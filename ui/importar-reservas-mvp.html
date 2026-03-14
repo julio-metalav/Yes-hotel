@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yes Hotel - Importar reservas (admin)</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; }
+      h1 { font-size: 1.25rem; }
+      .alert { padding: 12px; border-radius: 8px; margin: 12px 0; }
+      .alert.error { background: #fef2f2; color: #991b1b; }
+      .alert.success { background: #f0fdf4; color: #166534; }
+      .alert.warn { background: #fffbeb; color: #92400e; }
+      textarea { width: 100%; min-height: 200px; font-family: monospace; font-size: 13px; padding: 12px; box-sizing: border-box; }
+      button { margin-top: 8px; padding: 10px 16px; cursor: pointer; }
+      .meta { margin-top: 16px; color: #666; font-size: 14px; }
+      a { color: #2563eb; }
+    </style>
+  </head>
+  <body>
+    <h1>Importar reservas (entrada manual sem HITS)</h1>
+    <p class="meta">Apenas admin. Cole um JSON no formato do painel (array de reservas com <code>apartamento</code>, <code>hospedePrincipal</code>, <code>checkInPrevisto</code>, <code>checkOutPrevisto</code>, <code>hospedes</code>).</p>
+    <div id="message"></div>
+    <textarea id="json-input" placeholder='[{"apartamento":"12","hospedePrincipal":"Nome","checkInPrevisto":"2025-03-11","checkOutPrevisto":"2025-03-13","pagamento":"pendente","hospedes":[{"nome":"Nome","principal":true,"email":"","whatsapp":""}]}]'></textarea>
+    <div>
+      <button type="button" id="btn-importar">Importar</button>
+      <a href="./checkin-operacional-mvp.html">Voltar ao painel</a>
+    </div>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script defer src="./yes-supabase-config.js"></script>
+    <script defer src="./yes-supabase-auth.js"></script>
+    <script defer src="./importar-reservas-mvp.js"></script>
+  </body>
+  </html>
