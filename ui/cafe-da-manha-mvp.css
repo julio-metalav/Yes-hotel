@@ -1,0 +1,252 @@
+:root {
+  color-scheme: light;
+  --bg: #f5f4ef;
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --paid-bg: #dcfce7;
+  --paid-text: #166534;
+  --unpaid-bg: #fee2e2;
+  --unpaid-text: #991b1b;
+  --complete-border: #86efac;
+  --button-bg: #111827;
+  --button-text: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.app-shell {
+  width: min(100%, 640px);
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.page-header {
+  margin-bottom: 16px;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.page-header h1 {
+  margin: 0 0 6px;
+  font-size: 28px;
+}
+
+.page-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.session-banner,
+.access-state {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
+}
+
+.session-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.session-banner-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.secondary-button,
+.secondary-link {
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.access-state {
+  color: var(--text);
+  display: grid;
+  gap: 12px;
+}
+
+.access-state-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.access-state-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.cards-list {
+  display: grid;
+  gap: 10px;
+}
+
+.breakfast-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
+}
+
+.breakfast-card.is-complete {
+  border-color: var(--complete-border);
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.card-title {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.apartment-code {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.guest-name {
+  min-width: 0;
+  color: var(--text);
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.payment-badge {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.payment-badge.is-paid {
+  background: var(--paid-bg);
+  color: var(--paid-text);
+}
+
+.payment-badge.is-unpaid {
+  background: var(--unpaid-bg);
+  color: var(--unpaid-text);
+}
+
+.card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.counts-line {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.counts-line strong {
+  color: var(--text);
+}
+
+.counts-line .is-complete-text {
+  color: var(--paid-text);
+  font-weight: 700;
+}
+
+.counter-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-button {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--button-bg);
+  color: var(--button-text);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.icon-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.arrived-pill {
+  min-width: 32px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+@media (max-width: 480px) {
+  .app-shell {
+    padding: 12px;
+  }
+
+  .session-banner,
+  .card-top,
+  .card-bottom {
+    align-items: flex-start;
+  }
+
+  .session-banner,
+  .card-bottom {
+    flex-direction: column;
+  }
+
+  .session-banner-actions,
+  .counter-controls {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

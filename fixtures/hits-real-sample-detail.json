@@ -1,0 +1,62 @@
+{
+  "idReservation": "9101001",
+  "contactName": "Patricia Souza",
+  "contact1": "patricia.souza@example.com",
+  "contact2": "+55 41 95555-4444",
+  "dateAdd": "2026-03-18T08:00:00-03:00",
+  "dateUp": "2026-03-19T09:30:00-03:00",
+  "notes": [],
+  "rooms": [
+    {
+      "idRoom": "112",
+      "code": "12",
+      "checkIn": "2026-03-20",
+      "checkOut": "2026-03-23",
+      "idRoomType": "STD",
+      "roomTypeName": "Apartamento Standard",
+      "amount": 1,
+      "status": 1,
+      "pax": 2,
+      "chd1": 0,
+      "chd2": 0,
+      "chd3": 0,
+      "ratePlanId": "BAR",
+      "ratePlanName": "Best Available Rate",
+      "mealPlanDesc": "Cafe da manha",
+      "requirementReservation": [],
+      "reservationRoomId": "RRM-9101001-1"
+    }
+  ],
+  "guests": [
+    {
+      "idEntity": "G-910",
+      "name": "Patricia Souza",
+      "idRoom": "112",
+      "contactMail": "patricia.souza@example.com",
+      "contactPhone": "+55 41 95555-4444",
+      "main": true,
+      "federalRegistrationNumber": "00000000000",
+      "documentType": "CPF",
+      "notes": [],
+      "gender": "F",
+      "birthDate": "1990-01-01",
+      "mainDocType": "CPF",
+      "docCpfCnpjPassport": "00000000000",
+      "addressZipCode": "80000-000",
+      "addressCountry": "BR",
+      "addressStateCode": "PR",
+      "addressStateName": "Parana",
+      "addressCity": "Curitiba",
+      "addressNeighborhood": "Centro",
+      "addressAddress": "Rua Exemplo",
+      "addressDetails": "",
+      "addressNumber": "100"
+    }
+  ],
+  "commissions": [],
+  "revenueManagement": null,
+  "creditState": null,
+  "reservationTotalAmount": 1000,
+  "reservationBalanceDue": 0,
+  "chargeTags": []
+}

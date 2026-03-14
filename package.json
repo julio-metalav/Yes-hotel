@@ -1,0 +1,33 @@
+{
+  "name": "yes-hotel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Base minima do cliente HITS V1 para o projeto Yes Hotel.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test:hits:auth": "tsx scripts/test-hits-auth.ts",
+    "test:hits:reservations": "tsx scripts/test-hits-reservations.ts",
+    "test:hits:reservation": "tsx scripts/test-hits-reservation-detail.ts",
+    "test:yes:access:normal": "tsx scripts/test-yes-access-normal.ts",
+    "test:yes:access:early-checkin": "tsx scripts/test-yes-access-early-checkin.ts",
+    "test:yes:access:late-checkout": "tsx scripts/test-yes-access-late-checkout.ts",
+    "test:yes:access:room-change": "tsx scripts/test-yes-access-room-change.ts",
+    "test:yes:access:cancel": "tsx scripts/test-yes-access-cancel.ts",
+    "test:yes:orchestrator:created": "tsx scripts/test-yes-orchestrator-created.ts",
+    "test:yes:orchestrator:room-change": "tsx scripts/test-yes-orchestrator-room-change.ts",
+    "test:yes:orchestrator:cancel": "tsx scripts/test-yes-orchestrator-cancel.ts",
+    "test:yes:orchestrator:manual-adjustment": "tsx scripts/test-yes-orchestrator-manual-adjustment.ts",
+    "test:hits-mock:normal": "tsx scripts/test-hits-mock-to-yes-normal.ts",
+    "test:hits-mock:room-change": "tsx scripts/test-hits-mock-to-yes-room-change.ts",
+    "test:hits-mock:cancel": "tsx scripts/test-hits-mock-to-yes-cancel.ts",
+    "test:hits-real:json": "tsx scripts/test-hits-real-json-to-yes.ts"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

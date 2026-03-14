@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yes Hotel - Usuarios e Login MVP</title>
+    <link rel="stylesheet" href="./usuarios-login-mvp.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="page-header">
+        <p class="eyebrow">Yes Hotel</p>
+        <h1>Usuarios internos</h1>
+        <p class="page-description">
+          Login simples com sessao de 4 horas e perfis basicos para operacao.
+        </p>
+      </header>
+
+      <section class="notice hidden" id="notice"></section>
+
+      <section class="panel hidden" id="bootstrap-panel">
+        <h2>Primeiro acesso</h2>
+        <p class="helper-text">
+          Crie o primeiro usuario admin para habilitar o login do sistema.
+        </p>
+        <form class="stack-form" id="bootstrap-form">
+          <label>
+            Nome
+            <input type="text" name="name" required />
+          </label>
+          <label>
+            Email
+            <input type="email" name="email" required />
+          </label>
+          <label>
+            Senha
+            <input type="password" name="password" required minlength="6" />
+          </label>
+          <button class="primary-button" type="submit">Criar admin</button>
+        </form>
+      </section>
+
+      <section class="panel hidden" id="login-panel">
+        <h2>Login</h2>
+        <form class="stack-form" id="login-form">
+          <label>
+            Email
+            <input type="email" name="email" required />
+          </label>
+          <label>
+            Senha
+            <input type="password" name="password" required />
+          </label>
+          <button class="primary-button" type="submit">Entrar</button>
+        </form>
+      </section>
+
+      <section class="panel hidden" id="app-panel">
+        <div class="session-bar">
+          <div id="session-user"></div>
+          <div class="session-actions">
+            <a class="secondary-link" href="./cafe-da-manha-mvp.html">Ir para cafe</a>
+            <button class="secondary-button" id="logout-button" type="button">
+              Sair
+            </button>
+          </div>
+        </div>
+
+        <section class="users-section">
+          <div class="section-header">
+            <div>
+              <h2>Usuarios cadastrados</h2>
+              <p class="helper-text">
+                Admin gerencia usuarios. Recepcao e cafe usam apenas as telas
+                operacionais.
+              </p>
+            </div>
+          </div>
+
+          <div class="users-list" id="users-list"></div>
+        </section>
+
+        <section class="users-section">
+          <div class="section-header">
+            <div>
+              <h2 id="user-form-title">Novo usuario</h2>
+              <p class="helper-text">
+                Cadastre ou edite usuarios internos com perfil simples.
+              </p>
+            </div>
+          </div>
+
+          <form class="stack-form" id="user-form">
+            <input type="hidden" name="userId" />
+            <label>
+              Nome
+              <input type="text" name="name" required />
+            </label>
+            <label>
+              Email
+              <input type="email" name="email" required />
+            </label>
+            <label>
+              Senha
+              <input
+                type="password"
+                name="password"
+                placeholder="Obrigatoria no cadastro, opcional na edicao"
+              />
+            </label>
+            <label>
+              Perfil
+              <select name="role" required>
+                <option value="admin">Admin</option>
+                <option value="recepcao">Recepcao</option>
+                <option value="cafe">Cafe</option>
+              </select>
+            </label>
+            <label class="checkbox-line">
+              <input type="checkbox" name="active" checked />
+              Usuario ativo
+            </label>
+            <div class="form-actions">
+              <button class="primary-button" type="submit">Salvar</button>
+              <button class="secondary-button" id="cancel-edit-button" type="button">
+                Cancelar
+              </button>
+            </div>
+          </form>
+        </section>
+      </section>
+    </main>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script defer src="./yes-supabase-config.js"></script>
+    <script defer src="./yes-supabase-auth.js"></script>
+    <script defer src="./usuarios-login-mvp.js"></script>
+  </body>
+</html>

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yes Hotel - Cafe da Manha MVP</title>
+    <link rel="stylesheet" href="./cafe-da-manha-mvp.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="page-header">
+        <p class="eyebrow">Yes Hotel</p>
+        <h1>Cafe da manha</h1>
+        <p class="page-description">
+          Controle simples por apartamento para a equipe operacional.
+        </p>
+      </header>
+
+      <section class="session-banner hidden" id="session-banner">
+        <div id="session-banner-user"></div>
+        <div class="session-banner-actions">
+          <a class="secondary-link hidden" id="users-link" href="./usuarios-login-mvp.html">
+            Usuarios
+          </a>
+          <button class="secondary-button" id="logout-button" type="button">
+            Sair
+          </button>
+        </div>
+      </section>
+
+      <section class="access-state hidden" id="access-state"></section>
+      <section class="cards-list" id="cards-list" aria-live="polite"></section>
+    </main>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script defer src="./yes-supabase-config.js"></script>
+    <script defer src="./yes-supabase-auth.js"></script>
+    <script defer src="./cafe-da-manha-mvp.js"></script>
+  </body>
+</html>
