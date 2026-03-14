@@ -631,6 +631,22 @@ body {
   color: var(--text);
 }
 
+.reservation-detail-eventos-simulados .reservation-detail-section-title {
+  margin-bottom: 4px;
+}
+
+.reservation-detail-eventos-desc {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.reservation-detail-eventos-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .guest-detail-vehicle {
   font-size: 12px;
   color: var(--muted);

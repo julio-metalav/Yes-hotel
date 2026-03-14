@@ -519,17 +519,11 @@ function acaoConfirmarCheckin(id) {
 }
 
 function primaryActionFor(reserva) {
-  if (reserva.pagamento === "pendente") {
-    return { label: "Marcar pagamento ok", action: "marcar_pagamento", id: reserva.id };
-  }
-  if (hasFnrhPendente(reserva)) {
-    return { label: "Avançar FNRH", action: "avancar_fnrh", id: reserva.id };
-  }
-  if (!reserva.acessoLiberado) {
+  if (!reserva.acessoLiberado && isProntaParaLiberarAcesso(reserva)) {
     return { label: "Liberar acesso", action: "liberar_acesso", id: reserva.id };
   }
   if (reserva.acessoLiberado && !reserva.entrouNoApto) {
-    return { label: "Confirmar check-in", action: "confirmar_checkin", id: reserva.id };
+    return { label: "Marcar entrada no apartamento", action: "confirmar_checkin", id: reserva.id };
   }
   return null;
 }
@@ -565,10 +559,9 @@ function renderList() {
 
       let actionsHtml = "";
       if (primary) {
-        const disabled = primary.action === "liberar_acesso" && (reserva.pagamento !== "pago" || hasFnrhPendente(reserva)) ? " disabled" : "";
-        actionsHtml = `<button type="button" class="primary-button" data-action="${primary.action}" data-id="${primary.id}"${disabled}>${primary.label}</button>`;
+        actionsHtml = `<button type="button" class="primary-button" data-action="${primary.action}" data-id="${primary.id}">${primary.label}</button>`;
       } else {
-        actionsHtml = '<span class="muted" style="font-size:13px;color:var(--muted)">Check-in concluido</span>';
+        actionsHtml = '<span class="muted" style="font-size:13px;color:var(--muted)">Check-in concluído</span>';
       }
 
       const badgesHtml = badgeClasses
@@ -804,7 +797,7 @@ function renderDetail(reserva) {
           : "";
       const onlyConfirmarEnviado = h.statusOperacional === GUEST_STATUS.ENVIADO;
       const confirmarBtn = onlyConfirmarEnviado
-        ? `<button type="button" class="secondary-button guest-confirmar-fnrh-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Marcar como confirmada</button>`
+        ? `<button type="button" class="secondary-button guest-confirmar-fnrh-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Simular confirmação</button>`
         : "";
       const setPrincipalBtn = !h.principal
         ? `<button type="button" class="guest-link-btn guest-set-principal-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Definir como principal</button>`
@@ -899,6 +892,22 @@ function renderDetail(reserva) {
       <p class="reservation-detail-proxima-acao-label">${escapeHtml(proximaAcao)}</p>
     </div>`;
 
+  const simuladosBtns = [];
+  if (reserva.pagamento !== "pago") {
+    simuladosBtns.push(`<button type="button" class="secondary-button detail-simular-pagamento-btn" data-reserva-id="${escapeHtml(reserva.id)}">Simular pagamento aprovado</button>`);
+  }
+  if (hasFnrhPendente(reserva)) {
+    simuladosBtns.push(`<button type="button" class="secondary-button detail-simular-fnrh-btn" data-reserva-id="${escapeHtml(reserva.id)}">Simular confirmação de FNRH</button>`);
+  }
+  const eventosSimuladosHtml =
+    simuladosBtns.length > 0
+      ? `<div class="reservation-detail-section reservation-detail-eventos-simulados">
+    <p class="reservation-detail-section-title">Eventos simulados</p>
+    <p class="reservation-detail-eventos-desc">Simular retorno do sistema para testar o fluxo.</p>
+    <div class="reservation-detail-eventos-btns">${simuladosBtns.join(" ")}</div>
+  </div>`
+      : "";
+
   const resumoComunicacao = formatResumoComunicacao(reserva);
   const comunicacaoReservaHtml = `<div class="reservation-detail-section reservation-detail-comunicacao">
     <p class="reservation-detail-section-title">Comunicação da reserva</p>
@@ -908,6 +917,7 @@ function renderDetail(reserva) {
   detailBodyElement.innerHTML = `
     ${statusReservaHtml}
     ${proximaAcaoHtml || ""}
+    ${eventosSimuladosHtml}
     <div class="reservation-detail-section">
       <p class="reservation-detail-section-title">Período</p>
       <p style="margin:0;font-size:14px;color:var(--text)">${escapeHtml(period)}</p>
@@ -1012,6 +1022,24 @@ function bindDetailListeners(reserva) {
       adicionarHospede(rid);
     });
   }
+
+  detailBodyElement.querySelectorAll(".detail-simular-pagamento-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const rid = btn.dataset.reservaId;
+      acaoMarcarPagamentoOk(rid);
+      const r = reservas.find((x) => x.id === rid);
+      if (r && detailReservaId === rid) renderDetail(r);
+    });
+  });
+
+  detailBodyElement.querySelectorAll(".detail-simular-fnrh-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const rid = btn.dataset.reservaId;
+      acaoAvançarFnrh(rid);
+      const r = reservas.find((x) => x.id === rid);
+      if (r && detailReservaId === rid) renderDetail(r);
+    });
+  });
 
   const enviarBtn = detailBodyElement.querySelector("#detail-enviar-links-btn");
   if (enviarBtn) {
