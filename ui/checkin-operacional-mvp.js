@@ -29,9 +29,17 @@ let reservas = [
     checkInPrevisto: todayStr(),
     checkOutPrevisto: todayStr(),
     pagamento: "pago",
-    fnrh: "pendente",
     acessoLiberado: false,
     entrouNoApto: false,
+    veiculoPlaca: "ABC1D23",
+    veiculoCor: "Prata",
+    hospedes: [
+      { nome: "Julio Cesar", principal: true, fnrhPreenchida: true },
+      { nome: "Sandra Maria", principal: false, fnrhPreenchida: true },
+      { nome: "Hospede 3", principal: false, fnrhPreenchida: false },
+      { nome: "Hospede 4", principal: false, fnrhPreenchida: false },
+      { nome: "Hospede 5", principal: false, fnrhPreenchida: false },
+    ],
   },
   {
     id: "2",
@@ -40,9 +48,14 @@ let reservas = [
     checkInPrevisto: todayStr(),
     checkOutPrevisto: todayStr(),
     pagamento: "pendente",
-    fnrh: "pendente",
     acessoLiberado: false,
     entrouNoApto: false,
+    veiculoPlaca: "",
+    veiculoCor: "",
+    hospedes: [
+      { nome: "Sandra Maria", principal: true, fnrhPreenchida: false },
+      { nome: "Hospede 2", principal: false, fnrhPreenchida: false },
+    ],
   },
   {
     id: "3",
@@ -51,9 +64,15 @@ let reservas = [
     checkInPrevisto: todayStr(),
     checkOutPrevisto: todayStr(),
     pagamento: "pago",
-    fnrh: "preenchido",
     acessoLiberado: true,
     entrouNoApto: true,
+    veiculoPlaca: "XYZ9K99",
+    veiculoCor: "Preto",
+    hospedes: [
+      { nome: "Joao Pedro", principal: true, fnrhPreenchida: true },
+      { nome: "Maria Silva", principal: false, fnrhPreenchida: true },
+      { nome: "Hospede 3", principal: false, fnrhPreenchida: true },
+    ],
   },
   {
     id: "4",
@@ -62,9 +81,14 @@ let reservas = [
     checkInPrevisto: todayStr(),
     checkOutPrevisto: todayStr(),
     pagamento: "pago",
-    fnrh: "pendente",
     acessoLiberado: false,
     entrouNoApto: false,
+    veiculoPlaca: "",
+    veiculoCor: "",
+    hospedes: [
+      { nome: "Ana Souza", principal: true, fnrhPreenchida: false },
+      { nome: "Hospede 2", principal: false, fnrhPreenchida: false },
+    ],
   },
   {
     id: "5",
@@ -73,17 +97,54 @@ let reservas = [
     checkInPrevisto: todayStr(),
     checkOutPrevisto: todayStr(),
     pagamento: "pago",
-    fnrh: "preenchido",
     acessoLiberado: true,
     entrouNoApto: false,
+    veiculoPlaca: "JKL4M55",
+    veiculoCor: "Branco",
+    hospedes: [
+      { nome: "Carlos Mendes", principal: true, fnrhPreenchida: true },
+      { nome: "Hospede 2", principal: false, fnrhPreenchida: true },
+    ],
   },
 ];
+
+function getHospedesTotal(reserva) {
+  return Array.isArray(reserva.hospedes) ? reserva.hospedes.length : 0;
+}
+
+function getFnrhPreenchidas(reserva) {
+  if (!Array.isArray(reserva.hospedes)) return 0;
+  return reserva.hospedes.filter((h) => h.fnrhPreenchida === true).length;
+}
+
+function hasFnrhPendente(reserva) {
+  const total = getHospedesTotal(reserva);
+  const preenchidas = getFnrhPreenchidas(reserva);
+  return total > 0 && preenchidas < total;
+}
+
+function getFnrhStatus(reserva) {
+  const total = getHospedesTotal(reserva);
+  const preenchidas = getFnrhPreenchidas(reserva);
+  if (total === 0) return { class: "fnrh-neutral", label: "—" };
+  if (preenchidas === 0) return { class: "fnrh-0", label: `FNRH 0/${total}` };
+  if (preenchidas < total) return { class: "fnrh-partial", label: `FNRH ${preenchidas}/${total}` };
+  return { class: "fnrh-ok", label: `FNRH ${total}/${total}` };
+}
+
+function registrarProximaFnrh(reserva) {
+  if (!Array.isArray(reserva.hospedes)) return false;
+  const pendente = reserva.hospedes.find((h) => h.fnrhPreenchida === false);
+  if (!pendente) return false;
+  pendente.fnrhPreenchida = true;
+  return true;
+}
 
 function derivarStatusOperacional(reserva) {
   if (reserva.pagamento === "pendente") {
     return { label: "Pendente pagamento", type: "pendente-pagamento" };
   }
-  if (reserva.fnrh === "pendente") {
+  if (hasFnrhPendente(reserva)) {
     return { label: "Pendente FNRH", type: "pendente-fnrh" };
   }
   if (!reserva.acessoLiberado) {
@@ -108,7 +169,7 @@ function filtrarReservas(lista, filtroAtivo) {
     return lista.filter((r) => r.pagamento === "pendente");
   }
   if (filtroAtivo === FILTER_PENDENTE_FNRH) {
-    return lista.filter((r) => r.fnrh === "pendente");
+    return lista.filter((r) => hasFnrhPendente(r));
   }
   if (filtroAtivo === FILTER_ACESSO_LIBERADO) {
     return lista.filter((r) => r.acessoLiberado === true);
@@ -127,7 +188,7 @@ function calcularResumo(lista) {
   return {
     chegadasHoje: lista.filter((r) => r.checkInPrevisto === hoje).length,
     pendentesPagamento: lista.filter((r) => r.pagamento === "pendente").length,
-    pendentesFnrh: lista.filter((r) => r.fnrh === "pendente").length,
+    pendentesFnrh: lista.filter((r) => getFnrhPreenchidas(r) < getHospedesTotal(r)).length,
     acessosLiberados: lista.filter((r) => r.acessoLiberado === true).length,
     aindaNaoEntraram: lista.filter((r) => r.acessoLiberado === true && r.entrouNoApto === false).length,
     jaEntraram: lista.filter((r) => r.entrouNoApto === true).length,
@@ -181,15 +242,14 @@ function acaoMarcarPagamentoOk(id) {
   renderAll();
 }
 
-function acaoMarcarFnrhOk(id) {
+function acaoAvançarFnrh(id) {
   const r = reservas.find((x) => x.id === id);
-  if (r) r.fnrh = "preenchido";
-  renderAll();
+  if (r && registrarProximaFnrh(r)) renderAll();
 }
 
 function acaoLiberarAcesso(id) {
   const r = reservas.find((x) => x.id === id);
-  if (r && r.pagamento === "pago" && r.fnrh === "preenchido") r.acessoLiberado = true;
+  if (r && r.pagamento === "pago" && !hasFnrhPendente(r)) r.acessoLiberado = true;
   renderAll();
 }
 
@@ -200,12 +260,11 @@ function acaoConfirmarCheckin(id) {
 }
 
 function primaryActionFor(reserva) {
-  const status = derivarStatusOperacional(reserva);
   if (reserva.pagamento === "pendente") {
     return { label: "Marcar pagamento ok", action: "marcar_pagamento", id: reserva.id };
   }
-  if (reserva.fnrh === "pendente") {
-    return { label: "Marcar FNRH ok", action: "marcar_fnrh", id: reserva.id };
+  if (hasFnrhPendente(reserva)) {
+    return { label: "Avançar FNRH", action: "avancar_fnrh", id: reserva.id };
   }
   if (!reserva.acessoLiberado) {
     return { label: "Liberar acesso", action: "liberar_acesso", id: reserva.id };
@@ -225,23 +284,29 @@ function renderList() {
       const status = derivarStatusOperacional(reserva);
       const primary = primaryActionFor(reserva);
       const period = `${reserva.checkInPrevisto} a ${reserva.checkOutPrevisto}`;
+      const fnrhStatus = getFnrhStatus(reserva);
+      const hospedesTotal = getHospedesTotal(reserva);
+      const veiculoLine =
+        reserva.veiculoPlaca && reserva.veiculoPlaca.trim()
+          ? `${(reserva.veiculoPlaca || "").trim()}${reserva.veiculoCor ? " • " + (reserva.veiculoCor || "").trim() : ""}`
+          : "";
 
       const badgeClasses = [
         reserva.pagamento === "pago" ? "badge badge-pago" : "badge badge-pendente",
-        reserva.fnrh === "preenchido" ? "badge badge-preenchido" : "badge badge-pendente",
+        "badge fnrh-badge " + fnrhStatus.class,
         reserva.acessoLiberado ? "badge badge-liberado" : "badge badge-nao-liberado",
         reserva.entrouNoApto ? "badge badge-entrou" : "badge badge-nao-entrou",
       ];
       const badgeLabels = [
         reserva.pagamento === "pago" ? "Pago" : "Pendente",
-        reserva.fnrh === "preenchido" ? "FNRH ok" : "FNRH pend.",
+        fnrhStatus.label,
         reserva.acessoLiberado ? "Liberado" : "Nao liberado",
         reserva.entrouNoApto ? "Entrou" : "Nao entrou",
       ];
 
       let actionsHtml = "";
       if (primary) {
-        const disabled = primary.action === "liberar_acesso" && (reserva.pagamento !== "pago" || reserva.fnrh !== "preenchido") ? " disabled" : "";
+        const disabled = primary.action === "liberar_acesso" && (reserva.pagamento !== "pago" || hasFnrhPendente(reserva)) ? " disabled" : "";
         actionsHtml = `<button type="button" class="primary-button" data-action="${primary.action}" data-id="${primary.id}"${disabled}>${primary.label}</button>`;
       } else {
         actionsHtml = '<span class="muted" style="font-size:13px;color:var(--muted)">Check-in concluido</span>';
@@ -250,6 +315,10 @@ function renderList() {
       const badgesHtml = badgeClasses
         .map((cls, i) => `<span class="${cls}">${badgeLabels[i]}</span>`)
         .join("");
+
+      const metaParts = [`Hóspedes: ${hospedesTotal}`, fnrhStatus.label];
+      if (veiculoLine) metaParts.push(`Veículo: ${veiculoLine}`);
+      const metaHtml = `<div class="operational-card-meta">${metaParts.map((t) => `<span class="operational-card-meta-item">${t}</span>`).join("")}</div>`;
 
       return `
         <article class="operational-card" data-id="${reserva.id}">
@@ -260,6 +329,7 @@ function renderList() {
           <div class="operational-card-guest">${reserva.hospedePrincipal}</div>
           <div class="operational-card-period">${period}</div>
           <div class="operational-card-badges">${badgesHtml}</div>
+          ${metaHtml}
           <div class="operational-card-actions">${actionsHtml}</div>
         </article>
       `;
@@ -271,7 +341,7 @@ function renderList() {
     const action = btn.dataset.action;
     const id = btn.dataset.id;
     if (action === "marcar_pagamento") btn.addEventListener("click", () => acaoMarcarPagamentoOk(id));
-    if (action === "marcar_fnrh") btn.addEventListener("click", () => acaoMarcarFnrhOk(id));
+    if (action === "avancar_fnrh") btn.addEventListener("click", () => acaoAvançarFnrh(id));
     if (action === "liberar_acesso") btn.addEventListener("click", () => acaoLiberarAcesso(id));
     if (action === "confirmar_checkin") btn.addEventListener("click", () => acaoConfirmarCheckin(id));
   });

@@ -295,6 +295,24 @@ body {
 .badge-entrou { background: var(--ok-bg); color: var(--ok-text); }
 .badge-nao-entrou { background: var(--neutral-bg); color: var(--neutral-text); }
 
+.fnrh-badge.fnrh-0 { background: var(--danger-bg); color: var(--danger-text); }
+.fnrh-badge.fnrh-partial { background: var(--warn-bg); color: var(--warn-text); }
+.fnrh-badge.fnrh-ok { background: var(--ok-bg); color: var(--ok-text); }
+.fnrh-badge.fnrh-neutral { background: var(--neutral-bg); color: var(--neutral-text); }
+
+.operational-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.operational-card-meta-item {
+  white-space: nowrap;
+}
+
 .operational-card-actions {
   display: flex;
   flex-wrap: wrap;
