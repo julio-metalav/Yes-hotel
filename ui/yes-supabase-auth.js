@@ -1,5 +1,14 @@
 (function attachYesHotelSupabaseAuth(globalScope) {
-  const config = globalScope.YES_HOTEL_SUPABASE_CONFIG ?? {};
+  const rawConfig = globalScope.YES_HOTEL_SUPABASE_CONFIG ?? {};
+  const config = {
+    ...rawConfig,
+    url:
+      typeof rawConfig.url === "string" ? rawConfig.url.trim() : rawConfig.url,
+    anonKey:
+      typeof rawConfig.anonKey === "string"
+        ? rawConfig.anonKey.trim()
+        : rawConfig.anonKey,
+  };
   const APP_SESSION_STARTED_AT_KEY = "yesHotelAppSessionStartedAt";
   const APP_SESSION_DURATION_MS = Number(config.appSessionHours || 4) * 60 * 60 * 1000;
   const PROFILE_COLUMNS =
