@@ -185,17 +185,97 @@ function hasContatoSuficiente(hospede) {
   return e.length > 0 || w.length > 0;
 }
 
+const NOMES_GENERICOS = [
+  "hospede 2", "hospede 3", "hospede 4", "hospede 5", "hospede 6", "hospede 7", "hospede 8", "hospede 9",
+  "acompanhante", "nao informado", "não informado", "nao identificado", "não identificado",
+];
+
+function hasIdentificacaoMinima(hospede) {
+  const n = (hospede.nome || "").trim();
+  if (n.length === 0) return false;
+  const lower = n.toLowerCase();
+  return !NOMES_GENERICOS.includes(lower);
+}
+
+function syncGuestStatus(hospede) {
+  if (hospede.statusOperacional === GUEST_STATUS.ENVIADO || hospede.statusOperacional === GUEST_STATUS.CONFIRMADO) {
+    return;
+  }
+  const ident = hasIdentificacaoMinima(hospede);
+  const contato = hasContatoSuficiente(hospede);
+  if (!ident) {
+    hospede.statusOperacional = GUEST_STATUS.NAO_IDENTIFICADO;
+    return;
+  }
+  if (!contato) {
+    hospede.statusOperacional = GUEST_STATUS.AGUARDANDO_CONTATO;
+    return;
+  }
+  hospede.statusOperacional = GUEST_STATUS.PRONTO_PARA_ENVIO;
+}
+
+function guestPendencyMessage(hospede) {
+  switch (hospede.statusOperacional) {
+    case GUEST_STATUS.NAO_IDENTIFICADO:
+      return "Falta identificar hóspede";
+    case GUEST_STATUS.AGUARDANDO_CONTATO:
+      return "Falta email ou WhatsApp";
+    case GUEST_STATUS.PRONTO_PARA_ENVIO:
+      return "Pronto para envio";
+    case GUEST_STATUS.ENVIADO:
+      return "Link enviado, aguardando confirmação";
+    case GUEST_STATUS.CONFIRMADO:
+      return "FNRH confirmada";
+    default:
+      return "";
+  }
+}
+
+function getNaoIdentificados(reserva) {
+  if (!Array.isArray(reserva.hospedes)) return [];
+  return reserva.hospedes.filter((h) => !hasIdentificacaoMinima(h));
+}
+
+function getProximaAcaoReserva(reserva) {
+  if (!Array.isArray(reserva.hospedes)) return "";
+  const hospedes = reserva.hospedes;
+  const naoIdent = hospedes.filter((h) => !hasIdentificacaoMinima(h)).length;
+  const aguardandoContato = hospedes.filter(
+    (h) => hasIdentificacaoMinima(h) && h.statusOperacional === GUEST_STATUS.AGUARDANDO_CONTATO,
+  ).length;
+  const prontos = hospedes.filter(
+    (h) => h.statusOperacional === GUEST_STATUS.PRONTO_PARA_ENVIO && hasIdentificacaoMinima(h) && hasContatoSuficiente(h),
+  ).length;
+  const enviados = hospedes.filter((h) => h.statusOperacional === GUEST_STATUS.ENVIADO).length;
+  const confirmados = getFnrhConfirmadas(reserva);
+  const total = hospedes.length;
+
+  if (naoIdent > 0) return "Completar identificação dos hóspedes";
+  if (aguardandoContato > 0) return "Completar contatos";
+  if (prontos > 0) return "Enviar links de FNRH";
+  if (enviados > 0) return "Aguardar confirmação das FNRHs";
+  if (confirmados === total) return "Reserva pronta para liberar acesso";
+  return "";
+}
+
 function getProntosParaEnvio(reserva) {
   if (!Array.isArray(reserva.hospedes)) return [];
   return reserva.hospedes.filter(
-    (h) => h.statusOperacional === GUEST_STATUS.PRONTO_PARA_ENVIO && hasContatoSuficiente(h),
+    (h) =>
+      h.statusOperacional === GUEST_STATUS.PRONTO_PARA_ENVIO &&
+      hasIdentificacaoMinima(h) &&
+      hasContatoSuficiente(h),
   );
 }
 
 function getFaltamContato(reserva) {
   if (!Array.isArray(reserva.hospedes)) return [];
   return reserva.hospedes.filter(
-    (h) => h.statusOperacional !== GUEST_STATUS.CONFIRMADO && h.statusOperacional !== GUEST_STATUS.ENVIADO && !hasContatoSuficiente(h),
+    (h) =>
+      hasIdentificacaoMinima(h) &&
+      h.statusOperacional !== GUEST_STATUS.CONFIRMADO &&
+      h.statusOperacional !== GUEST_STATUS.ENVIADO &&
+      !hasContatoSuficiente(h),
   );
 }
 
@@ -450,37 +530,37 @@ function renderDetail(reserva) {
   if (!(detailBodyElement instanceof HTMLElement) || !reserva) return;
   const period = `${reserva.checkInPrevisto} a ${reserva.checkOutPrevisto}`;
   const hospedes = Array.isArray(reserva.hospedes) ? reserva.hospedes : [];
+  const naoIdentificados = getNaoIdentificados(reserva);
   const faltamContato = getFaltamContato(reserva);
   const prontos = getProntosParaEnvio(reserva);
+  const proximaAcao = getProximaAcaoReserva(reserva);
 
   const guestsHtml = hospedes
     .map((h, index) => {
       const statusClass = guestStatusClass(h.statusOperacional);
       const statusLabel = guestStatusLabel(h.statusOperacional);
-      const contatoOk = hasContatoSuficiente(h);
+      const pendencyMsg = guestPendencyMessage(h);
       const principalBadge = h.principal ? '<span class="guest-detail-badge-principal">Principal</span>' : "";
       const vehicleHtml =
         h.principal && reserva.veiculoPlaca && reserva.veiculoPlaca.trim()
           ? `<div class="guest-detail-vehicle">Veículo: ${escapeHtml(reserva.veiculoPlaca.trim())}${reserva.veiculoCor ? " • " + escapeHtml(reserva.veiculoCor.trim()) : ""}</div>`
           : "";
-      const canConfirmar = h.statusOperacional !== GUEST_STATUS.CONFIRMADO;
-      const canProntoEnvio =
-        hasContatoSuficiente(h) &&
-        (h.statusOperacional === GUEST_STATUS.NAO_IDENTIFICADO || h.statusOperacional === GUEST_STATUS.AGUARDANDO_CONTATO);
-      const confirmarBtn = canConfirmar
-        ? `<button type="button" class="secondary-button guest-confirmar-fnrh-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Confirmar FNRH</button>`
-        : "";
-      const prontoBtn = canProntoEnvio
-        ? ` <button type="button" class="secondary-button guest-pronto-envio-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Pronto para envio</button>`
+      const onlyConfirmarEnviado = h.statusOperacional === GUEST_STATUS.ENVIADO;
+      const confirmarBtn = onlyConfirmarEnviado
+        ? `<button type="button" class="secondary-button guest-confirmar-fnrh-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Marcar como confirmada</button>`
         : "";
 
       return `
         <div class="guest-detail-card" data-guest-index="${index}">
           <div class="guest-detail-name-row">
-            <span class="guest-detail-name">${escapeHtml(h.nome)}</span>
             ${principalBadge}
             <span class="guest-detail-status ${statusClass}">${escapeHtml(statusLabel)}</span>
           </div>
+          <div class="guest-detail-contact-row guest-detail-name-edit">
+            <label>Nome</label>
+            <input type="text" class="guest-nome-input" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}" value="${escapeHtml((h.nome || "").trim())}" placeholder="Nome do hóspede" />
+          </div>
+          <p class="guest-detail-pendency">${escapeHtml(pendencyMsg)}</p>
           ${vehicleHtml}
           <div class="guest-detail-contact-row">
             <label>E-mail</label>
@@ -490,10 +570,7 @@ function renderDetail(reserva) {
             <label>WhatsApp</label>
             <input type="text" class="guest-whatsapp-input" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}" value="${escapeHtml((h.whatsapp || "").trim())}" placeholder="11999990000" />
           </div>
-          <div class="guest-detail-contact-row">
-            ${contatoOk ? '<span class="guest-detail-contact-ok">Contato suficiente</span>' : '<span class="guest-detail-contact-falta">Falta contato</span>'}
-          </div>
-          ${confirmarBtn || prontoBtn ? `<div class="guest-detail-actions">${confirmarBtn}${prontoBtn}</div>` : ""}
+          ${confirmarBtn ? `<div class="guest-detail-actions">${confirmarBtn}</div>` : ""}
         </div>
       `;
     })
@@ -501,8 +578,15 @@ function renderDetail(reserva) {
 
   let enviarSection = "";
   const prontosCount = prontos.length;
+  const naoIdentCount = naoIdentificados.length;
   const faltamCount = faltamContato.length;
-  if (faltamCount > 0 && prontosCount === 0) {
+  const enviadosCount = hospedes.filter((h) => h.statusOperacional === GUEST_STATUS.ENVIADO).length;
+  const confirmadosCount = getFnrhConfirmadas(reserva);
+  const totalH = hospedes.length;
+
+  if (naoIdentCount > 0) {
+    enviarSection = `<div class="detail-enviar-links-alert is-warn">Completar identificação de ${naoIdentCount} hóspede(s). Preencha o nome (evite "Hospede 2", "Acompanhante", etc.).</div>`;
+  } else if (faltamCount > 0 && prontosCount === 0) {
     enviarSection = `<div class="detail-enviar-links-alert is-warn">Falta contato para ${faltamCount} hóspede(s). Preencha e-mail ou WhatsApp para enviar o link.</div>`;
   } else if (faltamCount > 0 && prontosCount > 0) {
     enviarSection = `
@@ -511,17 +595,21 @@ function renderDetail(reserva) {
     `;
   } else if (prontosCount > 0) {
     enviarSection = `<button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}">Enviar link(s) FNRH (${prontosCount})</button>`;
-  } else {
-    const enviados = hospedes.filter((x) => x.statusOperacional === GUEST_STATUS.ENVIADO).length;
-    const confirmados = getFnrhConfirmadas(reserva);
-    if (confirmados === hospedes.length) {
-      enviarSection = '<div class="detail-enviar-links-alert is-ok">Todas as FNRHs estão confirmadas.</div>';
-    } else if (enviados > 0) {
-      enviarSection = `<div class="detail-enviar-links-alert is-ok">Link(s) enviado(s) para ${enviados} hóspede(s). Aguardando confirmação.</div>`;
-    }
+  } else if (confirmadosCount === totalH) {
+    enviarSection = '<div class="detail-enviar-links-alert is-ok">Todas as FNRHs estão confirmadas. Reserva pronta para liberar acesso.</div>';
+  } else if (enviadosCount > 0) {
+    enviarSection = `<div class="detail-enviar-links-alert is-ok">Link(s) enviado(s) para ${enviadosCount} hóspede(s). Aguardando confirmação.</div>`;
   }
 
+  const proximaAcaoHtml =
+    proximaAcao &&
+    `<div class="reservation-detail-section reservation-detail-proxima-acao">
+      <p class="reservation-detail-section-title">Próxima ação</p>
+      <p class="reservation-detail-proxima-acao-label">${escapeHtml(proximaAcao)}</p>
+    </div>`;
+
   detailBodyElement.innerHTML = `
+    ${proximaAcaoHtml || ""}
     <div class="reservation-detail-section">
       <p class="reservation-detail-section-title">Período</p>
       <p style="margin:0;font-size:14px;color:var(--text)">${escapeHtml(period)}</p>
@@ -541,6 +629,23 @@ function renderDetail(reserva) {
 function bindDetailListeners(reserva) {
   if (!(detailBodyElement instanceof HTMLElement)) return;
 
+  detailBodyElement.querySelectorAll(".guest-nome-input").forEach((input) => {
+    input.addEventListener("change", (e) => {
+      const target = e.target;
+      const rid = target.dataset.reservaId;
+      const idx = parseInt(target.dataset.guestIndex, 10);
+      const r = reservas.find((x) => x.id === rid);
+      if (r && r.hospedes && r.hospedes[idx] != null) {
+        const h = r.hospedes[idx];
+        h.nome = target.value.trim();
+        if (h.principal) r.hospedePrincipal = h.nome;
+        syncGuestStatus(h);
+        renderAll();
+        if (detailReservaId === rid) renderDetail(r);
+      }
+    });
+  });
+
   detailBodyElement.querySelectorAll(".guest-email-input").forEach((input) => {
     input.addEventListener("change", (e) => {
       const target = e.target;
@@ -549,6 +654,7 @@ function bindDetailListeners(reserva) {
       const r = reservas.find((x) => x.id === rid);
       if (r && r.hospedes && r.hospedes[idx] != null) {
         r.hospedes[idx].email = target.value.trim();
+        syncGuestStatus(r.hospedes[idx]);
         if (detailReservaId === rid) renderDetail(r);
       }
     });
@@ -562,6 +668,7 @@ function bindDetailListeners(reserva) {
       const r = reservas.find((x) => x.id === rid);
       if (r && r.hospedes && r.hospedes[idx] != null) {
         r.hospedes[idx].whatsapp = target.value.trim();
+        syncGuestStatus(r.hospedes[idx]);
         if (detailReservaId === rid) renderDetail(r);
       }
     });
@@ -574,19 +681,6 @@ function bindDetailListeners(reserva) {
       const r = reservas.find((x) => x.id === rid);
       if (r && r.hospedes && r.hospedes[idx] != null) {
         r.hospedes[idx].statusOperacional = GUEST_STATUS.CONFIRMADO;
-        renderAll();
-        if (detailReservaId === rid) renderDetail(r);
-      }
-    });
-  });
-
-  detailBodyElement.querySelectorAll(".guest-pronto-envio-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const rid = btn.dataset.reservaId;
-      const idx = parseInt(btn.dataset.guestIndex, 10);
-      const r = reservas.find((x) => x.id === rid);
-      if (r && r.hospedes && r.hospedes[idx] != null) {
-        r.hospedes[idx].statusOperacional = GUEST_STATUS.PRONTO_PARA_ENVIO;
         renderAll();
         if (detailReservaId === rid) renderDetail(r);
       }

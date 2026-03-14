@@ -537,6 +537,30 @@ body {
 .guest-detail-contact-ok { color: var(--ok-text); }
 .guest-detail-contact-falta { color: var(--danger-text); }
 
+.guest-detail-pendency {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.reservation-detail-proxima-acao {
+  background: var(--neutral-bg);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.reservation-detail-proxima-acao .reservation-detail-section-title {
+  margin-bottom: 4px;
+}
+
+.reservation-detail-proxima-acao-label {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .guest-detail-vehicle {
   font-size: 12px;
   color: var(--muted);
