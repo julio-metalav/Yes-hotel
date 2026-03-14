@@ -34,6 +34,18 @@ const GUEST_STATUS = {
   CONFIRMADO: "confirmado",
 };
 
+const ORIGEM_CADASTRO = {
+  EXISTENTE_COMPLETO: "existente_completo",
+  EXISTENTE_INCOMPLETO: "existente_incompleto",
+  NOVO: "novo",
+  AGENCIA_SEM_DADOS: "agencia_sem_dados",
+};
+
+const MODO_COLETA_FNRH = {
+  CONFIRMACAO_SIMPLIFICADA: "confirmacao_simplificada",
+  PREENCHIMENTO_COMPLETO: "preenchimento_completo",
+};
+
 function guestStatusLabel(s) {
   const labels = {
     [GUEST_STATUS.NAO_IDENTIFICADO]: "Não identificado",
@@ -56,6 +68,67 @@ function guestStatusClass(s) {
   return classes[s] || "";
 }
 
+function getOrigemCadastroLabel(origem) {
+  const labels = {
+    [ORIGEM_CADASTRO.EXISTENTE_COMPLETO]: "Já cadastrado",
+    [ORIGEM_CADASTRO.EXISTENTE_INCOMPLETO]: "Cadastrado incompleto",
+    [ORIGEM_CADASTRO.NOVO]: "Novo hóspede",
+    [ORIGEM_CADASTRO.AGENCIA_SEM_DADOS]: "Veio sem dados da reserva",
+  };
+  return labels[origem] || "";
+}
+
+function getModoColetaLabel(modo) {
+  const labels = {
+    [MODO_COLETA_FNRH.CONFIRMACAO_SIMPLIFICADA]: "Confirmação simplificada",
+    [MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO]: "Preenchimento completo",
+  };
+  return labels[modo] || "";
+}
+
+function syncGuestOriginAndCollectionMode(hospede) {
+  const origem = hospede.origemCadastro || ORIGEM_CADASTRO.NOVO;
+  if (origem === ORIGEM_CADASTRO.EXISTENTE_COMPLETO) {
+    hospede.modoColetaFnrh = MODO_COLETA_FNRH.CONFIRMACAO_SIMPLIFICADA;
+  } else {
+    hospede.modoColetaFnrh = MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO;
+  }
+}
+
+function getGuestOperationalMessage(hospede) {
+  const status = hospede.statusOperacional;
+  const origem = hospede.origemCadastro || ORIGEM_CADASTRO.NOVO;
+  const modo = hospede.modoColetaFnrh || MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO;
+  const ident = hasIdentificacaoMinima(hospede);
+  const contato = hasContatoSuficiente(hospede);
+
+  if (status === GUEST_STATUS.CONFIRMADO) {
+    return "FNRH confirmada";
+  }
+  if (status === GUEST_STATUS.ENVIADO) {
+    return "Link enviado, aguardando confirmação";
+  }
+  if (!ident) {
+    if (origem === ORIGEM_CADASTRO.AGENCIA_SEM_DADOS) return "Dados insuficientes da reserva, completar e enviar FNRH";
+    if (origem === ORIGEM_CADASTRO.NOVO) return "Novo hóspede, preencher FNRH completa";
+    return "Falta identificar hóspede";
+  }
+  if (!contato) {
+    if (origem === ORIGEM_CADASTRO.EXISTENTE_INCOMPLETO) return "Cadastro incompleto, precisa preenchimento completo";
+    return "Falta email ou WhatsApp";
+  }
+  if (status === GUEST_STATUS.PRONTO_PARA_ENVIO) {
+    if (modo === MODO_COLETA_FNRH.CONFIRMACAO_SIMPLIFICADA) return "Hóspede já cadastrado, aguardando confirmação simplificada";
+    return "Pronto para envio de FNRH completa";
+  }
+  if (origem === ORIGEM_CADASTRO.EXISTENTE_COMPLETO && modo === MODO_COLETA_FNRH.CONFIRMACAO_SIMPLIFICADA) {
+    return "Hóspede já cadastrado, aguardando confirmação simplificada";
+  }
+  if (origem === ORIGEM_CADASTRO.EXISTENTE_INCOMPLETO) return "Cadastro incompleto, precisa preenchimento completo";
+  if (origem === ORIGEM_CADASTRO.AGENCIA_SEM_DADOS) return "Dados insuficientes da reserva, completar e enviar FNRH";
+  return "Novo hóspede, precisa preencher FNRH completa";
+}
+
 let reservas = [
   {
     id: "1",
@@ -69,11 +142,11 @@ let reservas = [
     veiculoPlaca: "ABC1D23",
     veiculoCor: "Prata",
     hospedes: [
-      { nome: "Julio Cesar", principal: true, email: "julio@email.com", whatsapp: "11999990001", statusOperacional: GUEST_STATUS.CONFIRMADO },
-      { nome: "Sandra Maria", principal: false, email: "sandra@email.com", whatsapp: "", statusOperacional: GUEST_STATUS.CONFIRMADO },
-      { nome: "Hospede 3", principal: false, email: "", whatsapp: "11999990003", statusOperacional: GUEST_STATUS.ENVIADO },
-      { nome: "Hospede 4", principal: false, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.AGUARDANDO_CONTATO },
-      { nome: "Hospede 5", principal: false, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO },
+      { nome: "Julio Cesar", principal: true, email: "julio@email.com", whatsapp: "11999990001", statusOperacional: GUEST_STATUS.CONFIRMADO, origemCadastro: ORIGEM_CADASTRO.EXISTENTE_COMPLETO, modoColetaFnrh: MODO_COLETA_FNRH.CONFIRMACAO_SIMPLIFICADA },
+      { nome: "Sandra Maria", principal: false, email: "sandra@email.com", whatsapp: "", statusOperacional: GUEST_STATUS.CONFIRMADO, origemCadastro: ORIGEM_CADASTRO.EXISTENTE_COMPLETO, modoColetaFnrh: MODO_COLETA_FNRH.CONFIRMACAO_SIMPLIFICADA },
+      { nome: "Hospede 3", principal: false, email: "", whatsapp: "11999990003", statusOperacional: GUEST_STATUS.ENVIADO, origemCadastro: ORIGEM_CADASTRO.NOVO, modoColetaFnrh: MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO },
+      { nome: "Hospede 4", principal: false, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.AGUARDANDO_CONTATO, origemCadastro: ORIGEM_CADASTRO.AGENCIA_SEM_DADOS, modoColetaFnrh: MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO },
+      { nome: "Hospede 5", principal: false, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO, origemCadastro: ORIGEM_CADASTRO.AGENCIA_SEM_DADOS, modoColetaFnrh: MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO },
     ],
   },
   {
@@ -88,8 +161,8 @@ let reservas = [
     veiculoPlaca: "",
     veiculoCor: "",
     hospedes: [
-      { nome: "Sandra Maria", principal: true, email: "sandra@email.com", whatsapp: "11988880000", statusOperacional: GUEST_STATUS.AGUARDANDO_CONTATO },
-      { nome: "Hospede 2", principal: false, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO },
+      { nome: "Sandra Maria", principal: true, email: "sandra@email.com", whatsapp: "11988880000", statusOperacional: GUEST_STATUS.AGUARDANDO_CONTATO, origemCadastro: ORIGEM_CADASTRO.EXISTENTE_INCOMPLETO, modoColetaFnrh: MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO },
+      { nome: "Hospede 2", principal: false, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO, origemCadastro: ORIGEM_CADASTRO.AGENCIA_SEM_DADOS, modoColetaFnrh: MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO },
     ],
   },
   {
@@ -104,9 +177,9 @@ let reservas = [
     veiculoPlaca: "XYZ9K99",
     veiculoCor: "Preto",
     hospedes: [
-      { nome: "Joao Pedro", principal: true, email: "joao@email.com", whatsapp: "11977770000", statusOperacional: GUEST_STATUS.CONFIRMADO },
-      { nome: "Maria Silva", principal: false, email: "maria@email.com", whatsapp: "", statusOperacional: GUEST_STATUS.CONFIRMADO },
-      { nome: "Hospede 3", principal: false, email: "", whatsapp: "11977770002", statusOperacional: GUEST_STATUS.CONFIRMADO },
+      { nome: "Joao Pedro", principal: true, email: "joao@email.com", whatsapp: "11977770000", statusOperacional: GUEST_STATUS.CONFIRMADO, origemCadastro: ORIGEM_CADASTRO.EXISTENTE_COMPLETO, modoColetaFnrh: MODO_COLETA_FNRH.CONFIRMACAO_SIMPLIFICADA },
+      { nome: "Maria Silva", principal: false, email: "maria@email.com", whatsapp: "", statusOperacional: GUEST_STATUS.CONFIRMADO, origemCadastro: ORIGEM_CADASTRO.EXISTENTE_COMPLETO, modoColetaFnrh: MODO_COLETA_FNRH.CONFIRMACAO_SIMPLIFICADA },
+      { nome: "Hospede 3", principal: false, email: "", whatsapp: "11977770002", statusOperacional: GUEST_STATUS.CONFIRMADO, origemCadastro: ORIGEM_CADASTRO.NOVO, modoColetaFnrh: MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO },
     ],
   },
   {
@@ -121,8 +194,8 @@ let reservas = [
     veiculoPlaca: "",
     veiculoCor: "",
     hospedes: [
-      { nome: "Ana Souza", principal: true, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO },
-      { nome: "Hospede 2", principal: false, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO },
+      { nome: "Ana Souza", principal: true, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO, origemCadastro: ORIGEM_CADASTRO.AGENCIA_SEM_DADOS, modoColetaFnrh: MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO },
+      { nome: "Hospede 2", principal: false, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO, origemCadastro: ORIGEM_CADASTRO.AGENCIA_SEM_DADOS, modoColetaFnrh: MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO },
     ],
   },
   {
@@ -137,8 +210,8 @@ let reservas = [
     veiculoPlaca: "JKL4M55",
     veiculoCor: "Branco",
     hospedes: [
-      { nome: "Carlos Mendes", principal: true, email: "carlos@email.com", whatsapp: "11966660000", statusOperacional: GUEST_STATUS.CONFIRMADO },
-      { nome: "Hospede 2", principal: false, email: "h2@email.com", whatsapp: "", statusOperacional: GUEST_STATUS.PRONTO_PARA_ENVIO },
+      { nome: "Carlos Mendes", principal: true, email: "carlos@email.com", whatsapp: "11966660000", statusOperacional: GUEST_STATUS.CONFIRMADO, origemCadastro: ORIGEM_CADASTRO.EXISTENTE_COMPLETO, modoColetaFnrh: MODO_COLETA_FNRH.CONFIRMACAO_SIMPLIFICADA },
+      { nome: "Hospede 2", principal: false, email: "h2@email.com", whatsapp: "", statusOperacional: GUEST_STATUS.PRONTO_PARA_ENVIO, origemCadastro: ORIGEM_CADASTRO.NOVO, modoColetaFnrh: MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO },
     ],
   },
 ];
@@ -240,19 +313,29 @@ function getProximaAcaoReserva(reserva) {
   if (!Array.isArray(reserva.hospedes)) return "";
   const hospedes = reserva.hospedes;
   const naoIdent = hospedes.filter((h) => !hasIdentificacaoMinima(h)).length;
+  const agenciaSemDados = hospedes.filter((h) => h.origemCadastro === ORIGEM_CADASTRO.AGENCIA_SEM_DADOS && !hasIdentificacaoMinima(h)).length;
+  const existenteIncompleto = hospedes.filter((h) => h.origemCadastro === ORIGEM_CADASTRO.EXISTENTE_INCOMPLETO && h.statusOperacional !== GUEST_STATUS.CONFIRMADO && h.statusOperacional !== GUEST_STATUS.ENVIADO).length;
   const aguardandoContato = hospedes.filter(
     (h) => hasIdentificacaoMinima(h) && h.statusOperacional === GUEST_STATUS.AGUARDANDO_CONTATO,
   ).length;
   const prontos = hospedes.filter(
     (h) => h.statusOperacional === GUEST_STATUS.PRONTO_PARA_ENVIO && hasIdentificacaoMinima(h) && hasContatoSuficiente(h),
-  ).length;
+  );
+  const prontosSimplificada = prontos.filter((h) => h.modoColetaFnrh === MODO_COLETA_FNRH.CONFIRMACAO_SIMPLIFICADA).length;
+  const prontosCompleto = prontos.filter((h) => h.modoColetaFnrh === MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO).length;
+  const prontosCount = prontos.length;
   const enviados = hospedes.filter((h) => h.statusOperacional === GUEST_STATUS.ENVIADO).length;
   const confirmados = getFnrhConfirmadas(reserva);
   const total = hospedes.length;
 
-  if (naoIdent > 0) return "Completar identificação dos hóspedes";
+  if (agenciaSemDados > 0 || naoIdent > 0) return "Completar dados dos hóspedes";
+  if (existenteIncompleto > 0) return "Completar cadastro dos hóspedes";
   if (aguardandoContato > 0) return "Completar contatos";
-  if (prontos > 0) return "Enviar links de FNRH";
+  if (prontosCount > 0) {
+    if (prontosSimplificada > 0 && prontosCompleto === 0) return "Enviar confirmações simplificadas";
+    if (prontosCompleto > 0 && prontosSimplificada === 0) return "Enviar FNRHs completas";
+    return "Enviar confirmações e FNRHs";
+  }
   if (enviados > 0) return "Aguardar confirmação das FNRHs";
   if (confirmados === total) return "Reserva pronta para liberar acesso";
   return "";
@@ -537,9 +620,12 @@ function renderDetail(reserva) {
 
   const guestsHtml = hospedes
     .map((h, index) => {
+      syncGuestOriginAndCollectionMode(h);
       const statusClass = guestStatusClass(h.statusOperacional);
       const statusLabel = guestStatusLabel(h.statusOperacional);
-      const pendencyMsg = guestPendencyMessage(h);
+      const origemLabel = getOrigemCadastroLabel(h.origemCadastro);
+      const modoLabel = getModoColetaLabel(h.modoColetaFnrh);
+      const operationalMsg = getGuestOperationalMessage(h);
       const principalBadge = h.principal ? '<span class="guest-detail-badge-principal">Principal</span>' : "";
       const vehicleHtml =
         h.principal && reserva.veiculoPlaca && reserva.veiculoPlaca.trim()
@@ -556,11 +642,12 @@ function renderDetail(reserva) {
             ${principalBadge}
             <span class="guest-detail-status ${statusClass}">${escapeHtml(statusLabel)}</span>
           </div>
+          <p class="guest-detail-origin-mode">${escapeHtml(origemLabel)} · ${escapeHtml(modoLabel)}</p>
           <div class="guest-detail-contact-row guest-detail-name-edit">
             <label>Nome</label>
             <input type="text" class="guest-nome-input" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}" value="${escapeHtml((h.nome || "").trim())}" placeholder="Nome do hóspede" />
           </div>
-          <p class="guest-detail-pendency">${escapeHtml(pendencyMsg)}</p>
+          <p class="guest-detail-pendency">${escapeHtml(operationalMsg)}</p>
           ${vehicleHtml}
           <div class="guest-detail-contact-row">
             <label>E-mail</label>
@@ -578,23 +665,31 @@ function renderDetail(reserva) {
 
   let enviarSection = "";
   const prontosCount = prontos.length;
+  const prontosSimplificada = prontos.filter((h) => h.modoColetaFnrh === MODO_COLETA_FNRH.CONFIRMACAO_SIMPLIFICADA).length;
+  const prontosCompleto = prontos.filter((h) => h.modoColetaFnrh === MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO).length;
   const naoIdentCount = naoIdentificados.length;
   const faltamCount = faltamContato.length;
   const enviadosCount = hospedes.filter((h) => h.statusOperacional === GUEST_STATUS.ENVIADO).length;
   const confirmadosCount = getFnrhConfirmadas(reserva);
   const totalH = hospedes.length;
 
+  function getEnviarButtonLabel() {
+    if (prontosSimplificada > 0 && prontosCompleto === 0) return `Enviar confirmação${prontosSimplificada > 1 ? "ões" : ""} simplificada${prontosSimplificada > 1 ? "s" : ""} (${prontosCount})`;
+    if (prontosCompleto > 0 && prontosSimplificada === 0) return `Enviar FNRH${prontosCompleto > 1 ? "s" : ""} completa${prontosCompleto > 1 ? "s" : ""} (${prontosCount})`;
+    return `Enviar confirmações e FNRHs (${prontosCount})`;
+  }
+
   if (naoIdentCount > 0) {
-    enviarSection = `<div class="detail-enviar-links-alert is-warn">Completar identificação de ${naoIdentCount} hóspede(s). Preencha o nome (evite "Hospede 2", "Acompanhante", etc.).</div>`;
+    enviarSection = `<div class="detail-enviar-links-alert is-warn">Completar dados de ${naoIdentCount} hóspede(s). Preencha o nome (evite "Hospede 2", "Acompanhante", etc.).</div>`;
   } else if (faltamCount > 0 && prontosCount === 0) {
     enviarSection = `<div class="detail-enviar-links-alert is-warn">Falta contato para ${faltamCount} hóspede(s). Preencha e-mail ou WhatsApp para enviar o link.</div>`;
   } else if (faltamCount > 0 && prontosCount > 0) {
     enviarSection = `
       <div class="detail-enviar-links-alert is-warn">Falta contato para ${faltamCount} hóspede(s).</div>
-      <button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}">Enviar link(s) FNRH (${prontosCount} pronto(s))</button>
+      <button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}">${escapeHtml(getEnviarButtonLabel())}</button>
     `;
   } else if (prontosCount > 0) {
-    enviarSection = `<button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}">Enviar link(s) FNRH (${prontosCount})</button>`;
+    enviarSection = `<button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}">${escapeHtml(getEnviarButtonLabel())}</button>`;
   } else if (confirmadosCount === totalH) {
     enviarSection = '<div class="detail-enviar-links-alert is-ok">Todas as FNRHs estão confirmadas. Reserva pronta para liberar acesso.</div>';
   } else if (enviadosCount > 0) {
