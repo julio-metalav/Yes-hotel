@@ -7,6 +7,11 @@ const logoutButtonElement = document.querySelector("#logout-button");
 const summaryCardsElement = document.querySelector("#summary-cards");
 const filterBarElement = document.querySelector("#filter-bar");
 const listaElement = document.querySelector("#lista-operacional");
+const detailPanelElement = document.querySelector("#reservation-detail-panel");
+const detailBackdropElement = document.querySelector("#reservation-detail-backdrop");
+const detailTitleElement = document.querySelector("#reservation-detail-title");
+const detailBodyElement = document.querySelector("#reservation-detail-body");
+const detailCloseButtonElement = document.querySelector("#reservation-detail-close");
 
 function todayStr() {
   const d = new Date();
@@ -21,6 +26,36 @@ const FILTER_ACESSO_LIBERADO = "acesso_liberado";
 const FILTER_NAO_ENTROU = "nao_entrou";
 const FILTER_ENTROU = "entrou";
 
+const GUEST_STATUS = {
+  NAO_IDENTIFICADO: "nao_identificado",
+  AGUARDANDO_CONTATO: "aguardando_contato",
+  PRONTO_PARA_ENVIO: "pronto_para_envio",
+  ENVIADO: "enviado",
+  CONFIRMADO: "confirmado",
+};
+
+function guestStatusLabel(s) {
+  const labels = {
+    [GUEST_STATUS.NAO_IDENTIFICADO]: "Não identificado",
+    [GUEST_STATUS.AGUARDANDO_CONTATO]: "Aguardando contato",
+    [GUEST_STATUS.PRONTO_PARA_ENVIO]: "Pronto para envio",
+    [GUEST_STATUS.ENVIADO]: "Link enviado",
+    [GUEST_STATUS.CONFIRMADO]: "FNRH confirmada",
+  };
+  return labels[s] || s;
+}
+
+function guestStatusClass(s) {
+  const classes = {
+    [GUEST_STATUS.NAO_IDENTIFICADO]: "guest-status-nao-identificado",
+    [GUEST_STATUS.AGUARDANDO_CONTATO]: "guest-status-aguardando",
+    [GUEST_STATUS.PRONTO_PARA_ENVIO]: "guest-status-pronto",
+    [GUEST_STATUS.ENVIADO]: "guest-status-enviado",
+    [GUEST_STATUS.CONFIRMADO]: "guest-status-confirmado",
+  };
+  return classes[s] || "";
+}
+
 let reservas = [
   {
     id: "1",
@@ -34,11 +69,11 @@ let reservas = [
     veiculoPlaca: "ABC1D23",
     veiculoCor: "Prata",
     hospedes: [
-      { nome: "Julio Cesar", principal: true, fnrhPreenchida: true },
-      { nome: "Sandra Maria", principal: false, fnrhPreenchida: true },
-      { nome: "Hospede 3", principal: false, fnrhPreenchida: false },
-      { nome: "Hospede 4", principal: false, fnrhPreenchida: false },
-      { nome: "Hospede 5", principal: false, fnrhPreenchida: false },
+      { nome: "Julio Cesar", principal: true, email: "julio@email.com", whatsapp: "11999990001", statusOperacional: GUEST_STATUS.CONFIRMADO },
+      { nome: "Sandra Maria", principal: false, email: "sandra@email.com", whatsapp: "", statusOperacional: GUEST_STATUS.CONFIRMADO },
+      { nome: "Hospede 3", principal: false, email: "", whatsapp: "11999990003", statusOperacional: GUEST_STATUS.ENVIADO },
+      { nome: "Hospede 4", principal: false, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.AGUARDANDO_CONTATO },
+      { nome: "Hospede 5", principal: false, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO },
     ],
   },
   {
@@ -53,8 +88,8 @@ let reservas = [
     veiculoPlaca: "",
     veiculoCor: "",
     hospedes: [
-      { nome: "Sandra Maria", principal: true, fnrhPreenchida: false },
-      { nome: "Hospede 2", principal: false, fnrhPreenchida: false },
+      { nome: "Sandra Maria", principal: true, email: "sandra@email.com", whatsapp: "11988880000", statusOperacional: GUEST_STATUS.AGUARDANDO_CONTATO },
+      { nome: "Hospede 2", principal: false, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO },
     ],
   },
   {
@@ -69,9 +104,9 @@ let reservas = [
     veiculoPlaca: "XYZ9K99",
     veiculoCor: "Preto",
     hospedes: [
-      { nome: "Joao Pedro", principal: true, fnrhPreenchida: true },
-      { nome: "Maria Silva", principal: false, fnrhPreenchida: true },
-      { nome: "Hospede 3", principal: false, fnrhPreenchida: true },
+      { nome: "Joao Pedro", principal: true, email: "joao@email.com", whatsapp: "11977770000", statusOperacional: GUEST_STATUS.CONFIRMADO },
+      { nome: "Maria Silva", principal: false, email: "maria@email.com", whatsapp: "", statusOperacional: GUEST_STATUS.CONFIRMADO },
+      { nome: "Hospede 3", principal: false, email: "", whatsapp: "11977770002", statusOperacional: GUEST_STATUS.CONFIRMADO },
     ],
   },
   {
@@ -86,8 +121,8 @@ let reservas = [
     veiculoPlaca: "",
     veiculoCor: "",
     hospedes: [
-      { nome: "Ana Souza", principal: true, fnrhPreenchida: false },
-      { nome: "Hospede 2", principal: false, fnrhPreenchida: false },
+      { nome: "Ana Souza", principal: true, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO },
+      { nome: "Hospede 2", principal: false, email: "", whatsapp: "", statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO },
     ],
   },
   {
@@ -102,8 +137,8 @@ let reservas = [
     veiculoPlaca: "JKL4M55",
     veiculoCor: "Branco",
     hospedes: [
-      { nome: "Carlos Mendes", principal: true, fnrhPreenchida: true },
-      { nome: "Hospede 2", principal: false, fnrhPreenchida: true },
+      { nome: "Carlos Mendes", principal: true, email: "carlos@email.com", whatsapp: "11966660000", statusOperacional: GUEST_STATUS.CONFIRMADO },
+      { nome: "Hospede 2", principal: false, email: "h2@email.com", whatsapp: "", statusOperacional: GUEST_STATUS.PRONTO_PARA_ENVIO },
     ],
   },
 ];
@@ -112,32 +147,56 @@ function getHospedesTotal(reserva) {
   return Array.isArray(reserva.hospedes) ? reserva.hospedes.length : 0;
 }
 
-function getFnrhPreenchidas(reserva) {
+function getFnrhConfirmadas(reserva) {
   if (!Array.isArray(reserva.hospedes)) return 0;
-  return reserva.hospedes.filter((h) => h.fnrhPreenchida === true).length;
+  return reserva.hospedes.filter((h) => h.statusOperacional === GUEST_STATUS.CONFIRMADO).length;
+}
+
+function getFnrhPreenchidas(reserva) {
+  return getFnrhConfirmadas(reserva);
 }
 
 function hasFnrhPendente(reserva) {
   const total = getHospedesTotal(reserva);
-  const preenchidas = getFnrhPreenchidas(reserva);
-  return total > 0 && preenchidas < total;
+  const confirmadas = getFnrhConfirmadas(reserva);
+  return total > 0 && confirmadas < total;
 }
 
 function getFnrhStatus(reserva) {
   const total = getHospedesTotal(reserva);
-  const preenchidas = getFnrhPreenchidas(reserva);
+  const confirmadas = getFnrhConfirmadas(reserva);
   if (total === 0) return { class: "fnrh-neutral", label: "—" };
-  if (preenchidas === 0) return { class: "fnrh-0", label: `FNRH 0/${total}` };
-  if (preenchidas < total) return { class: "fnrh-partial", label: `FNRH ${preenchidas}/${total}` };
+  if (confirmadas === 0) return { class: "fnrh-0", label: `FNRH 0/${total}` };
+  if (confirmadas < total) return { class: "fnrh-partial", label: `FNRH ${confirmadas}/${total}` };
   return { class: "fnrh-ok", label: `FNRH ${total}/${total}` };
 }
 
 function registrarProximaFnrh(reserva) {
   if (!Array.isArray(reserva.hospedes)) return false;
-  const pendente = reserva.hospedes.find((h) => h.fnrhPreenchida === false);
+  const pendente = reserva.hospedes.find((h) => h.statusOperacional !== GUEST_STATUS.CONFIRMADO);
   if (!pendente) return false;
-  pendente.fnrhPreenchida = true;
+  pendente.statusOperacional = GUEST_STATUS.CONFIRMADO;
   return true;
+}
+
+function hasContatoSuficiente(hospede) {
+  const e = (hospede.email || "").trim();
+  const w = (hospede.whatsapp || "").trim();
+  return e.length > 0 || w.length > 0;
+}
+
+function getProntosParaEnvio(reserva) {
+  if (!Array.isArray(reserva.hospedes)) return [];
+  return reserva.hospedes.filter(
+    (h) => h.statusOperacional === GUEST_STATUS.PRONTO_PARA_ENVIO && hasContatoSuficiente(h),
+  );
+}
+
+function getFaltamContato(reserva) {
+  if (!Array.isArray(reserva.hospedes)) return [];
+  return reserva.hospedes.filter(
+    (h) => h.statusOperacional !== GUEST_STATUS.CONFIRMADO && h.statusOperacional !== GUEST_STATUS.ENVIADO && !hasContatoSuficiente(h),
+  );
 }
 
 function derivarStatusOperacional(reserva) {
@@ -345,12 +404,210 @@ function renderList() {
     if (action === "liberar_acesso") btn.addEventListener("click", () => acaoLiberarAcesso(id));
     if (action === "confirmar_checkin") btn.addEventListener("click", () => acaoConfirmarCheckin(id));
   });
+
+  listaElement.querySelectorAll(".operational-card").forEach((card) => {
+    const reservaId = card.dataset.id;
+    if (!reservaId) return;
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      openDetail(reservaId);
+    });
+  });
 }
 
 function renderAll() {
   const summary = calcularResumo(reservas);
   renderSummary(summary);
   renderList();
+}
+
+function escapeHtml(s) {
+  if (s == null || s === "") return "";
+  const div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+let detailReservaId = null;
+
+function openDetail(reservaId) {
+  const reserva = reservas.find((r) => r.id === reservaId);
+  if (!reserva) return;
+  detailReservaId = reservaId;
+  if (detailPanelElement) detailPanelElement.classList.remove("hidden");
+  if (detailBackdropElement) detailBackdropElement.classList.remove("hidden");
+  if (detailTitleElement) detailTitleElement.textContent = `Reserva Apto ${reserva.apartamento}`;
+  renderDetail(reserva);
+}
+
+function closeDetail() {
+  detailReservaId = null;
+  if (detailPanelElement) detailPanelElement.classList.add("hidden");
+  if (detailBackdropElement) detailBackdropElement.classList.add("hidden");
+}
+
+function renderDetail(reserva) {
+  if (!(detailBodyElement instanceof HTMLElement) || !reserva) return;
+  const period = `${reserva.checkInPrevisto} a ${reserva.checkOutPrevisto}`;
+  const hospedes = Array.isArray(reserva.hospedes) ? reserva.hospedes : [];
+  const faltamContato = getFaltamContato(reserva);
+  const prontos = getProntosParaEnvio(reserva);
+
+  const guestsHtml = hospedes
+    .map((h, index) => {
+      const statusClass = guestStatusClass(h.statusOperacional);
+      const statusLabel = guestStatusLabel(h.statusOperacional);
+      const contatoOk = hasContatoSuficiente(h);
+      const principalBadge = h.principal ? '<span class="guest-detail-badge-principal">Principal</span>' : "";
+      const vehicleHtml =
+        h.principal && reserva.veiculoPlaca && reserva.veiculoPlaca.trim()
+          ? `<div class="guest-detail-vehicle">Veículo: ${escapeHtml(reserva.veiculoPlaca.trim())}${reserva.veiculoCor ? " • " + escapeHtml(reserva.veiculoCor.trim()) : ""}</div>`
+          : "";
+      const canConfirmar = h.statusOperacional !== GUEST_STATUS.CONFIRMADO;
+      const canProntoEnvio =
+        hasContatoSuficiente(h) &&
+        (h.statusOperacional === GUEST_STATUS.NAO_IDENTIFICADO || h.statusOperacional === GUEST_STATUS.AGUARDANDO_CONTATO);
+      const confirmarBtn = canConfirmar
+        ? `<button type="button" class="secondary-button guest-confirmar-fnrh-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Confirmar FNRH</button>`
+        : "";
+      const prontoBtn = canProntoEnvio
+        ? ` <button type="button" class="secondary-button guest-pronto-envio-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Pronto para envio</button>`
+        : "";
+
+      return `
+        <div class="guest-detail-card" data-guest-index="${index}">
+          <div class="guest-detail-name-row">
+            <span class="guest-detail-name">${escapeHtml(h.nome)}</span>
+            ${principalBadge}
+            <span class="guest-detail-status ${statusClass}">${escapeHtml(statusLabel)}</span>
+          </div>
+          ${vehicleHtml}
+          <div class="guest-detail-contact-row">
+            <label>E-mail</label>
+            <input type="text" class="guest-email-input" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}" value="${escapeHtml((h.email || "").trim())}" placeholder="email@exemplo.com" />
+          </div>
+          <div class="guest-detail-contact-row">
+            <label>WhatsApp</label>
+            <input type="text" class="guest-whatsapp-input" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}" value="${escapeHtml((h.whatsapp || "").trim())}" placeholder="11999990000" />
+          </div>
+          <div class="guest-detail-contact-row">
+            ${contatoOk ? '<span class="guest-detail-contact-ok">Contato suficiente</span>' : '<span class="guest-detail-contact-falta">Falta contato</span>'}
+          </div>
+          ${confirmarBtn || prontoBtn ? `<div class="guest-detail-actions">${confirmarBtn}${prontoBtn}</div>` : ""}
+        </div>
+      `;
+    })
+    .join("");
+
+  let enviarSection = "";
+  const prontosCount = prontos.length;
+  const faltamCount = faltamContato.length;
+  if (faltamCount > 0 && prontosCount === 0) {
+    enviarSection = `<div class="detail-enviar-links-alert is-warn">Falta contato para ${faltamCount} hóspede(s). Preencha e-mail ou WhatsApp para enviar o link.</div>`;
+  } else if (faltamCount > 0 && prontosCount > 0) {
+    enviarSection = `
+      <div class="detail-enviar-links-alert is-warn">Falta contato para ${faltamCount} hóspede(s).</div>
+      <button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}">Enviar link(s) FNRH (${prontosCount} pronto(s))</button>
+    `;
+  } else if (prontosCount > 0) {
+    enviarSection = `<button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}">Enviar link(s) FNRH (${prontosCount})</button>`;
+  } else {
+    const enviados = hospedes.filter((x) => x.statusOperacional === GUEST_STATUS.ENVIADO).length;
+    const confirmados = getFnrhConfirmadas(reserva);
+    if (confirmados === hospedes.length) {
+      enviarSection = '<div class="detail-enviar-links-alert is-ok">Todas as FNRHs estão confirmadas.</div>';
+    } else if (enviados > 0) {
+      enviarSection = `<div class="detail-enviar-links-alert is-ok">Link(s) enviado(s) para ${enviados} hóspede(s). Aguardando confirmação.</div>`;
+    }
+  }
+
+  detailBodyElement.innerHTML = `
+    <div class="reservation-detail-section">
+      <p class="reservation-detail-section-title">Período</p>
+      <p style="margin:0;font-size:14px;color:var(--text)">${escapeHtml(period)}</p>
+    </div>
+    <div class="reservation-detail-section">
+      <p class="reservation-detail-section-title">Hóspedes</p>
+      ${guestsHtml}
+    </div>
+    <div class="reservation-detail-section">
+      ${enviarSection}
+    </div>
+  `;
+
+  bindDetailListeners(reserva);
+}
+
+function bindDetailListeners(reserva) {
+  if (!(detailBodyElement instanceof HTMLElement)) return;
+
+  detailBodyElement.querySelectorAll(".guest-email-input").forEach((input) => {
+    input.addEventListener("change", (e) => {
+      const target = e.target;
+      const rid = target.dataset.reservaId;
+      const idx = parseInt(target.dataset.guestIndex, 10);
+      const r = reservas.find((x) => x.id === rid);
+      if (r && r.hospedes && r.hospedes[idx] != null) {
+        r.hospedes[idx].email = target.value.trim();
+        if (detailReservaId === rid) renderDetail(r);
+      }
+    });
+  });
+
+  detailBodyElement.querySelectorAll(".guest-whatsapp-input").forEach((input) => {
+    input.addEventListener("change", (e) => {
+      const target = e.target;
+      const rid = target.dataset.reservaId;
+      const idx = parseInt(target.dataset.guestIndex, 10);
+      const r = reservas.find((x) => x.id === rid);
+      if (r && r.hospedes && r.hospedes[idx] != null) {
+        r.hospedes[idx].whatsapp = target.value.trim();
+        if (detailReservaId === rid) renderDetail(r);
+      }
+    });
+  });
+
+  detailBodyElement.querySelectorAll(".guest-confirmar-fnrh-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const rid = btn.dataset.reservaId;
+      const idx = parseInt(btn.dataset.guestIndex, 10);
+      const r = reservas.find((x) => x.id === rid);
+      if (r && r.hospedes && r.hospedes[idx] != null) {
+        r.hospedes[idx].statusOperacional = GUEST_STATUS.CONFIRMADO;
+        renderAll();
+        if (detailReservaId === rid) renderDetail(r);
+      }
+    });
+  });
+
+  detailBodyElement.querySelectorAll(".guest-pronto-envio-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const rid = btn.dataset.reservaId;
+      const idx = parseInt(btn.dataset.guestIndex, 10);
+      const r = reservas.find((x) => x.id === rid);
+      if (r && r.hospedes && r.hospedes[idx] != null) {
+        r.hospedes[idx].statusOperacional = GUEST_STATUS.PRONTO_PARA_ENVIO;
+        renderAll();
+        if (detailReservaId === rid) renderDetail(r);
+      }
+    });
+  });
+
+  const enviarBtn = detailBodyElement.querySelector("#detail-enviar-links-btn");
+  if (enviarBtn) {
+    enviarBtn.addEventListener("click", () => {
+      const rid = enviarBtn.dataset.reservaId;
+      const r = reservas.find((x) => x.id === rid);
+      if (!r || !Array.isArray(r.hospedes)) return;
+      r.hospedes.forEach((h) => {
+        if (h.statusOperacional === GUEST_STATUS.PRONTO_PARA_ENVIO && hasContatoSuficiente(h)) {
+          h.statusOperacional = GUEST_STATUS.ENVIADO;
+        }
+      });
+      renderAll();
+      if (detailReservaId === rid) renderDetail(r);
+    });
+  }
 }
 
 function showAccessState(title, message, actionLabel) {
@@ -409,6 +666,9 @@ async function initCheckinOperacional() {
 
   renderFilters();
   renderAll();
+
+  detailCloseButtonElement?.addEventListener("click", closeDetail);
+  detailBackdropElement?.addEventListener("click", closeDetail);
 }
 
 logoutButtonElement?.addEventListener("click", async () => {
