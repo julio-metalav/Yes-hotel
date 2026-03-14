@@ -389,10 +389,95 @@ function serializarPainelOperacional(reservasList) {
   return reservasList.map(serializarReservaOperacional);
 }
 
+/*
+ * Pré-integração HITS: contrato e adaptador sem credenciais reais.
+ * Pipeline: HITS futuro → adaptador HITS → payload externo padronizado → normalização → modelo interno → UI.
+ * O que depende de credenciais: fetch real, auth headers, baseUrl. Interface do adaptador já é definitiva.
+ */
+/* ---------- Config / contrato esperado do HITS ---------- */
+const HITS_CONFIG = {
+  baseUrl: "",
+  authType: "bearer",
+  reservationsListPath: "/reservations",
+  reservationDetailPath: "/reservations/:id",
+  hasCredentials: false,
+  available: false,
+};
+
+function getHitsAdapterInfo() {
+  return {
+    available: HITS_CONFIG.available && HITS_CONFIG.hasCredentials,
+    hasCredentials: HITS_CONFIG.hasCredentials,
+    baseUrl: HITS_CONFIG.baseUrl || "(não configurado)",
+  };
+}
+
+/** Mapeia um hóspede no formato HITS para o payload externo do painel. Placeholder até contrato real. */
+function mapHitsGuestToExternalPayload(hitsGuest, index) {
+  if (!hitsGuest || typeof hitsGuest !== "object") return null;
+  const g = hitsGuest;
+  return {
+    id: g.id ?? g.guestId ?? null,
+    nome: sanitizeString(g.nome ?? g.name ?? g.guestName ?? ""),
+    principal: !!(g.principal ?? g.isPrimary ?? g.primary ?? index === 0),
+    email: sanitizeString(g.email ?? g.mail ?? ""),
+    whatsapp: sanitizeString(g.whatsapp ?? g.phone ?? g.cellPhone ?? ""),
+    statusOperacional: pickEnumValue(g.statusOperacional ?? g.status ?? g.fnrhStatus, GUEST_STATUS, GUEST_STATUS.NAO_IDENTIFICADO),
+    origemCadastro: pickEnumValue(g.origemCadastro ?? g.origin, ORIGEM_CADASTRO, ORIGEM_CADASTRO.NOVO),
+    modoColetaFnrh: pickEnumValue(g.modoColetaFnrh ?? g.collectionMode, MODO_COLETA_FNRH, MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO),
+    ultimoEnvioCanal: g.ultimoEnvioCanal ?? g.lastSendChannel ?? null,
+    ultimoEnvioEm: g.ultimoEnvioEm ?? g.lastSentAt ?? null,
+    tentativasEnvio: g.tentativasEnvio != null ? Number(g.tentativasEnvio) : (g.sendAttempts != null ? Number(g.sendAttempts) : 0),
+  };
+}
+
+/** Mapeia uma reserva no formato HITS para o payload externo consumível pela normalização do painel. */
+function mapHitsReservationToExternalPayload(hitsReservation) {
+  if (!hitsReservation || typeof hitsReservation !== "object") return null;
+  const r = hitsReservation;
+  const rawGuests = Array.isArray(r.hospedes) ? r.hospedes : Array.isArray(r.guests) ? r.guests : Array.isArray(r.guestList) ? r.guestList : [];
+  const hospedes = rawGuests.map((g, i) => mapHitsGuestToExternalPayload(g, i)).filter(Boolean);
+  return {
+    id: r.id ?? r.reservationId ?? r.reservation_id ?? "",
+    apartamento: sanitizeString(r.apartamento ?? r.roomNumber ?? r.room_number ?? r.room ?? ""),
+    hospedePrincipal: sanitizeString(r.hospedePrincipal ?? r.primaryGuest ?? r.primary_guest ?? (hospedes[0] && hospedes[0].nome) ? hospedes[0].nome : ""),
+    checkInPrevisto: sanitizeString(r.checkInPrevisto ?? r.checkIn ?? r.check_in ?? r.arrivalDate ?? ""),
+    checkOutPrevisto: sanitizeString(r.checkOutPrevisto ?? r.checkOut ?? r.check_out ?? r.departureDate ?? ""),
+    pagamento: r.pagamento === "pago" || r.paymentStatus === "paid" ? "pago" : "pendente",
+    acessoLiberado: !!(r.acessoLiberado ?? r.accessGranted ?? r.access_granted),
+    entrouNoApto: !!(r.entrouNoApto ?? r.checkedIn ?? r.checked_in),
+    veiculoPlaca: sanitizeString(r.veiculoPlaca ?? r.vehiclePlate ?? r.vehicle_plate ?? ""),
+    veiculoCor: sanitizeString(r.veiculoCor ?? r.vehicleColor ?? r.vehicle_color ?? ""),
+    hospedes,
+    historicoOperacional: Array.isArray(r.historicoOperacional) ? r.historicoOperacional : Array.isArray(r.history) ? r.history : [],
+  };
+}
+
+/** Carrega reservas via adaptador HITS. Sem credenciais: faz fallback json-local → mock-local. */
+function loadReservasFromHitsAdapter() {
+  if (!HITS_CONFIG.available || !HITS_CONFIG.hasCredentials) {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("[painel] HITS: sem credenciais/config. Fallback: json-local → mock-local.");
+    }
+    return fetch(PAINEL_JSON_LOCAL_URL)
+      .then((r) => {
+        if (!r.ok) throw new Error("JSON local não encontrado");
+        return r.json();
+      })
+      .then((data) => {
+        const list = Array.isArray(data) ? data : (data && data.reservas) ? data.reservas : [];
+        return normalizarListaReservasExternas(list);
+      })
+      .catch(() => loadReservasOperacionais());
+  }
+  return Promise.reject(new Error("HITS real não implementado nesta fase"));
+}
+
 /* ---------- Provider de dados / origem do painel ---------- */
 const PAINEL_DATA_SOURCE_MOCK_LOCAL = "mock-local";
 const PAINEL_DATA_SOURCE_JSON_LOCAL = "json-local";
-/** Origem atual: "mock-local" (embutido) ou "json-local" (arquivo data/checkin-operacional-reservas.json). */
+const PAINEL_DATA_SOURCE_HITS_ADAPTER = "hits-adapter";
+/** Origem atual: "mock-local" | "json-local" | "hits-adapter" (hits-adapter sem credenciais usa fallback). */
 const PAINEL_DATA_SOURCE = PAINEL_DATA_SOURCE_MOCK_LOCAL;
 const PAINEL_JSON_LOCAL_URL = "./data/checkin-operacional-reservas.json";
 
@@ -406,6 +491,9 @@ function loadReservasOperacionais() {
 }
 
 function loadReservasOperacionaisFromProvider() {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_HITS_ADAPTER) {
+    return loadReservasFromHitsAdapter();
+  }
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_JSON_LOCAL) {
     return fetch(PAINEL_JSON_LOCAL_URL)
       .then((r) => {
@@ -422,6 +510,14 @@ function loadReservasOperacionaisFromProvider() {
 }
 
 function getPainelDataSourceInfo() {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_HITS_ADAPTER) {
+    const info = getHitsAdapterInfo();
+    return {
+      type: PAINEL_DATA_SOURCE_HITS_ADAPTER,
+      description: info.available ? "HITS (adaptador)" : "Pré-integração HITS (sem credenciais reais)",
+      available: info.available,
+    };
+  }
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_JSON_LOCAL) {
     return { type: PAINEL_DATA_SOURCE_JSON_LOCAL, description: "JSON local (data/checkin-operacional-reservas.json)" };
   }
