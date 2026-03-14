@@ -377,6 +377,10 @@
     return data.user;
   }
 
+  function getSupabaseClient() {
+    return client || null;
+  }
+
   globalScope.YesHotelAuthApp = {
     isConfigured,
     getConfigError,
@@ -392,5 +396,6 @@
     listUsers,
     createUser,
     updateUser,
+    getSupabaseClient,
   };
 })(window);
