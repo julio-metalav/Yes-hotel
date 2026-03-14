@@ -362,6 +362,12 @@ function serializarPainelOperacional(reservasList) {
 }
 
 /* ---------- Provider de dados / origem do painel ---------- */
+const PAINEL_DATA_SOURCE_MOCK_LOCAL = "mock-local";
+const PAINEL_DATA_SOURCE_JSON_LOCAL = "json-local";
+/** Origem atual: "mock-local" (embutido) ou "json-local" (arquivo reservas-operacionais.json). */
+const PAINEL_DATA_SOURCE = PAINEL_DATA_SOURCE_MOCK_LOCAL;
+const PAINEL_JSON_LOCAL_URL = "./reservas-operacionais.json";
+
 function getMockReservasExternas() {
   return mockReservasExternasRaw;
 }
@@ -371,8 +377,27 @@ function loadReservasOperacionais() {
   return normalizarListaReservasExternas(payloads);
 }
 
+function loadReservasOperacionaisFromProvider() {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_JSON_LOCAL) {
+    return fetch(PAINEL_JSON_LOCAL_URL)
+      .then((r) => {
+        if (!r.ok) throw new Error("JSON local não encontrado");
+        return r.json();
+      })
+      .then((data) => {
+        const list = Array.isArray(data) ? data : (data && data.reservas) ? data.reservas : [];
+        return normalizarListaReservasExternas(list);
+      })
+      .catch(() => loadReservasOperacionais());
+  }
+  return Promise.resolve(loadReservasOperacionais());
+}
+
 function getPainelDataSourceInfo() {
-  return { type: "mock-local", description: "Mock local normalizado" };
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_JSON_LOCAL) {
+    return { type: PAINEL_DATA_SOURCE_JSON_LOCAL, description: "JSON local (reservas-operacionais.json)" };
+  }
+  return { type: PAINEL_DATA_SOURCE_MOCK_LOCAL, description: "Mock local normalizado" };
 }
 
 function exportReservasOperacionais(reservasList) {
@@ -467,8 +492,8 @@ const mockReservasExternasRaw = [
   },
 ];
 
-/* ---------- Estado base (preenchido pelo provider) ---------- */
-let reservas = loadReservasOperacionais();
+/* ---------- Estado base (preenchido pelo provider no init) ---------- */
+let reservas = [];
 
 /* ---------- Selectors / estado derivado ---------- */
 function getReservaById(id) {
@@ -1523,6 +1548,7 @@ async function initCheckinOperacional() {
       `${currentUser.name} | ${auth.getRoleLabel(currentUser.role)} | sessao de ${auth.getSessionDurationHours()} horas`;
   }
 
+  reservas = await loadReservasOperacionaisFromProvider();
   renderFilters();
   refresh();
 

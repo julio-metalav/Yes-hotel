@@ -1,0 +1,86 @@
+[
+  {
+    "id": "1",
+    "apartamento": "12",
+    "hospedePrincipal": "Julio Cesar",
+    "checkInPrevisto": "2025-03-15",
+    "checkOutPrevisto": "2025-03-18",
+    "pagamento": "pago",
+    "acessoLiberado": false,
+    "entrouNoApto": false,
+    "veiculoPlaca": "ABC1D23",
+    "veiculoCor": "Prata",
+    "hospedes": [
+      { "id": "1-1", "nome": "Julio Cesar", "principal": true, "email": "julio@email.com", "whatsapp": "11999990001", "statusOperacional": "confirmado", "origemCadastro": "existente_completo", "modoColetaFnrh": "confirmacao_simplificada" },
+      { "id": "1-2", "nome": "Sandra Maria", "principal": false, "email": "sandra@email.com", "whatsapp": "", "statusOperacional": "confirmado", "origemCadastro": "existente_completo", "modoColetaFnrh": "confirmacao_simplificada" },
+      { "id": "1-3", "nome": "Hospede 3", "principal": false, "email": "", "whatsapp": "11999990003", "statusOperacional": "enviado", "origemCadastro": "novo", "modoColetaFnrh": "preenchimento_completo" },
+      { "id": "1-4", "nome": "Hospede 4", "principal": false, "email": "", "whatsapp": "", "statusOperacional": "aguardando_contato", "origemCadastro": "agencia_sem_dados", "modoColetaFnrh": "preenchimento_completo" },
+      { "id": "1-5", "nome": "Hospede 5", "principal": false, "email": "", "whatsapp": "", "statusOperacional": "nao_identificado", "origemCadastro": "agencia_sem_dados", "modoColetaFnrh": "preenchimento_completo" }
+    ]
+  },
+  {
+    "id": "2",
+    "apartamento": "18",
+    "hospedePrincipal": "Sandra Maria",
+    "checkInPrevisto": "2025-03-15",
+    "checkOutPrevisto": "2025-03-18",
+    "pagamento": "pendente",
+    "acessoLiberado": false,
+    "entrouNoApto": false,
+    "veiculoPlaca": "",
+    "veiculoCor": "",
+    "hospedes": [
+      { "id": "2-1", "nome": "Sandra Maria", "principal": true, "email": "sandra@email.com", "whatsapp": "11988880000", "statusOperacional": "aguardando_contato", "origemCadastro": "existente_incompleto", "modoColetaFnrh": "preenchimento_completo" },
+      { "id": "2-2", "nome": "Hospede 2", "principal": false, "email": "", "whatsapp": "", "statusOperacional": "nao_identificado", "origemCadastro": "agencia_sem_dados", "modoColetaFnrh": "preenchimento_completo" }
+    ]
+  },
+  {
+    "id": "3",
+    "apartamento": "24",
+    "hospedePrincipal": "Joao Pedro",
+    "checkInPrevisto": "2025-03-15",
+    "checkOutPrevisto": "2025-03-18",
+    "pagamento": "pago",
+    "acessoLiberado": true,
+    "entrouNoApto": true,
+    "veiculoPlaca": "XYZ9K99",
+    "veiculoCor": "Preto",
+    "hospedes": [
+      { "id": "3-1", "nome": "Joao Pedro", "principal": true, "email": "joao@email.com", "whatsapp": "11977770000", "statusOperacional": "confirmado", "origemCadastro": "existente_completo", "modoColetaFnrh": "confirmacao_simplificada" },
+      { "id": "3-2", "nome": "Maria Silva", "principal": false, "email": "maria@email.com", "whatsapp": "", "statusOperacional": "confirmado", "origemCadastro": "existente_completo", "modoColetaFnrh": "confirmacao_simplificada" },
+      { "id": "3-3", "nome": "Hospede 3", "principal": false, "email": "", "whatsapp": "11977770002", "statusOperacional": "confirmado", "origemCadastro": "novo", "modoColetaFnrh": "preenchimento_completo" }
+    ]
+  },
+  {
+    "id": "4",
+    "apartamento": "07",
+    "hospedePrincipal": "Ana Souza",
+    "checkInPrevisto": "2025-03-15",
+    "checkOutPrevisto": "2025-03-18",
+    "pagamento": "pago",
+    "acessoLiberado": false,
+    "entrouNoApto": false,
+    "veiculoPlaca": "",
+    "veiculoCor": "",
+    "hospedes": [
+      { "id": "4-1", "nome": "Ana Souza", "principal": true, "email": "", "whatsapp": "", "statusOperacional": "nao_identificado", "origemCadastro": "agencia_sem_dados", "modoColetaFnrh": "preenchimento_completo" },
+      { "id": "4-2", "nome": "Hospede 2", "principal": false, "email": "", "whatsapp": "", "statusOperacional": "nao_identificado", "origemCadastro": "agencia_sem_dados", "modoColetaFnrh": "preenchimento_completo" }
+    ]
+  },
+  {
+    "id": "5",
+    "apartamento": "31",
+    "hospedePrincipal": "Carlos Mendes",
+    "checkInPrevisto": "2025-03-15",
+    "checkOutPrevisto": "2025-03-18",
+    "pagamento": "pago",
+    "acessoLiberado": true,
+    "entrouNoApto": false,
+    "veiculoPlaca": "JKL4M55",
+    "veiculoCor": "Branco",
+    "hospedes": [
+      { "id": "5-1", "nome": "Carlos Mendes", "principal": true, "email": "carlos@email.com", "whatsapp": "11966660000", "statusOperacional": "confirmado", "origemCadastro": "existente_completo", "modoColetaFnrh": "confirmacao_simplificada" },
+      { "id": "5-2", "nome": "Hospede 2", "principal": false, "email": "h2@email.com", "whatsapp": "", "statusOperacional": "pronto_para_envio", "origemCadastro": "novo", "modoColetaFnrh": "preenchimento_completo" }
+    ]
+  }
+]
