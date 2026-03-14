@@ -186,19 +186,8 @@ async function renderPageState() {
     return;
   }
 
-  const hasUsers = await auth.hasUsers();
-
-  if (!hasUsers) {
-    showOnlyPanel(bootstrapPanelElement);
-    hideNotice();
-    return;
-  }
-
-  if (!currentUser) {
-    showOnlyPanel(loginPanelElement);
-    hideNotice();
-    return;
-  }
+  showOnlyPanel(loginPanelElement);
+  hideNotice();
 }
 
 bootstrapFormElement?.addEventListener("submit", async (event) => {
