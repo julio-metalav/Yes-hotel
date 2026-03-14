@@ -18,6 +18,35 @@ function todayStr() {
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
 
+function formatHistoricoTimestamp(date) {
+  if (!(date instanceof Date) || isNaN(date.getTime())) return "";
+  const d = date.getDate();
+  const m = date.getMonth() + 1;
+  const h = date.getHours();
+  const min = date.getMinutes();
+  return `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")} ${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
+function addHistoricoEvento(reserva, tipo, titulo, detalhe) {
+  if (!reserva) return;
+  if (!reserva.historicoOperacional) reserva.historicoOperacional = [];
+  reserva.historicoOperacional.push({
+    tipo,
+    titulo,
+    detalhe: detalhe || null,
+    em: formatHistoricoTimestamp(new Date()),
+  });
+}
+
+function maybeRegistrarFnrhCompleta(reserva, confirmadasAntes) {
+  if (!reserva || !Array.isArray(reserva.hospedes)) return;
+  const total = reserva.hospedes.length;
+  const agora = getFnrhConfirmadas(reserva);
+  if (total > 0 && agora === total && confirmadasAntes < total) {
+    addHistoricoEvento(reserva, "fnrh_completa", "FNRH completa da reserva", null);
+  }
+}
+
 const FILTER_ALL = "all";
 const FILTER_CHEGANDO_HOJE = "chegando_hoje";
 const FILTER_PENDENTE_PAGAMENTO = "pendente_pagamento";
@@ -497,24 +526,39 @@ function renderFilters() {
 
 function acaoMarcarPagamentoOk(id) {
   const r = reservas.find((x) => x.id === id);
-  if (r) r.pagamento = "pago";
+  if (r) {
+    r.pagamento = "pago";
+    addHistoricoEvento(r, "pagamento_aprovado", "Pagamento aprovado", null);
+  }
   renderAll();
 }
 
 function acaoAvançarFnrh(id) {
   const r = reservas.find((x) => x.id === id);
-  if (r && registrarProximaFnrh(r)) renderAll();
+  if (!r) return;
+  const antes = getFnrhConfirmadas(r);
+  if (registrarProximaFnrh(r)) {
+    addHistoricoEvento(r, "fnrh_confirmada", "FNRH confirmada (próxima pendente)", null);
+    maybeRegistrarFnrhCompleta(r, antes);
+  }
+  renderAll();
 }
 
 function acaoLiberarAcesso(id) {
   const r = reservas.find((x) => x.id === id);
-  if (r && r.pagamento === "pago" && !hasFnrhPendente(r)) r.acessoLiberado = true;
+  if (r && r.pagamento === "pago" && !hasFnrhPendente(r)) {
+    r.acessoLiberado = true;
+    addHistoricoEvento(r, "acesso_liberado", "Acesso liberado", null);
+  }
   renderAll();
 }
 
 function acaoConfirmarCheckin(id) {
   const r = reservas.find((x) => x.id === id);
-  if (r) r.entrouNoApto = true;
+  if (r) {
+    r.entrouNoApto = true;
+    addHistoricoEvento(r, "entrada_apartamento", "Entrada no apartamento registrada", null);
+  }
   renderAll();
 }
 
@@ -685,6 +729,7 @@ function reenviarHospede(reservaId, guestIndex) {
   const h = r.hospedes[guestIndex];
   if (h.statusOperacional !== GUEST_STATUS.ENVIADO || !hasContatoSuficiente(h)) return;
   registrarEnvioHospede(h);
+  addHistoricoEvento(r, "reenvio", "Link reenviado para " + (h.nome || "hóspede"), null);
   if (detailReservaId === reservaId) renderDetail(r);
 }
 
@@ -737,6 +782,7 @@ function adicionarHospede(reservaId) {
   const r = reservas.find((x) => x.id === reservaId);
   if (!r || !Array.isArray(r.hospedes)) return;
   r.hospedes.push(createNovoHospede());
+  addHistoricoEvento(r, "hospede_adicionado", "Hóspede adicionado à reserva", null);
   renderAll();
   if (detailReservaId === reservaId) renderDetail(r);
 }
@@ -754,7 +800,9 @@ function removerHospede(reservaId, guestIndex) {
     alert("A reserva precisa ter pelo menos um hóspede.");
     return;
   }
+  const nomeRemovido = h.nome || "Hóspede";
   r.hospedes.splice(guestIndex, 1);
+  addHistoricoEvento(r, "hospede_removido", "Hóspede removido da reserva", nomeRemovido);
   renderAll();
   if (detailReservaId === reservaId) renderDetail(r);
 }
@@ -769,6 +817,7 @@ function definirPrincipal(reservaId, guestIndex) {
   });
   h.principal = true;
   r.hospedePrincipal = (h.nome || "").trim() || "Hóspede principal";
+  addHistoricoEvento(r, "principal_alterado", "Hóspede principal alterado", (h.nome || "").trim() || null);
   renderAll();
   if (detailReservaId === reservaId) renderDetail(r);
 }
@@ -914,6 +963,21 @@ function renderDetail(reserva) {
     <p class="reservation-detail-comunicacao-text">${escapeHtml(resumoComunicacao)}</p>
   </div>`;
 
+  const historico = (reserva.historicoOperacional || []).slice().reverse();
+  const historicoHtml =
+    historico.length === 0
+      ? `<p class="timeline-empty">Nenhum evento registrado ainda.</p>`
+      : historico
+          .map(
+            (ev) =>
+              `<div class="timeline-item"><span class="timeline-time">${escapeHtml(ev.em)}</span> — <span class="timeline-title">${escapeHtml(ev.titulo)}</span>${ev.detalhe ? `<br><span class="timeline-detalhe">${escapeHtml(ev.detalhe)}</span>` : ""}</div>`,
+          )
+          .join("");
+  const timelineSectionHtml = `<div class="reservation-detail-section reservation-detail-timeline">
+    <p class="reservation-detail-section-title">Linha do tempo da reserva</p>
+    <div class="timeline-list">${historicoHtml}</div>
+  </div>`;
+
   detailBodyElement.innerHTML = `
     ${statusReservaHtml}
     ${proximaAcaoHtml || ""}
@@ -930,6 +994,7 @@ function renderDetail(reserva) {
       ${guestsHtml}
     </div>
     ${comunicacaoReservaHtml}
+    ${timelineSectionHtml}
     <div class="reservation-detail-section">
       ${enviarSection}
     </div>
@@ -992,7 +1057,11 @@ function bindDetailListeners(reserva) {
       const idx = parseInt(btn.dataset.guestIndex, 10);
       const r = reservas.find((x) => x.id === rid);
       if (r && r.hospedes && r.hospedes[idx] != null) {
-        r.hospedes[idx].statusOperacional = GUEST_STATUS.CONFIRMADO;
+        const h = r.hospedes[idx];
+        const confirmadasAntes = getFnrhConfirmadas(r);
+        h.statusOperacional = GUEST_STATUS.CONFIRMADO;
+        addHistoricoEvento(r, "fnrh_confirmada", "FNRH confirmada por " + (h.nome || "hóspede"), null);
+        maybeRegistrarFnrhCompleta(r, confirmadasAntes);
         renderAll();
         if (detailReservaId === rid) renderDetail(r);
       }
@@ -1047,12 +1116,25 @@ function bindDetailListeners(reserva) {
       const rid = enviarBtn.dataset.reservaId;
       const r = reservas.find((x) => x.id === rid);
       if (!r || !Array.isArray(r.hospedes)) return;
+      let porEmail = 0, porWhatsapp = 0, porAmbos = 0;
       r.hospedes.forEach((h) => {
         if (h.statusOperacional === GUEST_STATUS.PRONTO_PARA_ENVIO && hasContatoSuficiente(h)) {
           h.statusOperacional = GUEST_STATUS.ENVIADO;
           registrarEnvioHospede(h);
+          const canal = getCanalEnvioMock(h);
+          if (canal === CANAL_ENVIO.EMAIL) porEmail++;
+          else if (canal === CANAL_ENVIO.WHATSAPP) porWhatsapp++;
+          else if (canal === CANAL_ENVIO.AMBOS) porAmbos++;
         }
       });
+      const totalEnviados = porEmail + porWhatsapp + porAmbos;
+      if (totalEnviados > 0) {
+        const parts = [];
+        if (porWhatsapp > 0) parts.push(porWhatsapp + " por WhatsApp");
+        if (porEmail > 0) parts.push(porEmail + " por e-mail");
+        if (porAmbos > 0) parts.push(porAmbos + " por ambos");
+        addHistoricoEvento(r, "links_enviados", "Links de FNRH enviados", parts.join("; "));
+      }
       renderAll();
       if (detailReservaId === rid) renderDetail(r);
     });
