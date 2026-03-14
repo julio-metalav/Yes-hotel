@@ -237,24 +237,26 @@ function createHospedeId(reservaId, index) {
   return sanitizeString(reservaId) + "-" + (index != null ? Number(index) : 0);
 }
 
+function pickEnumValue(val, enumObj, fallback) {
+  if (val == null || val === "") return fallback;
+  const s = String(val).trim();
+  if (Object.values(enumObj).includes(s)) return s;
+  const lower = s.toLowerCase();
+  const found = Object.values(enumObj).find((v) => String(v).toLowerCase() === lower);
+  return found != null ? found : fallback;
+}
+
 function ensureHospedeDefaults(payload) {
-  const id = payload && payload.id != null ? sanitizeString(payload.id) : null;
-  const nome = sanitizeString(payload && payload.nome);
-  const principal = !!(payload && payload.principal);
-  const email = sanitizeString(payload && payload.email);
-  const whatsapp = sanitizeString(payload && payload.whatsapp);
-  const statusOperacional =
-    payload && payload.statusOperacional && Object.values(GUEST_STATUS).includes(payload.statusOperacional)
-      ? payload.statusOperacional
-      : GUEST_STATUS.NAO_IDENTIFICADO;
-  const origemCadastro =
-    payload && payload.origemCadastro && Object.values(ORIGEM_CADASTRO).includes(payload.origemCadastro)
-      ? payload.origemCadastro
-      : ORIGEM_CADASTRO.NOVO;
-  const modoColetaFnrh =
-    payload && payload.modoColetaFnrh && Object.values(MODO_COLETA_FNRH).includes(payload.modoColetaFnrh)
-      ? payload.modoColetaFnrh
-      : MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO;
+  if (!payload || typeof payload !== "object") payload = {};
+  const id = payload.id != null ? sanitizeString(String(payload.id)) : null;
+  const nome = sanitizeString(payload.nome ?? payload.name ?? "");
+  const principal = !!(payload.principal ?? payload.is_primary);
+  const email = sanitizeString(payload.email ?? "");
+  const whatsapp = sanitizeString(payload.whatsapp ?? payload.phone ?? "");
+  const statusOperacional = pickEnumValue(payload.statusOperacional ?? payload.status, GUEST_STATUS, GUEST_STATUS.NAO_IDENTIFICADO);
+  const origemCadastro = pickEnumValue(payload.origemCadastro ?? payload.origem, ORIGEM_CADASTRO, ORIGEM_CADASTRO.NOVO);
+  const modoColetaFnrh = pickEnumValue(payload.modoColetaFnrh ?? payload.modo_coleta, MODO_COLETA_FNRH, MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO);
+  const tentativasEnvio = payload.tentativasEnvio != null ? Number(payload.tentativasEnvio) : 0;
   return {
     id,
     nome,
@@ -264,24 +266,25 @@ function ensureHospedeDefaults(payload) {
     statusOperacional,
     origemCadastro,
     modoColetaFnrh,
-    ultimoEnvioCanal: payload && payload.ultimoEnvioCanal != null ? payload.ultimoEnvioCanal : null,
-    ultimoEnvioEm: payload && payload.ultimoEnvioEm != null ? payload.ultimoEnvioEm : null,
-    tentativasEnvio: payload && payload.tentativasEnvio != null ? Number(payload.tentativasEnvio) : 0,
+    ultimoEnvioCanal: payload.ultimoEnvioCanal != null ? payload.ultimoEnvioCanal : null,
+    ultimoEnvioEm: payload.ultimoEnvioEm != null ? payload.ultimoEnvioEm : null,
+    tentativasEnvio,
   };
 }
 
 function ensureReservaDefaults(payload) {
-  const id = payload && payload.id != null ? sanitizeString(String(payload.id)) : "";
-  const apartamento = sanitizeString(payload && (payload.apartamento ?? payload.room_number ?? payload.room)) || "";
-  const hospedePrincipal = sanitizeString(payload && payload.hospedePrincipal) || "";
-  const checkInPrevisto = sanitizeString(payload && (payload.checkInPrevisto ?? payload.check_in ?? payload.checkIn)) || "";
-  const checkOutPrevisto = sanitizeString(payload && (payload.checkOutPrevisto ?? payload.check_out ?? payload.checkOut)) || "";
-  const pagamento = payload && payload.pagamento === "pago" ? "pago" : "pendente";
-  const acessoLiberado = !!(payload && payload.acessoLiberado);
-  const entrouNoApto = !!(payload && payload.entrouNoApto);
-  const veiculoPlaca = sanitizeString(payload && payload.veiculoPlaca) || "";
-  const veiculoCor = sanitizeString(payload && payload.veiculoCor) || "";
-  const historicoOperacional = Array.isArray(payload && payload.historicoOperacional) ? payload.historicoOperacional : [];
+  if (!payload || typeof payload !== "object") payload = {};
+  const id = payload.id != null ? sanitizeString(String(payload.id)) : "";
+  const apartamento = sanitizeString(payload.apartamento ?? payload.room_number ?? payload.room ?? "") || "";
+  const hospedePrincipal = sanitizeString(payload.hospedePrincipal ?? payload.primary_guest ?? "") || "";
+  const checkInPrevisto = sanitizeString(payload.checkInPrevisto ?? payload.check_in ?? payload.checkIn ?? "") || "";
+  const checkOutPrevisto = sanitizeString(payload.checkOutPrevisto ?? payload.check_out ?? payload.checkOut ?? "") || "";
+  const pagamento = payload.pagamento === "pago" ? "pago" : "pendente";
+  const acessoLiberado = !!(payload.acessoLiberado ?? payload.access_granted);
+  const entrouNoApto = !!(payload.entrouNoApto ?? payload.checked_in);
+  const veiculoPlaca = sanitizeString(payload.veiculoPlaca ?? payload.vehicle_plate ?? "") || "";
+  const veiculoCor = sanitizeString(payload.veiculoCor ?? payload.vehicle_color ?? "") || "";
+  const historicoOperacional = Array.isArray(payload.historicoOperacional) ? payload.historicoOperacional : [];
   return {
     id,
     apartamento,
@@ -299,25 +302,50 @@ function ensureReservaDefaults(payload) {
 }
 
 function normalizarHospedeExterno(payload, reservaId, index) {
-  const base = ensureHospedeDefaults(payload);
+  const safePayload = payload != null && typeof payload === "object" ? payload : {};
+  const base = ensureHospedeDefaults(safePayload);
   if (!base.id) base.id = createHospedeId(reservaId, index);
   return base;
 }
 
+function toGuestArray(val, reservaId) {
+  if (Array.isArray(val)) return val;
+  if (val != null && typeof val === "object") return [val];
+  return [];
+}
+
 function normalizarReservaExterna(payload) {
+  if (!payload || typeof payload !== "object") {
+    if (typeof console !== "undefined" && console.warn) console.warn("[painel] normalizarReservaExterna: payload inválido, ignorado");
+    return null;
+  }
   const reserva = ensureReservaDefaults(payload);
-  const rawGuests = Array.isArray(payload && payload.hospedes) ? payload.hospedes : Array.isArray(payload && payload.guests) ? payload.guests : [];
-  reserva.hospedes = rawGuests.map((g, i) => normalizarHospedeExterno(g, reserva.id, i + 1));
+  const rawHospedes = payload.hospedes ?? payload.guests;
+  const rawGuests = toGuestArray(rawHospedes, reserva.id);
+  reserva.hospedes = rawGuests.map((g, i) => normalizarHospedeExterno(g, reserva.id || String(i), i + 1));
   if (!reserva.hospedePrincipal && reserva.hospedes.length > 0) {
     const principal = reserva.hospedes.find((h) => h.principal) || reserva.hospedes[0];
-    reserva.hospedePrincipal = principal.nome || "";
+    reserva.hospedePrincipal = (principal && principal.nome) ? principal.nome : "";
+  }
+  if (reserva.hospedes.length === 0 && typeof console !== "undefined" && console.warn) {
+    console.warn("[painel] Reserva sem hóspedes (id=" + (reserva.id || "?") + "), pode precisar adicionar no painel");
   }
   return reserva;
 }
 
 function normalizarListaReservasExternas(payloads) {
-  if (!Array.isArray(payloads)) return [];
-  return payloads.map((p) => normalizarReservaExterna(p));
+  if (payloads == null) return [];
+  if (!Array.isArray(payloads)) {
+    if (typeof payloads === "object" && payloads.reservas) return normalizarListaReservasExternas(payloads.reservas);
+    return [];
+  }
+  const list = payloads
+    .map((p) => normalizarReservaExterna(p))
+    .filter((r) => r != null);
+  if (list.length === 0 && payloads.length > 0 && typeof console !== "undefined" && console.warn) {
+    console.warn("[painel] Nenhuma reserva válida após normalização");
+  }
+  return list;
 }
 
 /* ---------- Serialização de saída (modelo interno → formato para backend) ---------- */
@@ -364,9 +392,9 @@ function serializarPainelOperacional(reservasList) {
 /* ---------- Provider de dados / origem do painel ---------- */
 const PAINEL_DATA_SOURCE_MOCK_LOCAL = "mock-local";
 const PAINEL_DATA_SOURCE_JSON_LOCAL = "json-local";
-/** Origem atual: "mock-local" (embutido) ou "json-local" (arquivo reservas-operacionais.json). */
+/** Origem atual: "mock-local" (embutido) ou "json-local" (arquivo data/checkin-operacional-reservas.json). */
 const PAINEL_DATA_SOURCE = PAINEL_DATA_SOURCE_MOCK_LOCAL;
-const PAINEL_JSON_LOCAL_URL = "./reservas-operacionais.json";
+const PAINEL_JSON_LOCAL_URL = "./data/checkin-operacional-reservas.json";
 
 function getMockReservasExternas() {
   return mockReservasExternasRaw;
@@ -395,7 +423,7 @@ function loadReservasOperacionaisFromProvider() {
 
 function getPainelDataSourceInfo() {
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_JSON_LOCAL) {
-    return { type: PAINEL_DATA_SOURCE_JSON_LOCAL, description: "JSON local (reservas-operacionais.json)" };
+    return { type: PAINEL_DATA_SOURCE_JSON_LOCAL, description: "JSON local (data/checkin-operacional-reservas.json)" };
   }
   return { type: PAINEL_DATA_SOURCE_MOCK_LOCAL, description: "Mock local normalizado" };
 }
