@@ -562,6 +562,26 @@ body {
   color: var(--muted);
 }
 
+.guest-detail-comunicacao {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.reservation-detail-comunicacao {
+  padding-top: 4px;
+}
+
+.reservation-detail-comunicacao .reservation-detail-section-title {
+  margin-bottom: 4px;
+}
+
+.reservation-detail-comunicacao-text {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .reservation-detail-proxima-acao {
   background: var(--neutral-bg);
   border-radius: 10px;

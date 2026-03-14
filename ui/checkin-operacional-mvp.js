@@ -609,6 +609,85 @@ function closeDetail() {
   if (detailBackdropElement) detailBackdropElement.classList.add("hidden");
 }
 
+const CANAL_ENVIO = {
+  EMAIL: "email",
+  WHATSAPP: "whatsapp",
+  AMBOS: "ambos",
+};
+
+function getCanalEnvioMock(hospede) {
+  if (!hasContatoSuficiente(hospede)) return null;
+  const e = (hospede.email || "").trim().length > 0;
+  const w = (hospede.whatsapp || "").trim().length > 0;
+  if (e && w) return CANAL_ENVIO.AMBOS;
+  if (w) return CANAL_ENVIO.WHATSAPP;
+  if (e) return CANAL_ENVIO.EMAIL;
+  return null;
+}
+
+function getCanalEnvioLabel(canal) {
+  if (!canal) return "Não enviado";
+  const labels = { [CANAL_ENVIO.EMAIL]: "E-mail", [CANAL_ENVIO.WHATSAPP]: "WhatsApp", [CANAL_ENVIO.AMBOS]: "Ambos" };
+  return labels[canal] || canal;
+}
+
+function formatEnvioTimestamp(date) {
+  if (!(date instanceof Date) || isNaN(date.getTime())) return null;
+  const d = date.getDate();
+  const m = date.getMonth() + 1;
+  const h = date.getHours();
+  const min = date.getMinutes();
+  return `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")} ${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
+function registrarEnvioHospede(hospede) {
+  if (!hasContatoSuficiente(hospede)) return;
+  const canal = getCanalEnvioMock(hospede);
+  if (!canal) return;
+  hospede.ultimoEnvioCanal = canal;
+  hospede.ultimoEnvioEm = formatEnvioTimestamp(new Date());
+  hospede.tentativasEnvio = (hospede.tentativasEnvio || 0) + 1;
+}
+
+function reenviarHospede(reservaId, guestIndex) {
+  const r = reservas.find((x) => x.id === reservaId);
+  if (!r || !r.hospedes || !r.hospedes[guestIndex]) return;
+  const h = r.hospedes[guestIndex];
+  if (h.statusOperacional !== GUEST_STATUS.ENVIADO || !hasContatoSuficiente(h)) return;
+  registrarEnvioHospede(h);
+  if (detailReservaId === reservaId) renderDetail(r);
+}
+
+function getResumoComunicacaoReserva(reserva) {
+  if (!Array.isArray(reserva.hospedes)) return { porWhatsapp: 0, porEmail: 0, porAmbos: 0, naoEnviado: 0 };
+  let porWhatsapp = 0;
+  let porEmail = 0;
+  let porAmbos = 0;
+  let naoEnviado = 0;
+  reserva.hospedes.forEach((h) => {
+    const canal = h.ultimoEnvioCanal || null;
+    if (!canal) {
+      naoEnviado++;
+      return;
+    }
+    if (canal === CANAL_ENVIO.AMBOS) porAmbos++;
+    else if (canal === CANAL_ENVIO.WHATSAPP) porWhatsapp++;
+    else if (canal === CANAL_ENVIO.EMAIL) porEmail++;
+    else naoEnviado++;
+  });
+  return { porWhatsapp, porEmail, porAmbos, naoEnviado };
+}
+
+function formatResumoComunicacao(reserva) {
+  const r = getResumoComunicacaoReserva(reserva);
+  const parts = [];
+  if (r.porWhatsapp > 0) parts.push(`${r.porWhatsapp} com envio por WhatsApp`);
+  if (r.porEmail > 0) parts.push(`${r.porEmail} com envio por e-mail`);
+  if (r.porAmbos > 0) parts.push(`${r.porAmbos} com envio por ambos`);
+  if (r.naoEnviado > 0) parts.push(`${r.naoEnviado} ainda não enviado`);
+  return parts.length ? parts.join("; ") : "Nenhum envio.";
+}
+
 function createNovoHospede() {
   return {
     nome: "",
@@ -618,6 +697,9 @@ function createNovoHospede() {
     statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO,
     origemCadastro: ORIGEM_CADASTRO.NOVO,
     modoColetaFnrh: MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO,
+    ultimoEnvioCanal: null,
+    ultimoEnvioEm: null,
+    tentativasEnvio: 0,
   };
 }
 
@@ -693,6 +775,15 @@ function renderDetail(reserva) {
       const removeBtn = `<button type="button" class="guest-link-btn guest-remove-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Remover</button>`;
       const compositionActions = `<div class="guest-detail-composition">${setPrincipalBtn}${setPrincipalBtn ? " " : ""}${removeBtn}</div>`;
 
+      const canalLabel = getCanalEnvioLabel(h.ultimoEnvioCanal || null);
+      const enviadoEm = h.ultimoEnvioEm || null;
+      const tentativas = h.tentativasEnvio != null ? h.tentativasEnvio : 0;
+      const comunicacaoHtml = `<p class="guest-detail-comunicacao">Último envio: ${escapeHtml(canalLabel)}${enviadoEm ? ` · Enviado em: ${escapeHtml(enviadoEm)}` : ""} · Tentativas: ${tentativas}</p>`;
+      const reenviarBtn =
+        h.statusOperacional === GUEST_STATUS.ENVIADO && hasContatoSuficiente(h)
+          ? `<button type="button" class="guest-link-btn guest-reenviar-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Reenviar</button>`
+          : "";
+
       return `
         <div class="guest-detail-card" data-guest-index="${index}">
           <div class="guest-detail-name-row">
@@ -705,6 +796,8 @@ function renderDetail(reserva) {
             <input type="text" class="guest-nome-input" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}" value="${escapeHtml((h.nome || "").trim())}" placeholder="Nome do hóspede" />
           </div>
           <p class="guest-detail-pendency">${escapeHtml(operationalMsg)}</p>
+          ${comunicacaoHtml}
+          ${reenviarBtn ? `<div class="guest-detail-composition">${reenviarBtn}</div>` : ""}
           ${vehicleHtml}
           <div class="guest-detail-contact-row">
             <label>E-mail</label>
@@ -761,6 +854,12 @@ function renderDetail(reserva) {
       <p class="reservation-detail-proxima-acao-label">${escapeHtml(proximaAcao)}</p>
     </div>`;
 
+  const resumoComunicacao = formatResumoComunicacao(reserva);
+  const comunicacaoReservaHtml = `<div class="reservation-detail-section reservation-detail-comunicacao">
+    <p class="reservation-detail-section-title">Comunicação da reserva</p>
+    <p class="reservation-detail-comunicacao-text">${escapeHtml(resumoComunicacao)}</p>
+  </div>`;
+
   detailBodyElement.innerHTML = `
     ${proximaAcaoHtml || ""}
     <div class="reservation-detail-section">
@@ -774,6 +873,7 @@ function renderDetail(reserva) {
       </div>
       ${guestsHtml}
     </div>
+    ${comunicacaoReservaHtml}
     <div class="reservation-detail-section">
       ${enviarSection}
     </div>
@@ -876,12 +976,21 @@ function bindDetailListeners(reserva) {
       r.hospedes.forEach((h) => {
         if (h.statusOperacional === GUEST_STATUS.PRONTO_PARA_ENVIO && hasContatoSuficiente(h)) {
           h.statusOperacional = GUEST_STATUS.ENVIADO;
+          registrarEnvioHospede(h);
         }
       });
       renderAll();
       if (detailReservaId === rid) renderDetail(r);
     });
   }
+
+  detailBodyElement.querySelectorAll(".guest-reenviar-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const rid = btn.dataset.reservaId;
+      const idx = parseInt(btn.dataset.guestIndex, 10);
+      reenviarHospede(rid, idx);
+    });
+  });
 }
 
 function showAccessState(title, message, actionLabel) {
