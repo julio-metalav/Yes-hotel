@@ -609,6 +609,58 @@ function closeDetail() {
   if (detailBackdropElement) detailBackdropElement.classList.add("hidden");
 }
 
+function createNovoHospede() {
+  return {
+    nome: "",
+    principal: false,
+    email: "",
+    whatsapp: "",
+    statusOperacional: GUEST_STATUS.NAO_IDENTIFICADO,
+    origemCadastro: ORIGEM_CADASTRO.NOVO,
+    modoColetaFnrh: MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO,
+  };
+}
+
+function adicionarHospede(reservaId) {
+  const r = reservas.find((x) => x.id === reservaId);
+  if (!r || !Array.isArray(r.hospedes)) return;
+  r.hospedes.push(createNovoHospede());
+  renderAll();
+  if (detailReservaId === reservaId) renderDetail(r);
+}
+
+function removerHospede(reservaId, guestIndex) {
+  const r = reservas.find((x) => x.id === reservaId);
+  if (!r || !Array.isArray(r.hospedes)) return;
+  const h = r.hospedes[guestIndex];
+  if (!h) return;
+  if (h.principal) {
+    alert("Defina outro hóspede como principal antes de remover este.");
+    return;
+  }
+  if (r.hospedes.length <= 1) {
+    alert("A reserva precisa ter pelo menos um hóspede.");
+    return;
+  }
+  r.hospedes.splice(guestIndex, 1);
+  renderAll();
+  if (detailReservaId === reservaId) renderDetail(r);
+}
+
+function definirPrincipal(reservaId, guestIndex) {
+  const r = reservas.find((x) => x.id === reservaId);
+  if (!r || !Array.isArray(r.hospedes)) return;
+  const h = r.hospedes[guestIndex];
+  if (!h) return;
+  r.hospedes.forEach((g) => {
+    g.principal = false;
+  });
+  h.principal = true;
+  r.hospedePrincipal = (h.nome || "").trim() || "Hóspede principal";
+  renderAll();
+  if (detailReservaId === reservaId) renderDetail(r);
+}
+
 function renderDetail(reserva) {
   if (!(detailBodyElement instanceof HTMLElement) || !reserva) return;
   const period = `${reserva.checkInPrevisto} a ${reserva.checkOutPrevisto}`;
@@ -635,6 +687,11 @@ function renderDetail(reserva) {
       const confirmarBtn = onlyConfirmarEnviado
         ? `<button type="button" class="secondary-button guest-confirmar-fnrh-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Marcar como confirmada</button>`
         : "";
+      const setPrincipalBtn = !h.principal
+        ? `<button type="button" class="guest-link-btn guest-set-principal-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Definir como principal</button>`
+        : "";
+      const removeBtn = `<button type="button" class="guest-link-btn guest-remove-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Remover</button>`;
+      const compositionActions = `<div class="guest-detail-composition">${setPrincipalBtn}${setPrincipalBtn ? " " : ""}${removeBtn}</div>`;
 
       return `
         <div class="guest-detail-card" data-guest-index="${index}">
@@ -657,6 +714,7 @@ function renderDetail(reserva) {
             <label>WhatsApp</label>
             <input type="text" class="guest-whatsapp-input" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}" value="${escapeHtml((h.whatsapp || "").trim())}" placeholder="11999990000" />
           </div>
+          ${compositionActions}
           ${confirmarBtn ? `<div class="guest-detail-actions">${confirmarBtn}</div>` : ""}
         </div>
       `;
@@ -710,7 +768,10 @@ function renderDetail(reserva) {
       <p style="margin:0;font-size:14px;color:var(--text)">${escapeHtml(period)}</p>
     </div>
     <div class="reservation-detail-section">
-      <p class="reservation-detail-section-title">Hóspedes</p>
+      <div class="reservation-detail-section-header-row">
+        <p class="reservation-detail-section-title">Hóspedes</p>
+        <button type="button" class="guest-link-btn detail-add-guest-btn" id="detail-add-guest-btn" data-reserva-id="${escapeHtml(reserva.id)}">Adicionar hóspede</button>
+      </div>
       ${guestsHtml}
     </div>
     <div class="reservation-detail-section">
@@ -781,6 +842,30 @@ function bindDetailListeners(reserva) {
       }
     });
   });
+
+  detailBodyElement.querySelectorAll(".guest-set-principal-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const rid = btn.dataset.reservaId;
+      const idx = parseInt(btn.dataset.guestIndex, 10);
+      definirPrincipal(rid, idx);
+    });
+  });
+
+  detailBodyElement.querySelectorAll(".guest-remove-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const rid = btn.dataset.reservaId;
+      const idx = parseInt(btn.dataset.guestIndex, 10);
+      removerHospede(rid, idx);
+    });
+  });
+
+  const addGuestBtn = detailBodyElement.querySelector("#detail-add-guest-btn");
+  if (addGuestBtn) {
+    addGuestBtn.addEventListener("click", () => {
+      const rid = addGuestBtn.dataset.reservaId;
+      adicionarHospede(rid);
+    });
+  }
 
   const enviarBtn = detailBodyElement.querySelector("#detail-enviar-links-btn");
   if (enviarBtn) {
