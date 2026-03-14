@@ -142,10 +142,18 @@ body {
 }
 
 .summary-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
   gap: 10px;
   margin-bottom: 16px;
+}
+
+.summary-cards-funnel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  flex: 1 1 auto;
 }
 
 .summary-card {
@@ -154,6 +162,28 @@ body {
   border-radius: 12px;
   padding: 12px;
   text-align: center;
+}
+
+.summary-card-funnel {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  min-width: 120px;
+}
+
+.summary-card-funnel:hover {
+  border-color: var(--primary);
+  background: var(--neutral-bg);
+}
+
+.summary-card-funnel.summary-card-is-active {
+  border-color: var(--primary);
+  background: var(--info-bg);
+  box-shadow: 0 0 0 2px var(--info-text);
+}
+
+.summary-card-aux {
+  flex: 0 0 auto;
 }
 
 .summary-card-value {

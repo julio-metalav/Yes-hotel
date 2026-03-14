@@ -57,6 +57,11 @@ const FILTER_ENTROU = "entrou";
 const FILTER_PRIORIDADE_ALTA = "prioridade_alta";
 const FILTER_PRIORIDADE_MEDIA = "prioridade_media";
 const FILTER_PRIORIDADE_BAIXA = "prioridade_baixa";
+const FILTER_ETAPA_DADOS_PENDENTES = "etapa_dados_pendentes";
+const FILTER_ETAPA_FNRH_EM_ANDAMENTO = "etapa_fnrh_em_andamento";
+const FILTER_ETAPA_PRONTA_LIBERAR = "etapa_pronta_liberar";
+const FILTER_ETAPA_ACESSO_LIBERADO = "etapa_acesso_liberado";
+const FILTER_ETAPA_CHECKIN_CONCLUIDO = "etapa_checkin_concluido";
 
 const PRIORIDADE_ALTA = "alta";
 const PRIORIDADE_MEDIA = "media";
@@ -394,6 +399,63 @@ function isCheckinConcluido(reserva) {
   return reserva.acessoLiberado === true && reserva.entrouNoApto === true;
 }
 
+const ETAPA_FUNIL = {
+  CHECKIN_CONCLUIDO: "checkin_concluido",
+  ACESSO_LIBERADO: "acesso_liberado",
+  PRONTA_LIBERAR: "pronta_liberar",
+  DADOS_PENDENTES: "dados_pendentes",
+  FNRH_EM_ANDAMENTO: "fnrh_em_andamento",
+};
+
+function isDadosPendentes(reserva) {
+  if (!Array.isArray(reserva.hospedes)) return false;
+  if (getNaoIdentificados(reserva).length > 0) return true;
+  if (getFaltamContato(reserva).length > 0) return true;
+  const hasExistenteIncompletoPendente = reserva.hospedes.some(
+    (h) =>
+      h.origemCadastro === ORIGEM_CADASTRO.EXISTENTE_INCOMPLETO &&
+      h.statusOperacional !== GUEST_STATUS.CONFIRMADO &&
+      h.statusOperacional !== GUEST_STATUS.ENVIADO,
+  );
+  if (hasExistenteIncompletoPendente) return true;
+  const hasAgenciaSemDadosPendente = reserva.hospedes.some(
+    (h) =>
+      h.origemCadastro === ORIGEM_CADASTRO.AGENCIA_SEM_DADOS &&
+      (!hasIdentificacaoMinima(h) || !hasContatoSuficiente(h)),
+  );
+  return !!hasAgenciaSemDadosPendente;
+}
+
+function getEtapaFunilReserva(reserva) {
+  if (isCheckinConcluido(reserva)) return ETAPA_FUNIL.CHECKIN_CONCLUIDO;
+  if (reserva.acessoLiberado === true && reserva.entrouNoApto !== true) return ETAPA_FUNIL.ACESSO_LIBERADO;
+  if (isProntaParaLiberarAcesso(reserva)) return ETAPA_FUNIL.PRONTA_LIBERAR;
+  if (isDadosPendentes(reserva)) return ETAPA_FUNIL.DADOS_PENDENTES;
+  return ETAPA_FUNIL.FNRH_EM_ANDAMENTO;
+}
+
+function getResumoFunil(reservas) {
+  const hoje = todayStr();
+  const resumo = {
+    dadosPendentes: 0,
+    fnrhEmAndamento: 0,
+    prontaLiberar: 0,
+    acessoLiberado: 0,
+    checkinConcluido: 0,
+    chegadasHoje: 0,
+  };
+  reservas.forEach((r) => {
+    const etapa = getEtapaFunilReserva(r);
+    if (etapa === ETAPA_FUNIL.DADOS_PENDENTES) resumo.dadosPendentes += 1;
+    else if (etapa === ETAPA_FUNIL.FNRH_EM_ANDAMENTO) resumo.fnrhEmAndamento += 1;
+    else if (etapa === ETAPA_FUNIL.PRONTA_LIBERAR) resumo.prontaLiberar += 1;
+    else if (etapa === ETAPA_FUNIL.ACESSO_LIBERADO) resumo.acessoLiberado += 1;
+    else if (etapa === ETAPA_FUNIL.CHECKIN_CONCLUIDO) resumo.checkinConcluido += 1;
+    if (r.checkInPrevisto === hoje) resumo.chegadasHoje += 1;
+  });
+  return resumo;
+}
+
 function getBloqueiosReserva(reserva) {
   const bloqueios = [];
   if (!isPagamentoOk(reserva)) bloqueios.push("Pagamento pendente");
@@ -509,31 +571,59 @@ function filtrarReservas(lista, filtroAtivo) {
   if (filtroAtivo === FILTER_PRIORIDADE_ALTA) return lista.filter((r) => getPrioridadeReserva(r) === PRIORIDADE_ALTA);
   if (filtroAtivo === FILTER_PRIORIDADE_MEDIA) return lista.filter((r) => getPrioridadeReserva(r) === PRIORIDADE_MEDIA);
   if (filtroAtivo === FILTER_PRIORIDADE_BAIXA) return lista.filter((r) => getPrioridadeReserva(r) === PRIORIDADE_BAIXA);
+  if (filtroAtivo === FILTER_ETAPA_DADOS_PENDENTES) return lista.filter((r) => getEtapaFunilReserva(r) === ETAPA_FUNIL.DADOS_PENDENTES);
+  if (filtroAtivo === FILTER_ETAPA_FNRH_EM_ANDAMENTO) return lista.filter((r) => getEtapaFunilReserva(r) === ETAPA_FUNIL.FNRH_EM_ANDAMENTO);
+  if (filtroAtivo === FILTER_ETAPA_PRONTA_LIBERAR) return lista.filter((r) => getEtapaFunilReserva(r) === ETAPA_FUNIL.PRONTA_LIBERAR);
+  if (filtroAtivo === FILTER_ETAPA_ACESSO_LIBERADO) return lista.filter((r) => getEtapaFunilReserva(r) === ETAPA_FUNIL.ACESSO_LIBERADO);
+  if (filtroAtivo === FILTER_ETAPA_CHECKIN_CONCLUIDO) return lista.filter((r) => getEtapaFunilReserva(r) === ETAPA_FUNIL.CHECKIN_CONCLUIDO);
   return lista;
 }
 
 function calcularResumo(lista) {
-  const hoje = todayStr();
-  return {
-    chegadasHoje: lista.filter((r) => r.checkInPrevisto === hoje).length,
-    pendentesPagamento: lista.filter((r) => r.pagamento === "pendente").length,
-    pendentesFnrh: lista.filter((r) => getFnrhPreenchidas(r) < getHospedesTotal(r)).length,
-    acessosLiberados: lista.filter((r) => r.acessoLiberado === true).length,
-    aindaNaoEntraram: lista.filter((r) => r.acessoLiberado === true && r.entrouNoApto === false).length,
-    jaEntraram: lista.filter((r) => r.entrouNoApto === true).length,
-  };
+  return getResumoFunil(lista);
 }
+
+const MAPA_FILTRO_ETAPA = {
+  [ETAPA_FUNIL.DADOS_PENDENTES]: FILTER_ETAPA_DADOS_PENDENTES,
+  [ETAPA_FUNIL.FNRH_EM_ANDAMENTO]: FILTER_ETAPA_FNRH_EM_ANDAMENTO,
+  [ETAPA_FUNIL.PRONTA_LIBERAR]: FILTER_ETAPA_PRONTA_LIBERAR,
+  [ETAPA_FUNIL.ACESSO_LIBERADO]: FILTER_ETAPA_ACESSO_LIBERADO,
+  [ETAPA_FUNIL.CHECKIN_CONCLUIDO]: FILTER_ETAPA_CHECKIN_CONCLUIDO,
+};
 
 function renderSummary(summary) {
   if (!(summaryCardsElement instanceof HTMLElement)) return;
-  summaryCardsElement.innerHTML = `
-    <div class="summary-card is-neutral"><span class="summary-card-value">${summary.chegadasHoje}</span><span class="summary-card-label">Chegadas hoje</span></div>
-    <div class="summary-card is-danger"><span class="summary-card-value">${summary.pendentesPagamento}</span><span class="summary-card-label">Pend. pagamento</span></div>
-    <div class="summary-card is-warn"><span class="summary-card-value">${summary.pendentesFnrh}</span><span class="summary-card-label">Pend. FNRH</span></div>
-    <div class="summary-card is-info"><span class="summary-card-value">${summary.acessosLiberados}</span><span class="summary-card-label">Acessos liberados</span></div>
-    <div class="summary-card is-info"><span class="summary-card-value">${summary.aindaNaoEntraram}</span><span class="summary-card-label">Ainda nao entraram</span></div>
-    <div class="summary-card is-ok"><span class="summary-card-value">${summary.jaEntraram}</span><span class="summary-card-label">Ja entraram</span></div>
-  `;
+  const cards = [
+    { key: ETAPA_FUNIL.DADOS_PENDENTES, label: "Dados pendentes", value: summary.dadosPendentes, css: "is-danger" },
+    { key: ETAPA_FUNIL.FNRH_EM_ANDAMENTO, label: "FNRH em andamento", value: summary.fnrhEmAndamento, css: "is-warn" },
+    { key: ETAPA_FUNIL.PRONTA_LIBERAR, label: "Prontas para liberar acesso", value: summary.prontaLiberar, css: "is-info" },
+    { key: ETAPA_FUNIL.ACESSO_LIBERADO, label: "Acesso liberado", value: summary.acessoLiberado, css: "is-info" },
+    { key: ETAPA_FUNIL.CHECKIN_CONCLUIDO, label: "Check-in concluído", value: summary.checkinConcluido, css: "is-ok" },
+  ];
+  const funnelHtml = cards
+    .map(
+      (c) => {
+        const filtro = MAPA_FILTRO_ETAPA[c.key];
+        const active = filtroAtivo === filtro ? " summary-card-is-active" : "";
+        return `<button type="button" class="summary-card summary-card-funnel ${c.css}${active}" data-etapa="${c.key}" aria-label="Filtrar: ${escapeHtml(c.label)}">
+          <span class="summary-card-value">${c.value}</span>
+          <span class="summary-card-label">${escapeHtml(c.label)}</span>
+        </button>`;
+      },
+    )
+    .join("");
+  const chegadasHtml = `<div class="summary-card is-neutral summary-card-aux" title="Chegadas previstas hoje"><span class="summary-card-value">${summary.chegadasHoje}</span><span class="summary-card-label">Chegadas hoje</span></div>`;
+  summaryCardsElement.innerHTML = `<div class="summary-cards-funnel">${funnelHtml}</div>${chegadasHtml}`;
+
+  summaryCardsElement.querySelectorAll(".summary-card-funnel").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const etapa = btn.dataset.etapa;
+      const filtro = MAPA_FILTRO_ETAPA[etapa];
+      filtroAtivo = filtroAtivo === filtro ? FILTER_ALL : filtro;
+      renderFilters();
+      renderAll();
+    });
+  });
 }
 
 let filtroAtivo = FILTER_ALL;
