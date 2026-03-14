@@ -361,8 +361,26 @@ function serializarPainelOperacional(reservasList) {
   return reservasList.map(serializarReservaOperacional);
 }
 
-/* ---------- Estado base (mock passa pela normalização; futuramente API) ---------- */
-const mockReservasExternas = [
+/* ---------- Provider de dados / origem do painel ---------- */
+function getMockReservasExternas() {
+  return mockReservasExternasRaw;
+}
+
+function loadReservasOperacionais() {
+  const payloads = getMockReservasExternas();
+  return normalizarListaReservasExternas(payloads);
+}
+
+function getPainelDataSourceInfo() {
+  return { type: "mock-local", description: "Mock local normalizado" };
+}
+
+function exportReservasOperacionais(reservasList) {
+  return serializarPainelOperacional(reservasList || reservas);
+}
+
+/** Fonte externa simulada (mock). Trocar por API/adaptador no futuro. */
+const mockReservasExternasRaw = [
   {
     id: "1",
     apartamento: "12",
@@ -449,7 +467,8 @@ const mockReservasExternas = [
   },
 ];
 
-let reservas = normalizarListaReservasExternas(mockReservasExternas);
+/* ---------- Estado base (preenchido pelo provider) ---------- */
+let reservas = loadReservasOperacionais();
 
 /* ---------- Selectors / estado derivado ---------- */
 function getReservaById(id) {
