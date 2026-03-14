@@ -582,6 +582,37 @@ body {
   color: var(--muted);
 }
 
+.reservation-detail-status-reserva {
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.reservation-detail-status-reserva .reservation-detail-section-title {
+  margin-bottom: 4px;
+}
+
+.reservation-detail-status-reserva-text {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.reservation-detail-status-is-blocked {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+.reservation-detail-status-is-neutral {
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+
+.reservation-detail-status-is-ok {
+  background: var(--ok-bg);
+  color: var(--ok-text);
+}
+
 .reservation-detail-proxima-acao {
   background: var(--neutral-bg);
   border-radius: 10px;

@@ -309,6 +309,40 @@ function getNaoIdentificados(reserva) {
   return reserva.hospedes.filter((h) => !hasIdentificacaoMinima(h));
 }
 
+function isPagamentoOk(reserva) {
+  return reserva.pagamento === "pago";
+}
+
+function isFnrhCompleta(reserva) {
+  const total = getHospedesTotal(reserva);
+  if (total === 0) return false;
+  return getFnrhConfirmadas(reserva) === total;
+}
+
+function isProntaParaLiberarAcesso(reserva) {
+  return isPagamentoOk(reserva) && isFnrhCompleta(reserva) && !reserva.acessoLiberado;
+}
+
+function isCheckinConcluido(reserva) {
+  return reserva.acessoLiberado === true && reserva.entrouNoApto === true;
+}
+
+function getBloqueiosReserva(reserva) {
+  const bloqueios = [];
+  if (!isPagamentoOk(reserva)) bloqueios.push("Pagamento pendente");
+  if (!isFnrhCompleta(reserva)) bloqueios.push("FNRH pendente");
+  return bloqueios;
+}
+
+function getStatusOperacionalReservaTexto(reserva) {
+  const bloqueios = getBloqueiosReserva(reserva);
+  if (bloqueios.length > 0) return "Bloqueios: " + bloqueios.join("; ");
+  if (isProntaParaLiberarAcesso(reserva)) return "Pronta para liberar acesso";
+  if (reserva.acessoLiberado && !reserva.entrouNoApto) return "Acesso liberado, aguardando entrada";
+  if (isCheckinConcluido(reserva)) return "Check-in concluído";
+  return "—";
+}
+
 function getProximaAcaoReserva(reserva) {
   if (!Array.isArray(reserva.hospedes)) return "";
   const hospedes = reserva.hospedes;
@@ -337,7 +371,10 @@ function getProximaAcaoReserva(reserva) {
     return "Enviar confirmações e FNRHs";
   }
   if (enviados > 0) return "Aguardar confirmação das FNRHs";
-  if (confirmados === total) return "Reserva pronta para liberar acesso";
+  if (!isPagamentoOk(reserva)) return "Regularizar pagamento";
+  if (isProntaParaLiberarAcesso(reserva)) return "Liberar acesso";
+  if (reserva.acessoLiberado && !reserva.entrouNoApto) return "Aguardar entrada no apartamento";
+  if (isCheckinConcluido(reserva)) return "Check-in concluído";
   return "";
 }
 
@@ -847,6 +884,14 @@ function renderDetail(reserva) {
     enviarSection = `<div class="detail-enviar-links-alert is-ok">Link(s) enviado(s) para ${enviadosCount} hóspede(s). Aguardando confirmação.</div>`;
   }
 
+  const statusOperacionalTexto = getStatusOperacionalReservaTexto(reserva);
+  const bloqueios = getBloqueiosReserva(reserva);
+  const statusReservaClass = bloqueios.length > 0 ? "is-blocked" : isCheckinConcluido(reserva) ? "is-ok" : "is-neutral";
+  const statusReservaHtml = `<div class="reservation-detail-section reservation-detail-status-reserva reservation-detail-status-${statusReservaClass}">
+    <p class="reservation-detail-section-title">Status da reserva</p>
+    <p class="reservation-detail-status-reserva-text">${escapeHtml(statusOperacionalTexto)}</p>
+  </div>`;
+
   const proximaAcaoHtml =
     proximaAcao &&
     `<div class="reservation-detail-section reservation-detail-proxima-acao">
@@ -861,6 +906,7 @@ function renderDetail(reserva) {
   </div>`;
 
   detailBodyElement.innerHTML = `
+    ${statusReservaHtml}
     ${proximaAcaoHtml || ""}
     <div class="reservation-detail-section">
       <p class="reservation-detail-section-title">Período</p>
