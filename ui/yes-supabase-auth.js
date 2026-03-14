@@ -103,12 +103,6 @@
       return config.anonKey;
     }
 
-    const cachedAccessToken = getCachedAccessToken();
-
-    if (cachedAccessToken) {
-      return cachedAccessToken;
-    }
-
     const session = await enforceAppSessionWindow();
 
     if (!session?.access_token) {
@@ -189,6 +183,7 @@
 
     if (!session) {
       clearAppSessionStart();
+      setCachedAccessToken(null);
       return null;
     }
 
@@ -199,6 +194,7 @@
     if (!sessionStartedAt || Date.now() - sessionStartedAt > APP_SESSION_DURATION_MS) {
       await client.auth.signOut();
       clearAppSessionStart();
+      setCachedAccessToken(null);
       return null;
     }
 
