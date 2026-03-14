@@ -220,7 +220,17 @@
   }
 
   async function hasUsers() {
-    const data = await invokeAdminAction("bootstrap_status", {}, { requireUserSession: false });
+    const response = await fetch("/api/bootstrap-status", {
+      method: "GET",
+    });
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      throw new Error(
+        data?.error || "Falha ao consultar bootstrap publico de usuarios.",
+      );
+    }
+
     return Boolean(data?.hasUsers);
   }
 

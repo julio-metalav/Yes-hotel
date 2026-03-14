@@ -186,6 +186,14 @@ async function renderPageState() {
     return;
   }
 
+  const hasUsers = await auth.hasUsers();
+
+  if (!hasUsers) {
+    showOnlyPanel(bootstrapPanelElement);
+    hideNotice();
+    return;
+  }
+
   showOnlyPanel(loginPanelElement);
   hideNotice();
 }
