@@ -3,15 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Yes Hotel - Recepcao MVP</title>
-    <link rel="stylesheet" href="./recepcao-mvp.css" />
+    <title>Yes Hotel - Painel de Check-in Operacional</title>
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css" />
   </head>
   <body>
     <main class="app-shell">
       <header class="page-header">
         <p class="eyebrow">Yes Hotel</p>
-        <h1>Recepcao</h1>
-        <p class="page-description">Area operacional provisoria da recepcao.</p>
+        <h1>Painel de Check-in Operacional</h1>
+        <p class="page-description">
+          Acompanhamento por reserva: pagamento, FNRH, acesso e entrada no apartamento.
+        </p>
       </header>
 
       <section class="access-state hidden" id="access-state"></section>
@@ -20,24 +22,22 @@
         <div class="session-bar">
           <div id="session-user"></div>
           <div class="session-actions">
+            <a class="secondary-link" href="./recepcao-mvp.html">Voltar para recepcao</a>
             <button class="secondary-button" id="logout-button" type="button">Sair</button>
           </div>
         </div>
 
-        <section class="panel-body panel-home">
-          <h2>Home operacional</h2>
-          <p class="helper-text">Escolha a tela que deseja acessar.</p>
-          <div class="home-actions">
-            <a class="primary-link" href="./checkin-operacional-mvp.html">Ir para Painel de Check-in Operacional</a>
-            <a class="secondary-link" href="./cafe-da-manha-mvp.html">Ir para cafe da manha</a>
-          </div>
-        </section>
+        <div class="summary-cards" id="summary-cards"></div>
+
+        <div class="filter-bar" id="filter-bar"></div>
+
+        <section class="lista-operacional" id="lista-operacional" aria-live="polite"></section>
       </section>
     </main>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
-    <script defer src="./recepcao-mvp.js"></script>
+    <script defer src="./checkin-operacional-mvp.js?v=1"></script>
   </body>
 </html>

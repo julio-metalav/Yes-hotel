@@ -111,6 +111,19 @@ body {
   font-size: 20px;
 }
 
+.panel-home .helper-text {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.home-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 360px;
+}
+
 .panel-body p,
 .access-state p {
   margin: 0;
