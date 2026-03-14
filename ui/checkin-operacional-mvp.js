@@ -477,9 +477,243 @@ function loadReservasFromHitsAdapter() {
 const PAINEL_DATA_SOURCE_MOCK_LOCAL = "mock-local";
 const PAINEL_DATA_SOURCE_JSON_LOCAL = "json-local";
 const PAINEL_DATA_SOURCE_HITS_ADAPTER = "hits-adapter";
-/** Origem atual: "mock-local" | "json-local" | "hits-adapter" (hits-adapter sem credenciais usa fallback). */
-const PAINEL_DATA_SOURCE = PAINEL_DATA_SOURCE_MOCK_LOCAL;
+const PAINEL_DATA_SOURCE_BACKEND = "backend";
+/** Origem atual: "backend" (Supabase) | "mock-local" | "json-local" | "hits-adapter". */
+const PAINEL_DATA_SOURCE = PAINEL_DATA_SOURCE_BACKEND;
 const PAINEL_JSON_LOCAL_URL = "./data/checkin-operacional-reservas.json";
+
+/* ---------- Backend Supabase (Bloco 02/04) ---------- */
+function getSupabase() {
+  return (typeof auth !== "undefined" && auth && auth.getSupabaseClient) ? auth.getSupabaseClient() : null;
+}
+
+function formatDateForDb(dateStr) {
+  if (!dateStr) return null;
+  const s = String(dateStr).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  return s || null;
+}
+
+function mapDbEventoToHistorico(row) {
+  if (!row) return null;
+  const d = row.criado_em ? new Date(row.criado_em) : null;
+  return {
+    tipo: row.tipo || "",
+    titulo: row.titulo || "",
+    detalhe: row.detalhe || null,
+    em: d && !isNaN(d.getTime()) ? formatHistoricoTimestamp(d) : "",
+  };
+}
+
+function mapDbHospedeToInternal(row) {
+  if (!row) return null;
+  return {
+    id: row.id || "",
+    nome: (row.nome || "").trim(),
+    principal: !!row.principal,
+    email: (row.email || "").trim(),
+    whatsapp: (row.whatsapp || "").trim(),
+    statusOperacional: row.status_operacional || GUEST_STATUS.NAO_IDENTIFICADO,
+    origemCadastro: row.origem_cadastro || ORIGEM_CADASTRO.NOVO,
+    modoColetaFnrh: row.modo_coleta_fnrh || MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO,
+    ultimoEnvioCanal: row.ultimo_envio_canal || null,
+    ultimoEnvioEm: row.ultimo_envio_em || null,
+    tentativasEnvio: row.tentativas_envio != null ? Number(row.tentativas_envio) : 0,
+  };
+}
+
+function mapDbReservaToInternal(r, hospedesRows, eventosRows) {
+  const checkIn = r.check_in_previsto;
+  const checkOut = r.check_out_previsto;
+  const hospedes = (hospedesRows || []).map(mapDbHospedeToInternal).filter(Boolean);
+  const historico = (eventosRows || []).map(mapDbEventoToHistorico).filter(Boolean);
+  return {
+    id: r.id,
+    apartamento: (r.apartamento || "").trim(),
+    hospedePrincipal: (r.hospede_principal || "").trim(),
+    checkInPrevisto: checkIn ? (typeof checkIn === "string" ? checkIn.slice(0, 10) : checkIn) : "",
+    checkOutPrevisto: checkOut ? (typeof checkOut === "string" ? checkOut.slice(0, 10) : checkOut) : "",
+    pagamento: r.pagamento_status === "pago" ? "pago" : "pendente",
+    acessoLiberado: !!r.acesso_liberado,
+    entrouNoApto: !!r.entrou_no_apto,
+    veiculoPlaca: (r.veiculo_placa || "").trim(),
+    veiculoCor: (r.veiculo_cor || "").trim(),
+    hospedes,
+    historicoOperacional: historico,
+  };
+}
+
+async function loadReservasFromBackend() {
+  const supabase = getSupabase();
+  if (!supabase) return [];
+  const { data: reservasRows, error: errReservas } = await supabase
+    .from("operacional_reservas")
+    .select("*")
+    .order("created_at", { ascending: true });
+  if (errReservas || !Array.isArray(reservasRows)) return [];
+  const out = [];
+  for (const r of reservasRows) {
+    const { data: hospedesRows } = await supabase
+      .from("operacional_hospedes")
+      .select("*")
+      .eq("reserva_id", r.id)
+      .order("created_at", { ascending: true });
+    const { data: eventosRows } = await supabase
+      .from("operacional_reserva_eventos")
+      .select("*")
+      .eq("reserva_id", r.id)
+      .order("criado_em", { ascending: false });
+    out.push(mapDbReservaToInternal(r, hospedesRows || [], eventosRows || []));
+  }
+  return out;
+}
+
+function internalHospedeToDbPayload(h) {
+  return {
+    nome: (h.nome || "").trim(),
+    principal: !!h.principal,
+    email: (h.email || "").trim(),
+    whatsapp: (h.whatsapp || "").trim(),
+    status_operacional: h.statusOperacional || "nao_identificado",
+    origem_cadastro: h.origemCadastro || "novo",
+    modo_coleta_fnrh: h.modoColetaFnrh || "preenchimento_completo",
+    ultimo_envio_canal: h.ultimoEnvioCanal || null,
+    ultimo_envio_em: h.ultimoEnvioEm || null,
+    tentativas_envio: h.tentativasEnvio != null ? Number(h.tentativasEnvio) : 0,
+  };
+}
+
+async function backendUpdateHospedeCampo(reservaId, guestIndex, campo, valor) {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const reserva = getReservaById(reservaId);
+  const hospede = getHospede(reserva, guestIndex);
+  if (!hospede || !hospede.id) return false;
+  const keyMap = { nome: "nome", email: "email", whatsapp: "whatsapp", principal: "principal", statusOperacional: "status_operacional", origemCadastro: "origem_cadastro", modoColetaFnrh: "modo_coleta_fnrh" };
+  const col = keyMap[campo] || campo;
+  const payload = col === "principal" ? { principal: !!valor } : col === "status_operacional" ? { status_operacional: valor } : col === "origem_cadastro" ? { origem_cadastro: valor } : col === "modo_coleta_fnrh" ? { modo_coleta_fnrh: valor } : { [col]: valor };
+  const { error } = await supabase.from("operacional_hospedes").update(payload).eq("id", hospede.id);
+  return !error;
+}
+
+async function backendAddHospede(reservaId) {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const reserva = getReservaById(reservaId);
+  const count = getHospedesTotal(reserva);
+  const { data: inserted, error } = await supabase
+    .from("operacional_hospedes")
+    .insert({ reserva_id: reservaId, nome: "Novo hóspede", principal: false, status_operacional: GUEST_STATUS.NAO_IDENTIFICADO, origem_cadastro: ORIGEM_CADASTRO.NOVO, modo_coleta_fnrh: MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO, tentativas_envio: 0 })
+    .select("id")
+    .single();
+  if (error || !inserted) return false;
+  await supabase.from("operacional_reserva_eventos").insert({ reserva_id: reservaId, tipo: "hospede_adicionado", titulo: "Hóspede adicionado", detalhe: "Novo hóspede incluído manualmente." });
+  return true;
+}
+
+async function backendRemoveHospede(reservaId, guestIndex) {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const reserva = getReservaById(reservaId);
+  const hospede = getHospede(reserva, guestIndex);
+  if (!hospede || !hospede.id) return false;
+  const { error } = await supabase.from("operacional_hospedes").delete().eq("id", hospede.id);
+  if (error) return false;
+  await supabase.from("operacional_reserva_eventos").insert({ reserva_id: reservaId, tipo: "hospede_removido", titulo: "Hóspede removido", detalhe: hospede.nome || "Hóspede" });
+  return true;
+}
+
+async function backendSetPrincipal(reservaId, guestIndex) {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const reserva = getReservaById(reservaId);
+  const hospede = getHospede(reserva, guestIndex);
+  if (!hospede || !hospede.id) return false;
+  await supabase.from("operacional_hospedes").update({ principal: false }).eq("reserva_id", reservaId);
+  const { error } = await supabase.from("operacional_hospedes").update({ principal: true }).eq("id", hospede.id);
+  if (!error) {
+    const principalNome = (hospede.nome || "").trim() || "Hóspede";
+    await supabase.from("operacional_reservas").update({ hospede_principal: principalNome }).eq("id", reservaId);
+    await supabase.from("operacional_reserva_eventos").insert({ reserva_id: reservaId, tipo: "principal_alterado", titulo: "Principal alterado", detalhe: principalNome });
+  }
+  return !error;
+}
+
+async function backendAddEvento(reservaId, tipo, titulo, detalhe) {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const { error } = await supabase.from("operacional_reserva_eventos").insert({ reserva_id: reservaId, tipo: tipo || "evento", titulo: titulo || "", detalhe: detalhe || null });
+  return !error;
+}
+
+async function backendSetPagamentoOk(reservaId) {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const { error } = await supabase.from("operacional_reservas").update({ pagamento_status: "pago" }).eq("id", reservaId);
+  if (error) return false;
+  await backendAddEvento(reservaId, "pagamento", "Pagamento aprovado", "Simulação de pagamento aprovado.");
+  return true;
+}
+
+async function backendConfirmarFnrh(reservaId, guestIndex) {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const reserva = getReservaById(reservaId);
+  const h = guestIndex != null ? getHospede(reserva, guestIndex) : reserva.hospedes.find((x) => x.statusOperacional !== GUEST_STATUS.CONFIRMADO);
+  if (!h || !h.id) return false;
+  const { error } = await supabase.from("operacional_hospedes").update({ status_operacional: GUEST_STATUS.CONFIRMADO }).eq("id", h.id);
+  if (error) return false;
+  await backendAddEvento(reservaId, "fnrh_confirmada", "FNRH confirmada", (h.nome || "Hóspede") + " confirmou FNRH.");
+  return true;
+}
+
+async function backendEnviarLinks(reservaId) {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const r = getReservaById(reservaId);
+  if (r && Array.isArray(r.hospedes)) {
+    const now = new Date().toISOString();
+    for (const h of r.hospedes) {
+      if (h.statusOperacional === GUEST_STATUS.PRONTO_PARA_ENVIO && hasContatoSuficiente(h)) {
+        await supabase
+          .from("operacional_hospedes")
+          .update({ status_operacional: GUEST_STATUS.ENVIADO, ultimo_envio_canal: "mock", ultimo_envio_em: now, tentativas_envio: (h.tentativasEnvio || 0) + 1 })
+          .eq("id", h.id);
+      }
+    }
+  }
+  await backendAddEvento(reservaId, "envio_link", "Envio/reenvio de link", "Envio simulado (canal mock). Persistido para histórico.");
+  return true;
+}
+
+async function backendLiberarAcesso(reservaId) {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const { error } = await supabase.from("operacional_reservas").update({ acesso_liberado: true }).eq("id", reservaId);
+  if (error) return false;
+  await backendAddEvento(reservaId, "acesso_liberado", "Acesso liberado", "Acesso ao apartamento liberado.");
+  return true;
+}
+
+async function backendMarcarEntrada(reservaId) {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const { error } = await supabase.from("operacional_reservas").update({ entrou_no_apto: true }).eq("id", reservaId);
+  if (error) return false;
+  await backendAddEvento(reservaId, "entrada_apto", "Entrada no apartamento", "Hóspede marcado como entrado no apartamento.");
+  return true;
+}
+
+async function backendUpdateHospedeFull(reservaId, guestIndex, hospedePayload) {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const reserva = getReservaById(reservaId);
+  const hospede = getHospede(reserva, guestIndex);
+  if (!hospede || !hospede.id) return false;
+  const payload = internalHospedeToDbPayload(hospedePayload);
+  const { error } = await supabase.from("operacional_hospedes").update(payload).eq("id", hospede.id);
+  return !error;
+}
 
 function getMockReservasExternas() {
   return mockReservasExternasRaw;
@@ -491,6 +725,9 @@ function loadReservasOperacionais() {
 }
 
 function loadReservasOperacionaisFromProvider() {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    return loadReservasFromBackend();
+  }
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_HITS_ADAPTER) {
     return loadReservasFromHitsAdapter();
   }
@@ -510,6 +747,9 @@ function loadReservasOperacionaisFromProvider() {
 }
 
 function getPainelDataSourceInfo() {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    return { type: PAINEL_DATA_SOURCE_BACKEND, description: "Backend Yes (Supabase)", available: !!getSupabase() };
+  }
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_HITS_ADAPTER) {
     const info = getHitsAdapterInfo();
     return {
@@ -1010,7 +1250,7 @@ function renderFilters() {
    reenviarLinkFnrh=reenviarHospede, liberarAcessoReserva=acaoLiberarAcesso, marcarEntradaReserva=acaoConfirmarCheckin,
    adicionarHospedeReserva=adicionarHospede, removerHospedeReserva=removerHospede,
    definirHospedePrincipalReserva=definirPrincipal, atualizarHospedeCampo=atualizarHospedeCampo. */
-function atualizarHospedeCampo(reservaId, guestIndex, campo, valor) {
+async function atualizarHospedeCampo(reservaId, guestIndex, campo, valor) {
   const r = getReservaById(reservaId);
   const h = getHospede(r, guestIndex);
   if (!r || !h) return;
@@ -1023,10 +1263,20 @@ function atualizarHospedeCampo(reservaId, guestIndex, campo, valor) {
     h.whatsapp = String(valor == null ? "" : valor).trim();
   }
   syncGuestStatus(h);
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    const ok = await backendUpdateHospedeFull(reservaId, guestIndex, h);
+    if (ok) await refreshFromSource();
+    return;
+  }
   refresh();
 }
 
-function acaoMarcarPagamentoOk(id) {
+async function acaoMarcarPagamentoOk(id) {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    const ok = await backendSetPagamentoOk(id);
+    if (ok) await refreshFromSource();
+    return;
+  }
   const r = getReservaById(id);
   if (r) {
     r.pagamento = "pago";
@@ -1035,7 +1285,12 @@ function acaoMarcarPagamentoOk(id) {
   refresh();
 }
 
-function acaoAvançarFnrh(id) {
+async function acaoAvançarFnrh(id) {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    const ok = await backendConfirmarFnrh(id, null);
+    if (ok) await refreshFromSource();
+    return;
+  }
   const r = getReservaById(id);
   if (!r) return;
   const antes = getFnrhConfirmadas(r);
@@ -1046,7 +1301,12 @@ function acaoAvançarFnrh(id) {
   refresh();
 }
 
-function acaoLiberarAcesso(id) {
+async function acaoLiberarAcesso(id) {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    const ok = await backendLiberarAcesso(id);
+    if (ok) await refreshFromSource();
+    return;
+  }
   const r = getReservaById(id);
   if (r && r.pagamento === "pago" && !hasFnrhPendente(r)) {
     r.acessoLiberado = true;
@@ -1055,7 +1315,12 @@ function acaoLiberarAcesso(id) {
   refresh();
 }
 
-function acaoConfirmarCheckin(id) {
+async function acaoConfirmarCheckin(id) {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    const ok = await backendMarcarEntrada(id);
+    if (ok) await refreshFromSource();
+    return;
+  }
   const r = getReservaById(id);
   if (r) {
     r.entrouNoApto = true;
@@ -1170,6 +1435,13 @@ function refresh() {
   }
 }
 
+async function refreshFromSource() {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    reservas = await loadReservasFromBackend();
+  }
+  refresh();
+}
+
 function renderAll() {
   refresh();
 }
@@ -1237,11 +1509,17 @@ function registrarEnvioHospede(hospede) {
   hospede.tentativasEnvio = (hospede.tentativasEnvio || 0) + 1;
 }
 
-function reenviarHospede(reservaId, guestIndex) {
+async function reenviarHospede(reservaId, guestIndex) {
   const r = getReservaById(reservaId);
   const h = getHospede(r, guestIndex);
   if (!r || !h) return;
-  if (h.statusOperacional !== GUEST_STATUS.ENVIADO || !hasContatoSuficiente(h)) return;
+  if (h.statusOperacional !== GUEST_STATUS.ENVIADO && h.statusOperacional !== GUEST_STATUS.PRONTO_PARA_ENVIO) return;
+  if (!hasContatoSuficiente(h)) return;
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    await backendEnviarLinks(reservaId);
+    await refreshFromSource();
+    return;
+  }
   registrarEnvioHospede(h);
   addHistoricoEvento(r, "reenvio", "Link reenviado para " + (h.nome || "hóspede"), null);
   refresh();
@@ -1284,7 +1562,12 @@ function createNovoHospede(reserva) {
   return h;
 }
 
-function adicionarHospede(reservaId) {
+async function adicionarHospede(reservaId) {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    const ok = await backendAddHospede(reservaId);
+    if (ok) await refreshFromSource();
+    return;
+  }
   const r = getReservaById(reservaId);
   if (!r || !Array.isArray(r.hospedes)) return;
   r.hospedes.push(createNovoHospede(r));
@@ -1292,7 +1575,7 @@ function adicionarHospede(reservaId) {
   refresh();
 }
 
-function removerHospede(reservaId, guestIndex) {
+async function removerHospede(reservaId, guestIndex) {
   const r = getReservaById(reservaId);
   const h = getHospede(r, guestIndex);
   if (!r || !h) return;
@@ -1304,16 +1587,26 @@ function removerHospede(reservaId, guestIndex) {
     alert("A reserva precisa ter pelo menos um hóspede.");
     return;
   }
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    const ok = await backendRemoveHospede(reservaId, guestIndex);
+    if (ok) await refreshFromSource();
+    return;
+  }
   const nomeRemovido = h.nome || "Hóspede";
   r.hospedes.splice(guestIndex, 1);
   addHistoricoEvento(r, "hospede_removido", "Hóspede removido da reserva", nomeRemovido);
   refresh();
 }
 
-function definirPrincipal(reservaId, guestIndex) {
+async function definirPrincipal(reservaId, guestIndex) {
   const r = getReservaById(reservaId);
   const h = getHospede(r, guestIndex);
   if (!r || !h) return;
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    const ok = await backendSetPrincipal(reservaId, guestIndex);
+    if (ok) await refreshFromSource();
+    return;
+  }
   r.hospedes.forEach((g) => {
     g.principal = false;
   });
@@ -1581,10 +1874,15 @@ function bindDetailListeners(reserva) {
 
   const enviarBtn = detailBodyElement.querySelector("#detail-enviar-links-btn");
   if (enviarBtn) {
-    enviarBtn.addEventListener("click", () => {
+    enviarBtn.addEventListener("click", async () => {
       const rid = enviarBtn.dataset.reservaId;
       const r = getReservaById(rid);
       if (!r || !Array.isArray(r.hospedes)) return;
+      if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+        const ok = await backendEnviarLinks(rid);
+        if (ok) await refreshFromSource();
+        return;
+      }
       let porEmail = 0, porWhatsapp = 0, porAmbos = 0;
       r.hospedes.forEach((h) => {
         if (h.statusOperacional === GUEST_STATUS.PRONTO_PARA_ENVIO && hasContatoSuficiente(h)) {
@@ -1670,6 +1968,15 @@ async function initCheckinOperacional() {
   if (sessionUserElement instanceof HTMLElement) {
     sessionUserElement.textContent =
       `${currentUser.name} | ${auth.getRoleLabel(currentUser.role)} | sessao de ${auth.getSessionDurationHours()} horas`;
+  }
+
+  const sessionActions = contentPanelElement?.querySelector(".session-actions");
+  if (sessionActions && currentUser.role === "admin") {
+    const importLink = document.createElement("a");
+    importLink.className = "secondary-link";
+    importLink.href = "./importar-reservas-mvp.html";
+    importLink.textContent = "Importar reservas";
+    sessionActions.insertBefore(importLink, sessionActions.firstChild);
   }
 
   reservas = await loadReservasOperacionaisFromProvider();
