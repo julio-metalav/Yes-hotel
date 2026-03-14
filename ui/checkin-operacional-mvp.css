@@ -261,6 +261,29 @@ body {
   color: var(--ok-text);
 }
 
+.priority-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.02em;
+}
+
+.priority-badge.priority-alta {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.priority-badge.priority-media {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+.priority-badge.priority-baixa {
+  background: var(--neutral-bg);
+  color: var(--neutral-text);
+}
+
 .operational-card-guest {
   font-size: 15px;
   font-weight: 600;

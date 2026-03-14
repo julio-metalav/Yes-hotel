@@ -54,6 +54,44 @@ const FILTER_PENDENTE_FNRH = "pendente_fnrh";
 const FILTER_ACESSO_LIBERADO = "acesso_liberado";
 const FILTER_NAO_ENTROU = "nao_entrou";
 const FILTER_ENTROU = "entrou";
+const FILTER_PRIORIDADE_ALTA = "prioridade_alta";
+const FILTER_PRIORIDADE_MEDIA = "prioridade_media";
+const FILTER_PRIORIDADE_BAIXA = "prioridade_baixa";
+
+const PRIORIDADE_ALTA = "alta";
+const PRIORIDADE_MEDIA = "media";
+const PRIORIDADE_BAIXA = "baixa";
+
+function isChegadaHoje(reserva) {
+  return reserva.checkInPrevisto === todayStr();
+}
+
+function getPrioridadeReserva(reserva) {
+  if (isCheckinConcluido(reserva)) return PRIORIDADE_BAIXA;
+  if (isProntaParaLiberarAcesso(reserva)) return PRIORIDADE_ALTA;
+  if (reserva.acessoLiberado && !reserva.entrouNoApto) return PRIORIDADE_ALTA;
+  if (isChegadaHoje(reserva)) return PRIORIDADE_ALTA;
+  return PRIORIDADE_MEDIA;
+}
+
+function getPrioridadeLabel(prioridade) {
+  const labels = { [PRIORIDADE_ALTA]: "Alta", [PRIORIDADE_MEDIA]: "Média", [PRIORIDADE_BAIXA]: "Baixa" };
+  return labels[prioridade] || "";
+}
+
+function sortReservasPorPrioridade(lista) {
+  const ordem = { [PRIORIDADE_ALTA]: 0, [PRIORIDADE_MEDIA]: 1, [PRIORIDADE_BAIXA]: 2 };
+  const hoje = todayStr();
+  return [...lista].sort((a, b) => {
+    const pa = ordem[getPrioridadeReserva(a)] ?? 1;
+    const pb = ordem[getPrioridadeReserva(b)] ?? 1;
+    if (pa !== pb) return pa - pb;
+    const aHoje = a.checkInPrevisto === hoje ? 1 : 0;
+    const bHoje = b.checkInPrevisto === hoje ? 1 : 0;
+    if (bHoje !== aHoje) return bHoje - aHoje;
+    return (a.apartamento || "").localeCompare(b.apartamento || "");
+  });
+}
 
 const GUEST_STATUS = {
   NAO_IDENTIFICADO: "nao_identificado",
@@ -468,6 +506,9 @@ function filtrarReservas(lista, filtroAtivo) {
   if (filtroAtivo === FILTER_ENTROU) {
     return lista.filter((r) => r.entrouNoApto === true);
   }
+  if (filtroAtivo === FILTER_PRIORIDADE_ALTA) return lista.filter((r) => getPrioridadeReserva(r) === PRIORIDADE_ALTA);
+  if (filtroAtivo === FILTER_PRIORIDADE_MEDIA) return lista.filter((r) => getPrioridadeReserva(r) === PRIORIDADE_MEDIA);
+  if (filtroAtivo === FILTER_PRIORIDADE_BAIXA) return lista.filter((r) => getPrioridadeReserva(r) === PRIORIDADE_BAIXA);
   return lista;
 }
 
@@ -507,6 +548,9 @@ function renderFilters() {
     [FILTER_ACESSO_LIBERADO, "Acesso liberado"],
     [FILTER_NAO_ENTROU, "Nao entrou"],
     [FILTER_ENTROU, "Entrou"],
+    [FILTER_PRIORIDADE_ALTA, "Alta"],
+    [FILTER_PRIORIDADE_MEDIA, "Média"],
+    [FILTER_PRIORIDADE_BAIXA, "Baixa"],
   ];
   filterBarElement.innerHTML = filters
     .map(
@@ -575,11 +619,14 @@ function primaryActionFor(reserva) {
 function renderList() {
   if (!(listaElement instanceof HTMLElement)) return;
   const filtradas = filtrarReservas(reservas, filtroAtivo);
+  const ordenadas = sortReservasPorPrioridade(filtradas);
 
-  listaElement.innerHTML = filtradas
+  listaElement.innerHTML = ordenadas
     .map((reserva) => {
       const status = derivarStatusOperacional(reserva);
       const primary = primaryActionFor(reserva);
+      const prioridade = getPrioridadeReserva(reserva);
+      const prioridadeLabel = getPrioridadeLabel(prioridade);
       const period = `${reserva.checkInPrevisto} a ${reserva.checkOutPrevisto}`;
       const fnrhStatus = getFnrhStatus(reserva);
       const hospedesTotal = getHospedesTotal(reserva);
@@ -616,11 +663,14 @@ function renderList() {
       if (veiculoLine) metaParts.push(`Veículo: ${veiculoLine}`);
       const metaHtml = `<div class="operational-card-meta">${metaParts.map((t) => `<span class="operational-card-meta-item">${t}</span>`).join("")}</div>`;
 
+      const priorityBadgeHtml = `<span class="priority-badge priority-${prioridade}">${prioridadeLabel}</span>`;
+
       return `
         <article class="operational-card" data-id="${reserva.id}">
           <div class="operational-card-header">
             <span class="operational-card-apt">Apto ${reserva.apartamento}</span>
             <span class="operational-card-status status-${status.type}">${status.label}</span>
+            ${priorityBadgeHtml}
           </div>
           <div class="operational-card-guest">${reserva.hospedePrincipal}</div>
           <div class="operational-card-period">${period}</div>
