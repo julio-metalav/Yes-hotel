@@ -14,6 +14,25 @@ const logoutButtonElement = document.querySelector("#logout-button");
 const cancelEditButtonElement = document.querySelector("#cancel-edit-button");
 let usersCache = [];
 
+function redirectUserByRole(user) {
+  if (!user) {
+    return;
+  }
+
+  if (auth.canAccessUserManagement(user)) {
+    return;
+  }
+
+  if (user.role === "recepcao") {
+    window.location.href = "./recepcao-mvp.html";
+    return;
+  }
+
+  if (user.role === "cafe") {
+    window.location.href = "./cafe-da-manha-mvp.html";
+  }
+}
+
 function showNotice(message, variant = "success") {
   if (!(noticeElement instanceof HTMLElement)) {
     return;
@@ -153,7 +172,7 @@ async function renderAdminPanel() {
   }
 
   if (!auth.canAccessUserManagement(currentUser)) {
-    window.location.href = "./cafe-da-manha-mvp.html";
+    redirectUserByRole(currentUser);
     return;
   }
 
@@ -178,7 +197,7 @@ async function renderPageState() {
 
   if (currentUser) {
     if (!auth.canAccessUserManagement(currentUser)) {
-      window.location.href = "./cafe-da-manha-mvp.html";
+      redirectUserByRole(currentUser);
       return;
     }
 
@@ -240,7 +259,7 @@ loginFormElement?.addEventListener("submit", async (event) => {
       return;
     }
 
-    window.location.href = "./cafe-da-manha-mvp.html";
+    redirectUserByRole(user);
   } catch (error) {
     showNotice(error instanceof Error ? error.message : "Falha no login.", "error");
   }

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yes Hotel - Recepcao MVP</title>
+    <link rel="stylesheet" href="./recepcao-mvp.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="page-header">
+        <p class="eyebrow">Yes Hotel</p>
+        <h1>Recepcao</h1>
+        <p class="page-description">Area operacional provisoria da recepcao.</p>
+      </header>
+
+      <section class="access-state hidden" id="access-state"></section>
+
+      <section class="panel hidden" id="content-panel">
+        <div class="session-bar">
+          <div id="session-user"></div>
+          <div class="session-actions">
+            <a class="primary-link" href="./cafe-da-manha-mvp.html">Ir para cafe da manha</a>
+            <button class="secondary-button" id="logout-button" type="button">Sair</button>
+          </div>
+        </div>
+
+        <section class="panel-body">
+          <h2>Recepcao habilitada</h2>
+          <p>
+            Esta e uma tela provisoria para o perfil de recepcao, separada da tela do cafe.
+          </p>
+        </section>
+      </section>
+    </main>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script defer src="./yes-supabase-config.js"></script>
+    <script defer src="./yes-supabase-auth.js"></script>
+    <script defer src="./recepcao-mvp.js"></script>
+  </body>
+</html>
