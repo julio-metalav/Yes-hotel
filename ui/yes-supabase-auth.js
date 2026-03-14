@@ -10,6 +10,7 @@
         : rawConfig.anonKey,
   };
   const APP_SESSION_STARTED_AT_KEY = "yesHotelAppSessionStartedAt";
+  const ACCESS_TOKEN_STORAGE_KEY = "yesHotelSupabaseAccessToken";
   const APP_SESSION_DURATION_MS = Number(config.appSessionHours || 4) * 60 * 60 * 1000;
   const PROFILE_COLUMNS =
     "id, auth_user_id, nome, email_login, perfil_usuario, ativo, created_at, updated_at";
@@ -102,13 +103,21 @@
       return config.anonKey;
     }
 
+    const cachedAccessToken = getCachedAccessToken();
+
+    if (cachedAccessToken) {
+      return cachedAccessToken;
+    }
+
     const session = await enforceAppSessionWindow();
 
     if (!session?.access_token) {
       throw new Error("Sessao real do Supabase indisponivel para esta operacao.");
     }
 
-    return session.access_token;
+    const normalizedAccessToken = session.access_token.trim();
+    setCachedAccessToken(normalizedAccessToken);
+    return normalizedAccessToken;
   }
 
   async function invokeAdminAction(action, payload = {}, options = {}) {
@@ -151,6 +160,22 @@
 
   function clearAppSessionStart() {
     globalScope.localStorage.removeItem(APP_SESSION_STARTED_AT_KEY);
+  }
+
+  function setCachedAccessToken(token) {
+    const normalizedToken = typeof token === "string" ? token.trim() : "";
+
+    if (!normalizedToken) {
+      globalScope.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+      return;
+    }
+
+    globalScope.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, normalizedToken);
+  }
+
+  function getCachedAccessToken() {
+    const token = globalScope.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+    return token ? token.trim() : null;
   }
 
   async function enforceAppSessionWindow() {
@@ -281,6 +306,7 @@
       throw new Error("Login realizado sem access_token valido do Supabase Auth.");
     }
 
+    setCachedAccessToken(data.session.access_token);
     await client.auth.getSession();
     setAppSessionStart();
 
@@ -296,11 +322,13 @@
   async function logout() {
     if (!client) {
       clearAppSessionStart();
+      setCachedAccessToken(null);
       return;
     }
 
     await client.auth.signOut();
     clearAppSessionStart();
+    setCachedAccessToken(null);
   }
 
   async function listUsers() {
