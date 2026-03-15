@@ -48,14 +48,15 @@ async function getCallerProfile(request: Request): Promise<{ role: string; activ
   const authHeader = request.headers.get("Authorization") ?? "";
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
-  const { data: { user }, error: userError } = await anonClient.auth.getUser(token);
-  if (userError || !user) return null;
-  const { data: row, error } = await adminClient
+  const { data, error } = await anonClient.auth.getClaims(token);
+  if (error || !data?.claims?.sub) return null;
+  const authUserId = data.claims.sub as string;
+  const { data: row, error: rowError } = await adminClient
     .from("usuarios_internos")
     .select("perfil_usuario, ativo")
-    .eq("auth_user_id", user.id)
+    .eq("auth_user_id", authUserId)
     .maybeSingle();
-  if (error || !row) return null;
+  if (rowError || !row) return null;
   return { role: row.perfil_usuario, active: !!row.ativo };
 }
 
