@@ -38,6 +38,33 @@ export interface TtlockKeyboardPwdAddResponse {
   keyboardPwdId: number;
 }
 
+/** Parâmetros para deletar passcode (v3/keyboardPwd/delete). deleteType=2 = via gateway. */
+export interface TtlockKeyboardPwdDeleteParams {
+  lockId: number | string;
+  keyboardPwdId: number;
+  deleteType?: 1 | 2 | 3;
+  date: number;
+}
+
+/** Parâmetros para alterar passcode (v3/keyboardPwd/change). changeType=2 = via gateway. */
+export interface TtlockKeyboardPwdChangeParams {
+  lockId: number | string;
+  keyboardPwdId: number;
+  keyboardPwdName?: string;
+  newKeyboardPwd?: string;
+  startDate?: number;
+  endDate?: number;
+  changeType?: 1 | 2 | 3;
+  date: number;
+}
+
+/** Resposta genérica de sucesso (errcode 0). */
+export interface TtlockSuccessResponse {
+  errcode?: number;
+  errmsg?: string;
+  description?: string;
+}
+
 export interface TtlockApiErrorBody {
   errcode?: number;
   errmsg?: string;

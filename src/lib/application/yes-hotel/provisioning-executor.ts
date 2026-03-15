@@ -13,10 +13,12 @@ export interface CredencialRow {
   id: string;
   reserva_id: string;
   status: OperacionalCredencialStatus;
-  valido_de: string; // ISO ou timestamptz
+  valido_de: string;
   valido_ate: string;
   codigo_credencial: string | null;
   provider_tipo: string | null;
+  revogado_em?: string | null;
+  motivo_revogacao?: string | null;
 }
 
 /** Item de provisionamento como lido do banco. */
@@ -30,17 +32,35 @@ export interface CredencialItemRow {
   status_provisionamento: OperacionalItemProvisionamentoStatus;
   ultimo_erro: string | null;
   provisionado_em: string | null;
+  revogado_em: string | null;
   remote_keyboard_pwd_id: number | null;
   codigo_enviado: string | null;
 }
 
+/** Destino de fechadura para inserção de novo item (ex.: room change). */
+export interface NovoItemDestino {
+  fechadura_id: string;
+  lock_id_ttlock: string;
+  tipo_destino: string;
+  codigo_logico_destino: string;
+}
+
 export interface ProvisioningRepository {
   getCredencial(id: string): Promise<CredencialRow | null>;
+  getCredencialPorReserva(reservaId: string): Promise<CredencialRow | null>;
   getCredenciaisPendentes(): Promise<CredencialRow[]>;
+  getItens(credencialId: string): Promise<CredencialItemRow[]>;
   getItensPendentes(credencialId: string): Promise<CredencialItemRow[]>;
+  getItensProvisionados(credencialId: string): Promise<CredencialItemRow[]>;
+  insertItem(credencialId: string, destino: NovoItemDestino): Promise<CredencialItemRow>;
   updateCredencial(
     id: string,
-    patch: Partial<Pick<CredencialRow, "status" | "codigo_credencial" | "provider_tipo">>,
+    patch: Partial<
+      Pick<
+        CredencialRow & { revogado_em?: string | null; motivo_revogacao?: string | null },
+        "status" | "codigo_credencial" | "provider_tipo" | "valido_de" | "valido_ate" | "revogado_em" | "motivo_revogacao"
+      >
+    >,
   ): Promise<void>;
   updateItem(
     id: string,
@@ -48,10 +68,13 @@ export interface ProvisioningRepository {
       status_provisionamento: OperacionalItemProvisionamentoStatus;
       ultimo_erro: string | null;
       provisionado_em: string | null;
+      revogado_em: string | null;
       remote_keyboard_pwd_id: number | null;
       codigo_enviado: string | null;
     }>,
   ): Promise<void>;
+  getReservaApartment(reservaId: string): Promise<string | null>;
+  getFechadurasForApartment(apartmentCode: string): Promise<NovoItemDestino[]>;
 }
 
 const PASSCODE_LENGTH = 6;

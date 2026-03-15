@@ -23,7 +23,11 @@
     "test:hits-real:json": "tsx scripts/test-hits-real-json-to-yes.ts",
     "debug:provisioning": "tsx scripts/debug-provisioning-plan.ts",
     "debug:ttlock-auth": "tsx scripts/debug-ttlock-auth.ts",
-    "debug:ttlock-provision": "tsx scripts/debug-ttlock-provision.ts"
+    "debug:ttlock-provision": "tsx scripts/debug-ttlock-provision.ts",
+    "debug:ttlock-revoke": "tsx scripts/debug-ttlock-revoke.ts",
+    "debug:ttlock-update-validity": "tsx scripts/debug-ttlock-update-validity.ts",
+    "debug:ttlock-reprovision": "tsx scripts/debug-ttlock-reprovision.ts",
+    "debug:ttlock-lifecycle": "tsx scripts/debug-ttlock-lifecycle-scenarios.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.0",

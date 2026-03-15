@@ -10,6 +10,9 @@ import type {
   TtlockConfig,
   TtlockKeyboardPwdAddParams,
   TtlockKeyboardPwdAddResponse,
+  TtlockKeyboardPwdChangeParams,
+  TtlockKeyboardPwdDeleteParams,
+  TtlockSuccessResponse,
 } from "./types";
 import { TtlockApiError } from "./types";
 import { getTtlockConfig, isTtlockAvailable } from "./config";
@@ -214,28 +217,163 @@ export class TtlockClient {
   }
 
   /**
-   * Stub para alteração de passcode (fase futura).
+   * Deleta passcode na fechadura (via gateway, deleteType=2).
+   * Usado para revogação de acesso.
    */
-  async updateKeyboardPassword(_params: {
+  async deleteKeyboardPassword(
+    params: Omit<TtlockKeyboardPwdDeleteParams, "deleteType" | "date">,
+  ): Promise<TtlockSuccessResponse> {
+    if (!this.isAvailable()) {
+      throw new Error(
+        "TTLock: credenciais nao configuradas. Configure TTLOCK_CLIENT_ID, TTLOCK_CLIENT_SECRET, TTLOCK_USERNAME, TTLOCK_PASSWORD.",
+      );
+    }
+
+    const token = await this.ensureAccessToken();
+    const lockId = typeof params.lockId === "string" ? parseInt(params.lockId, 10) : params.lockId;
+    const date = Date.now();
+
+    const body = {
+      clientId: this.config.clientId,
+      accessToken: token,
+      lockId,
+      keyboardPwdId: params.keyboardPwdId,
+      deleteType: 2,
+      date,
+    };
+
+    const url = `${this.config.apiBaseUrl}/v3/keyboardPwd/delete`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const res = await this.fetchImpl(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+      const data = (await parseJsonSafe(res)) as TtlockSuccessResponse & { errcode?: number; errmsg?: string };
+
+      if (!res.ok) {
+        throw new TtlockApiError(
+          data?.errmsg ?? `Delete passcode failed: ${res.status}`,
+          res.status,
+          data,
+        );
+      }
+
+      if (data.errcode != null && data.errcode !== 0) {
+        throw new TtlockApiError(
+          data.errmsg ?? "Delete passcode error",
+          res.status,
+          data,
+        );
+      }
+
+      return data;
+    } catch (e) {
+      clearTimeout(timeout);
+      if (e instanceof TtlockApiError) throw e;
+      if (e instanceof Error) throw e;
+      throw new Error(String(e));
+    }
+  }
+
+  /**
+   * Altera passcode na fechadura (via gateway, changeType=2).
+   * Permite alterar validade (startDate/endDate) e opcionalmente o próprio código.
+   * Usado para early check-in, late check-out e ajuste manual.
+   */
+  async changeKeyboardPassword(
+    params: Omit<TtlockKeyboardPwdChangeParams, "changeType" | "date"> & { date?: number },
+  ): Promise<TtlockSuccessResponse> {
+    if (!this.isAvailable()) {
+      throw new Error(
+        "TTLock: credenciais nao configuradas. Configure TTLOCK_CLIENT_ID, TTLOCK_CLIENT_SECRET, TTLOCK_USERNAME, TTLOCK_PASSWORD.",
+      );
+    }
+
+    const token = await this.ensureAccessToken();
+    const lockId = typeof params.lockId === "string" ? parseInt(params.lockId, 10) : params.lockId;
+    const date = params.date ?? Date.now();
+
+    const body: Record<string, string | number> = {
+      clientId: this.config.clientId,
+      accessToken: token,
+      lockId,
+      keyboardPwdId: params.keyboardPwdId,
+      changeType: 2,
+      date,
+    };
+    if (params.keyboardPwdName != null) body.keyboardPwdName = params.keyboardPwdName;
+    if (params.newKeyboardPwd != null) body.newKeyboardPwd = params.newKeyboardPwd;
+    if (params.startDate != null) body.startDate = params.startDate;
+    if (params.endDate != null) body.endDate = params.endDate;
+
+    const url = `${this.config.apiBaseUrl}/v3/keyboardPwd/change`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const res = await this.fetchImpl(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+      const data = (await parseJsonSafe(res)) as TtlockSuccessResponse & { errcode?: number; errmsg?: string };
+
+      if (!res.ok) {
+        throw new TtlockApiError(
+          data?.errmsg ?? `Change passcode failed: ${res.status}`,
+          res.status,
+          data,
+        );
+      }
+
+      if (data.errcode != null && data.errcode !== 0) {
+        throw new TtlockApiError(
+          data.errmsg ?? "Change passcode error",
+          res.status,
+          data,
+        );
+      }
+
+      return data;
+    } catch (e) {
+      clearTimeout(timeout);
+      if (e instanceof TtlockApiError) throw e;
+      if (e instanceof Error) throw e;
+      throw new Error(String(e));
+    }
+  }
+
+  /**
+   * Alias para compatibilidade com código que já usava o nome updateKeyboardPassword.
+   * Delega para changeKeyboardPassword com startDate/endDate.
+   */
+  async updateKeyboardPassword(params: {
     lockId: number | string;
     keyboardPwdId: number;
     keyboardPwd: string;
     startDate: number;
     endDate: number;
-    date: number;
+    date?: number;
   }): Promise<{ success: boolean }> {
-    throw new Error("TTLock updateKeyboardPassword ainda nao implementado (fase futura).");
-  }
-
-  /**
-   * Stub para revogação de passcode (fase futura).
-   */
-  async deleteKeyboardPassword(_params: {
-    lockId: number | string;
-    keyboardPwdId: number;
-    date: number;
-  }): Promise<{ success: boolean }> {
-    throw new Error("TTLock deleteKeyboardPassword ainda nao implementado (fase futura).");
+    await this.changeKeyboardPassword({
+      lockId: params.lockId,
+      keyboardPwdId: params.keyboardPwdId,
+      newKeyboardPwd: params.keyboardPwd,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      date: params.date ?? Date.now(),
+    });
+    return { success: true };
   }
 }
 
