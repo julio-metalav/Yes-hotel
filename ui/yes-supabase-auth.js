@@ -250,8 +250,20 @@
   }
 
   async function hasUsers() {
-    const response = await fetch("/api/bootstrap-status", {
-      method: "GET",
+    if (!client || !ADMIN_FUNCTION_URL) {
+      throw new Error(getConfigError());
+    }
+    const response = await fetch(ADMIN_FUNCTION_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: config.anonKey,
+        Authorization: `Bearer ${config.anonKey}`,
+      },
+      body: JSON.stringify({
+        action: "bootstrap_status",
+        payload: {},
+      }),
     });
     const data = await response.json().catch(() => null);
 
