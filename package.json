@@ -21,9 +21,12 @@
     "test:hits-mock:room-change": "tsx scripts/test-hits-mock-to-yes-room-change.ts",
     "test:hits-mock:cancel": "tsx scripts/test-hits-mock-to-yes-cancel.ts",
     "test:hits-real:json": "tsx scripts/test-hits-real-json-to-yes.ts",
-    "debug:provisioning": "tsx scripts/debug-provisioning-plan.ts"
+    "debug:provisioning": "tsx scripts/debug-provisioning-plan.ts",
+    "debug:ttlock-auth": "tsx scripts/debug-ttlock-auth.ts",
+    "debug:ttlock-provision": "tsx scripts/debug-ttlock-provision.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.47.0",
     "dotenv": "^17.3.1"
   },
   "devDependencies": {
