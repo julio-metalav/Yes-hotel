@@ -1,2 +1,5 @@
 [functions.internal-users-admin]
 verify_jwt = false
+
+[functions.yes-hotel-lifecycle]
+verify_jwt = false

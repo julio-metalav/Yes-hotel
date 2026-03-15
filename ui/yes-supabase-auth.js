@@ -160,6 +160,9 @@
     }
 
     const bearerToken = await getFunctionBearerToken(true);
+    if (typeof globalScope.console !== "undefined" && globalScope.console.log) {
+      globalScope.console.log("[TTLock] invokeLifecycleAction action=" + action + " url=" + LIFECYCLE_FUNCTION_URL + " tokenLen=" + (bearerToken ? String(bearerToken.length) : "0"));
+    }
     const response = await fetch(LIFECYCLE_FUNCTION_URL, {
       method: "POST",
       headers: {

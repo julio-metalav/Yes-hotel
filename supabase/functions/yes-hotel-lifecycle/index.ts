@@ -46,11 +46,30 @@ const anonClient = createClient(supabaseUrl, supabaseAnonKey, {
 
 async function getCallerProfile(request: Request): Promise<{ role: string; active: boolean } | null> {
   const authHeader = request.headers.get("Authorization") ?? "";
+  const hasBearer = /^\s*Bearer\s+/i.test(authHeader);
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (typeof console !== "undefined") {
+    console.log("[lifecycle] getCallerProfile authHeaderPresent=" + (authHeader.length > 0) + " hasBearer=" + hasBearer + " tokenLen=" + token.length);
+  }
   if (!token) return null;
-  const { data, error } = await anonClient.auth.getClaims(token);
-  if (error || !data?.claims?.sub) return null;
-  const authUserId = data.claims.sub as string;
+  let authUserId: string | null = null;
+  try {
+    const claimsResult = await anonClient.auth.getClaims(token);
+    if (claimsResult.error) {
+      if (typeof console !== "undefined") console.warn("[lifecycle] getClaims error", claimsResult.error.message);
+      throw claimsResult.error;
+    }
+    if (claimsResult.data?.claims?.sub) authUserId = claimsResult.data.claims.sub as string;
+  } catch (claimsErr) {
+    if (typeof console !== "undefined") console.warn("[lifecycle] getClaims threw", claimsErr instanceof Error ? claimsErr.message : String(claimsErr));
+    const userResult = await anonClient.auth.getUser(token);
+    if (userResult.error || !userResult.data?.user?.id) {
+      if (typeof console !== "undefined") console.warn("[lifecycle] getUser fallback error", userResult.error?.message ?? "no user");
+      return null;
+    }
+    authUserId = userResult.data.user.id;
+  }
+  if (!authUserId) return null;
   const { data: row, error: rowError } = await adminClient
     .from("usuarios_internos")
     .select("perfil_usuario, ativo")
@@ -397,6 +416,7 @@ Deno.serve(async (request: Request) => {
     const requestBody = (await request.json()) as { action?: string; payload?: Record<string, unknown> };
     const action = (requestBody.action ?? "").trim();
     const payload = requestBody.payload ?? {};
+    if (typeof console !== "undefined") console.log("[lifecycle] action=" + action);
 
     if (action === "lifecycle_cancel") {
       return await handleCancelOrCheckout(request, payload, "cancelamento");

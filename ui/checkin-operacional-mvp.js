@@ -1456,7 +1456,11 @@ function escapeHtml(s) {
 async function loadAndRenderTtlockSection(reservaId) {
   const loadingEl = document.getElementById("detail-ttlock-loading");
   const contentEl = document.getElementById("detail-ttlock-content");
-  if (!loadingEl || !contentEl || !auth?.invokeLifecycleAction) return;
+  const hasInvoke = !!auth?.invokeLifecycleAction;
+  if (typeof console !== "undefined" && console.log) {
+    console.log("[TTLock] loadAndRenderTtlockSection reservaId=" + reservaId + " invokeLifecycleAction=" + hasInvoke);
+  }
+  if (!loadingEl || !contentEl || !hasInvoke) return;
   try {
     const data = await auth.invokeLifecycleAction("sync_summary", { reservaId });
     const syncStatus = data.syncStatus ?? null;
@@ -1496,7 +1500,9 @@ async function loadAndRenderTtlockSection(reservaId) {
       btn.addEventListener("click", () => acaoLifecycleRetry(btn.dataset.reservaId));
     });
   } catch (e) {
-    contentEl.innerHTML = `<p class="reservation-detail-ttlock-error">Erro ao carregar status: ${escapeHtml(e instanceof Error ? e.message : String(e))}</p>`;
+    const msg = e instanceof Error ? e.message : String(e);
+    if (typeof console !== "undefined" && console.warn) console.warn("[TTLock] loadAndRenderTtlockSection error", msg);
+    contentEl.innerHTML = `<p class="reservation-detail-ttlock-error">Erro ao carregar status: ${escapeHtml(msg)}</p>`;
     loadingEl.classList.add("hidden");
     contentEl.classList.remove("hidden");
   }
