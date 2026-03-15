@@ -107,12 +107,14 @@
       return config.anonKey;
     }
 
-    const session = await enforceAppSessionWindow();
-
-    if (!session?.access_token) {
+    const inWindow = await enforceAppSessionWindow();
+    if (!inWindow) {
       throw new Error("Sessao real do Supabase indisponivel para esta operacao.");
     }
-
+    const { data: { session }, error } = await client.auth.refreshSession();
+    if (error || !session?.access_token) {
+      throw new Error("Sessao real do Supabase indisponivel para esta operacao.");
+    }
     const normalizedAccessToken = session.access_token.trim();
     setCachedAccessToken(normalizedAccessToken);
     return normalizedAccessToken;
