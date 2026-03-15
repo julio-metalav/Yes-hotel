@@ -1453,6 +1453,109 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
+async function loadAndRenderTtlockSection(reservaId) {
+  const loadingEl = document.getElementById("detail-ttlock-loading");
+  const contentEl = document.getElementById("detail-ttlock-content");
+  if (!loadingEl || !contentEl || !auth?.invokeLifecycleAction) return;
+  try {
+    const data = await auth.invokeLifecycleAction("sync_summary", { reservaId });
+    const syncStatus = data.syncStatus ?? null;
+    const statusClass = syncStatus === "ok" ? "sync-ok" : syncStatus === "pending" ? "sync-pending" : syncStatus === "partial" ? "sync-partial" : "sync-failed";
+    const statusLabel = syncStatus === "ok" ? "Sync OK" : syncStatus === "pending" ? "Sync pendente" : syncStatus === "partial" ? "Sync parcial" : syncStatus === "failed" ? "Sync falhou" : "—";
+    let html = `<p class="reservation-detail-ttlock-resumo"><span class="ttlock-sync-badge ${statusClass}">${escapeHtml(statusLabel)}</span> ${escapeHtml(data.resumo || "")}</p>`;
+    if (data.lastSyncAttemptAt) {
+      html += `<p class="reservation-detail-ttlock-meta">Última tentativa: ${escapeHtml(data.lastSyncAttemptAt)}</p>`;
+    }
+    if (data.lastSyncError) {
+      html += `<p class="reservation-detail-ttlock-error">${escapeHtml(data.lastSyncError)}</p>`;
+    }
+    if (data.temCredencial && data.status !== "revogada") {
+      html += `<div class="reservation-detail-ttlock-actions">
+        <button type="button" class="secondary-button detail-ttlock-cancel-btn" data-reserva-id="${escapeHtml(reservaId)}">Cancelar reserva (revogar acesso TTLock)</button>
+        <button type="button" class="secondary-button detail-ttlock-checkout-btn" data-reserva-id="${escapeHtml(reservaId)}">Checkout (revogar acesso TTLock)</button>
+      </div>`;
+    }
+    if (data.temCredencial && data.status === "revogada" && data.syncStatus && data.syncStatus !== "ok") {
+      html += `<div class="reservation-detail-ttlock-actions">
+        <button type="button" class="secondary-button detail-ttlock-retry-btn" data-reserva-id="${escapeHtml(reservaId)}">Reprocessar sincronização</button>
+      </div>`;
+    }
+    if (data.temCredencial === false) {
+      html += `<p class="muted">Sem credencial operacional para esta reserva.</p>`;
+    }
+    contentEl.innerHTML = html;
+    loadingEl.classList.add("hidden");
+    contentEl.classList.remove("hidden");
+    contentEl.querySelectorAll(".detail-ttlock-cancel-btn").forEach((btn) => {
+      btn.addEventListener("click", () => acaoLifecycleCancel(btn.dataset.reservaId));
+    });
+    contentEl.querySelectorAll(".detail-ttlock-checkout-btn").forEach((btn) => {
+      btn.addEventListener("click", () => acaoLifecycleCheckout(btn.dataset.reservaId));
+    });
+    contentEl.querySelectorAll(".detail-ttlock-retry-btn").forEach((btn) => {
+      btn.addEventListener("click", () => acaoLifecycleRetry(btn.dataset.reservaId));
+    });
+  } catch (e) {
+    contentEl.innerHTML = `<p class="reservation-detail-ttlock-error">Erro ao carregar status: ${escapeHtml(e instanceof Error ? e.message : String(e))}</p>`;
+    loadingEl.classList.add("hidden");
+    contentEl.classList.remove("hidden");
+  }
+}
+
+async function acaoLifecycleCancel(reservaId) {
+  if (!reservaId || !auth?.invokeLifecycleAction) return;
+  if (!confirm("Revogar acesso TTLock desta reserva (cancelamento)? A ação é irreversível para a credencial.")) return;
+  try {
+    const data = await auth.invokeLifecycleAction("lifecycle_cancel", { reservaId });
+    const msg = data.idempotente
+      ? "Credencial já estava revogada."
+      : data.divergencia
+        ? `Cancelamento aplicado. Atenção: sync ${data.syncStatus}. ${data.lastSyncError || ""} Use "Reprocessar sincronização" se necessário.`
+        : "Cancelamento aplicado. Acesso revogado.";
+    alert(msg);
+    await refreshFromSource();
+    if (detailReservaId === reservaId) await loadAndRenderTtlockSection(reservaId);
+    refresh();
+  } catch (e) {
+    alert("Erro: " + (e instanceof Error ? e.message : String(e)));
+  }
+}
+
+async function acaoLifecycleCheckout(reservaId) {
+  if (!reservaId || !auth?.invokeLifecycleAction) return;
+  if (!confirm("Fazer checkout e revogar acesso TTLock desta reserva?")) return;
+  try {
+    const data = await auth.invokeLifecycleAction("lifecycle_checkout", { reservaId });
+    const msg = data.idempotente
+      ? "Credencial já estava revogada."
+      : data.divergencia
+        ? `Checkout aplicado. Atenção: sync ${data.syncStatus}. ${data.lastSyncError || ""} Use "Reprocessar sincronização" se necessário.`
+        : "Checkout aplicado. Acesso revogado.";
+    alert(msg);
+    await refreshFromSource();
+    if (detailReservaId === reservaId) await loadAndRenderTtlockSection(reservaId);
+    refresh();
+  } catch (e) {
+    alert("Erro: " + (e instanceof Error ? e.message : String(e)));
+  }
+}
+
+async function acaoLifecycleRetry(reservaId) {
+  if (!reservaId || !auth?.invokeLifecycleAction) return;
+  try {
+    const data = await auth.invokeLifecycleAction("retry_sync", { reservaId });
+    const msg = data.itensFalha > 0
+      ? `Retry executado. ${data.itensOk} ok, ${data.itensFalha} falha(s). ${data.lastSyncError || ""}`
+      : "Sincronização reprocessada com sucesso.";
+    alert(msg);
+    await refreshFromSource();
+    if (detailReservaId === reservaId) await loadAndRenderTtlockSection(reservaId);
+    refresh();
+  } catch (e) {
+    alert("Erro: " + (e instanceof Error ? e.message : String(e)));
+  }
+}
+
 function openDetail(reservaId) {
   const reserva = getReservaById(reservaId);
   if (!reserva) return;
@@ -1461,6 +1564,9 @@ function openDetail(reservaId) {
   if (detailBackdropElement) detailBackdropElement.classList.remove("hidden");
   if (detailTitleElement) detailTitleElement.textContent = `Reserva Apto ${reserva.apartamento}`;
   renderDetail(reserva);
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && document.getElementById("detail-ttlock-section")) {
+    loadAndRenderTtlockSection(reservaId);
+  }
 }
 
 function closeDetail() {
@@ -1728,6 +1834,15 @@ function renderDetail(reserva) {
     <p class="reservation-detail-status-reserva-text">${escapeHtml(statusOperacionalTexto)}</p>
   </div>`;
 
+  const ttlockSectionHtml =
+    PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && auth?.invokeLifecycleAction
+      ? `<div class="reservation-detail-section reservation-detail-ttlock" id="detail-ttlock-section">
+    <p class="reservation-detail-section-title">Acesso TTLock</p>
+    <p class="reservation-detail-ttlock-loading" id="detail-ttlock-loading">Carregando...</p>
+    <div class="reservation-detail-ttlock-content hidden" id="detail-ttlock-content"></div>
+  </div>`
+      : "";
+
   const proximaAcaoHtml =
     proximaAcao &&
     `<div class="reservation-detail-section reservation-detail-proxima-acao">
@@ -1774,6 +1889,7 @@ function renderDetail(reserva) {
 
   detailBodyElement.innerHTML = `
     ${statusReservaHtml}
+    ${ttlockSectionHtml}
     ${proximaAcaoHtml || ""}
     ${eventosSimuladosHtml}
     <div class="reservation-detail-section">

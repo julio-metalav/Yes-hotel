@@ -18,6 +18,10 @@
   const ADMIN_FUNCTION_URL = config.url
     ? `${config.url}/functions/v1/${ADMIN_FUNCTION_NAME}`
     : "";
+  const LIFECYCLE_FUNCTION_NAME = "yes-hotel-lifecycle";
+  const LIFECYCLE_FUNCTION_URL = config.url
+    ? `${config.url}/functions/v1/${LIFECYCLE_FUNCTION_NAME}`
+    : "";
 
   function getConfigError() {
     if (!globalScope.supabase?.createClient) {
@@ -138,6 +142,39 @@
     if (!response.ok) {
       const errorMessage =
         data?.error || data?.message || `Edge Function retornou status ${response.status}.`;
+      throw new Error(errorMessage);
+    }
+
+    if (data?.error) {
+      throw new Error(data.error);
+    }
+
+    return data;
+  }
+
+  async function invokeLifecycleAction(action, payload = {}) {
+    if (!client || !LIFECYCLE_FUNCTION_URL) {
+      throw new Error(getConfigError());
+    }
+
+    const bearerToken = await getFunctionBearerToken(true);
+    const response = await fetch(LIFECYCLE_FUNCTION_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: config.anonKey,
+        Authorization: `Bearer ${bearerToken}`,
+      },
+      body: JSON.stringify({
+        action,
+        payload,
+      }),
+    });
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const errorMessage =
+        data?.error || data?.message || `Lifecycle retornou status ${response.status}.`;
       throw new Error(errorMessage);
     }
 
@@ -409,5 +446,6 @@
     createUser,
     updateUser,
     getSupabaseClient,
+    invokeLifecycleAction,
   };
 })(window);

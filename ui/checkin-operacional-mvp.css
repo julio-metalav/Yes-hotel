@@ -802,3 +802,67 @@ body {
   background: var(--ok-bg);
   color: var(--ok-text);
 }
+
+/* Acesso TTLock (Fase 3.2) */
+.reservation-detail-ttlock {
+  margin-top: 12px;
+}
+
+.reservation-detail-ttlock-resumo {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.reservation-detail-ttlock-meta,
+.reservation-detail-ttlock-error {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.reservation-detail-ttlock-error {
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.ttlock-sync-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.ttlock-sync-badge.sync-ok {
+  background: var(--ok-bg);
+  color: var(--ok-text);
+}
+
+.ttlock-sync-badge.sync-pending {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+.ttlock-sync-badge.sync-partial {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+.ttlock-sync-badge.sync-failed {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.reservation-detail-ttlock-actions {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.reservation-detail-ttlock-actions .secondary-button {
+  font-size: 13px;
+}
