@@ -145,9 +145,9 @@ type CredencialRow = {
   id: string;
   reserva_id: string;
   status: string;
-  sync_status: string | null;
-  last_sync_attempt_at: string | null;
-  last_sync_error: string | null;
+  sync_status?: string | null;
+  last_sync_attempt_at?: string | null;
+  last_sync_error?: string | null;
 };
 
 type ItemRow = {
@@ -160,13 +160,38 @@ type ItemRow = {
 };
 
 async function getCredencialPorReserva(reservaId: string): Promise<CredencialRow | null> {
+  const normalizedId = String(reservaId ?? "").trim().toLowerCase();
+  if (!normalizedId) return null;
   const { data, error } = await adminClient
     .from("operacional_credenciais_acesso")
-    .select("id, reserva_id, status, sync_status, last_sync_attempt_at, last_sync_error")
-    .eq("reserva_id", reservaId)
+    .select("id, reserva_id, status")
+    .eq("reserva_id", normalizedId)
     .maybeSingle();
   if (error || !data) return null;
-  return data as CredencialRow;
+  const row = data as { id: string; reserva_id: string; status: string };
+  const cred: CredencialRow = {
+    id: row.id,
+    reserva_id: row.reserva_id,
+    status: row.status,
+    sync_status: null,
+    last_sync_attempt_at: null,
+    last_sync_error: null,
+  };
+  try {
+    const { data: extra } = await adminClient
+      .from("operacional_credenciais_acesso")
+      .select("sync_status, last_sync_attempt_at, last_sync_error")
+      .eq("id", row.id)
+      .maybeSingle();
+    if (extra && typeof extra === "object") {
+      cred.sync_status = (extra as { sync_status?: string | null }).sync_status ?? null;
+      cred.last_sync_attempt_at = (extra as { last_sync_attempt_at?: string | null }).last_sync_attempt_at ?? null;
+      cred.last_sync_error = (extra as { last_sync_error?: string | null }).last_sync_error ?? null;
+    }
+  } catch {
+    // sync_* existem só após migration 0009
+  }
+  return cred;
 }
 
 async function getItensProvisionados(credencialId: string): Promise<ItemRow[]> {
