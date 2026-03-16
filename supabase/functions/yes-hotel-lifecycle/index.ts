@@ -263,7 +263,7 @@ async function getCredencialForProvision(reservaId: string): Promise<CredencialF
 async function getItensPendentes(credencialId: string): Promise<ItemRow[]> {
   const { data, error } = await adminClient
     .from("operacional_credencial_itens")
-    .select("id, credencial_id, lock_id_ttlock, status_provisionamento, remote_keyboard_pwd_id, codigo_logico_destino")
+    .select("id, credencial_id, lock_id_ttlock, status_provisionamento, codigo_logico_destino")
     .eq("credencial_id", credencialId)
     .eq("status_provisionamento", "pendente");
   if (error || !Array.isArray(data)) return [];
@@ -273,7 +273,7 @@ async function getItensPendentes(credencialId: string): Promise<ItemRow[]> {
 async function getItensProvisionados(credencialId: string): Promise<ItemRow[]> {
   const { data, error } = await adminClient
     .from("operacional_credencial_itens")
-    .select("id, credencial_id, lock_id_ttlock, status_provisionamento, remote_keyboard_pwd_id, codigo_logico_destino")
+    .select("id, credencial_id, lock_id_ttlock, status_provisionamento, codigo_logico_destino")
     .eq("credencial_id", credencialId)
     .eq("status_provisionamento", "provisionado");
   if (error || !Array.isArray(data)) return [];
@@ -493,8 +493,6 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
           status_provisionamento: "provisionado",
           provisionado_em: now,
           ultimo_erro: null,
-          remote_keyboard_pwd_id: keyboardPwdId,
-          codigo_enviado: passcode!,
         })
         .eq("id", item.id);
       provisionados++;
