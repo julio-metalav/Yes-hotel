@@ -315,7 +315,9 @@ async function sendMessage() {
   const supabase = getSupabase();
   if (!supabase) return;
 
-  if (conv.canal === "whatsapp") {
+  // WhatsApp: usar Edge Function (real/mock). Fallback: se tiver telefone e não for canal "interno", também usar function (robusto contra canal ausente no payload).
+  const useWhatsAppFunction = conv.canal === "whatsapp" || (conv.telefone && conv.canal !== "interno");
+  if (useWhatsAppFunction) {
     const url = getSendMessageFunctionUrl();
     if (!url) {
       if (window.alert) window.alert("Configuração do Supabase indisponível. Não foi possível enviar.");
