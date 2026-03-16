@@ -244,12 +244,19 @@ async function getCredencialPorReserva(reservaId: string): Promise<CredencialRow
 async function getCredencialForProvision(reservaId: string): Promise<CredencialForProvision | null> {
   const normalizedId = String(reservaId ?? "").trim().toLowerCase();
   if (!normalizedId) return null;
+  if (typeof console !== "undefined") console.log("[lifecycle] getCredencialForProvision reservaId=" + normalizedId);
   const { data, error } = await adminClient
     .from("operacional_credenciais_acesso")
     .select("id, reserva_id, status, valido_de, valido_ate, codigo_credencial, provider_tipo")
     .eq("reserva_id", normalizedId)
+    .eq("tipo_credencial", "principal")
+    .limit(1)
     .maybeSingle();
-  if (error || !data) return null;
+  if (error) {
+    if (typeof console !== "undefined") console.warn("[lifecycle] getCredencialForProvision error", error.message);
+    return null;
+  }
+  if (!data) return null;
   return data as CredencialForProvision;
 }
 
