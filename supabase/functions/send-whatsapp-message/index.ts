@@ -1,7 +1,8 @@
 /**
- * Outbound mínimo — MVP 3 Fase 2.
+ * Outbound — MVP 3 Fase 2 + Fase 4.2 Meta Cloud API.
  * Recebe POST com conversa_id e text; valida JWT; insere mensagem (enviando);
- * chama adaptador mock; atualiza mensagem (enviada/falha) e conversa; responde JSON.
+ * chama adapter mock ou Meta Cloud API conforme WHATSAPP_USE_MOCK;
+ * atualiza mensagem (enviada/falha) e conversa; responde JSON.
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -22,6 +23,12 @@ if (!supabaseUrl || !serviceRoleKey) {
 const admin = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
+
+/** Fase 4.2: Meta Cloud API — env vars (uso real quando WHATSAPP_USE_MOCK !== 'true'). */
+const whatsappUseMock = Deno.env.get("WHATSAPP_USE_MOCK") ?? "true";
+const whatsappAccessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
+const whatsappPhoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+const whatsappGraphVersion = Deno.env.get("WHATSAPP_GRAPH_API_VERSION") ?? "v21.0";
 
 const PREVIEW_MAX_LEN = 80;
 
@@ -59,8 +66,10 @@ function parseBody(body: unknown): SendBody {
   return {};
 }
 
+type AdapterResult = { ok: boolean; provider_message_id?: string; error?: string };
+
 /** Adaptador mock: sucesso por padrão; falha se text contiver "__fail__". */
-function mockAdapterSend(telefone: string, text: string): { ok: boolean; provider_message_id?: string; error?: string } {
+function mockAdapterSend(telefone: string, text: string): AdapterResult {
   if (text.includes("__fail__")) {
     return { ok: false, error: "Mock: falha simulada (texto contem __fail__)." };
   }
@@ -68,6 +77,53 @@ function mockAdapterSend(telefone: string, text: string): { ok: boolean; provide
     ok: true,
     provider_message_id: "mock-" + Date.now(),
   };
+}
+
+/** Fase 4.2: Adaptador Meta Cloud API — POST graph.facebook.com/{version}/{PHONE_NUMBER_ID}/messages */
+async function cloudApiAdapterSend(telefone: string, text: string): Promise<AdapterResult> {
+  if (!whatsappAccessToken || !whatsappPhoneNumberId) {
+    return { ok: false, error: "Meta Cloud API: WHATSAPP_ACCESS_TOKEN e WHATSAPP_PHONE_NUMBER_ID obrigatorios." };
+  }
+  const to = telefone.replace(/\D/g, "");
+  if (!to) return { ok: false, error: "Telefone invalido (sem digitos)." };
+
+  const url = `https://graph.facebook.com/${whatsappGraphVersion}/${whatsappPhoneNumberId}/messages`;
+  const body = {
+    messaging_product: "whatsapp",
+    to,
+    type: "text",
+    text: { body: text },
+  };
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${whatsappAccessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      const msg = (data && typeof data === "object" && "error" in data && data.error && typeof data.error === "object" && "message" in data.error)
+        ? String((data.error as { message?: unknown }).message)
+        : `HTTP ${res.status}`;
+      return { ok: false, error: `Meta Cloud API: ${msg}` };
+    }
+
+    const messages = data?.messages;
+    const provider_message_id = Array.isArray(messages) && messages[0] && typeof messages[0].id === "string"
+      ? messages[0].id
+      : undefined;
+
+    return { ok: true, provider_message_id };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Erro de rede ao chamar Meta Cloud API.";
+    return { ok: false, error: message };
+  }
 }
 
 function preview(text: string): string {
@@ -144,7 +200,9 @@ Deno.serve(async (request: Request) => {
     return jsonResponse({ ok: false, error: insertError?.message ?? "Falha ao gravar mensagem." }, 500);
   }
 
-  const result = mockAdapterSend(telefone, text);
+  const result = whatsappUseMock === "true"
+    ? mockAdapterSend(telefone, text)
+    : await cloudApiAdapterSend(telefone, text);
 
   if (result.ok) {
     await admin

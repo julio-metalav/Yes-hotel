@@ -1,14 +1,14 @@
 /**
- * Webhook inbound mínimo (Fase 1) + callback de status entregue/lida (Fase 3).
- * - Inbound: POST com from, messageId, text → localizar ou criar conversa, inserir mensagem, 200.
- * - Status: POST com type='status', provider_message_id, status (entregue|lida|falha) → atualizar status_envio com precedência, 200.
+ * Webhook inbound (Fase 1) + callback status (Fase 3) + Meta Cloud API (Fase 4.2).
+ * - GET: verificação Meta (hub.mode, hub.verify_token, hub.challenge) → 200 + challenge ou 403.
+ * - POST: valida assinatura X-Hub-Signature-256 se WHATSAPP_APP_SECRET; reconhece payload Meta (object/entry) ou fallback teste (from, messageId, text / type=status).
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -22,6 +22,10 @@ const supabase = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
+/** Fase 4.2: Webhook Meta */
+const whatsappWebhookVerifyToken = Deno.env.get("WHATSAPP_WEBHOOK_VERIFY_TOKEN");
+const whatsappAppSecret = Deno.env.get("WHATSAPP_APP_SECRET");
+
 // --- Payload interno normalizado (após adapter)
 interface InboundPayload {
   from: string;
@@ -30,8 +34,8 @@ interface InboundPayload {
   raw?: Record<string, unknown>;
 }
 
-/** Payload interno para callback de status (Fase 3). */
-type StatusValue = "entregue" | "lida" | "falha";
+/** Payload interno para callback de status (Fase 3 + 4.2 enviada da Meta). */
+type StatusValue = "enviada" | "entregue" | "lida" | "falha";
 interface StatusPayload {
   provider_message_id: string;
   status: StatusValue;
@@ -201,7 +205,7 @@ function shouldUpdateStatus(current: string | null, newStatus: StatusValue): boo
 
 /**
  * Adapter payload de status: aceita type='status' ou event='status' com provider_message_id e status.
- * status pode vir como entregue|delivered|entregue, lida|read|lida, falha|failed|falha.
+ * status pode vir como enviada|sent, entregue|delivered, lida|read, falha|failed.
  */
 function parseStatusBody(body: unknown): StatusPayload {
   const o = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
@@ -214,10 +218,11 @@ function parseStatusBody(body: unknown): StatusPayload {
 
   const rawStatus = String(o.status ?? o.delivery_status ?? "").trim().toLowerCase();
   let status: StatusValue;
-  if (rawStatus === "entregue" || rawStatus === "delivered" || rawStatus === "delivery") status = "entregue";
+  if (rawStatus === "enviada" || rawStatus === "sent") status = "enviada";
+  else if (rawStatus === "entregue" || rawStatus === "delivered" || rawStatus === "delivery") status = "entregue";
   else if (rawStatus === "lida" || rawStatus === "read" || rawStatus === "read_at") status = "lida";
   else if (rawStatus === "falha" || rawStatus === "failed" || rawStatus === "error") status = "falha";
-  else throw new Error("status invalido. Use entregue, lida ou falha.");
+  else throw new Error("status invalido. Use enviada, entregue, lida ou falha.");
 
   return { provider_message_id, status };
 }
@@ -253,17 +258,169 @@ function isStatusCallback(body: unknown): boolean {
   return o.type === "status" || o.event === "status" || o.kind === "status";
 }
 
+// --- Fase 4.2: Verificação GET da Meta (hub.mode, hub.verify_token, hub.challenge)
+function handleWebhookGet(request: Request): Response | null {
+  const url = new URL(request.url);
+  const mode = url.searchParams.get("hub.mode");
+  const token = url.searchParams.get("hub.verify_token");
+  const challenge = url.searchParams.get("hub.challenge");
+
+  if (mode !== "subscribe" || !challenge) return null;
+  if (!whatsappWebhookVerifyToken || token !== whatsappWebhookVerifyToken) {
+    return new Response("Forbidden", { status: 403, headers: corsHeaders });
+  }
+  return new Response(challenge, {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "text/plain" },
+  });
+}
+
+// --- Fase 4.2: Validação assinatura X-Hub-Signature-256 (HMAC-SHA256 do body com App Secret)
+async function validateHubSignature(rawBody: string, signatureHeader: string | null): Promise<boolean> {
+  if (!whatsappAppSecret || !signatureHeader || !signatureHeader.startsWith("sha256=")) return false;
+  const expectedHex = signatureHeader.slice(7).toLowerCase().trim();
+
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(whatsappAppSecret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(rawBody),
+  );
+  const actualHex = Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  if (expectedHex.length !== actualHex.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expectedHex.length; i++) {
+    diff |= expectedHex.charCodeAt(i) ^ actualHex.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+// --- Fase 4.2: Detectar payload real da Meta (object + entry)
+function isMetaPayload(body: unknown): body is { object: string; entry?: unknown[] } {
+  const o = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  return o.object === "whatsapp_business_account" && Array.isArray(o.entry);
+}
+
+// --- Fase 4.2: Mapear status Meta (sent -> enviada, delivered -> entregue, read -> lida, failed -> falha)
+function metaStatusToInternal(meta: string): StatusValue | null {
+  const s = String(meta).toLowerCase();
+  if (s === "sent") return "enviada";
+  if (s === "delivered") return "entregue";
+  if (s === "read") return "lida";
+  if (s === "failed") return "falha";
+  return null;
+}
+
+// --- Fase 4.2: Extrair StatusPayload[] e InboundPayload[] do body Meta
+function extractMetaPayloads(body: { object?: string; entry?: Array<{ changes?: Array<{ value?: Record<string, unknown> }> }> }): {
+  statuses: StatusPayload[];
+  inbounds: InboundPayload[];
+} {
+  const statuses: StatusPayload[] = [];
+  const inbounds: InboundPayload[] = [];
+  const entries = body.entry ?? [];
+
+  for (const entry of entries) {
+    const changes = entry.changes ?? [];
+    for (const change of changes) {
+      const value = change.value;
+      if (!value || typeof value !== "object") continue;
+
+      const valueStatuses = value.statuses;
+      if (Array.isArray(valueStatuses)) {
+        for (const st of valueStatuses) {
+          const id = st?.id;
+          const status = st?.status;
+          if (id && typeof id === "string" && status) {
+            const internal = metaStatusToInternal(String(status));
+            if (internal) statuses.push({ provider_message_id: id, status: internal });
+          }
+        }
+      }
+
+      const valueMessages = value.messages;
+      if (Array.isArray(valueMessages)) {
+        for (const msg of valueMessages) {
+          if (!msg || typeof msg !== "object") continue;
+          const from = (msg as Record<string, unknown>).from;
+          const id = (msg as Record<string, unknown>).id;
+          const type = (msg as Record<string, unknown>).type;
+          const textObj = (msg as Record<string, unknown>).text;
+          const fromStr = from != null ? String(from) : "";
+          const idStr = id != null ? String(id) : "";
+          let text = "(mensagem sem texto)";
+          if (type === "text" && textObj && typeof textObj === "object" && "body" in textObj) {
+            text = String((textObj as { body?: unknown }).body ?? "").trim() || text;
+          }
+          if (fromStr && idStr) {
+            inbounds.push({
+              from: normalizePhone(fromStr),
+              messageId: idStr,
+              text,
+              raw: msg as Record<string, unknown>,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return { statuses, inbounds };
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  if (request.method === "GET") {
+    const getResponse = handleWebhookGet(request);
+    if (getResponse) return getResponse;
+    return jsonResponse({ error: "GET sem parametros de verificacao ou token invalido." }, 400);
+  }
+
   if (request.method !== "POST") {
-    return jsonResponse({ error: "Metodo permitido: POST." }, 405);
+    return jsonResponse({ error: "Metodo permitido: GET (verificacao) ou POST." }, 405);
+  }
+
+  let rawBody: string;
+  try {
+    rawBody = await request.text();
+  } catch {
+    return jsonResponse({ error: "Falha ao ler body." }, 400);
+  }
+
+  if (whatsappAppSecret) {
+    const signature = request.headers.get("X-Hub-Signature-256");
+    const valid = await validateHubSignature(rawBody, signature);
+    if (!valid) {
+      return new Response("Unauthorized", { status: 401, headers: corsHeaders });
+    }
+  }
+
+  let body: unknown;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    return jsonResponse({ error: "Body JSON invalido." }, 400);
   }
 
   try {
-    const body = await request.json();
+    if (isMetaPayload(body)) {
+      const { statuses, inbounds } = extractMetaPayloads(body);
+      for (const payload of statuses) await handleStatusCallback(payload);
+      for (const payload of inbounds) await handleInbound(payload);
+      return emptyOk();
+    }
 
     if (isStatusCallback(body)) {
       const payload = parseStatusBody(body);
