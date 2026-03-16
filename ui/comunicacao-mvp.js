@@ -300,6 +300,13 @@ async function handleQuickAction(action, conv) {
   }
 }
 
+function getSendMessageFunctionUrl() {
+  const config = window.YES_HOTEL_SUPABASE_CONFIG;
+  const base = config && typeof config.url === "string" ? config.url.trim() : "";
+  if (!base) return "";
+  return base.replace(/\/$/, "") + "/functions/v1/send-whatsapp-message";
+}
+
 async function sendMessage() {
   const text = (chatInputEl?.value || "").trim();
   if (!text || !selectedConversaId) return;
@@ -307,6 +314,58 @@ async function sendMessage() {
   if (!conv) return;
   const supabase = getSupabase();
   if (!supabase) return;
+
+  if (conv.canal === "whatsapp") {
+    const url = getSendMessageFunctionUrl();
+    if (!url) {
+      if (window.alert) window.alert("Configuração do Supabase indisponível. Não foi possível enviar.");
+      return;
+    }
+    let token = null;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token;
+    } catch (_) {}
+    if (!token) {
+      if (window.alert) window.alert("Sessão expirada. Faça login novamente.");
+      return;
+    }
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + token,
+        },
+        body: JSON.stringify({ conversa_id: selectedConversaId, text }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = data.error || "Erro ao enviar (" + res.status + ").";
+        if (window.alert) window.alert(msg);
+        return;
+      }
+      if (data.ok === false) {
+        if (window.alert) window.alert(data.error || "Falha no envio.");
+        chatInputEl.value = "";
+        const msgs = await loadMensagens(selectedConversaId);
+        renderMessages(msgs);
+        renderConversasList();
+        return;
+      }
+      chatInputEl.value = "";
+      const msgs = await loadMensagens(selectedConversaId);
+      renderMessages(msgs);
+      conv.ultima_mensagem_preview = text.length > 80 ? text.slice(0, 77) + "..." : text;
+      renderConversasList();
+      return;
+    } catch (err) {
+      console.warn("[comunicacao] sendMessage fetch error", err);
+      if (window.alert) window.alert("Erro de rede ao enviar. Tente novamente.");
+      return;
+    }
+  }
+
   const preview = text.length > 80 ? text.slice(0, 77) + "..." : text;
   const now = new Date().toISOString();
   const { data: inserted, error: errInsert } = await supabase
