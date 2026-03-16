@@ -1,7 +1,7 @@
 /**
- * Webhook inbound mínimo — MVP 3 Fase 1.
- * Recebe POST do provedor (ou teste manual), normaliza telefone, localiza ou cria conversa,
- * insere mensagem com idempotência por provider_message_id, atualiza conversa, responde 200.
+ * Webhook inbound mínimo (Fase 1) + callback de status entregue/lida (Fase 3).
+ * - Inbound: POST com from, messageId, text → localizar ou criar conversa, inserir mensagem, 200.
+ * - Status: POST com type='status', provider_message_id, status (entregue|lida|falha) → atualizar status_envio com precedência, 200.
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -28,6 +28,13 @@ interface InboundPayload {
   messageId: string;
   text: string;
   raw?: Record<string, unknown>;
+}
+
+/** Payload interno para callback de status (Fase 3). */
+type StatusValue = "entregue" | "lida" | "falha";
+interface StatusPayload {
+  provider_message_id: string;
+  status: StatusValue;
 }
 
 const PREVIEW_MAX_LEN = 80;
@@ -174,6 +181,78 @@ async function handleInbound(payload: InboundPayload): Promise<void> {
   });
 }
 
+/** Ordem de precedência: enviada < entregue < lida. falha é caso separado. */
+function getStatusRank(s: string | null): number {
+  if (!s) return 0;
+  if (s === "enviada" || s === "enviando" || s === "local" || s === "mock_enviado") return 1;
+  if (s === "entregue") return 2;
+  if (s === "lida") return 3;
+  if (s === "falha") return 0;
+  return 0;
+}
+
+/** Só atualiza se o novo status for igual ou mais avançado; não regride. falha pode sobrescrever enviada/enviando. */
+function shouldUpdateStatus(current: string | null, newStatus: StatusValue): boolean {
+  const curRank = getStatusRank(current);
+  if (newStatus === "falha") return curRank <= 1;
+  const newRank = getStatusRank(newStatus);
+  return newRank >= curRank;
+}
+
+/**
+ * Adapter payload de status: aceita type='status' ou event='status' com provider_message_id e status.
+ * status pode vir como entregue|delivered|entregue, lida|read|lida, falha|failed|falha.
+ */
+function parseStatusBody(body: unknown): StatusPayload {
+  const o = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const isStatus = o.type === "status" || o.event === "status" || o.kind === "status";
+  if (!isStatus) throw new Error("Payload de status deve ter type, event ou kind igual a 'status'.");
+
+  const pid = o.provider_message_id ?? o.message_id ?? o.id ?? "";
+  const provider_message_id = String(pid).trim();
+  if (!provider_message_id) throw new Error("provider_message_id obrigatorio no callback de status.");
+
+  const rawStatus = String(o.status ?? o.delivery_status ?? "").trim().toLowerCase();
+  let status: StatusValue;
+  if (rawStatus === "entregue" || rawStatus === "delivered" || rawStatus === "delivery") status = "entregue";
+  else if (rawStatus === "lida" || rawStatus === "read" || rawStatus === "read_at") status = "lida";
+  else if (rawStatus === "falha" || rawStatus === "failed" || rawStatus === "error") status = "falha";
+  else throw new Error("status invalido. Use entregue, lida ou falha.");
+
+  return { provider_message_id, status };
+}
+
+async function handleStatusCallback(payload: StatusPayload): Promise<void> {
+  const { provider_message_id, status } = payload;
+
+  const { data: msg, error: selError } = await supabase
+    .from("comunicacao_mensagens")
+    .select("id, conversa_id, status_envio")
+    .eq("provider_message_id", provider_message_id)
+    .limit(1)
+    .maybeSingle();
+
+  if (selError || !msg) return;
+
+  if (!shouldUpdateStatus(msg.status_envio, status)) return;
+
+  await supabase
+    .from("comunicacao_mensagens")
+    .update({ status_envio: status })
+    .eq("id", msg.id);
+
+  await supabase.from("comunicacao_eventos").insert({
+    conversa_id: msg.conversa_id,
+    tipo_evento: "status_atualizado",
+    payload: { provider_message_id, status },
+  });
+}
+
+function isStatusCallback(body: unknown): boolean {
+  const o = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  return o.type === "status" || o.event === "status" || o.kind === "status";
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -185,13 +264,20 @@ Deno.serve(async (request: Request) => {
 
   try {
     const body = await request.json();
+
+    if (isStatusCallback(body)) {
+      const payload = parseStatusBody(body);
+      await handleStatusCallback(payload);
+      return emptyOk();
+    }
+
     const payload = parseInboundBody(body);
     await handleInbound(payload);
     return emptyOk();
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erro inesperado no webhook.";
     console.error("[webhook-whatsapp-inbound]", message, err);
-    if (message.includes("obrigatorio")) {
+    if (message.includes("obrigatorio") || message.includes("invalido") || message.includes("deve ter")) {
       return jsonResponse({ error: message }, 400);
     }
     return jsonResponse({ error: message }, 500);
