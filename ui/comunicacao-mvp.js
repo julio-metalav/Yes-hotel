@@ -120,17 +120,28 @@ function filterConversas() {
   });
 }
 
+function statusLabel(s) {
+  if (s === "resolvida") return "Resolvida";
+  if (s === "aguardando_hospede") return "Aguardando hóspede";
+  return s === "aberta" ? "Aberta" : (s || "—");
+}
+
 function renderConversasList() {
   if (!conversasListEl) return;
   const list = filterConversas();
   conversasListEl.innerHTML = list
     .map(
-      (c) => `
-    <li data-conversa-id="${escapeHtml(c.id)}" class="${c.id === selectedConversaId ? "selected" : ""}">
+      (c) => {
+        const isSelected = c.id === selectedConversaId;
+        const isResolvida = c.status === "resolvida";
+        const classes = [isSelected ? "selected" : "", isResolvida ? "status-resolvida" : ""].filter(Boolean).join(" ");
+        return `
+    <li data-conversa-id="${escapeHtml(c.id)}" class="${classes}">
       <div class="conv-preview-name">${escapeHtml(nomeExibicaoConversa(c))}</div>
-      <div class="conv-preview-meta">Apto ${escapeHtml(apartamentoConversa(c) || "—")} · ${escapeHtml(c.status)}</div>
+      <div class="conv-preview-meta">Apto ${escapeHtml(apartamentoConversa(c) || "—")} · <span class="conv-status">${escapeHtml(statusLabel(c.status))}</span></div>
       <div class="conv-preview-msg">${escapeHtml(c.ultima_mensagem_preview || "")}</div>
-    </li>`
+    </li>`;
+      }
     )
     .join("");
   conversasListEl.querySelectorAll("li").forEach((li) => {
@@ -166,7 +177,10 @@ async function selectConversa(id) {
       chatEmptyEl?.classList.add("hidden");
       chatActiveEl?.classList.remove("hidden");
       if (chatHeaderNameEl) chatHeaderNameEl.textContent = nomeExibicaoConversa(conv);
-      if (chatHeaderMetaEl) chatHeaderMetaEl.textContent = `Apto ${apartamentoConversa(conv) || "—"} · ${conv.telefone || "—"}`;
+      if (chatHeaderMetaEl) {
+        chatHeaderMetaEl.textContent = `Apto ${apartamentoConversa(conv) || "—"} · ${conv.telefone || "—"} · ${statusLabel(conv.status)}`;
+        chatHeaderMetaEl.classList.toggle("status-resolvida", conv.status === "resolvida");
+      }
       const msgs = await loadMensagens(id);
       renderMessages(msgs);
       const reserva = conv.reserva_id ? await loadResumoReserva(conv.reserva_id) : null;
@@ -230,7 +244,9 @@ function renderResumo(reserva, conv) {
   if (resumoEmptyEl) resumoEmptyEl.classList.toggle("hidden", !!hasResumo);
   if (resumoContentEl) resumoContentEl.classList.toggle("hidden", !hasResumo);
   if (!hasResumo) return;
+  const resolvida = conv && conv.status === "resolvida";
   resumoListEl.innerHTML = `
+    <dt>Status</dt><dd class="${resolvida ? "resumo-status-resolvida" : ""}">${escapeHtml(statusLabel(conv.status))}</dd>
     <dt>Apartamento</dt><dd>${escapeHtml(reserva.apartamento)}</dd>
     <dt>Check-in / Check-out</dt><dd>${escapeHtml(reserva.checkIn)} — ${escapeHtml(reserva.checkOut)}</dd>
     <dt>Hóspede principal</dt><dd>${escapeHtml(reserva.hospedePrincipal)}</dd>
@@ -240,15 +256,19 @@ function renderResumo(reserva, conv) {
     <dt>Café</dt><dd>${escapeHtml(reserva.cafe)}</dd>
     <dt>Observações</dt><dd>${escapeHtml(reserva.observacoes || "—")}</dd>
   `;
-  resumoActionsBtnsEl.innerHTML = `
+  if (resolvida) {
+    resumoActionsBtnsEl.innerHTML = `<p class="resumo-conversa-resolvida">Conversa marcada como resolvida.</p>`;
+  } else {
+    resumoActionsBtnsEl.innerHTML = `
     <button type="button" class="secondary-button" data-action="reenviar_fnrh">Reenviar link FNRH</button>
     <button type="button" class="secondary-button" data-action="reenviar_instrucoes">Reenviar instruções de acesso</button>
     <button type="button" class="secondary-button" data-action="reenviar_senha">Reenviar senha</button>
     <button type="button" class="secondary-button" data-action="marcar_resolvida">Marcar conversa como resolvida</button>
   `;
-  resumoActionsBtnsEl.querySelectorAll("button").forEach((btn) => {
-    btn.addEventListener("click", () => handleQuickAction(btn.dataset.action, conv));
-  });
+    resumoActionsBtnsEl.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => handleQuickAction(btn.dataset.action, conv));
+    });
+  }
 }
 
 async function handleQuickAction(action, conv) {
@@ -259,6 +279,15 @@ async function handleQuickAction(action, conv) {
       if (!error) {
         conv.status = "resolvida";
         renderConversasList();
+        if (selectedConversaId === conv.id) {
+          if (chatHeaderMetaEl) {
+            chatHeaderMetaEl.textContent = `Apto ${apartamentoConversa(conv) || "—"} · ${conv.telefone || "—"} · ${statusLabel(conv.status)}`;
+            chatHeaderMetaEl.classList.add("status-resolvida");
+          }
+          const reserva = conv.reserva_id ? await loadResumoReserva(conv.reserva_id) : null;
+          renderResumo(reserva, conv);
+        }
+        closeResumoDrawer();
         if (window.alert) window.alert("Conversa marcada como resolvida.");
       } else {
         if (window.alert) window.alert("Erro ao atualizar: " + (error.message || "tente novamente."));
@@ -350,8 +379,10 @@ function openResumoDrawer() {
     if (!reserva) {
       resumoDrawerBody.innerHTML = "<p class=\"resumo-empty-text\">Reserva não encontrada.</p>";
     } else {
+      const resolvida = conv.status === "resolvida";
       resumoDrawerBody.innerHTML = `
         <dl class="resumo-list">
+          <dt>Status</dt><dd class="${resolvida ? "resumo-status-resolvida" : ""}">${escapeHtml(statusLabel(conv.status))}</dd>
           <dt>Apartamento</dt><dd>${escapeHtml(reserva.apartamento)}</dd>
           <dt>Check-in / Check-out</dt><dd>${escapeHtml(reserva.checkIn)} — ${escapeHtml(reserva.checkOut)}</dd>
           <dt>Hóspede principal</dt><dd>${escapeHtml(reserva.hospedePrincipal)}</dd>
@@ -363,16 +394,20 @@ function openResumoDrawer() {
         <div class="resumo-actions">
           <h4 class="resumo-actions-title">Ações rápidas</h4>
           <div class="resumo-actions-btns">
+            ${resolvida ? '<p class="resumo-conversa-resolvida">Conversa marcada como resolvida.</p>' : `
             <button type="button" class="secondary-button" data-action="reenviar_fnrh">Reenviar link FNRH</button>
             <button type="button" class="secondary-button" data-action="reenviar_instrucoes">Reenviar instruções</button>
             <button type="button" class="secondary-button" data-action="reenviar_senha">Reenviar senha</button>
             <button type="button" class="secondary-button" data-action="marcar_resolvida">Marcar como resolvida</button>
+            `}
           </div>
         </div>
       `;
-      resumoDrawerBody.querySelectorAll("[data-action]").forEach((btn) => {
-        btn.addEventListener("click", () => handleQuickAction(btn.dataset.action, conv));
-      });
+      if (!resolvida) {
+        resumoDrawerBody.querySelectorAll("[data-action]").forEach((btn) => {
+          btn.addEventListener("click", () => handleQuickAction(btn.dataset.action, conv));
+        });
+      }
     }
     resumoDrawer?.classList.remove("hidden");
     drawerBackdrop?.classList.remove("hidden");

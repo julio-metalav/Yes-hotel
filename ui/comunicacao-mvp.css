@@ -236,6 +236,33 @@ body {
   text-overflow: ellipsis;
 }
 
+.conversas-list li.status-resolvida .conv-preview-meta {
+  color: var(--muted);
+}
+
+.conversas-list li.status-resolvida .conv-status {
+  font-weight: 600;
+  color: var(--success, #0a7b0a);
+}
+
+.chat-header-meta.status-resolvida {
+  font-weight: 600;
+  color: var(--success, #0a7b0a);
+}
+
+.resumo-status-resolvida {
+  font-weight: 600;
+  color: var(--success, #0a7b0a);
+}
+
+.resumo-conversa-resolvida {
+  margin: 0;
+  padding: 10px 0;
+  font-size: 14px;
+  color: var(--success, #0a7b0a);
+  font-weight: 500;
+}
+
 /* Coluna 2: Chat */
 .chat-col {
   display: flex;
