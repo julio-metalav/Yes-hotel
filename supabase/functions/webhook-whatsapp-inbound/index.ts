@@ -32,6 +32,12 @@ interface InboundPayload {
   messageId: string;
   text: string;
   raw?: Record<string, unknown>;
+  /** Meta: value.contacts (para auditabilidade). */
+  raw_contacts?: unknown;
+  /** Origem do número usado: wa_id ou from. */
+  chosen_phone_source?: "wa_id" | "from";
+  /** Número efetivamente usado (já normalizado), para metadata. */
+  chosen_phone?: string;
 }
 
 /** Payload interno para callback de status (Fase 3 + 4.2 enviada da Meta). */
@@ -97,7 +103,7 @@ function preview(text: string): string {
 }
 
 async function handleInbound(payload: InboundPayload): Promise<void> {
-  const { from, messageId, text, raw } = payload;
+  const { from, messageId, text, raw, raw_contacts, chosen_phone_source, chosen_phone } = payload;
 
   // 1. Idempotência
   const { data: existingMsg } = await supabase
@@ -153,8 +159,16 @@ async function handleInbound(payload: InboundPayload): Promise<void> {
     }
   }
 
-  // 3. Inserir mensagem
-  const metadata = raw ? { raw } : null;
+  // 3. Inserir mensagem (metadata com raw + origem do telefone para auditabilidade)
+  const metadata = raw
+    ? {
+        raw,
+        raw_message: raw,
+        raw_contacts: raw_contacts ?? undefined,
+        chosen_phone_source: chosen_phone_source ?? "from",
+        chosen_phone: chosen_phone ?? from,
+      }
+    : null;
   const { error: msgError } = await supabase.from("comunicacao_mensagens").insert({
     conversa_id: conversaId,
     direcao: "entrada",
@@ -348,8 +362,10 @@ function extractMetaPayloads(body: { object?: string; entry?: Array<{ changes?: 
       }
 
       const valueMessages = value.messages;
+      const valueContacts = value.contacts;
       if (Array.isArray(valueMessages)) {
-        for (const msg of valueMessages) {
+        for (let i = 0; i < valueMessages.length; i++) {
+          const msg = valueMessages[i];
           if (!msg || typeof msg !== "object") continue;
           const from = (msg as Record<string, unknown>).from;
           const id = (msg as Record<string, unknown>).id;
@@ -361,14 +377,30 @@ function extractMetaPayloads(body: { object?: string; entry?: Array<{ changes?: 
           if (type === "text" && textObj && typeof textObj === "object" && "body" in textObj) {
             text = String((textObj as { body?: unknown }).body ?? "").trim() || text;
           }
-          if (fromStr && idStr) {
-            inbounds.push({
-              from: normalizePhone(fromStr),
-              messageId: idStr,
-              text,
-              raw: msg as Record<string, unknown>,
-            });
+          if (!fromStr || !idStr) continue;
+          // Preferir wa_id do contato (canônico) quando existir; fallback para message.from
+          const contact = Array.isArray(valueContacts) && valueContacts[i] && typeof valueContacts[i] === "object"
+            ? (valueContacts[i] as Record<string, unknown>)
+            : null;
+          const waId = contact?.wa_id != null ? String(contact.wa_id).trim() : "";
+          let phone: string;
+          let source: "wa_id" | "from";
+          if (waId) {
+            phone = normalizePhone(waId);
+            source = "wa_id";
+          } else {
+            phone = normalizePhone(fromStr);
+            source = "from";
           }
+          inbounds.push({
+            from: phone,
+            messageId: idStr,
+            text,
+            raw: msg as Record<string, unknown>,
+            raw_contacts: valueContacts ?? undefined,
+            chosen_phone_source: source,
+            chosen_phone: phone,
+          });
         }
       }
     }
