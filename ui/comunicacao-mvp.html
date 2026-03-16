@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yes Hotel - Central de Comunicação</title>
+    <link rel="stylesheet" href="./comunicacao-mvp.css" />
+  </head>
+  <body>
+    <main class="app-shell comunicacao-shell">
+      <header class="page-header">
+        <p class="eyebrow">Yes Hotel</p>
+        <h1>Central de Comunicação</h1>
+        <p class="page-description">
+          Conversas com hóspedes e contexto da reserva. Preparado para integração com WhatsApp.
+        </p>
+      </header>
+
+      <section class="access-state hidden" id="access-state"></section>
+
+      <section class="panel comunicacao-panel hidden" id="content-panel">
+        <div class="session-bar">
+          <div id="session-user"></div>
+          <div class="session-actions">
+            <a class="secondary-link" href="./recepcao-mvp.html">Voltar para recepção</a>
+            <button class="secondary-button" id="logout-button" type="button">Sair</button>
+          </div>
+        </div>
+
+        <div class="comunicacao-layout">
+          <!-- Coluna 1: Lista de conversas -->
+          <aside class="comunicacao-col conversas-col" id="conversas-col">
+            <div class="conversas-header">
+              <input type="search" class="conversas-search" id="conversas-search" placeholder="Buscar conversas..." aria-label="Buscar" />
+              <select class="conversas-filter" id="conversas-filter" aria-label="Filtrar por status">
+                <option value="all">Todas</option>
+                <option value="aberta">Abertas</option>
+                <option value="aguardando_hospede">Aguardando hóspede</option>
+                <option value="resolvida">Resolvidas</option>
+              </select>
+            </div>
+            <div class="conversas-loading hidden" id="conversas-loading">Carregando conversas...</div>
+            <ul class="conversas-list" id="conversas-list" aria-label="Lista de conversas"></ul>
+            <div class="conversas-empty hidden" id="conversas-empty">Nenhuma conversa encontrada.</div>
+          </aside>
+
+          <!-- Coluna 2: Conversa ativa -->
+          <section class="comunicacao-col chat-col" id="chat-col">
+            <div class="chat-empty hidden" id="chat-empty">
+              <p class="chat-empty-text">Selecione uma conversa.</p>
+            </div>
+            <div class="chat-active hidden" id="chat-active">
+              <header class="chat-header">
+                <div class="chat-header-info">
+                  <h2 class="chat-header-name" id="chat-header-name">—</h2>
+                  <p class="chat-header-meta" id="chat-header-meta">Apto — · —</p>
+                </div>
+                <div class="chat-header-actions">
+                  <button type="button" class="secondary-button chat-detalhes-btn" id="chat-detalhes-btn" aria-label="Ver detalhes da reserva">Detalhes</button>
+                </div>
+              </header>
+              <div class="chat-messages-loading hidden" id="chat-messages-loading">Carregando mensagens...</div>
+              <div class="chat-messages" id="chat-messages"></div>
+              <div class="chat-composer">
+                <div class="chat-composer-row">
+                  <textarea class="chat-input" id="chat-input" placeholder="Digite sua mensagem..." rows="2" aria-label="Mensagem"></textarea>
+                  <div class="chat-composer-buttons">
+                    <button type="button" class="secondary-button chat-template-btn" id="chat-template-btn" title="Usar template">Template</button>
+                    <button type="button" class="primary-button chat-send-btn" id="chat-send-btn">Enviar</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Coluna 3 (desktop): Resumo da hospedagem -->
+          <aside class="comunicacao-col resumo-col" id="resumo-col">
+            <div class="resumo-header">
+              <h3 class="resumo-title">Resumo da hospedagem</h3>
+            </div>
+            <div class="resumo-empty hidden" id="resumo-empty">
+              <p class="resumo-empty-text">Selecione uma conversa vinculada a uma reserva para ver o resumo.</p>
+            </div>
+            <div class="resumo-content hidden" id="resumo-content">
+              <dl class="resumo-list" id="resumo-list"></dl>
+              <div class="resumo-actions">
+                <h4 class="resumo-actions-title">Ações rápidas</h4>
+                <div class="resumo-actions-btns" id="resumo-actions-btns"></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <!-- Mobile: drawer de detalhes -->
+        <aside class="comunicacao-drawer hidden" id="resumo-drawer" aria-label="Detalhes da reserva">
+          <div class="comunicacao-drawer-header">
+            <h3>Detalhes da reserva</h3>
+            <button type="button" class="drawer-close" id="drawer-close" aria-label="Fechar">Fechar</button>
+          </div>
+          <div class="comunicacao-drawer-body" id="resumo-drawer-body"></div>
+        </aside>
+        <div class="comunicacao-drawer-backdrop hidden" id="drawer-backdrop" aria-hidden="true"></div>
+      </section>
+    </main>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script defer src="./yes-supabase-config.js"></script>
+    <script defer src="./yes-supabase-auth.js"></script>
+    <script defer src="./comunicacao-mvp.js"></script>
+  </body>
+</html>
