@@ -186,15 +186,15 @@ type CredencialRow = {
   last_sync_error?: string | null;
 };
 
-/** Credencial com campos necessários para provisionamento TTLock. */
+/** Credencial com campos necessários para provisionamento TTLock (apenas colunas do schema base 0006). */
 type CredencialForProvision = {
   id: string;
   reserva_id: string;
   status: string;
   valido_de: string;
   valido_ate: string;
-  codigo_credencial: string | null;
-  provider_tipo: string | null;
+  codigo_credencial?: string | null;
+  provider_tipo?: string | null;
 };
 
 type ItemRow = {
@@ -247,7 +247,7 @@ async function getCredencialForProvision(reservaId: string): Promise<CredencialF
   if (typeof console !== "undefined") console.log("[lifecycle] getCredencialForProvision reservaId=" + normalizedId);
   const { data, error } = await adminClient
     .from("operacional_credenciais_acesso")
-    .select("id, reserva_id, status, valido_de, valido_ate, codigo_credencial, provider_tipo")
+    .select("id, reserva_id, status, valido_de, valido_ate")
     .eq("reserva_id", normalizedId)
     .eq("tipo_credencial", "principal")
     .limit(1)
@@ -428,13 +428,9 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     });
   }
 
-  let passcode = credencial.codigo_credencial;
+  let passcode = credencial.codigo_credencial ?? null;
   if (!passcode) {
     passcode = generateTemporaryPasscode();
-    await adminClient
-      .from("operacional_credenciais_acesso")
-      .update({ codigo_credencial: passcode, provider_tipo: "ttlock_passcode" })
-      .eq("id", credencial.id);
   }
 
   await adminClient
@@ -461,12 +457,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     }
     await adminClient
       .from("operacional_credenciais_acesso")
-      .update({
-        status: falhas === itens.length ? "falhou" : "parcial",
-        sync_status: "failed",
-        last_sync_attempt_at: now,
-        last_sync_error: msg,
-      })
+      .update({ status: falhas === itens.length ? "falhou" : "parcial" })
       .eq("id", credencial.id);
     return jsonResponse({
       ok: true,
@@ -522,17 +513,9 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
   if (falhas > 0 && provisionados > 0) statusFinal = "parcial";
   else if (falhas === itens.length) statusFinal = "falhou";
 
-  const syncStatus: "ok" | "partial" | "failed" = falhas === 0 ? "ok" : provisionados > 0 ? "partial" : "failed";
-  const lastSyncError = erros.length > 0 ? erros.slice(0, 3).join("; ") : null;
-
   await adminClient
     .from("operacional_credenciais_acesso")
-    .update({
-      status: statusFinal,
-      sync_status: syncStatus,
-      last_sync_attempt_at: now,
-      last_sync_error: lastSyncError,
-    })
+    .update({ status: statusFinal })
     .eq("id", credencial.id);
 
   return jsonResponse({
