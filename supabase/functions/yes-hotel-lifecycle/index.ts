@@ -87,7 +87,12 @@ async function ensureCallerAllowed(request: Request): Promise<void> {
 }
 
 function isTtlockAvailable(): boolean {
-  return !!(ttlockClientId && ttlockClientSecret && ttlockUsername && ttlockPassword);
+  return !!(
+    ttlockClientId.trim() &&
+    ttlockClientSecret.trim() &&
+    ttlockUsername.trim() &&
+    ttlockPassword.trim()
+  );
 }
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
@@ -95,11 +100,14 @@ let cachedToken: { token: string; expiresAt: number } | null = null;
 async function getTtlockToken(): Promise<string> {
   if (!isTtlockAvailable()) throw new Error("TTLock não configurado (variáveis de ambiente).");
   if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.token;
-  const passwordMd5 = String((md5 as (s: string) => string)(ttlockPassword)).toLowerCase();
+  // TTLOCK_USERNAME = conta do app TTLock (não do portal desenvolvedor). TTLOCK_PASSWORD = texto puro (enviamos MD5).
+  const username = ttlockUsername.trim();
+  const passwordPlain = ttlockPassword.trim();
+  const passwordMd5 = String((md5 as (s: string) => string)(passwordPlain)).toLowerCase();
   const body = new URLSearchParams({
     client_id: ttlockClientId,
     client_secret: ttlockClientSecret,
-    username: ttlockUsername,
+    username,
     password: passwordMd5,
     grant_type: "password",
   });
@@ -109,11 +117,18 @@ async function getTtlockToken(): Promise<string> {
     body: body.toString(),
   });
   const data = (await res.json()) as { access_token?: string; expires_in?: number; errcode?: number; errmsg?: string };
+  if (typeof console !== "undefined") {
+    console.log("[lifecycle] TTLock token res.status=" + res.status + " errcode=" + (data.errcode ?? "n/a") + " errmsg=" + (data.errmsg ?? "n/a"));
+  }
   if (!res.ok || data.errcode !== undefined && data.errcode !== 0) {
+    if (typeof console !== "undefined") console.warn("[lifecycle] TTLock token FAIL body=" + JSON.stringify({ ...data, access_token: data.access_token ? "***" : undefined }));
     throw new Error(data.errmsg ?? `TTLock token: ${res.status}`);
   }
   const token = data.access_token;
-  if (!token) throw new Error("TTLock: resposta sem access_token");
+  if (!token) {
+    if (typeof console !== "undefined") console.warn("[lifecycle] TTLock token no access_token body=" + JSON.stringify({ ...data, access_token: "***" }));
+    throw new Error("TTLock: resposta sem access_token");
+  }
   const expiresIn = typeof data.expires_in === "number" ? data.expires_in : 7776000;
   cachedToken = { token, expiresAt: Date.now() + (expiresIn - 60) * 1000 };
   return token;
@@ -168,10 +183,15 @@ async function ttlockAddKeyboardPassword(
     body: JSON.stringify(body),
   });
   const data = (await res.json()) as { keyboardPwdId?: number; errcode?: number; errmsg?: string };
+  if (typeof console !== "undefined") {
+    console.log("[lifecycle] TTLock add passcode res.status=" + res.status + " errcode=" + (data.errcode ?? "n/a") + " errmsg=" + (data.errmsg ?? "n/a") + " keyboardPwdId=" + (data.keyboardPwdId ?? "n/a"));
+  }
   if (!res.ok || (data.errcode != null && data.errcode !== 0)) {
+    if (typeof console !== "undefined") console.warn("[lifecycle] TTLock add passcode FAIL body=" + JSON.stringify(data));
     throw new Error(data.errmsg ?? `Add passcode: ${res.status}`);
   }
   if (typeof data.keyboardPwdId !== "number") {
+    if (typeof console !== "undefined") console.warn("[lifecycle] TTLock add passcode no keyboardPwdId body=" + JSON.stringify(data));
     throw new Error("TTLock add passcode: resposta sem keyboardPwdId");
   }
   return data.keyboardPwdId;
@@ -446,6 +466,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
   const now = NOW();
 
   if (!isTtlockAvailable()) {
+    if (typeof console !== "undefined") console.warn("[lifecycle] TTLock indisponível: env CLIENT_ID=" + (!!ttlockClientId) + " SECRET=" + (!!ttlockClientSecret) + " USER=" + (!!ttlockUsername) + " PWD=" + (!!ttlockPassword));
     const msg = "TTLock não configurado (variáveis de ambiente).";
     erros.push(msg);
     for (const item of itens) {
@@ -498,6 +519,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
       provisionados++;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (typeof console !== "undefined") console.warn("[lifecycle] TTLock provision item FAIL", item.codigo_logico_destino, "error=" + msg, e instanceof Error ? e.stack : String(e));
       erros.push(`${item.codigo_logico_destino}: ${msg}`);
       await adminClient
         .from("operacional_credencial_itens")
