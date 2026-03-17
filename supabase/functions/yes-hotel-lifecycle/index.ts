@@ -525,6 +525,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
           status_provisionamento: "provisionado",
           provisionado_em: now,
           ultimo_erro: null,
+          remote_keyboard_pwd_id: keyboardPwdId,
         })
         .eq("id", item.id);
       provisionados++;
