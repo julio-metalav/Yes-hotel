@@ -219,6 +219,7 @@ export class TtlockClient {
   /**
    * Deleta passcode na fechadura (via gateway, deleteType=2).
    * Usado para revogação de acesso.
+   * API TTLock exige application/x-www-form-urlencoded (não JSON).
    */
   async deleteKeyboardPassword(
     params: Omit<TtlockKeyboardPwdDeleteParams, "deleteType" | "date">,
@@ -233,14 +234,14 @@ export class TtlockClient {
     const lockId = typeof params.lockId === "string" ? parseInt(params.lockId, 10) : params.lockId;
     const date = Date.now();
 
-    const body = {
+    const body = new URLSearchParams({
       clientId: this.config.clientId,
       accessToken: token,
-      lockId,
-      keyboardPwdId: params.keyboardPwdId,
-      deleteType: 2,
-      date,
-    };
+      lockId: String(lockId),
+      keyboardPwdId: String(params.keyboardPwdId),
+      deleteType: "2",
+      date: String(date),
+    });
 
     const url = `${this.config.apiBaseUrl}/v3/keyboardPwd/delete`;
     const controller = new AbortController();
@@ -249,8 +250,8 @@ export class TtlockClient {
     try {
       const res = await this.fetchImpl(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
         signal: controller.signal,
       });
 
