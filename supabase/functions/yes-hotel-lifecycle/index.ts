@@ -20,8 +20,12 @@ const ttlockClientId = Deno.env.get("TTLOCK_CLIENT_ID") ?? "";
 const ttlockClientSecret = Deno.env.get("TTLOCK_CLIENT_SECRET") ?? "";
 const ttlockUsername = Deno.env.get("TTLOCK_USERNAME") ?? "";
 const ttlockPassword = Deno.env.get("TTLOCK_PASSWORD") ?? "";
-const ttlockTokenUrl = Deno.env.get("TTLOCK_TOKEN_URL") || "https://euapi.ttlock.com/oauth2/token";
-const ttlockApiBase = (Deno.env.get("TTLOCK_API_BASE_URL") || "https://euapi.ttlock.com").replace(/\/+$/, "");
+const TTLOCK_TOKEN_DEFAULT = "https://api.sciener.com/oauth2/token";
+const TTLOCK_API_BASE_DEFAULT = "https://api.sciener.com";
+const _rawTokenUrl = (Deno.env.get("TTLOCK_TOKEN_URL") ?? "").trim() || TTLOCK_TOKEN_DEFAULT;
+const ttlockTokenUrl = _rawTokenUrl.includes("euopen.") ? _rawTokenUrl.replace(/euopen\.ttlock\.com/g, "api.sciener.com") : _rawTokenUrl;
+const _rawApiBase = (Deno.env.get("TTLOCK_API_BASE_URL") ?? "").trim() || TTLOCK_API_BASE_DEFAULT;
+const ttlockApiBase = _rawApiBase.replace(/\/+$/, "").replace(/euopen\.ttlock\.com/g, "api.sciener.com");
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -188,7 +192,7 @@ async function ttlockAddKeyboardPassword(
   const rawText = await res.text();
   if (rawText.trimStart().toLowerCase().startsWith("<")) {
     if (typeof console !== "undefined") console.warn("[lifecycle] TTLock add passcode respondeu HTML (URL=" + addPasscodeUrl + ") preview=" + rawText.slice(0, 200));
-    throw new Error("TTLock add passcode: resposta foi HTML, não JSON. Use TTLOCK_API_BASE_URL=https://euapi.ttlock.com (não euopen).");
+    throw new Error("TTLock add passcode: resposta foi HTML, não JSON. Use TTLOCK_API_BASE_URL=https://api.sciener.com (não euopen).");
   }
   const data = JSON.parse(rawText) as { keyboardPwdId?: number; errcode?: number; errmsg?: string };
   if (typeof console !== "undefined") {
