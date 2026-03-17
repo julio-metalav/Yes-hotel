@@ -27,6 +27,18 @@ const ttlockTokenUrl = _rawTokenUrl.includes("euopen.") ? _rawTokenUrl.replace(/
 const _rawApiBase = (Deno.env.get("TTLOCK_API_BASE_URL") ?? "").trim() || TTLOCK_API_BASE_DEFAULT;
 const ttlockApiBase = _rawApiBase.replace(/\/+$/, "").replace(/euopen\.ttlock\.com/g, "api.sciener.com");
 
+/** Contrato TTLock (form-urlencoded, retry delete): ver docs/YES_HOTEL_TTLOCK_CONTRATO_API.md */
+
+/** Log estruturado lifecycle TTLock (hardening). Não expõe secrets. */
+function logTtlockLifecycle(entry: Record<string, unknown>): void {
+  if (typeof console === "undefined") return;
+  try {
+    console.log("[TTLOCK_LIFECYCLE]", JSON.stringify({ ...entry, timestamp: entry.timestamp ?? new Date().toISOString() }));
+  } catch {
+    console.log("[TTLOCK_LIFECYCLE]", String(entry));
+  }
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -139,32 +151,136 @@ async function getTtlockToken(): Promise<string> {
   return token;
 }
 
-async function ttlockDeleteKeyboardPassword(lockId: string | number, keyboardPwdId: number): Promise<void> {
-  if (typeof console !== "undefined") console.log("### DELETE TTLOCK V2 EXECUTANDO ###");
-  const token = await getTtlockToken();
-  const lockIdNum = typeof lockId === "string" ? parseInt(lockId, 10) : lockId;
-  const params = new URLSearchParams();
-  params.append("clientId", ttlockClientId);
-  params.append("accessToken", token);
-  params.append("lockId", String(lockIdNum));
-  params.append("keyboardPwdId", String(keyboardPwdId));
-  params.append("deleteType", "2");
-  params.append("date", String(Date.now()));
-  const res = await fetch(`${ttlockApiBase}/v3/keyboardPwd/delete`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
-  });
-  const text = await res.text();
-  if (typeof console !== "undefined") console.log("[TTLOCK DELETE RAW RESPONSE]", text);
-  let data: { errcode?: number; errmsg?: string };
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch (e) {
-    throw new Error("TTLock delete respondeu não-JSON: " + text.substring(0, 200));
+const TTLOCK_DELETE_RETRY_MAX = 2;
+const TTLOCK_DELAY_MS = 800;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Retorna true se o erro parece transitório (vale retry). */
+function isTransientDeleteError(res: Response, data: { errcode?: number }): boolean {
+  if (res.status >= 500 || res.status === 429) return true;
+  if (data.errcode != null && data.errcode !== 0) {
+    const t = [10001, 10002, 10003, 10004]; // token/network-related TTLock codes exemplos
+    if (t.includes(data.errcode)) return true;
   }
-  if (!res.ok || (data.errcode != null && data.errcode !== 0)) {
-    throw new Error(data.errmsg ?? `Delete passcode: ${res.status}`);
+  return false;
+}
+
+async function ttlockDeleteKeyboardPassword(
+  lockId: string | number,
+  keyboardPwdId: number,
+  ctx?: { reserva_id?: string; credencial_id?: string; credencial_item_id?: string; codigo_logico_destino?: string },
+): Promise<void> {
+  const lockIdNum = typeof lockId === "string" ? parseInt(lockId, 10) : lockId;
+  const logErr = (attempt: number, errMsg: string) =>
+    logTtlockLifecycle({
+      action: "delete",
+      source: "edge_function",
+      reserva_id: ctx?.reserva_id,
+      credencial_id: ctx?.credencial_id,
+      credencial_item_id: ctx?.credencial_item_id,
+      codigo_logico_destino: ctx?.codigo_logico_destino,
+      remote_keyboard_pwd_id: keyboardPwdId,
+      lock_id: lockIdNum,
+      status: "error",
+      error_message: errMsg,
+      attempt,
+      timestamp: new Date().toISOString(),
+    });
+
+  logTtlockLifecycle({
+    action: "delete",
+    source: "edge_function",
+    reserva_id: ctx?.reserva_id,
+    credencial_id: ctx?.credencial_id,
+    credencial_item_id: ctx?.credencial_item_id,
+    codigo_logico_destino: ctx?.codigo_logico_destino,
+    remote_keyboard_pwd_id: keyboardPwdId,
+    lock_id: lockIdNum,
+    status: "start",
+    attempt: 1,
+    timestamp: new Date().toISOString(),
+  });
+
+  const token = await getTtlockToken();
+  let lastError: string | null = null;
+  for (let attempt = 1; attempt <= 1 + TTLOCK_DELETE_RETRY_MAX; attempt++) {
+    if (attempt > 1) {
+      logTtlockLifecycle({
+        action: "delete",
+        source: "edge_function",
+        reserva_id: ctx?.reserva_id,
+        credencial_id: ctx?.credencial_id,
+        credencial_item_id: ctx?.credencial_item_id,
+        codigo_logico_destino: ctx?.codigo_logico_destino,
+        remote_keyboard_pwd_id: keyboardPwdId,
+        lock_id: lockIdNum,
+        status: "start",
+        attempt,
+        timestamp: new Date().toISOString(),
+      });
+      await delay(TTLOCK_DELAY_MS);
+    }
+    try {
+      const params = new URLSearchParams();
+      params.append("clientId", ttlockClientId);
+      params.append("accessToken", token);
+      params.append("lockId", String(lockIdNum));
+      params.append("keyboardPwdId", String(keyboardPwdId));
+      params.append("deleteType", "2");
+      params.append("date", String(Date.now()));
+      const res = await fetch(`${ttlockApiBase}/v3/keyboardPwd/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+      });
+      const text = await res.text();
+      let data: { errcode?: number; errmsg?: string };
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        lastError = "TTLock delete respondeu não-JSON: " + text.substring(0, 200);
+        if (attempt < 1 + TTLOCK_DELETE_RETRY_MAX) continue;
+        logErr(attempt, lastError);
+        throw new Error(lastError);
+      }
+      if (res.ok && (data.errcode == null || data.errcode === 0)) {
+        logTtlockLifecycle({
+          action: "delete",
+          source: "edge_function",
+          reserva_id: ctx?.reserva_id,
+          credencial_id: ctx?.credencial_id,
+          credencial_item_id: ctx?.credencial_item_id,
+          codigo_logico_destino: ctx?.codigo_logico_destino,
+          remote_keyboard_pwd_id: keyboardPwdId,
+          lock_id: lockIdNum,
+          status: "success",
+          attempt,
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+      lastError = data.errmsg ?? `Delete passcode: ${res.status}`;
+      const canRetry = attempt < 1 + TTLOCK_DELETE_RETRY_MAX && isTransientDeleteError(res, data);
+      if (!canRetry) {
+        logErr(attempt, lastError);
+        throw new Error(lastError);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      lastError = msg;
+      const canRetry = attempt < 1 + TTLOCK_DELETE_RETRY_MAX;
+      if (!canRetry) {
+        logErr(attempt, "Falha final após " + (1 + TTLOCK_DELETE_RETRY_MAX) + " tentativas: " + msg);
+        throw e;
+      }
+    }
+  }
+  if (lastError) {
+    logErr(1 + TTLOCK_DELETE_RETRY_MAX, "Falha final: " + lastError);
+    throw new Error(lastError);
   }
 }
 
@@ -175,11 +291,21 @@ async function ttlockAddKeyboardPassword(
   startDateMs: number,
   endDateMs: number,
   keyboardPwdName?: string,
+  ctx?: { reserva_id?: string; credencial_id?: string; credencial_item_id?: string; codigo_logico_destino?: string },
 ): Promise<number> {
-  const token = await getTtlockToken();
   const lockIdNum = typeof lockId === "string" ? parseInt(lockId, 10) : lockId;
-  const addPasscodeUrl = `${ttlockApiBase}/v3/keyboardPwd/add`;
-  if (typeof console !== "undefined") console.log("[lifecycle] TTLock apiBase=" + ttlockApiBase + " addPasscode URL=" + addPasscodeUrl);
+  logTtlockLifecycle({
+    action: "provision",
+    source: "edge_function",
+    reserva_id: ctx?.reserva_id,
+    credencial_id: ctx?.credencial_id,
+    credencial_item_id: ctx?.credencial_item_id,
+    codigo_logico_destino: ctx?.codigo_logico_destino,
+    lock_id: lockIdNum,
+    status: "start",
+    timestamp: new Date().toISOString(),
+  });
+  const token = await getTtlockToken();
   const params = new URLSearchParams();
   params.append("clientId", ttlockClientId);
   params.append("accessToken", token);
@@ -190,28 +316,89 @@ async function ttlockAddKeyboardPassword(
   params.append("endDate", String(endDateMs));
   params.append("addType", "2");
   params.append("date", String(Date.now()));
-  const res = await fetch(addPasscodeUrl, {
+  const res = await fetch(`${ttlockApiBase}/v3/keyboardPwd/add`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params.toString(),
   });
   const text = await res.text();
-  if (typeof console !== "undefined") console.log("[TTLOCK RAW RESPONSE]", text);
   let data: { keyboardPwdId?: number; errcode?: number; errmsg?: string };
   try {
-    data = JSON.parse(text);
+    data = text ? JSON.parse(text) : {};
   } catch (e) {
+    logTtlockLifecycle({
+      action: "provision",
+      source: "edge_function",
+      reserva_id: ctx?.reserva_id,
+      credencial_id: ctx?.credencial_id,
+      credencial_item_id: ctx?.credencial_item_id,
+      codigo_logico_destino: ctx?.codigo_logico_destino,
+      lock_id: lockIdNum,
+      status: "error",
+      error_message: "TTLock respondeu não-JSON: " + text.substring(0, 200),
+      timestamp: new Date().toISOString(),
+    });
     throw new Error("TTLock respondeu não-JSON: " + text.substring(0, 200));
   }
   if (data.errcode && data.errcode !== 0) {
-    throw new Error(`TTLock erro ${data.errcode}: ${data.errmsg}`);
+    const errMsg = `TTLock erro ${data.errcode}: ${data.errmsg}`;
+    logTtlockLifecycle({
+      action: "provision",
+      source: "edge_function",
+      reserva_id: ctx?.reserva_id,
+      credencial_id: ctx?.credencial_id,
+      credencial_item_id: ctx?.credencial_item_id,
+      codigo_logico_destino: ctx?.codigo_logico_destino,
+      lock_id: lockIdNum,
+      status: "error",
+      error_message: errMsg,
+      timestamp: new Date().toISOString(),
+    });
+    throw new Error(errMsg);
   }
   if (!res.ok) {
-    throw new Error(data.errmsg ?? `Add passcode: ${res.status}`);
+    const errMsg = data.errmsg ?? `Add passcode: ${res.status}`;
+    logTtlockLifecycle({
+      action: "provision",
+      source: "edge_function",
+      reserva_id: ctx?.reserva_id,
+      credencial_id: ctx?.credencial_id,
+      credencial_item_id: ctx?.credencial_item_id,
+      codigo_logico_destino: ctx?.codigo_logico_destino,
+      lock_id: lockIdNum,
+      status: "error",
+      error_message: errMsg,
+      timestamp: new Date().toISOString(),
+    });
+    throw new Error(errMsg);
   }
   if (typeof data.keyboardPwdId !== "number") {
+    logTtlockLifecycle({
+      action: "provision",
+      source: "edge_function",
+      reserva_id: ctx?.reserva_id,
+      credencial_id: ctx?.credencial_id,
+      credencial_item_id: ctx?.credencial_item_id,
+      codigo_logico_destino: ctx?.codigo_logico_destino,
+      lock_id: lockIdNum,
+      status: "error",
+      error_message: "TTLock add passcode: resposta sem keyboardPwdId",
+      timestamp: new Date().toISOString(),
+    });
     throw new Error("TTLock add passcode: resposta sem keyboardPwdId");
   }
+  logTtlockLifecycle({
+    action: "provision",
+    source: "edge_function",
+    reserva_id: ctx?.reserva_id,
+    credencial_id: ctx?.credencial_id,
+    credencial_item_id: ctx?.credencial_item_id,
+    codigo_logico_destino: ctx?.codigo_logico_destino,
+    remote_keyboard_pwd_id: data.keyboardPwdId,
+    lock_id: lockIdNum,
+    status: "success",
+    timestamp: new Date().toISOString(),
+  });
   return data.keyboardPwdId;
 }
 
@@ -318,6 +505,18 @@ async function getItensProvisionados(credencialId: string): Promise<ItemRow[]> {
   return data as ItemRow[];
 }
 
+/** Itens com delete remoto pendente (status pendente_limpeza; janela até ~2h pós-checkout). */
+async function getItensPendentesLimpeza(credencialId: string): Promise<ItemRow[]> {
+  const { data, error } = await adminClient
+    .from("operacional_credencial_itens")
+    .select("id, credencial_id, lock_id_ttlock, status_provisionamento, codigo_logico_destino, remote_keyboard_pwd_id")
+    .eq("credencial_id", credencialId)
+    .eq("status_provisionamento", "pendente_limpeza")
+    .not("remote_keyboard_pwd_id", "is", null);
+  if (error || !Array.isArray(data)) return [];
+  return data as ItemRow[];
+}
+
 const NOW = () => new Date().toISOString();
 
 async function revokeCredencial(
@@ -335,6 +534,7 @@ async function revokeCredencial(
   erros: string[];
 }> {
   const itens = await getItensProvisionados(credencialId);
+  const itensPendentesLimpeza = await getItensPendentesLimpeza(credencialId);
   const erros: string[] = [];
   let revogados = 0;
   let falhas = 0;
@@ -342,6 +542,10 @@ async function revokeCredencial(
 
   for (const item of itens) {
     if (item.remote_keyboard_pwd_id == null) {
+      // Encerramento apenas local: não há passcode remoto a confirmar; revogado_em = fim local.
+      if (typeof console !== "undefined") {
+        console.warn("[lifecycle] Item provisionado sem remote_keyboard_pwd_id (credencial_id=" + credencialId + " item_id=" + item.id + "). Encerramento apenas local; possível inconsistência de persistência.");
+      }
       await adminClient
         .from("operacional_credencial_itens")
         .update({ status_provisionamento: "revogado", revogado_em: now })
@@ -351,7 +555,12 @@ async function revokeCredencial(
     }
     if (isTtlockAvailable()) {
       try {
-        await ttlockDeleteKeyboardPassword(item.lock_id_ttlock, item.remote_keyboard_pwd_id);
+        await ttlockDeleteKeyboardPassword(item.lock_id_ttlock, item.remote_keyboard_pwd_id, {
+          reserva_id: reservaId,
+          credencial_id: credencialId,
+          credencial_item_id: item.id,
+          codigo_logico_destino: item.codigo_logico_destino,
+        });
         await adminClient
           .from("operacional_credencial_itens")
           .update({ status_provisionamento: "revogado", revogado_em: now, ultimo_erro: null })
@@ -362,11 +571,12 @@ async function revokeCredencial(
         erros.push(`${item.codigo_logico_destino}: ${msg}`);
         await adminClient
           .from("operacional_credencial_itens")
-          .update({ ultimo_erro: msg })
+          .update({ status_provisionamento: "pendente_limpeza", ultimo_erro: msg })
           .eq("id", item.id);
         falhas++;
       }
     } else {
+      // TTLock indisponível: encerramento apenas local; não há confirmação remota.
       await adminClient
         .from("operacional_credencial_itens")
         .update({
@@ -376,6 +586,32 @@ async function revokeCredencial(
         })
         .eq("id", item.id);
       revogados++;
+    }
+  }
+
+  for (const item of itensPendentesLimpeza) {
+    if (item.remote_keyboard_pwd_id == null) continue;
+    if (!isTtlockAvailable()) continue;
+    try {
+      await ttlockDeleteKeyboardPassword(item.lock_id_ttlock, item.remote_keyboard_pwd_id, {
+        reserva_id: reservaId,
+        credencial_id: credencialId,
+        credencial_item_id: item.id,
+        codigo_logico_destino: item.codigo_logico_destino,
+      });
+      await adminClient
+        .from("operacional_credencial_itens")
+        .update({ status_provisionamento: "revogado", revogado_em: now, ultimo_erro: null })
+        .eq("id", item.id);
+      revogados++;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      erros.push(`${item.codigo_logico_destino}: ${msg}`);
+      await adminClient
+        .from("operacional_credencial_itens")
+        .update({ ultimo_erro: msg })
+        .eq("id", item.id);
+      falhas++;
     }
   }
 
@@ -525,6 +761,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
         validoDeMs,
         validoAteMs,
         `Yes-${item.codigo_logico_destino}`,
+        { reserva_id: reservaId, credencial_id: credencial.id, credencial_item_id: item.id, codigo_logico_destino: item.codigo_logico_destino },
       );
       await adminClient
         .from("operacional_credencial_itens")
@@ -619,6 +856,26 @@ async function handleCancelOrCheckout(
   });
 }
 
+/** Lista credenciais com itens pendentes de limpeza remota (revogado + ultimo_erro). Base para job/cron até 2h pós-checkout. */
+async function listPendingCleanup(request: Request): Promise<Response> {
+  await ensureCallerAllowed(request);
+  const { data: credenciais } = await adminClient
+    .from("operacional_credenciais_acesso")
+    .select("id, reserva_id")
+    .eq("status", "revogada");
+  if (!Array.isArray(credenciais) || credenciais.length === 0) {
+    return jsonResponse({ credenciais: [] });
+  }
+  const out: { credencial_id: string; reserva_id: string; itens_pendentes_limpeza: number }[] = [];
+  for (const c of credenciais as { id: string; reserva_id: string }[]) {
+    const itens = await getItensPendentesLimpeza(c.id);
+    if (itens.length > 0) {
+      out.push({ credencial_id: c.id, reserva_id: c.reserva_id, itens_pendentes_limpeza: itens.length });
+    }
+  }
+  return jsonResponse({ credenciais: out });
+}
+
 async function getSyncSummary(request: Request, reservaId: string): Promise<Response> {
   await ensureCallerAllowed(request);
   const credencial = await getCredencialPorReserva(reservaId);
@@ -639,10 +896,12 @@ async function getSyncSummary(request: Request, reservaId: string): Promise<Resp
     .select("status_provisionamento, ultimo_erro")
     .eq("credencial_id", credencial.id);
   const provisionados = (itens ?? []).filter((i: { status_provisionamento: string }) => i.status_provisionamento === "provisionado").length;
+  const pendentesLimpeza = (itens ?? []).filter((i: { status_provisionamento: string }) => i.status_provisionamento === "pendente_limpeza").length;
   const comErro = (itens ?? []).filter((i: { ultimo_erro: unknown }) => i.ultimo_erro != null).length;
   let resumo = credencial.status;
   if (credencial.sync_status) resumo += ` | sync: ${credencial.sync_status}`;
   if (comErro > 0) resumo += ` | ${comErro} item(ns) com erro`;
+  if (pendentesLimpeza > 0) resumo += ` | ${pendentesLimpeza} pendente(s) limpeza`;
   if (provisionados > 0 && credencial.status !== "revogada") resumo += ` | ${provisionados} provisionado(s)`;
 
   return jsonResponse({
@@ -736,9 +995,12 @@ Deno.serve(async (request: Request) => {
     if (action === "lifecycle_provision") {
       return await handleLifecycleProvision(request, payload);
     }
+    if (action === "list_pending_cleanup") {
+      return await listPendingCleanup(request);
+    }
 
     return jsonResponse(
-      { error: "Ação não suportada. Use: lifecycle_cancel, lifecycle_checkout, lifecycle_provision, sync_summary, retry_sync." },
+      { error: "Ação não suportada. Use: lifecycle_cancel, lifecycle_checkout, lifecycle_provision, sync_summary, retry_sync, list_pending_cleanup." },
       400,
     );
   } catch (error) {

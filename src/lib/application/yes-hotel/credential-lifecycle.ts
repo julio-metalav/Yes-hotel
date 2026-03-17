@@ -3,6 +3,7 @@
  * Revogação, alteração de validade, reprovisionamento e handlers por cenário operacional.
  */
 
+import { logTtlockLifecycle } from "../../integrations/ttlock";
 import type { TtlockClient } from "../../integrations/ttlock";
 import type { CredencialItemRow, CredencialRow, ProvisioningRepository } from "./provisioning-executor";
 import { processarCredencialDeAcesso } from "./provisioning-executor";
@@ -47,8 +48,11 @@ export interface LifecycleDeps {
   ttlockClient: TtlockClient;
 }
 
+const NOW = () => new Date().toISOString();
+
 /**
  * Revoga uma credencial: remove passcode remoto em cada item provisionado e atualiza estados.
+ * Idempotente: se já revogada, retorna sem alterar. Atualiza sync_status conforme resultado remoto.
  */
 export async function revokeCredential(
   credencialId: string,
@@ -66,7 +70,7 @@ export async function revokeCredential(
       status: "revogada",
       itensRevogados: 0,
       itensFalha: 0,
-      erros: ["Credencial ja revogada."],
+      erros: ["Credencial ja revogada (idempotente)."],
     };
   }
 
@@ -74,10 +78,11 @@ export async function revokeCredential(
   const erros: string[] = [];
   let revogados = 0;
   let falhas = 0;
-  const now = new Date().toISOString();
+  const now = NOW();
 
   for (const item of itens) {
     if (item.remote_keyboard_pwd_id == null) {
+      // Encerramento apenas local: não há passcode remoto a confirmar; revogado_em = fim local (não é "delete remoto confirmado").
       await repo.updateItem(item.id, {
         status_provisionamento: "revogado",
         revogado_em: now,
@@ -87,6 +92,18 @@ export async function revokeCredential(
     }
 
     if (client.isAvailable()) {
+      logTtlockLifecycle({
+        action: "revoke",
+        source: "app_client",
+        reserva_id: credencial.reserva_id,
+        credencial_id: credencialId,
+        credencial_item_id: item.id,
+        codigo_logico_destino: item.codigo_logico_destino,
+        remote_keyboard_pwd_id: item.remote_keyboard_pwd_id,
+        lock_id: item.lock_id_ttlock,
+        status: "start",
+        timestamp: new Date().toISOString(),
+      });
       try {
         await client.deleteKeyboardPassword({
           lockId: item.lock_id_ttlock,
@@ -98,15 +115,42 @@ export async function revokeCredential(
           ultimo_erro: null,
         });
         revogados++;
+        logTtlockLifecycle({
+          action: "revoke",
+          source: "app_client",
+          reserva_id: credencial.reserva_id,
+          credencial_id: credencialId,
+          credencial_item_id: item.id,
+          codigo_logico_destino: item.codigo_logico_destino,
+          remote_keyboard_pwd_id: item.remote_keyboard_pwd_id,
+          lock_id: item.lock_id_ttlock,
+          status: "success",
+          timestamp: new Date().toISOString(),
+        });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         erros.push(`${item.codigo_logico_destino}: ${msg}`);
         await repo.updateItem(item.id, {
+          status_provisionamento: "pendente_limpeza",
           ultimo_erro: msg,
         });
         falhas++;
+        logTtlockLifecycle({
+          action: "revoke",
+          source: "app_client",
+          reserva_id: credencial.reserva_id,
+          credencial_id: credencialId,
+          credencial_item_id: item.id,
+          codigo_logico_destino: item.codigo_logico_destino,
+          remote_keyboard_pwd_id: item.remote_keyboard_pwd_id,
+          lock_id: item.lock_id_ttlock,
+          status: "error",
+          error_message: msg,
+          timestamp: new Date().toISOString(),
+        });
       }
     } else {
+      // TTLock indisponível: encerramento apenas local; não há confirmação remota (não é "delete remoto confirmado").
       await repo.updateItem(item.id, {
         status_provisionamento: "revogado",
         revogado_em: now,
@@ -116,10 +160,23 @@ export async function revokeCredential(
     }
   }
 
+  let syncStatus: "ok" | "pending" | "partial" | "failed" = "ok";
+  let lastSyncError: string | null = null;
+  if (!client.isAvailable() && itens.length > 0) {
+    syncStatus = "pending";
+    lastSyncError = "TTLock indisponivel; revogacao apenas local.";
+  } else if (falhas > 0) {
+    syncStatus = revogados > 0 ? "partial" : "failed";
+    lastSyncError = erros.slice(0, 3).join("; ");
+  }
+
   await repo.updateCredencial(credencialId, {
     status: "revogada",
     revogado_em: now,
     motivo_revogacao: motivo,
+    sync_status: syncStatus,
+    last_sync_attempt_at: now,
+    last_sync_error: lastSyncError,
   });
 
   return {
@@ -133,7 +190,7 @@ export async function revokeCredential(
 
 /**
  * Altera a validade da credencial e sincroniza com TTLock (change passcode).
- * Se a API falhar em algum item, registra erro e continua nos demais.
+ * Se a API falhar em algum item, registra erro e continua nos demais; atualiza sync_status.
  */
 export async function updateCredentialValidity(
   credencialId: string,
@@ -151,10 +208,18 @@ export async function updateCredentialValidity(
 
   const validoDeMs = new Date(validity.valido_de).getTime();
   const validoAteMs = new Date(validity.valido_ate).getTime();
+  if (Number.isNaN(validoDeMs) || Number.isNaN(validoAteMs)) {
+    throw new Error("Validade invalida: valido_de e valido_ate devem ser datas validas.");
+  }
+  if (validoAteMs <= validoDeMs) {
+    throw new Error("Validade invalida: valido_ate deve ser posterior a valido_de.");
+  }
+
   const itens = await repo.getItensProvisionados(credencialId);
   const erros: string[] = [];
   let ok = 0;
   let falhas = 0;
+  const now = NOW();
 
   if (client.isAvailable()) {
     for (const item of itens) {
@@ -178,9 +243,22 @@ export async function updateCredentialValidity(
     erros.push("TTLock indisponivel; validade apenas atualizada localmente.");
   }
 
+  let syncStatus: "ok" | "pending" | "partial" | "failed" = "ok";
+  let lastSyncError: string | null = null;
+  if (!client.isAvailable()) {
+    syncStatus = "pending";
+    lastSyncError = "TTLock indisponivel; validade apenas local.";
+  } else if (erros.length > 0) {
+    syncStatus = ok > 0 ? "partial" : "failed";
+    lastSyncError = erros.slice(0, 3).join("; ");
+  }
+
   await repo.updateCredencial(credencialId, {
     valido_de: validity.valido_de,
     valido_ate: validity.valido_ate,
+    sync_status: syncStatus,
+    last_sync_attempt_at: now,
+    last_sync_error: lastSyncError,
   });
 
   return {
@@ -329,16 +407,15 @@ export async function handleRoomChange(
           keyboardPwdId: item.remote_keyboard_pwd_id,
         });
       } catch {
-        // registra erro no item mas continua
         await repo.updateItem(item.id, {
-          status_provisionamento: "revogado",
-          revogado_em: now,
+          status_provisionamento: "pendente_limpeza",
           ultimo_erro: "Erro ao revogar remoto no room change",
         });
         itensAntigosRevogados++;
         continue;
       }
     }
+    // Sucesso no delete ou item sem passcode remoto: revogado + revogado_em (local ou confirmado).
     await repo.updateItem(item.id, {
       status_provisionamento: "revogado",
       revogado_em: now,
@@ -348,7 +425,9 @@ export async function handleRoomChange(
   }
 
   const destinos = await repo.getFechadurasForApartment(numNovoNorm);
-  if (destinos.length === 0) throw new Error(`Nenhuma fechadura encontrada para apartamento: ${novoApartamento}`);
+  if (destinos.length === 0) {
+    throw new Error(`Nenhuma fechadura encontrada para apartamento: ${novoApartamento}. Verifique se o numero e valido (01-40).`);
+  }
 
   const itensExistentes = await repo.getItens(credencial.id);
   const fechadurasJaNaCredencial = new Set(itensExistentes.map((i) => i.fechadura_id));
@@ -403,4 +482,131 @@ export async function handleManualAdjustment(
     return reprovisionCredential(credencialId, deps);
   }
   throw new Error("Nenhuma acao especificada para ajuste manual.");
+}
+
+export interface RetrySyncResult {
+  credencialId: string;
+  reservaId: string;
+  previousSyncStatus: string | null;
+  action: "revoke_remaining" | "update_validity" | "none";
+  itensTentados: number;
+  itensOk: number;
+  itensFalha: number;
+  syncStatusAfter: "ok" | "pending" | "partial" | "failed";
+  erros: string[];
+}
+
+/**
+ * Tenta concluir a sincronização remota de uma credencial com pendência (sync_status pending/partial/failed).
+ * Idempotente: chamar novamente não duplica efeito; itens já revogados/sincronizados são ignorados.
+ */
+export async function retryCredentialSync(
+  credencialId: string,
+  deps: LifecycleDeps,
+): Promise<RetrySyncResult> {
+  const repo = deps.repository;
+  const client = deps.ttlockClient;
+
+  const credencial = await repo.getCredencial(credencialId);
+  if (!credencial) throw new Error(`Credencial nao encontrada: ${credencialId}`);
+  const previousSyncStatus = credencial.sync_status ?? null;
+  const erros: string[] = [];
+  let itensTentados = 0;
+  let itensOk = 0;
+  let itensFalha = 0;
+  const now = NOW();
+
+  if (credencial.status === "revogada") {
+    const itens = await repo.getItensPendentesLimpeza(credencialId);
+    for (const item of itens) {
+      if (item.remote_keyboard_pwd_id == null) continue;
+      itensTentados++;
+      if (!client.isAvailable()) {
+        erros.push("TTLock indisponivel");
+        itensFalha++;
+        continue;
+      }
+      try {
+        await client.deleteKeyboardPassword({
+          lockId: item.lock_id_ttlock,
+          keyboardPwdId: item.remote_keyboard_pwd_id,
+        });
+        await repo.updateItem(item.id, {
+          status_provisionamento: "revogado",
+          revogado_em: now,
+          ultimo_erro: null,
+        });
+        itensOk++;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        erros.push(`${item.codigo_logico_destino}: ${msg}`);
+        await repo.updateItem(item.id, { status_provisionamento: "pendente_limpeza", ultimo_erro: msg });
+        itensFalha++;
+      }
+    }
+    const syncStatusAfter =
+      itensFalha === 0 ? "ok" : itensOk > 0 ? "partial" : "failed";
+    await repo.updateCredencial(credencialId, {
+      sync_status: syncStatusAfter,
+      last_sync_attempt_at: now,
+      last_sync_error: erros.length > 0 ? erros.slice(0, 3).join("; ") : null,
+    });
+    return {
+      credencialId,
+      reservaId: credencial.reserva_id,
+      previousSyncStatus,
+      action: "revoke_remaining",
+      itensTentados,
+      itensOk,
+      itensFalha,
+      syncStatusAfter,
+      erros,
+    };
+  }
+
+  const itens = await repo.getItensProvisionados(credencialId);
+  const validoDeMs = new Date(credencial.valido_de).getTime();
+  const validoAteMs = new Date(credencial.valido_ate).getTime();
+  for (const item of itens) {
+    if (item.remote_keyboard_pwd_id == null) continue;
+    itensTentados++;
+    if (!client.isAvailable()) {
+      erros.push("TTLock indisponivel");
+      itensFalha++;
+      continue;
+    }
+    try {
+      await client.changeKeyboardPassword({
+        lockId: item.lock_id_ttlock,
+        keyboardPwdId: item.remote_keyboard_pwd_id,
+        startDate: validoDeMs,
+        endDate: validoAteMs,
+      });
+      await repo.updateItem(item.id, { ultimo_erro: null });
+      itensOk++;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      erros.push(`${item.codigo_logico_destino}: ${msg}`);
+      await repo.updateItem(item.id, { ultimo_erro: msg });
+      itensFalha++;
+    }
+  }
+  const syncStatusAfter =
+    itensFalha === 0 ? "ok" : itensOk > 0 ? "partial" : "failed";
+  await repo.updateCredencial(credencialId, {
+    sync_status: syncStatusAfter,
+    last_sync_attempt_at: now,
+    last_sync_error: erros.length > 0 ? erros.slice(0, 3).join("; ") : null,
+  });
+  return {
+    credencialId,
+    reservaId: credencial.reserva_id,
+    previousSyncStatus,
+    action: itensTentados > 0 ? "update_validity" : "none",
+    itensTentados,
+    itensOk,
+    itensFalha,
+    syncStatusAfter,
+    erros,
+  };
 }

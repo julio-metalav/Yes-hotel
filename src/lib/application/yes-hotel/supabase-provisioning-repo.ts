@@ -9,6 +9,7 @@ import type {
   CredencialRow,
   NovoItemDestino,
   ProvisioningRepository,
+  SyncStatus,
 } from "./provisioning-executor";
 import type {
   OperacionalCredencialStatus,
@@ -25,6 +26,9 @@ interface DbCredencial {
   provider_tipo: string | null;
   revogado_em?: string | null;
   motivo_revogacao?: string | null;
+  sync_status?: string | null;
+  last_sync_attempt_at?: string | null;
+  last_sync_error?: string | null;
 }
 
 interface DbItem {
@@ -59,6 +63,9 @@ function toCredencialRow(r: DbCredencial): CredencialRow {
     provider_tipo: r.provider_tipo,
     revogado_em: r.revogado_em ?? null,
     motivo_revogacao: r.motivo_revogacao ?? null,
+    sync_status: (r.sync_status as SyncStatus | null) ?? null,
+    last_sync_attempt_at: r.last_sync_attempt_at ?? null,
+    last_sync_error: r.last_sync_error ?? null,
   };
 }
 
@@ -80,7 +87,7 @@ function toItemRow(r: DbItem): CredencialItemRow {
 }
 
 const COLS_CREDENCIAL =
-  "id, reserva_id, status, valido_de, valido_ate, codigo_credencial, provider_tipo, revogado_em, motivo_revogacao";
+  "id, reserva_id, status, valido_de, valido_ate, codigo_credencial, provider_tipo, revogado_em, motivo_revogacao, sync_status, last_sync_attempt_at, last_sync_error";
 const COLS_ITEM =
   "id, credencial_id, fechadura_id, lock_id_ttlock, tipo_destino, codigo_logico_destino, status_provisionamento, ultimo_erro, provisionado_em, revogado_em, remote_keyboard_pwd_id, codigo_enviado";
 
@@ -149,6 +156,17 @@ export function createSupabaseProvisioningRepository(
       return (data ?? []).map((r) => toItemRow(r as DbItem));
     },
 
+    async getItensPendentesLimpeza(credencialId: string): Promise<CredencialItemRow[]> {
+      const { data, error } = await supabase
+        .from("operacional_credencial_itens")
+        .select(COLS_ITEM)
+        .eq("credencial_id", credencialId)
+        .eq("status_provisionamento", "pendente_limpeza")
+        .not("remote_keyboard_pwd_id", "is", null);
+      if (error) throw new Error(`getItensPendentesLimpeza: ${error.message}`);
+      return (data ?? []).map((r) => toItemRow(r as DbItem));
+    },
+
     async insertItem(credencialId: string, destino: NovoItemDestino): Promise<CredencialItemRow> {
       const { data, error } = await supabase
         .from("operacional_credencial_itens")
@@ -171,7 +189,16 @@ export function createSupabaseProvisioningRepository(
       patch: Partial<
         Pick<
           CredencialRow,
-          "status" | "codigo_credencial" | "provider_tipo" | "valido_de" | "valido_ate" | "revogado_em" | "motivo_revogacao"
+          | "status"
+          | "codigo_credencial"
+          | "provider_tipo"
+          | "valido_de"
+          | "valido_ate"
+          | "revogado_em"
+          | "motivo_revogacao"
+          | "sync_status"
+          | "last_sync_attempt_at"
+          | "last_sync_error"
         >
       >,
     ): Promise<void> {
@@ -180,6 +207,16 @@ export function createSupabaseProvisioningRepository(
         .update(patch)
         .eq("id", id);
       if (error) throw new Error(`updateCredencial: ${error.message}`);
+    },
+
+    async getCredenciaisComPendenciaSync(): Promise<CredencialRow[]> {
+      const { data, error } = await supabase
+        .from("operacional_credenciais_acesso")
+        .select(COLS_CREDENCIAL)
+        .in("sync_status", ["pending", "partial", "failed"])
+        .order("last_sync_attempt_at", { ascending: true, nullsFirst: true });
+      if (error) throw new Error(`getCredenciaisComPendenciaSync: ${error.message}`);
+      return (data ?? []).map((r) => toCredencialRow(r as DbCredencial));
     },
 
     async updateItem(

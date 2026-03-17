@@ -5,8 +5,12 @@
  * Não depende do Supabase diretamente; o repositório é injetado.
  */
 
+import { logTtlockLifecycle } from "../../integrations/ttlock";
 import type { TtlockClient } from "../../integrations/ttlock";
 import type { OperacionalCredencialStatus, OperacionalItemProvisionamentoStatus } from "./types";
+
+/** Estado de sincronização com TTLock (Fase 3.1). */
+export type SyncStatus = "ok" | "pending" | "partial" | "failed";
 
 /** Credencial como lida do banco (mínimo necessário). */
 export interface CredencialRow {
@@ -19,6 +23,9 @@ export interface CredencialRow {
   provider_tipo: string | null;
   revogado_em?: string | null;
   motivo_revogacao?: string | null;
+  sync_status?: SyncStatus | null;
+  last_sync_attempt_at?: string | null;
+  last_sync_error?: string | null;
 }
 
 /** Item de provisionamento como lido do banco. */
@@ -52,16 +59,27 @@ export interface ProvisioningRepository {
   getItens(credencialId: string): Promise<CredencialItemRow[]>;
   getItensPendentes(credencialId: string): Promise<CredencialItemRow[]>;
   getItensProvisionados(credencialId: string): Promise<CredencialItemRow[]>;
+  getItensPendentesLimpeza(credencialId: string): Promise<CredencialItemRow[]>;
   insertItem(credencialId: string, destino: NovoItemDestino): Promise<CredencialItemRow>;
   updateCredencial(
     id: string,
     patch: Partial<
       Pick<
-        CredencialRow & { revogado_em?: string | null; motivo_revogacao?: string | null },
-        "status" | "codigo_credencial" | "provider_tipo" | "valido_de" | "valido_ate" | "revogado_em" | "motivo_revogacao"
+        CredencialRow,
+        | "status"
+        | "codigo_credencial"
+        | "provider_tipo"
+        | "valido_de"
+        | "valido_ate"
+        | "revogado_em"
+        | "motivo_revogacao"
+        | "sync_status"
+        | "last_sync_attempt_at"
+        | "last_sync_error"
       >
     >,
   ): Promise<void>;
+  getCredenciaisComPendenciaSync(): Promise<CredencialRow[]>;
   updateItem(
     id: string,
     patch: Partial<{
@@ -169,6 +187,17 @@ export async function processarCredencialDeAcesso(
   for (const item of itens) {
     await repo.updateItem(item.id, { status_provisionamento: "provisionando" });
 
+    logTtlockLifecycle({
+      action: "provision",
+      source: "app_client",
+      reserva_id: credencial.reserva_id,
+      credencial_id: credencialId,
+      credencial_item_id: item.id,
+      codigo_logico_destino: item.codigo_logico_destino,
+      lock_id: item.lock_id_ttlock,
+      status: "start",
+      timestamp: new Date().toISOString(),
+    });
     try {
       const lockId = item.lock_id_ttlock;
       const date = Date.now();
@@ -188,6 +217,18 @@ export async function processarCredencialDeAcesso(
         codigo_enviado: passcode,
       });
       provisionados++;
+      logTtlockLifecycle({
+        action: "provision",
+        source: "app_client",
+        reserva_id: credencial.reserva_id,
+        credencial_id: credencialId,
+        credencial_item_id: item.id,
+        codigo_logico_destino: item.codigo_logico_destino,
+        remote_keyboard_pwd_id: res.keyboardPwdId,
+        lock_id: item.lock_id_ttlock,
+        status: "success",
+        timestamp: new Date().toISOString(),
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       erros.push(`${item.codigo_logico_destino}: ${msg}`);
@@ -196,6 +237,18 @@ export async function processarCredencialDeAcesso(
         ultimo_erro: msg,
       });
       falhas++;
+      logTtlockLifecycle({
+        action: "provision",
+        source: "app_client",
+        reserva_id: credencial.reserva_id,
+        credencial_id: credencialId,
+        credencial_item_id: item.id,
+        codigo_logico_destino: item.codigo_logico_destino,
+        lock_id: item.lock_id_ttlock,
+        status: "error",
+        error_message: msg,
+        timestamp: new Date().toISOString(),
+      });
     }
   }
 

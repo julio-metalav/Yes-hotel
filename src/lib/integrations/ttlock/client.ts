@@ -2,6 +2,7 @@
  * Cliente TTLock Open Platform.
  * Fluxo principal: passcode temporário (keyboard password).
  * addType = 2 (via gateway) para criar passcode sem Bluetooth.
+ * Contrato (form-urlencoded, retry delete): docs/YES_HOTEL_TTLOCK_CONTRATO_API.md
  */
 
 import * as crypto from "node:crypto";
@@ -16,6 +17,7 @@ import type {
 } from "./types";
 import { TtlockApiError } from "./types";
 import { getTtlockConfig, isTtlockAvailable } from "./config";
+import { logTtlockLifecycle } from "./lifecycle-log";
 
 function md5Lower(value: string): string {
   return crypto.createHash("md5").update(value, "utf8").digest("hex").toLowerCase();
@@ -29,6 +31,20 @@ async function parseJsonSafe(res: Response): Promise<unknown> {
   } catch {
     return text;
   }
+}
+
+const TTLOCK_DELETE_RETRY_MAX = 2;
+const TTLOCK_DELAY_MS = 800;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function isTransientDeleteError(status: number, errcode?: number): boolean {
+  if (status >= 500 || status === 429) return true;
+  const transientCodes = [10001, 10002, 10003, 10004];
+  if (errcode != null && errcode !== 0 && transientCodes.includes(errcode)) return true;
+  return false;
 }
 
 export interface TtlockClientOptions {
@@ -153,8 +169,16 @@ export class TtlockClient {
       );
     }
 
-    const token = await this.ensureAccessToken();
     const lockId = typeof params.lockId === "string" ? parseInt(params.lockId, 10) : params.lockId;
+    logTtlockLifecycle({
+      action: "provision",
+      source: "app_client",
+      lock_id: lockId,
+      status: "start",
+      timestamp: new Date().toISOString(),
+    });
+
+    const token = await this.ensureAccessToken();
     const date = Date.now();
 
     const body: Record<string, string | number> = {
@@ -207,9 +231,26 @@ export class TtlockClient {
         throw new TtlockApiError("Resposta sem keyboardPwdId", res.status, data);
       }
 
-      return { keyboardPwdId: (data as TtlockKeyboardPwdAddResponse).keyboardPwdId };
+      const keyboardPwdId = (data as TtlockKeyboardPwdAddResponse).keyboardPwdId;
+      logTtlockLifecycle({
+        action: "provision",
+        source: "app_client",
+        lock_id: lockId,
+        remote_keyboard_pwd_id: keyboardPwdId,
+        status: "success",
+        timestamp: new Date().toISOString(),
+      });
+      return { keyboardPwdId };
     } catch (e) {
       clearTimeout(timeout);
+      logTtlockLifecycle({
+        action: "provision",
+        source: "app_client",
+        lock_id: lockId,
+        status: "error",
+        error_message: e instanceof Error ? e.message : String(e),
+        timestamp: new Date().toISOString(),
+      });
       if (e instanceof TtlockApiError) throw e;
       if (e instanceof Error) throw e;
       throw new Error(String(e));
@@ -220,6 +261,7 @@ export class TtlockClient {
    * Deleta passcode na fechadura (via gateway, deleteType=2).
    * Usado para revogação de acesso.
    * API TTLock exige application/x-www-form-urlencoded (não JSON).
+   * Retry: 1 tentativa inicial + até 2 retries para erros transitórios.
    */
   async deleteKeyboardPassword(
     params: Omit<TtlockKeyboardPwdDeleteParams, "deleteType" | "date">,
@@ -230,57 +272,126 @@ export class TtlockClient {
       );
     }
 
-    const token = await this.ensureAccessToken();
     const lockId = typeof params.lockId === "string" ? parseInt(params.lockId, 10) : params.lockId;
-    const date = Date.now();
-
-    const body = new URLSearchParams({
-      clientId: this.config.clientId,
-      accessToken: token,
-      lockId: String(lockId),
-      keyboardPwdId: String(params.keyboardPwdId),
-      deleteType: "2",
-      date: String(date),
-    });
-
     const url = `${this.config.apiBaseUrl}/v3/keyboardPwd/delete`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    let lastError: Error | null = null;
 
-    try {
-      const res = await this.fetchImpl(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: body.toString(),
-        signal: controller.signal,
+    for (let attempt = 1; attempt <= 1 + TTLOCK_DELETE_RETRY_MAX; attempt++) {
+      logTtlockLifecycle({
+        action: "delete",
+        source: "app_client",
+        remote_keyboard_pwd_id: params.keyboardPwdId,
+        lock_id: lockId,
+        status: "start",
+        attempt,
+        timestamp: new Date().toISOString(),
       });
+      if (attempt > 1) await delay(TTLOCK_DELAY_MS);
 
-      clearTimeout(timeout);
-      const data = (await parseJsonSafe(res)) as TtlockSuccessResponse & { errcode?: number; errmsg?: string };
+      const token = await this.ensureAccessToken();
+      const body = new URLSearchParams({
+        clientId: this.config.clientId,
+        accessToken: token,
+        lockId: String(lockId),
+        keyboardPwdId: String(params.keyboardPwdId),
+        deleteType: "2",
+        date: String(Date.now()),
+      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
-      if (!res.ok) {
-        throw new TtlockApiError(
-          data?.errmsg ?? `Delete passcode failed: ${res.status}`,
-          res.status,
-          data,
-        );
+      try {
+        const res = await this.fetchImpl(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString(),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        const data = (await parseJsonSafe(res)) as TtlockSuccessResponse & { errcode?: number; errmsg?: string };
+
+        if (!res.ok) {
+          const errMsg = data?.errmsg ?? `Delete passcode failed: ${res.status}`;
+          lastError = new TtlockApiError(errMsg, res.status, data);
+          const canRetry = attempt < 1 + TTLOCK_DELETE_RETRY_MAX && isTransientDeleteError(res.status, data?.errcode);
+          if (!canRetry) {
+            logTtlockLifecycle({
+              action: "delete",
+              source: "app_client",
+              remote_keyboard_pwd_id: params.keyboardPwdId,
+              lock_id: lockId,
+              status: "error",
+              error_message: errMsg,
+              attempt,
+              timestamp: new Date().toISOString(),
+            });
+            throw lastError;
+          }
+          continue;
+        }
+
+        if (data.errcode != null && data.errcode !== 0) {
+          const errMsg = data.errmsg ?? "Delete passcode error";
+          lastError = new TtlockApiError(errMsg, res.status, data);
+          const canRetry = attempt < 1 + TTLOCK_DELETE_RETRY_MAX && isTransientDeleteError(res.status, data.errcode);
+          if (!canRetry) {
+            logTtlockLifecycle({
+              action: "delete",
+              source: "app_client",
+              remote_keyboard_pwd_id: params.keyboardPwdId,
+              lock_id: lockId,
+              status: "error",
+              error_message: errMsg,
+              attempt,
+              timestamp: new Date().toISOString(),
+            });
+            throw lastError;
+          }
+          continue;
+        }
+
+        logTtlockLifecycle({
+          action: "delete",
+          source: "app_client",
+          remote_keyboard_pwd_id: params.keyboardPwdId,
+          lock_id: lockId,
+          status: "success",
+          attempt,
+          timestamp: new Date().toISOString(),
+        });
+        return data;
+      } catch (e) {
+        clearTimeout(timeout);
+        lastError = e instanceof Error ? e : new Error(String(e));
+        const canRetry = attempt < 1 + TTLOCK_DELETE_RETRY_MAX;
+        if (!canRetry) {
+          const msg = lastError.message;
+          logTtlockLifecycle({
+            action: "delete",
+            source: "app_client",
+            remote_keyboard_pwd_id: params.keyboardPwdId,
+            lock_id: lockId,
+            status: "error",
+            error_message: "Falha final após " + (1 + TTLOCK_DELETE_RETRY_MAX) + " tentativas: " + msg,
+            attempt,
+            timestamp: new Date().toISOString(),
+          });
+          throw lastError;
+        }
       }
-
-      if (data.errcode != null && data.errcode !== 0) {
-        throw new TtlockApiError(
-          data.errmsg ?? "Delete passcode error",
-          res.status,
-          data,
-        );
-      }
-
-      return data;
-    } catch (e) {
-      clearTimeout(timeout);
-      if (e instanceof TtlockApiError) throw e;
-      if (e instanceof Error) throw e;
-      throw new Error(String(e));
     }
+
+    logTtlockLifecycle({
+      action: "delete",
+      source: "app_client",
+      remote_keyboard_pwd_id: params.keyboardPwdId,
+      lock_id: lockId,
+      status: "error",
+      error_message: lastError?.message ?? "Falha final",
+      attempt: 1 + TTLOCK_DELETE_RETRY_MAX,
+      timestamp: new Date().toISOString(),
+    });
+    throw lastError ?? new Error("Delete passcode failed");
   }
 
   /**

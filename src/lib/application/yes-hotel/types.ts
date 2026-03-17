@@ -32,7 +32,8 @@ export type OperacionalItemProvisionamentoStatus =
   | "provisionando"
   | "provisionado"
   | "falhou"
-  | "revogado";
+  | "revogado"
+  | "pendente_limpeza";
 
 /** Fila de fechadura vinda do banco (para resolução de destinos). */
 export interface FechaduraRow {
