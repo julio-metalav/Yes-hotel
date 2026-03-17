@@ -111,6 +111,7 @@ async function getTtlockToken(): Promise<string> {
     password: passwordMd5,
     grant_type: "password",
   });
+  if (typeof console !== "undefined") console.log("[lifecycle] TTLock token URL=" + ttlockTokenUrl);
   const res = await fetch(ttlockTokenUrl, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -177,12 +178,19 @@ async function ttlockAddKeyboardPassword(
     date: Date.now(),
   };
   if (keyboardPwdName != null) body.keyboardPwdName = keyboardPwdName;
-  const res = await fetch(`${ttlockApiBase}/v3/keyboardPwd/add`, {
+  const addPasscodeUrl = `${ttlockApiBase}/v3/keyboardPwd/add`;
+  if (typeof console !== "undefined") console.log("[lifecycle] TTLock apiBase=" + ttlockApiBase + " addPasscode URL=" + addPasscodeUrl);
+  const res = await fetch(addPasscodeUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const data = (await res.json()) as { keyboardPwdId?: number; errcode?: number; errmsg?: string };
+  const rawText = await res.text();
+  if (rawText.trimStart().toLowerCase().startsWith("<")) {
+    if (typeof console !== "undefined") console.warn("[lifecycle] TTLock add passcode respondeu HTML (URL=" + addPasscodeUrl + ") preview=" + rawText.slice(0, 200));
+    throw new Error("TTLock add passcode: resposta foi HTML, não JSON. Use TTLOCK_API_BASE_URL=https://euapi.ttlock.com (não euopen).");
+  }
+  const data = JSON.parse(rawText) as { keyboardPwdId?: number; errcode?: number; errmsg?: string };
   if (typeof console !== "undefined") {
     console.log("[lifecycle] TTLock add passcode res.status=" + res.status + " errcode=" + (data.errcode ?? "n/a") + " errmsg=" + (data.errmsg ?? "n/a") + " keyboardPwdId=" + (data.keyboardPwdId ?? "n/a"));
   }
