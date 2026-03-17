@@ -142,18 +142,17 @@ async function getTtlockToken(): Promise<string> {
 async function ttlockDeleteKeyboardPassword(lockId: string | number, keyboardPwdId: number): Promise<void> {
   const token = await getTtlockToken();
   const lockIdNum = typeof lockId === "string" ? parseInt(lockId, 10) : lockId;
-  const body = {
-    clientId: ttlockClientId,
-    accessToken: token,
-    lockId: lockIdNum,
-    keyboardPwdId,
-    deleteType: 2,
-    date: Date.now(),
-  };
+  const params = new URLSearchParams();
+  params.append("clientId", ttlockClientId);
+  params.append("accessToken", token);
+  params.append("lockId", String(lockIdNum));
+  params.append("keyboardPwdId", String(keyboardPwdId));
+  params.append("deleteType", "2");
+  params.append("date", String(Date.now()));
   const res = await fetch(`${ttlockApiBase}/v3/keyboardPwd/delete`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
   });
   const data = (await res.json()) as { errcode?: number; errmsg?: string };
   if (!res.ok || (data.errcode != null && data.errcode !== 0)) {
