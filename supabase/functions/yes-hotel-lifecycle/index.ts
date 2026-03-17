@@ -189,21 +189,21 @@ async function ttlockAddKeyboardPassword(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const rawText = await res.text();
-  if (rawText.trimStart().toLowerCase().startsWith("<")) {
-    if (typeof console !== "undefined") console.warn("[lifecycle] TTLock add passcode respondeu HTML (URL=" + addPasscodeUrl + ") preview=" + rawText.slice(0, 200));
-    throw new Error("TTLock add passcode: resposta foi HTML, não JSON. Use TTLOCK_API_BASE_URL=https://api.sciener.com (não euopen).");
+  const text = await res.text();
+  if (typeof console !== "undefined") console.log("[TTLOCK RAW RESPONSE]", text);
+  let data: { keyboardPwdId?: number; errcode?: number; errmsg?: string };
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new Error("TTLock respondeu não-JSON: " + text.substring(0, 200));
   }
-  const data = JSON.parse(rawText) as { keyboardPwdId?: number; errcode?: number; errmsg?: string };
-  if (typeof console !== "undefined") {
-    console.log("[lifecycle] TTLock add passcode res.status=" + res.status + " errcode=" + (data.errcode ?? "n/a") + " errmsg=" + (data.errmsg ?? "n/a") + " keyboardPwdId=" + (data.keyboardPwdId ?? "n/a"));
+  if (data.errcode && data.errcode !== 0) {
+    throw new Error(`TTLock erro ${data.errcode}: ${data.errmsg}`);
   }
-  if (!res.ok || (data.errcode != null && data.errcode !== 0)) {
-    if (typeof console !== "undefined") console.warn("[lifecycle] TTLock add passcode FAIL body=" + JSON.stringify(data));
+  if (!res.ok) {
     throw new Error(data.errmsg ?? `Add passcode: ${res.status}`);
   }
   if (typeof data.keyboardPwdId !== "number") {
-    if (typeof console !== "undefined") console.warn("[lifecycle] TTLock add passcode no keyboardPwdId body=" + JSON.stringify(data));
     throw new Error("TTLock add passcode: resposta sem keyboardPwdId");
   }
   return data.keyboardPwdId;
