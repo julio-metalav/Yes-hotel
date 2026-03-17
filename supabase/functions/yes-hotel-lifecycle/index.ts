@@ -304,7 +304,7 @@ async function getItensPendentes(credencialId: string): Promise<ItemRow[]> {
 async function getItensProvisionados(credencialId: string): Promise<ItemRow[]> {
   const { data, error } = await adminClient
     .from("operacional_credencial_itens")
-    .select("id, credencial_id, lock_id_ttlock, status_provisionamento, codigo_logico_destino")
+    .select("id, credencial_id, lock_id_ttlock, status_provisionamento, codigo_logico_destino, remote_keyboard_pwd_id")
     .eq("credencial_id", credencialId)
     .eq("status_provisionamento", "provisionado");
   if (error || !Array.isArray(data)) return [];
