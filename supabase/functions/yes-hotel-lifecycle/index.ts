@@ -140,6 +140,7 @@ async function getTtlockToken(): Promise<string> {
 }
 
 async function ttlockDeleteKeyboardPassword(lockId: string | number, keyboardPwdId: number): Promise<void> {
+  if (typeof console !== "undefined") console.log("### DELETE TTLOCK V2 EXECUTANDO ###");
   const token = await getTtlockToken();
   const lockIdNum = typeof lockId === "string" ? parseInt(lockId, 10) : lockId;
   const params = new URLSearchParams();
@@ -154,7 +155,14 @@ async function ttlockDeleteKeyboardPassword(lockId: string | number, keyboardPwd
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params.toString(),
   });
-  const data = (await res.json()) as { errcode?: number; errmsg?: string };
+  const text = await res.text();
+  if (typeof console !== "undefined") console.log("[TTLOCK DELETE RAW RESPONSE]", text);
+  let data: { errcode?: number; errmsg?: string };
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (e) {
+    throw new Error("TTLock delete respondeu não-JSON: " + text.substring(0, 200));
+  }
   if (!res.ok || (data.errcode != null && data.errcode !== 0)) {
     throw new Error(data.errmsg ?? `Delete passcode: ${res.status}`);
   }
