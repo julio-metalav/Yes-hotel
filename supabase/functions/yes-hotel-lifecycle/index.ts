@@ -171,23 +171,22 @@ async function ttlockAddKeyboardPassword(
 ): Promise<number> {
   const token = await getTtlockToken();
   const lockIdNum = typeof lockId === "string" ? parseInt(lockId, 10) : lockId;
-  const body: Record<string, string | number> = {
-    clientId: ttlockClientId,
-    accessToken: token,
-    lockId: lockIdNum,
-    keyboardPwd,
-    startDate: startDateMs,
-    endDate: endDateMs,
-    addType: 2,
-    date: Date.now(),
-  };
-  if (keyboardPwdName != null) body.keyboardPwdName = keyboardPwdName;
   const addPasscodeUrl = `${ttlockApiBase}/v3/keyboardPwd/add`;
   if (typeof console !== "undefined") console.log("[lifecycle] TTLock apiBase=" + ttlockApiBase + " addPasscode URL=" + addPasscodeUrl);
+  const params = new URLSearchParams();
+  params.append("clientId", ttlockClientId);
+  params.append("accessToken", token);
+  params.append("lockId", String(lockIdNum));
+  params.append("keyboardPwd", keyboardPwd);
+  if (keyboardPwdName != null) params.append("keyboardPwdName", keyboardPwdName);
+  params.append("startDate", String(startDateMs));
+  params.append("endDate", String(endDateMs));
+  params.append("addType", "2");
+  params.append("date", String(Date.now()));
   const res = await fetch(addPasscodeUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
   });
   const text = await res.text();
   if (typeof console !== "undefined") console.log("[TTLOCK RAW RESPONSE]", text);
