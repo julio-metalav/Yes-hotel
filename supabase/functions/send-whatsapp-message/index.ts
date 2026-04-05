@@ -29,6 +29,7 @@ const whatsappUseMock = Deno.env.get("WHATSAPP_USE_MOCK") ?? "true";
 const whatsappAccessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
 const whatsappPhoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
 const whatsappGraphVersion = Deno.env.get("WHATSAPP_GRAPH_API_VERSION") ?? "v21.0";
+const whatsappInternalTestToken = Deno.env.get("WHATSAPP_INTERNAL_TEST_TOKEN")?.trim() ?? "";
 
 const PREVIEW_MAX_LEN = 80;
 
@@ -52,6 +53,12 @@ async function ensureAuth(request: Request): Promise<{ user: { id: string } } | 
   const { data: { user }, error } = await client.auth.getUser();
   if (error || !user) return null;
   return { user };
+}
+
+function hasInternalTestAccess(request: Request): boolean {
+  if (!whatsappInternalTestToken) return false;
+  const token = request.headers.get("x-whatsapp-internal-test-token")?.trim() ?? "";
+  return token.length > 0 && token === whatsappInternalTestToken;
 }
 
 interface SendBody {
@@ -141,7 +148,8 @@ Deno.serve(async (request: Request) => {
     return jsonResponse({ ok: false, error: "Metodo permitido: POST." }, 405);
   }
 
-  const auth = await ensureAuth(request);
+  const internalTest = hasInternalTestAccess(request);
+  const auth = internalTest ? { user: { id: "internal-test" } } : await ensureAuth(request);
   if (!auth) {
     return jsonResponse({ ok: false, error: "Nao autorizado. Envie Authorization: Bearer <jwt>." }, 401);
   }
@@ -204,11 +212,13 @@ Deno.serve(async (request: Request) => {
     ? mockAdapterSend(telefone, text)
     : await cloudApiAdapterSend(telefone, text);
 
+  const usoMock = whatsappUseMock === "true";
+
   if (result.ok) {
     await admin
       .from("comunicacao_mensagens")
       .update({
-        status_envio: "enviada",
+        status_envio: usoMock ? "mock_enviado" : "enviada",
         provider_message_id: result.provider_message_id ?? null,
       })
       .eq("id", msg.id);
@@ -235,6 +245,8 @@ Deno.serve(async (request: Request) => {
       ok: true,
       messageId: msg.id,
       provider_message_id: result.provider_message_id ?? null,
+      transporte: usoMock ? "simulado" : "whatsapp",
+      status_envio_gravado: usoMock ? "mock_enviado" : "enviada",
     }, 200);
   }
 
