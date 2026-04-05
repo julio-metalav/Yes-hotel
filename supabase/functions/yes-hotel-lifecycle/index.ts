@@ -60,6 +60,32 @@ const anonClient = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
+/** Timeline operacional: não propaga falha para não quebrar lifecycle TTLock. */
+async function insertReservaEvento(
+  reservaId: string,
+  tipo: string,
+  titulo: string,
+  detalhe: Record<string, unknown>,
+): Promise<void> {
+  const timestamp = new Date().toISOString();
+  const payload = JSON.stringify({ ...detalhe, timestamp });
+  try {
+    const { error } = await adminClient.from("operacional_reserva_eventos").insert({
+      reserva_id: reservaId,
+      tipo,
+      titulo,
+      detalhe: payload,
+    });
+    if (error && typeof console !== "undefined") {
+      console.warn("[lifecycle] insertReservaEvento", tipo, error.message);
+    }
+  } catch (e) {
+    if (typeof console !== "undefined") {
+      console.warn("[lifecycle] insertReservaEvento exception", tipo, e instanceof Error ? e.message : String(e));
+    }
+  }
+}
+
 async function getCallerProfile(request: Request): Promise<{ role: string; active: boolean } | null> {
   const authHeader = request.headers.get("Authorization") ?? "";
   const hasBearer = /^\s*Bearer\s+/i.test(authHeader);
@@ -664,6 +690,16 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
 
   const credencial = await getCredencialForProvision(reservaId);
   if (!credencial) {
+    await insertReservaEvento(reservaId, "ttlock_credencial_nao_encontrada", "TTLock: credencial não encontrada", {
+      action: "lifecycle_provision",
+      credencial_id: null,
+      status_final: null,
+      total_itens: 0,
+      provisionados: 0,
+      falhas: 0,
+      revogados: 0,
+      erro_resumido: "Nenhuma credencial de acesso encontrada para esta reserva.",
+    });
     return jsonResponse(
       {
         ok: false,
@@ -674,6 +710,16 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     );
   }
   if (credencial.status === "revogada") {
+    await insertReservaEvento(reservaId, "ttlock_provision_bloqueado_revogada", "TTLock: provisionamento bloqueado (credencial revogada)", {
+      action: "lifecycle_provision",
+      credencial_id: credencial.id,
+      status_final: "revogada",
+      total_itens: 0,
+      provisionados: 0,
+      falhas: 0,
+      revogados: 0,
+      erro_resumido: "Não é possível provisionar credencial revogada.",
+    });
     return jsonResponse(
       {
         ok: false,
@@ -687,6 +733,16 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
 
   const itens = await getItensPendentes(credencial.id);
   if (itens.length === 0) {
+    await insertReservaEvento(reservaId, "ttlock_provision_sem_itens_pendentes", "TTLock: nenhum item pendente para provisionar", {
+      action: "lifecycle_provision",
+      credencial_id: credencial.id,
+      status_final: credencial.status,
+      total_itens: 0,
+      provisionados: 0,
+      falhas: 0,
+      revogados: 0,
+      erro_resumido: null,
+    });
     return jsonResponse({
       ok: true,
       idempotente: true,
@@ -712,6 +768,17 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     .update({ status: "provisionando" })
     .eq("id", credencial.id);
 
+  await insertReservaEvento(reservaId, "ttlock_provision_iniciado", "TTLock: provisionamento iniciado", {
+    action: "lifecycle_provision_iniciado",
+    credencial_id: credencial.id,
+    status_final: "provisionando",
+    total_itens: itens.length,
+    provisionados: 0,
+    falhas: 0,
+    revogados: 0,
+    erro_resumido: null,
+  });
+
   const validoDeMs = new Date(credencial.valido_de).getTime();
   const validoAteMs = new Date(credencial.valido_ate).getTime();
   const erros: string[] = [];
@@ -734,12 +801,23 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
       .from("operacional_credenciais_acesso")
       .update({ status: falhas === itens.length ? "falhou" : "parcial" })
       .eq("id", credencial.id);
+    const st = falhas === itens.length ? "falhou" : "parcial";
+    await insertReservaEvento(reservaId, "ttlock_provision_ttlock_indisponivel", "TTLock: provisionamento sem API (variáveis ausentes)", {
+      action: "lifecycle_provision_concluido",
+      credencial_id: credencial.id,
+      status_final: st,
+      total_itens: itens.length,
+      provisionados: 0,
+      falhas: itens.length,
+      revogados: 0,
+      erro_resumido: msg,
+    });
     return jsonResponse({
       ok: true,
       message: "Provisionamento tentado; TTLock indisponível.",
       credencialId: credencial.id,
       reservaId,
-      status: falhas === itens.length ? "falhou" : "parcial",
+      status: st,
       passcode,
       totalItens: itens.length,
       provisionados: 0,
@@ -794,6 +872,42 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     .update({ status: statusFinal })
     .eq("id", credencial.id);
 
+  const erroResumidoConclusao = erros.length ? erros.slice(0, 3).join("; ") : null;
+  if (statusFinal === "provisionada") {
+    await insertReservaEvento(reservaId, "ttlock_provision_sucesso", "TTLock: provisionamento concluído", {
+      action: "lifecycle_provision_concluido",
+      credencial_id: credencial.id,
+      status_final: statusFinal,
+      total_itens: itens.length,
+      provisionados,
+      falhas,
+      revogados: 0,
+      erro_resumido: erroResumidoConclusao,
+    });
+  } else if (statusFinal === "parcial") {
+    await insertReservaEvento(reservaId, "ttlock_provision_parcial", "TTLock: provisionamento parcial", {
+      action: "lifecycle_provision_concluido",
+      credencial_id: credencial.id,
+      status_final: statusFinal,
+      total_itens: itens.length,
+      provisionados,
+      falhas,
+      revogados: 0,
+      erro_resumido: erroResumidoConclusao,
+    });
+  } else {
+    await insertReservaEvento(reservaId, "ttlock_provision_falhou", "TTLock: provisionamento falhou", {
+      action: "lifecycle_provision_concluido",
+      credencial_id: credencial.id,
+      status_final: statusFinal,
+      total_itens: itens.length,
+      provisionados,
+      falhas,
+      revogados: 0,
+      erro_resumido: erroResumidoConclusao,
+    });
+  }
+
   return jsonResponse({
     ok: true,
     message:
@@ -823,6 +937,16 @@ async function handleCancelOrCheckout(
 
   const credencial = await getCredencialPorReserva(reservaId);
   if (!credencial) {
+    await insertReservaEvento(reservaId, "ttlock_revogacao_sem_credencial", "TTLock: revogação não aplicada (sem credencial)", {
+      action: motivo === "checkout" ? "lifecycle_checkout" : "lifecycle_cancel",
+      credencial_id: null,
+      status_final: null,
+      total_itens: 0,
+      provisionados: 0,
+      falhas: 0,
+      revogados: 0,
+      erro_resumido: "Reserva sem credencial operacional.",
+    });
     return jsonResponse(
       {
         ok: false,
@@ -833,6 +957,16 @@ async function handleCancelOrCheckout(
     );
   }
   if (credencial.status === "revogada") {
+    await insertReservaEvento(reservaId, "ttlock_revogacao_idempotente", "TTLock: revogação idempotente (já revogada)", {
+      action: motivo === "checkout" ? "lifecycle_checkout" : "lifecycle_cancel",
+      credencial_id: credencial.id,
+      status_final: "revogada",
+      total_itens: 0,
+      provisionados: 0,
+      falhas: 0,
+      revogados: 0,
+      erro_resumido: null,
+    });
     return jsonResponse({
       ok: true,
       idempotente: true,
@@ -848,6 +982,31 @@ async function handleCancelOrCheckout(
   }
 
   const result = await revokeCredencial(credencial.id, reservaId, motivo);
+  const totalItensRevogacao = result.itensRevogados + result.itensFalha;
+  const erroRev = result.lastSyncError ?? (result.erros.length ? result.erros.slice(0, 3).join("; ") : null);
+  if (motivo === "checkout") {
+    await insertReservaEvento(reservaId, "ttlock_checkout_executado", "TTLock: checkout e revogação executados", {
+      action: "lifecycle_checkout",
+      credencial_id: result.credencialId,
+      status_final: result.status,
+      total_itens: totalItensRevogacao,
+      provisionados: 0,
+      falhas: result.itensFalha,
+      revogados: result.itensRevogados,
+      erro_resumido: erroRev,
+    });
+  } else {
+    await insertReservaEvento(reservaId, "ttlock_cancelamento_executado", "TTLock: cancelamento e revogação executados", {
+      action: "lifecycle_cancel",
+      credencial_id: result.credencialId,
+      status_final: result.status,
+      total_itens: totalItensRevogacao,
+      provisionados: 0,
+      falhas: result.itensFalha,
+      revogados: result.itensRevogados,
+      erro_resumido: erroRev,
+    });
+  }
   return jsonResponse({
     ok: true,
     message: motivo === "cancelamento" ? "Cancelamento executado (acesso revogado)." : "Checkout executado (acesso revogado).",
@@ -944,16 +1103,33 @@ async function retrySync(request: Request, payload: Record<string, unknown>): Pr
 
   const credencial = await adminClient
     .from("operacional_credenciais_acesso")
-    .select("id, status")
+    .select("id, status, reserva_id")
     .eq("id", cid!)
     .single()
-    .then((r) => r.data as { id: string; status: string } | null);
+    .then((r) => r.data as { id: string; status: string; reserva_id: string } | null);
   if (!credencial) {
     return jsonResponse({ ok: false, error: "Credencial não encontrada.", credencialId: cid }, 404);
   }
 
+  const reservaIdRetry = (rid && rid.trim()) ? rid.trim() : String(credencial.reserva_id ?? "").trim();
+  if (!reservaIdRetry) {
+    return jsonResponse({ ok: false, error: "Não foi possível resolver reserva_id para retry.", credencialId: cid }, 400);
+  }
+
   if (credencial.status === "revogada") {
-    const result = await revokeCredencial(credencial.id, rid!, "cancelamento");
+    const result = await revokeCredencial(credencial.id, reservaIdRetry, "cancelamento");
+    const totalItensRetry = result.itensRevogados + result.itensFalha;
+    const erroRetry = result.lastSyncError ?? (result.erros.length ? result.erros.slice(0, 3).join("; ") : null);
+    await insertReservaEvento(reservaIdRetry, "ttlock_retry_sync_executado", "TTLock: reprocessar sincronização (revogação remota)", {
+      action: "retry_sync",
+      credencial_id: result.credencialId,
+      status_final: result.status,
+      total_itens: totalItensRetry,
+      provisionados: 0,
+      falhas: result.itensFalha,
+      revogados: result.itensRevogados,
+      erro_resumido: erroRetry,
+    });
     return jsonResponse({
       ok: true,
       message: "Retry executado (revogação remota nos itens ainda provisionados).",
