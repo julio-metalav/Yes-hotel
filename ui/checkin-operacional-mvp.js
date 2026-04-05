@@ -688,11 +688,45 @@ async function backendEnviarLinks(reservaId) {
 
 async function backendLiberarAcesso(reservaId) {
   const supabase = getSupabase();
-  if (!supabase) return false;
-  const { error } = await supabase.from("operacional_reservas").update({ acesso_liberado: true }).eq("id", reservaId);
-  if (error) return false;
-  await backendAddEvento(reservaId, "acesso_liberado", "Acesso liberado", "Acesso ao apartamento liberado.");
-  return true;
+  if (!supabase) {
+    return {
+      ok: false,
+      error: "Cliente Supabase indisponível. Confirme login e configuração (url/anonKey) do painel.",
+    };
+  }
+  const rid = String(reservaId ?? "").trim();
+  if (!rid) {
+    return { ok: false, error: "ID da reserva inválido." };
+  }
+  const { error: updateError } = await supabase
+    .from("operacional_reservas")
+    .update({ acesso_liberado: true })
+    .eq("id", rid);
+  if (updateError) {
+    return { ok: false, error: updateError.message || "Falha ao atualizar operacional_reservas." };
+  }
+  const { data: row, error: selectError } = await supabase
+    .from("operacional_reservas")
+    .select("id, acesso_liberado")
+    .eq("id", rid)
+    .maybeSingle();
+  if (selectError) {
+    return { ok: false, error: selectError.message || "Não foi possível confirmar acesso_liberado após o update." };
+  }
+  if (!row) {
+    return {
+      ok: false,
+      error: "Reserva não encontrada após o update (id sem correspondência ou sem permissão de leitura).",
+    };
+  }
+  if (row.acesso_liberado !== true) {
+    return {
+      ok: false,
+      error: "Update não aplicou acesso_liberado=true (valor no banco permanece diferente).",
+    };
+  }
+  await backendAddEvento(rid, "acesso_liberado", "Acesso liberado", "Acesso ao apartamento liberado.");
+  return { ok: true };
 }
 
 async function backendMarcarEntrada(reservaId) {
@@ -1303,8 +1337,12 @@ async function acaoAvançarFnrh(id) {
 
 async function acaoLiberarAcesso(id) {
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
-    const ok = await backendLiberarAcesso(id);
-    if (ok) await refreshFromSource();
+    const result = await backendLiberarAcesso(id);
+    if (result.ok) {
+      await refreshFromSource();
+    } else {
+      alert(result.error || "Não foi possível liberar o acesso.");
+    }
     return;
   }
   const r = getReservaById(id);
