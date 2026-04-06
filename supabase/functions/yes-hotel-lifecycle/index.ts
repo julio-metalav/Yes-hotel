@@ -519,13 +519,19 @@ type CredencialRow = {
   last_sync_error?: string | null;
 };
 
-/** Credencial com campos necessários para provisionamento TTLock (apenas colunas do schema base 0006). */
+/**
+ * Credencial para provisionamento: select alinhado ao schema mínimo em produção
+ * (id, reserva_id, tipo_credencial, status, valido_de, valido_ate, motivo_origem, timestamps).
+ * codigo_credencial / provider_tipo são opcionais quando existirem migrações TTLock (0007+).
+ */
 type CredencialForProvision = {
   id: string;
   reserva_id: string;
   status: string;
   valido_de: string;
   valido_ate: string;
+  tipo_credencial?: string;
+  motivo_origem?: string;
   codigo_credencial?: string | null;
   provider_tipo?: string | null;
 };
@@ -610,10 +616,11 @@ async function loadReservaTtlockFormatContext(reservaId: string): Promise<{
   };
 }
 
+/** Colunas que existem na tabela base em produção (sem codigo_credencial / provider_tipo). */
 const CREDENCIAL_PROVISION_SELECT =
-  "id, reserva_id, status, valido_de, valido_ate, codigo_credencial, provider_tipo, tipo_credencial";
+  "id, reserva_id, tipo_credencial, status, valido_de, valido_ate, motivo_origem, created_at, updated_at";
 
-/** Por reserva_id + tipo principal. Sem maybeSingle: evita null silencioso se PostgREST errar com múltiplas linhas. */
+/** Por reserva_id + tipo principal. Erro de PostgREST → HttpError (não confundir com “não encontrada”). */
 async function getCredencialForProvision(reservaId: string): Promise<CredencialForProvision | null> {
   const normalizedId = String(reservaId ?? "").trim().toLowerCase();
   if (!normalizedId) return null;
@@ -633,7 +640,10 @@ async function getCredencialForProvision(reservaId: string): Promise<CredencialF
         error.message,
       );
     }
-    return null;
+    throw new HttpError(
+      "Erro ao consultar operacional_credenciais_acesso por reserva_id: " + error.message,
+      500,
+    );
   }
   const row = Array.isArray(data) && data[0] ? data[0] : null;
   return row ? (row as CredencialForProvision) : null;
@@ -658,7 +668,10 @@ async function getCredencialPrincipalPorId(credencialId: string): Promise<Creden
         error.message,
       );
     }
-    return null;
+    throw new HttpError(
+      "Erro ao consultar operacional_credenciais_acesso por id: " + error.message,
+      500,
+    );
   }
   const row = Array.isArray(data) && data[0] ? data[0] : null;
   return row ? (row as CredencialForProvision) : null;
@@ -985,16 +998,36 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     passcode = deriveTtlockPasscodeFromReservation(ttlockCtx.external_reservation_id, reservaId);
   }
 
-  const credencialPatch: Record<string, unknown> = { status: "provisionando" };
-  if (!credencial.codigo_credencial) {
-    credencialPatch.codigo_credencial = passcode;
-    credencialPatch.provider_tipo = "ttlock_passcode";
+  const credencialPatchComPasscode: Record<string, unknown> = {
+    status: "provisionando",
+    codigo_credencial: passcode,
+    provider_tipo: "ttlock_passcode",
+  };
+  const credencialPatchSoStatus: Record<string, unknown> = { status: "provisionando" };
+
+  let upErr = (
+    await adminClient
+      .from("operacional_credenciais_acesso")
+      .update(credencial.codigo_credencial ? credencialPatchSoStatus : credencialPatchComPasscode)
+      .eq("id", credencial.id)
+  ).error;
+
+  if (upErr && !credencial.codigo_credencial) {
+    upErr = (await adminClient
+      .from("operacional_credenciais_acesso")
+      .update(credencialPatchSoStatus)
+      .eq("id", credencial.id)).error;
+  } else if (upErr && credencial.codigo_credencial) {
+    throw new HttpError("Falha ao atualizar credencial (status): " + upErr.message, 500);
   }
 
-  await adminClient
-    .from("operacional_credenciais_acesso")
-    .update(credencialPatch)
-    .eq("id", credencial.id);
+  if (upErr) {
+    throw new HttpError(
+      "Falha ao atualizar credencial para provisionamento (colunas codigo_credencial/provider_tipo podem não existir): " +
+        upErr.message,
+      500,
+    );
+  }
 
   await insertReservaEvento(reservaId, "ttlock_provision_iniciado", "TTLock: provisionamento iniciado", {
     action: "lifecycle_provision_iniciado",
