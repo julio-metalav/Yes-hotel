@@ -41,12 +41,30 @@
           <div class="reservation-detail-body" id="reservation-detail-body"></div>
         </aside>
         <div class="reservation-detail-backdrop hidden" id="reservation-detail-backdrop" aria-hidden="true"></div>
+
+        <div class="modal-overlay hidden" id="modal-enviar-senha-overlay" aria-hidden="true">
+          <div class="modal-enviar-senha" role="dialog" aria-labelledby="modal-enviar-senha-title">
+            <h3 id="modal-enviar-senha-title">Enviar senha de acesso</h3>
+            <p class="modal-enviar-senha-desc">Informe pelo menos um contato (e-mail ou WhatsApp) para envio da senha e dos links da FNRH.</p>
+            <form id="modal-enviar-senha-form">
+              <label for="modal-enviar-senha-email">E-mail</label>
+              <input type="email" id="modal-enviar-senha-email" name="email" placeholder="exemplo@email.com" />
+              <label for="modal-enviar-senha-whatsapp">WhatsApp</label>
+              <input type="tel" id="modal-enviar-senha-whatsapp" name="whatsapp" placeholder="(00) 00000-0000" />
+              <div class="modal-enviar-senha-actions">
+                <button type="button" class="secondary-button" id="modal-enviar-senha-cancel">Cancelar</button>
+                <button type="submit" class="primary-button" id="modal-enviar-senha-submit">Enviar senha</button>
+              </div>
+            </form>
+            <p class="modal-enviar-senha-msg hidden" id="modal-enviar-senha-msg"></p>
+          </div>
+        </div>
       </section>
     </main>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
-    <script defer src="./checkin-operacional-mvp.js?v=1"></script>
+    <script defer src="./checkin-operacional-mvp.js?v=2"></script>
   </body>
 </html>
