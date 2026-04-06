@@ -39,7 +39,7 @@
       const token = params.get("token");
 
       if (!guestId || !token) {
-        document.getElementById("app").innerHTML = "<p class=\"error\">Link inválido. É necessário guest_id e token na URL.</p>";
+        document.getElementById("app").innerHTML = "<p class=\"error\">Link inválido. São necessários guest_id (id da FNRH em fnrh_hospedes) e token na URL.</p>";
         return;
       }
 

@@ -121,12 +121,12 @@ Deno.serve(async (req: Request) => {
   let tentativasComEmail = 0;
   const erros: string[] = [];
 
-  for (const p of pendentes as { hospede_id: string; link_token: string; hospede_nome: string }[]) {
+  for (const p of pendentes as { id: string; hospede_id: string; link_token: string; hospede_nome: string }[]) {
     const hospede = (hospedes as { id: string; nome: string; email: string; whatsapp: string }[] | null)?.find((h) => h.id === p.hospede_id);
     const email = (hospede?.email ?? "").trim();
     const nome = (hospede?.nome ?? p.hospede_nome ?? "Hóspede").trim();
-    // base_url = origem do painel (ex.: Vercel com raiz = conteúdo de /ui → sem prefixo /ui)
-    const link = `${baseUrl}/fnrh-preenchimento.html?guest_id=${encodeURIComponent(p.hospede_id)}&token=${encodeURIComponent(p.link_token)}`;
+    // guest_id = fnrh_hospedes.id (formulário público + fnrh-get)
+    const link = `${baseUrl}/fnrh-preenchimento.html?guest_id=${encodeURIComponent(p.id)}&token=${encodeURIComponent(p.link_token)}`;
 
     if (email) {
       tentativasComEmail++;

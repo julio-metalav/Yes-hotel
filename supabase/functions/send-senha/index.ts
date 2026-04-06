@@ -148,11 +148,11 @@ Deno.serve(async (req: Request) => {
   const baseUrl = supabaseUrl.replace("/v1", "");
   const { data: fnrhList } = await admin
     .from("fnrh_hospedes")
-    .select("hospede_id, link_token")
+    .select("id, link_token")
     .eq("reserva_id", reservaId);
   const links = (fnrhList ?? []).map(
-    (r: { hospede_id: string; link_token: string }) =>
-      `${baseUrl}/fnrh-preenchimento.html?guest_id=${encodeURIComponent(r.hospede_id)}&token=${encodeURIComponent(r.link_token)}`,
+    (r: { id: string; link_token: string }) =>
+      `${baseUrl}/fnrh-preenchimento.html?guest_id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(r.link_token)}`,
   );
   const linksText = links.length > 0
     ? links.map((url: string, i: number) => `${i + 1}. ${url}`).join("\n")

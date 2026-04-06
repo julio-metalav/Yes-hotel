@@ -536,8 +536,8 @@ function mapDbHospedeToInternal(row, fnrhRow) {
     ultimoEnvioEm: row.ultimo_envio_em || null,
     tentativasEnvio: row.tentativas_envio != null ? Number(row.tentativas_envio) : 0,
   };
-  if (fnrhRow && fnrhRow.link_token) {
-    base.fnrhLink = "./fnrh-preenchimento.html?guest_id=" + encodeURIComponent(row.id) + "&token=" + encodeURIComponent(fnrhRow.link_token);
+  if (fnrhRow && fnrhRow.link_token && fnrhRow.id) {
+    base.fnrhLink = "./fnrh-preenchimento.html?guest_id=" + encodeURIComponent(fnrhRow.id) + "&token=" + encodeURIComponent(fnrhRow.link_token);
     base.fnrhStatus = fnrhRow.status || "pendente";
   }
   return base;
@@ -683,7 +683,7 @@ async function loadReservasFromBackend() {
       .order("criado_em", { ascending: false });
     const { data: fnrhRows } = await supabase
       .from("fnrh_hospedes")
-      .select("hospede_id, status, link_token")
+      .select("id, hospede_id, status, link_token")
       .eq("reserva_id", r.id);
     const internal = mapDbReservaToInternal(r, hospedesRows || [], eventosRows || [], fnrhRows || []);
     const ridKey = String(r.id);
