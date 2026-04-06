@@ -82,7 +82,11 @@ function resolvePayloadRecord(body: Record<string, unknown>): Record<string, unk
   return base;
 }
 
-/** Contrato de reserva: camelCase (painel) ou snake_case (APIs / fetch direto). */
+/**
+ * Contrato de reserva: camelCase (painel) ou snake_case (APIs / fetch direto).
+ * O fallback `payload.id` é ambíguo (alguns clientes enviam credencial_id em `id`);
+ * o lifecycle resolve isso com getCredencialPrincipalPorId após falhar por reserva_id.
+ */
 function pickReservaId(payload: Record<string, unknown>): string {
   for (const k of ["reservaId", "reserva_id", "reservationId"] as const) {
     const s = String(payload[k] ?? "").trim();
@@ -91,6 +95,10 @@ function pickReservaId(payload: Record<string, unknown>): string {
   const id = String(payload.id ?? "").trim();
   if (id) return id;
   return "";
+}
+
+function isUuidLike(s: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s ?? "").trim());
 }
 
 function requireReservaId(payload: Record<string, unknown>): string {
@@ -602,23 +610,58 @@ async function loadReservaTtlockFormatContext(reservaId: string): Promise<{
   };
 }
 
+const CREDENCIAL_PROVISION_SELECT =
+  "id, reserva_id, status, valido_de, valido_ate, codigo_credencial, provider_tipo, tipo_credencial";
+
+/** Por reserva_id + tipo principal. Sem maybeSingle: evita null silencioso se PostgREST errar com múltiplas linhas. */
 async function getCredencialForProvision(reservaId: string): Promise<CredencialForProvision | null> {
   const normalizedId = String(reservaId ?? "").trim().toLowerCase();
   if (!normalizedId) return null;
-  if (typeof console !== "undefined") console.log("[lifecycle] getCredencialForProvision reservaId=" + normalizedId);
+  if (typeof console !== "undefined") console.log("[lifecycle] getCredencialForProvision by reserva_id=" + normalizedId);
   const { data, error } = await adminClient
     .from("operacional_credenciais_acesso")
-    .select("id, reserva_id, status, valido_de, valido_ate, codigo_credencial, provider_tipo")
+    .select(CREDENCIAL_PROVISION_SELECT)
     .eq("reserva_id", normalizedId)
     .eq("tipo_credencial", "principal")
-    .limit(1)
-    .maybeSingle();
+    .order("created_at", { ascending: false })
+    .limit(1);
   if (error) {
-    if (typeof console !== "undefined") console.warn("[lifecycle] getCredencialForProvision error", error.message);
+    if (typeof console !== "undefined") {
+      console.warn(
+        "[lifecycle] getCredencialForProvision query error reserva_id=" + normalizedId,
+        (error as { code?: string }).code ?? "",
+        error.message,
+      );
+    }
     return null;
   }
-  if (!data) return null;
-  return data as CredencialForProvision;
+  const row = Array.isArray(data) && data[0] ? data[0] : null;
+  return row ? (row as CredencialForProvision) : null;
+}
+
+/** Quando o payload trouxe o UUID da credencial em vez do da reserva (ex. `payload.id`). */
+async function getCredencialPrincipalPorId(credencialId: string): Promise<CredencialForProvision | null> {
+  const id = String(credencialId ?? "").trim().toLowerCase();
+  if (!id) return null;
+  if (typeof console !== "undefined") console.log("[lifecycle] getCredencialPrincipalPorId id=" + id);
+  const { data, error } = await adminClient
+    .from("operacional_credenciais_acesso")
+    .select(CREDENCIAL_PROVISION_SELECT)
+    .eq("id", id)
+    .eq("tipo_credencial", "principal")
+    .limit(1);
+  if (error) {
+    if (typeof console !== "undefined") {
+      console.warn(
+        "[lifecycle] getCredencialPrincipalPorId query error id=" + id,
+        (error as { code?: string }).code ?? "",
+        error.message,
+      );
+    }
+    return null;
+  }
+  const row = Array.isArray(data) && data[0] ? data[0] : null;
+  return row ? (row as CredencialForProvision) : null;
 }
 
 async function getItensPendentes(credencialId: string): Promise<ItemRow[]> {
@@ -802,9 +845,23 @@ async function revokeCredencial(
 
 async function handleLifecycleProvision(request: Request, payload: Record<string, unknown>): Promise<Response> {
   await ensureCallerAllowed(request);
-  const reservaId = requireReservaId(payload);
+  let reservaId = requireReservaId(payload);
+  const idPesquisa = reservaId.trim().toLowerCase();
 
-  const credencial = await getCredencialForProvision(reservaId);
+  let credencial = await getCredencialForProvision(idPesquisa);
+  if (!credencial && isUuidLike(idPesquisa)) {
+    credencial = await getCredencialPrincipalPorId(idPesquisa);
+    if (credencial && typeof console !== "undefined") {
+      console.warn(
+        "[lifecycle] lifecycle_provision: resolvido por UUID da credencial (payload não era reserva_id). reserva_id efetivo=" +
+          credencial.reserva_id,
+      );
+    }
+  }
+  if (credencial) {
+    reservaId = String(credencial.reserva_id).trim().toLowerCase();
+  }
+
   if (!credencial) {
     await insertReservaEvento(reservaId, "ttlock_credencial_nao_encontrada", "TTLock: credencial não encontrada", {
       action: "lifecycle_provision",
