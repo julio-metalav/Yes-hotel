@@ -245,6 +245,39 @@ export function createSupabaseProvisioningRepository(
       return normalized || null;
     },
 
+    async getReservaTtlockCredentialSource(reservaId: string) {
+      const { data: reserva, error: errR } = await supabase
+        .from("operacional_reservas")
+        .select("id, apartamento, external_reservation_id, hospede_principal")
+        .eq("id", reservaId)
+        .maybeSingle();
+      if (errR) throw new Error(`getReservaTtlockCredentialSource: ${errR.message}`);
+      const { data: hosp, error: errH } = await supabase
+        .from("operacional_hospedes")
+        .select("nome")
+        .eq("reserva_id", reservaId)
+        .eq("principal", true)
+        .limit(1)
+        .maybeSingle();
+      if (errH) throw new Error(`getReservaTtlockCredentialSource(hospede): ${errH.message}`);
+      const r = reserva as {
+        id?: string;
+        apartamento?: string | null;
+        external_reservation_id?: string | null;
+        hospede_principal?: string | null;
+      } | null;
+      const h = hosp as { nome?: string | null } | null;
+      return {
+        reserva_id: reservaId,
+        apartamento: r?.apartamento != null && String(r.apartamento).trim() ? String(r.apartamento).trim() : null,
+        external_reservation_id: r?.external_reservation_id?.trim() || null,
+        principal_guest_nome: h?.nome != null && String(h.nome).trim() ? String(h.nome).trim() : null,
+        hospede_principal: r?.hospede_principal != null && String(r.hospede_principal).trim()
+          ? String(r.hospede_principal).trim()
+          : null,
+      };
+    },
+
     async getFechadurasForApartment(apartmentCode: string): Promise<NovoItemDestino[]> {
       const num = normalizeApartmentNum(apartmentCode);
       if (!num) return [];

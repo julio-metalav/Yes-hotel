@@ -6,6 +6,10 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import md5 from "npm:md5";
+import {
+  deriveTtlockPasscodeFromReservation,
+  formatTtlockKeyboardPwdName,
+} from "../_shared/ttlock-credential-format.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -492,13 +496,49 @@ async function getCredencialPorReserva(reservaId: string): Promise<CredencialRow
   return cred;
 }
 
+async function loadReservaTtlockFormatContext(reservaId: string): Promise<{
+  apartamento: string | null;
+  external_reservation_id: string | null;
+  principal_guest_nome: string | null;
+  hospede_principal: string | null;
+}> {
+  const { data: reserva } = await adminClient
+    .from("operacional_reservas")
+    .select("apartamento, external_reservation_id, hospede_principal")
+    .eq("id", reservaId)
+    .maybeSingle();
+  const { data: hosp } = await adminClient
+    .from("operacional_hospedes")
+    .select("nome")
+    .eq("reserva_id", reservaId)
+    .eq("principal", true)
+    .limit(1)
+    .maybeSingle();
+  const r = reserva as {
+    apartamento?: string | null;
+    external_reservation_id?: string | null;
+    hospede_principal?: string | null;
+  } | null;
+  const h = hosp as { nome?: string | null } | null;
+  return {
+    apartamento: r?.apartamento != null && String(r.apartamento).trim() ? String(r.apartamento).trim() : null,
+    external_reservation_id: r?.external_reservation_id != null && String(r.external_reservation_id).trim()
+      ? String(r.external_reservation_id).trim()
+      : null,
+    principal_guest_nome: h?.nome != null && String(h.nome).trim() ? String(h.nome).trim() : null,
+    hospede_principal: r?.hospede_principal != null && String(r.hospede_principal).trim()
+      ? String(r.hospede_principal).trim()
+      : null,
+  };
+}
+
 async function getCredencialForProvision(reservaId: string): Promise<CredencialForProvision | null> {
   const normalizedId = String(reservaId ?? "").trim().toLowerCase();
   if (!normalizedId) return null;
   if (typeof console !== "undefined") console.log("[lifecycle] getCredencialForProvision reservaId=" + normalizedId);
   const { data, error } = await adminClient
     .from("operacional_credenciais_acesso")
-    .select("id, reserva_id, status, valido_de, valido_ate")
+    .select("id, reserva_id, status, valido_de, valido_ate, codigo_credencial, provider_tipo")
     .eq("reserva_id", normalizedId)
     .eq("tipo_credencial", "principal")
     .limit(1)
@@ -675,15 +715,6 @@ async function revokeCredencial(
   };
 }
 
-const PASSCODE_LENGTH = 6;
-const PASSCODE_MIN = 10 ** (PASSCODE_LENGTH - 1);
-const PASSCODE_MAX = 10 ** PASSCODE_LENGTH - 1;
-
-function generateTemporaryPasscode(): string {
-  const n = Math.floor(PASSCODE_MIN + Math.random() * (PASSCODE_MAX - PASSCODE_MIN + 1));
-  return String(n).padStart(PASSCODE_LENGTH, "0");
-}
-
 async function handleLifecycleProvision(request: Request, payload: Record<string, unknown>): Promise<Response> {
   await ensureCallerAllowed(request);
   const reservaId = ensureText(payload.reservaId, "reservaId");
@@ -732,6 +763,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
   }
 
   const itens = await getItensPendentes(credencial.id);
+
   if (itens.length === 0) {
     await insertReservaEvento(reservaId, "ttlock_provision_sem_itens_pendentes", "TTLock: nenhum item pendente para provisionar", {
       action: "lifecycle_provision",
@@ -758,14 +790,26 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     });
   }
 
+  const ttlockCtx = await loadReservaTtlockFormatContext(reservaId);
+  const keyboardPwdBaseName = formatTtlockKeyboardPwdName(
+    ttlockCtx.apartamento,
+    ttlockCtx.principal_guest_nome ?? ttlockCtx.hospede_principal,
+  );
+
   let passcode = credencial.codigo_credencial ?? null;
   if (!passcode) {
-    passcode = generateTemporaryPasscode();
+    passcode = deriveTtlockPasscodeFromReservation(ttlockCtx.external_reservation_id, reservaId);
+  }
+
+  const credencialPatch: Record<string, unknown> = { status: "provisionando" };
+  if (!credencial.codigo_credencial) {
+    credencialPatch.codigo_credencial = passcode;
+    credencialPatch.provider_tipo = "ttlock_passcode";
   }
 
   await adminClient
     .from("operacional_credenciais_acesso")
-    .update({ status: "provisionando" })
+    .update(credencialPatch)
     .eq("id", credencial.id);
 
   await insertReservaEvento(reservaId, "ttlock_provision_iniciado", "TTLock: provisionamento iniciado", {
@@ -838,7 +882,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
         passcode!,
         validoDeMs,
         validoAteMs,
-        `Yes-${item.codigo_logico_destino}`,
+        keyboardPwdBaseName,
         { reserva_id: reservaId, credencial_id: credencial.id, credencial_item_id: item.id, codigo_logico_destino: item.codigo_logico_destino },
       );
       await adminClient

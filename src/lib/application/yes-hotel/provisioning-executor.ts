@@ -5,6 +5,10 @@
  * Não depende do Supabase diretamente; o repositório é injetado.
  */
 
+import {
+  deriveTtlockPasscodeFromReservation,
+  formatTtlockKeyboardPwdName,
+} from "../../domain/yes-hotel/ttlock-credential-format";
 import { logTtlockLifecycle } from "../../integrations/ttlock";
 import type { TtlockClient } from "../../integrations/ttlock";
 import type { OperacionalCredencialStatus, OperacionalItemProvisionamentoStatus } from "./types";
@@ -52,6 +56,15 @@ export interface NovoItemDestino {
   codigo_logico_destino: string;
 }
 
+/** Dados da reserva para senha/nome TTLock (origem externa + hóspede; sem acoplamento a PMS). */
+export type ReservaTtlockCredentialSource = {
+  reserva_id: string;
+  apartamento: string | null;
+  external_reservation_id: string | null;
+  principal_guest_nome: string | null;
+  hospede_principal: string | null;
+};
+
 export interface ProvisioningRepository {
   getCredencial(id: string): Promise<CredencialRow | null>;
   getCredencialPorReserva(reservaId: string): Promise<CredencialRow | null>;
@@ -93,19 +106,7 @@ export interface ProvisioningRepository {
   ): Promise<void>;
   getReservaApartment(reservaId: string): Promise<string | null>;
   getFechadurasForApartment(apartmentCode: string): Promise<NovoItemDestino[]>;
-}
-
-const PASSCODE_LENGTH = 6;
-const PASSCODE_MIN = 10 ** (PASSCODE_LENGTH - 1);
-const PASSCODE_MAX = 10 ** PASSCODE_LENGTH - 1;
-
-/**
- * Gera um passcode numérico de 6 dígitos (pseudoaleatório).
- * Um único passcode por credencial, reutilizado em todos os itens.
- */
-export function generateTemporaryPasscode(): string {
-  const n = Math.floor(PASSCODE_MIN + Math.random() * (PASSCODE_MAX - PASSCODE_MIN + 1));
-  return String(n).padStart(PASSCODE_LENGTH, "0");
+  getReservaTtlockCredentialSource(reservaId: string): Promise<ReservaTtlockCredentialSource>;
 }
 
 export interface ProcessarCredencialResult {
@@ -134,19 +135,26 @@ export async function processarCredencialDeAcesso(
 ): Promise<ProcessarCredencialResult> {
   const repo = deps.repository;
   const client = deps.ttlockClient;
-  const genPasscode = deps.passcodeGenerator ?? generateTemporaryPasscode;
 
   const credencial = await repo.getCredencial(credencialId);
   if (!credencial) {
     throw new Error(`Credencial nao encontrada: ${credencialId}`);
   }
 
+  const ttlockSrc = await repo.getReservaTtlockCredentialSource(credencial.reserva_id);
+  const keyboardPwdNameBase = formatTtlockKeyboardPwdName(
+    ttlockSrc.apartamento,
+    ttlockSrc.principal_guest_nome ?? ttlockSrc.hospede_principal,
+  );
+
   const itens = await repo.getItensPendentes(credencialId);
   const erros: string[] = [];
 
   let passcode = credencial.codigo_credencial;
   if (!passcode) {
-    passcode = genPasscode();
+    passcode = deps.passcodeGenerator
+      ? deps.passcodeGenerator()
+      : deriveTtlockPasscodeFromReservation(ttlockSrc.external_reservation_id, ttlockSrc.reserva_id);
     await repo.updateCredencial(credencialId, {
       codigo_credencial: passcode,
       provider_tipo: "ttlock_passcode",
@@ -204,7 +212,7 @@ export async function processarCredencialDeAcesso(
       const res = await client.createKeyboardPassword({
         lockId,
         keyboardPwd: passcode,
-        keyboardPwdName: `Yes-${item.codigo_logico_destino}`,
+        keyboardPwdName: keyboardPwdNameBase,
         startDate: validoDeMs,
         endDate: validoAteMs,
       });
