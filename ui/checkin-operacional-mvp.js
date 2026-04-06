@@ -88,14 +88,20 @@ function isChegadaHoje(reserva) {
   return reserva.checkInPrevisto === todayStr();
 }
 
-/** Itens TTLock pendentes/falhos sem passcode remoto — operacional_reservas.acesso_liberado sozinho não basta. */
+/** Há itens críticos (pendente/falhou sem pwd) em alguma credencial da reserva — usado só para aviso “TTLock incompleto”. */
 function ttlockBloqueiaLiberadoNoPainel(reserva) {
   return !!(reserva && reserva.ttlockBloqueiaLiberado);
 }
 
+/**
+ * Estado agregado para lista/cartão: liberado se a reserva está marcada no banco OU
+ * todos os itens da(s) credencial(is) principal(is) ativa(s) estão provisionados no TTLock.
+ */
 function acessoLiberadoEfetivo(reserva) {
   if (!reserva) return false;
-  return !!reserva.acessoLiberado && !ttlockBloqueiaLiberadoNoPainel(reserva);
+  if (!!reserva.acessoLiberado) return true;
+  if (!!reserva.ttlockPrincipalTodosProvisionados) return true;
+  return false;
 }
 
 function getPrioridadeReserva(reserva) {
@@ -584,6 +590,75 @@ async function fetchReservaIdsComTtlockPendenteCritico(supabase) {
   return ids;
 }
 
+/**
+ * Reservas em que cada credencial principal ativa tem pelo menos um item e todos os itens estão provisionados.
+ */
+async function fetchReservaIdsPrincipalTtlockTodosProvisionados(supabase) {
+  const { data: creds, error } = await supabase
+    .from("operacional_credenciais_acesso")
+    .select("id, reserva_id, status")
+    .eq("tipo_credencial", "principal")
+    .neq("status", "revogada");
+  if (error || !Array.isArray(creds) || creds.length === 0) return new Set();
+  const credIds = creds.map((c) => c.id);
+  const { data: itens, error: errItens } = await supabase
+    .from("operacional_credencial_itens")
+    .select("credencial_id, status_provisionamento")
+    .in("credencial_id", credIds);
+  if (errItens || !Array.isArray(itens)) return new Set();
+  const itemsByCred = new Map();
+  for (const c of creds) itemsByCred.set(c.id, []);
+  for (const it of itens) {
+    if (itemsByCred.has(it.credencial_id)) itemsByCred.get(it.credencial_id).push(it);
+  }
+  const reservaToCredIds = new Map();
+  for (const c of creds) {
+    const rid = c.reserva_id != null ? String(c.reserva_id) : "";
+    if (!rid) continue;
+    if (!reservaToCredIds.has(rid)) reservaToCredIds.set(rid, []);
+    reservaToCredIds.get(rid).push(c.id);
+  }
+  const out = new Set();
+  for (const [rid, credList] of reservaToCredIds) {
+    let allOk = true;
+    for (const cid of credList) {
+      const list = itemsByCred.get(cid) || [];
+      if (list.length === 0) {
+        allOk = false;
+        break;
+      }
+      if (!list.every((i) => i.status_provisionamento === "provisionado")) {
+        allOk = false;
+        break;
+      }
+    }
+    if (allOk) out.add(rid);
+  }
+  return out;
+}
+
+/** Uma reserva: todas as credenciais principais ativas com itens, todos provisionados (para pular lifecycle_provision). */
+async function principalTtlockTodosProvisionadosParaReserva(supabase, reservaId) {
+  const rid = String(reservaId ?? "").trim();
+  if (!rid) return false;
+  const { data: creds } = await supabase
+    .from("operacional_credenciais_acesso")
+    .select("id")
+    .eq("reserva_id", rid)
+    .eq("tipo_credencial", "principal")
+    .neq("status", "revogada");
+  if (!Array.isArray(creds) || creds.length === 0) return false;
+  for (const c of creds) {
+    const { data: itens } = await supabase
+      .from("operacional_credencial_itens")
+      .select("status_provisionamento")
+      .eq("credencial_id", c.id);
+    if (!Array.isArray(itens) || itens.length === 0) return false;
+    if (!itens.every((i) => i.status_provisionamento === "provisionado")) return false;
+  }
+  return true;
+}
+
 async function loadReservasFromBackend() {
   const supabase = getSupabase();
   if (!supabase) return [];
@@ -593,6 +668,7 @@ async function loadReservasFromBackend() {
     .order("created_at", { ascending: true });
   if (errReservas || !Array.isArray(reservasRows)) return [];
   const ttlockCritico = await fetchReservaIdsComTtlockPendenteCritico(supabase);
+  const principalTtlockOk = await fetchReservaIdsPrincipalTtlockTodosProvisionados(supabase);
   const out = [];
   for (const r of reservasRows) {
     const { data: hospedesRows } = await supabase
@@ -610,7 +686,9 @@ async function loadReservasFromBackend() {
       .select("hospede_id, status, link_token")
       .eq("reserva_id", r.id);
     const internal = mapDbReservaToInternal(r, hospedesRows || [], eventosRows || [], fnrhRows || []);
-    internal.ttlockBloqueiaLiberado = ttlockCritico.has(String(r.id));
+    const ridKey = String(r.id);
+    internal.ttlockBloqueiaLiberado = ttlockCritico.has(ridKey);
+    internal.ttlockPrincipalTodosProvisionados = principalTtlockOk.has(ridKey);
     out.push(internal);
   }
   return out;
@@ -785,6 +863,11 @@ async function backendLiberarAcesso(reservaId) {
   }
 
   if (usarProvisionTtlock) {
+    const jaProvisionado = await principalTtlockTodosProvisionadosParaReserva(supabase, rid);
+    if (jaProvisionado) {
+      await backendAddEvento(rid, "acesso_liberado", "Acesso liberado", "Acesso ao apartamento liberado (TTLock já provisionado nos itens).");
+      return { ok: true };
+    }
     try {
       const data = await auth.invokeLifecycleAction("lifecycle_provision", { reservaId: rid });
       if (data && data.error) {
@@ -1178,13 +1261,14 @@ function getStatusOperacionalReservaTexto(reserva) {
   if (
     ttlockBloqueiaLiberadoNoPainel(reserva) &&
     reserva.acessoLiberado &&
+    !reserva.ttlockPrincipalTodosProvisionados &&
     isPagamentoOk(reserva) &&
     isFnrhCompleta(reserva)
   ) {
     return "Acesso marcado; TTLock ainda não provisionado nos itens.";
   }
   if (isProntaParaLiberarAcesso(reserva)) return "Pronta para liberar acesso";
-  if (acessoLiberadoEfetivo(reserva) && !reserva.entrouNoApto) return "Acesso liberado, aguardando entrada";
+  if (acessoLiberadoEfetivo(reserva) && !reserva.entrouNoApto) return "Acesso liberado, aguardando chegada";
   if (isCheckinConcluido(reserva)) return "Check-in concluído";
   return "—";
 }
@@ -1253,7 +1337,7 @@ function derivarStatusOperacional(reserva) {
     return { label: "Pendente FNRH", type: "pendente-fnrh" };
   }
   if (!acessoLiberadoEfetivo(reserva)) {
-    if (ttlockBloqueiaLiberadoNoPainel(reserva) && reserva.acessoLiberado) {
+    if (ttlockBloqueiaLiberadoNoPainel(reserva) && reserva.acessoLiberado && !reserva.ttlockPrincipalTodosProvisionados) {
       return { label: "TTLock pendente (liberação incompleta)", type: "pronto-liberar" };
     }
     return { label: "Pronto para liberar acesso", type: "pronto-liberar" };
@@ -1979,7 +2063,9 @@ function renderDetail(reserva) {
   } else if (prontosCount > 0) {
     enviarSection = `<button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}">${escapeHtml(getEnviarButtonLabel())}</button>`;
   } else if (confirmadosCount === totalH) {
-    enviarSection = '<div class="detail-enviar-links-alert is-ok">Todas as FNRHs estão confirmadas. Reserva pronta para liberar acesso.</div>';
+    enviarSection = acessoLiberadoEfetivo(reserva)
+      ? '<div class="detail-enviar-links-alert is-ok">Todas as FNRHs confirmadas. Acesso liberado; aguardando chegada do hóspede.</div>'
+      : '<div class="detail-enviar-links-alert is-ok">Todas as FNRHs estão confirmadas. Reserva pronta para liberar acesso.</div>';
   } else if (enviadosCount > 0) {
     enviarSection = `<div class="detail-enviar-links-alert is-ok">Link(s) enviado(s) para ${enviadosCount} hóspede(s). Aguardando confirmação.</div>`;
   }
