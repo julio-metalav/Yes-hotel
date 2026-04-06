@@ -622,12 +622,27 @@ async function getCredencialForProvision(reservaId: string): Promise<CredencialF
 }
 
 async function getItensPendentes(credencialId: string): Promise<ItemRow[]> {
+  const cid = String(credencialId ?? "").trim();
+  if (!cid) {
+    throw new HttpError("credencialId inválido para listagem de itens pendentes.", 400);
+  }
   const { data, error } = await adminClient
     .from("operacional_credencial_itens")
     .select("id, credencial_id, lock_id_ttlock, status_provisionamento, codigo_logico_destino")
-    .eq("credencial_id", credencialId)
+    .eq("credencial_id", cid)
     .eq("status_provisionamento", "pendente");
-  if (error || !Array.isArray(data)) return [];
+  if (error) {
+    if (typeof console !== "undefined") {
+      console.warn("[lifecycle] getItensPendentes query error credencial_id=" + cid, error.message, (error as { code?: string }).code ?? "");
+    }
+    throw new HttpError("Falha ao listar itens pendentes da credencial: " + error.message, 500);
+  }
+  if (!Array.isArray(data)) {
+    if (typeof console !== "undefined") {
+      console.warn("[lifecycle] getItensPendentes resposta inesperada credencial_id=" + cid, typeof data);
+    }
+    throw new HttpError("Resposta inválida ao listar itens pendentes.", 500);
+  }
   return data as ItemRow[];
 }
 
@@ -832,9 +847,51 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     );
   }
 
-  const itens = await getItensPendentes(credencial.id);
+  const credIdForItens = String(credencial.id).trim();
+  const itens = await getItensPendentes(credIdForItens);
 
   if (itens.length === 0) {
+    const { count, error: cntErr } = await adminClient
+      .from("operacional_credencial_itens")
+      .select("id", { count: "exact", head: true })
+      .eq("credencial_id", credIdForItens);
+    if (cntErr && typeof console !== "undefined") {
+      console.warn("[lifecycle] count itens por credencial", credIdForItens, cntErr.message);
+    }
+    if (!cntErr && count != null && count > 0) {
+      const { data: diag } = await adminClient
+        .from("operacional_credencial_itens")
+        .select("id, status_provisionamento, codigo_logico_destino")
+        .eq("credencial_id", credIdForItens);
+      if (typeof console !== "undefined") {
+        console.warn(
+          "[lifecycle] lifecycle_provision: lista pendente vazia mas credencial tem " + count +
+            " itens; diagnostico=" + JSON.stringify(diag ?? []),
+        );
+      }
+      await insertReservaEvento(reservaId, "ttlock_provision_sem_pendente_com_itens", "TTLock: itens na credencial sem status pendente", {
+        action: "lifecycle_provision",
+        credencial_id: credIdForItens,
+        status_final: credencial.status,
+        total_itens: count,
+        provisionados: 0,
+        falhas: 0,
+        revogados: 0,
+        erro_resumido: "Nenhum item em status_provisionamento=pendente (ver itensDiagnostic).",
+      });
+      return jsonResponse(
+        {
+          ok: false,
+          error:
+            "Nenhum item com status pendente para provisionar; a credencial possui itens com outro status. Verifique status_provisionamento no banco.",
+          credencialId: credIdForItens,
+          reservaId,
+          itensDiagnostic: diag ?? [],
+        },
+        409,
+      );
+    }
+
     await insertReservaEvento(reservaId, "ttlock_provision_sem_itens_pendentes", "TTLock: nenhum item pendente para provisionar", {
       action: "lifecycle_provision",
       credencial_id: credencial.id,
