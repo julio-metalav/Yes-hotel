@@ -88,10 +88,20 @@ function isChegadaHoje(reserva) {
   return reserva.checkInPrevisto === todayStr();
 }
 
+/** Itens TTLock pendentes/falhos sem passcode remoto — operacional_reservas.acesso_liberado sozinho não basta. */
+function ttlockBloqueiaLiberadoNoPainel(reserva) {
+  return !!(reserva && reserva.ttlockBloqueiaLiberado);
+}
+
+function acessoLiberadoEfetivo(reserva) {
+  if (!reserva) return false;
+  return !!reserva.acessoLiberado && !ttlockBloqueiaLiberadoNoPainel(reserva);
+}
+
 function getPrioridadeReserva(reserva) {
   if (isCheckinConcluido(reserva)) return PRIORIDADE_BAIXA;
   if (isProntaParaLiberarAcesso(reserva)) return PRIORIDADE_ALTA;
-  if (reserva.acessoLiberado && !reserva.entrouNoApto) return PRIORIDADE_ALTA;
+  if (acessoLiberadoEfetivo(reserva) && !reserva.entrouNoApto) return PRIORIDADE_ALTA;
   if (isChegadaHoje(reserva)) return PRIORIDADE_ALTA;
   return PRIORIDADE_MEDIA;
 }
@@ -505,9 +515,9 @@ function mapDbEventoToHistorico(row) {
   };
 }
 
-function mapDbHospedeToInternal(row) {
+function mapDbHospedeToInternal(row, fnrhRow) {
   if (!row) return null;
-  return {
+  const base = {
     id: row.id || "",
     nome: (row.nome || "").trim(),
     principal: !!row.principal,
@@ -520,12 +530,23 @@ function mapDbHospedeToInternal(row) {
     ultimoEnvioEm: row.ultimo_envio_em || null,
     tentativasEnvio: row.tentativas_envio != null ? Number(row.tentativas_envio) : 0,
   };
+  if (fnrhRow && fnrhRow.link_token) {
+    base.fnrhLink = "./fnrh-preenchimento.html?guest_id=" + encodeURIComponent(row.id) + "&token=" + encodeURIComponent(fnrhRow.link_token);
+    base.fnrhStatus = fnrhRow.status || "pendente";
+  }
+  return base;
 }
 
-function mapDbReservaToInternal(r, hospedesRows, eventosRows) {
+function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows) {
   const checkIn = r.check_in_previsto;
   const checkOut = r.check_out_previsto;
-  const hospedes = (hospedesRows || []).map(mapDbHospedeToInternal).filter(Boolean);
+  const fnrhMap = (fnrhRows || []).reduce(function (acc, f) {
+    acc[f.hospede_id] = f;
+    return acc;
+  }, {});
+  const hospedes = (hospedesRows || []).map(function (row) {
+    return mapDbHospedeToInternal(row, fnrhMap[row.id]);
+  }).filter(Boolean);
   const historico = (eventosRows || []).map(mapDbEventoToHistorico).filter(Boolean);
   return {
     id: r.id,
@@ -538,9 +559,29 @@ function mapDbReservaToInternal(r, hospedesRows, eventosRows) {
     entrouNoApto: !!r.entrou_no_apto,
     veiculoPlaca: (r.veiculo_placa || "").trim(),
     veiculoCor: (r.veiculo_cor || "").trim(),
+    fnrhStatusAgregado: r.fnrh_status_agregado || "fnrh_pendente",
     hospedes,
     historicoOperacional: historico,
   };
+}
+
+/** Reservas com credencial ativa e item pendente/falho sem remote_keyboard_pwd_id (mesma regra do painel). */
+async function fetchReservaIdsComTtlockPendenteCritico(supabase) {
+  const { data, error } = await supabase
+    .from("operacional_credencial_itens")
+    .select("status_provisionamento, remote_keyboard_pwd_id, operacional_credenciais_acesso(reserva_id, status)")
+    .in("status_provisionamento", ["pendente", "falhou"])
+    .is("remote_keyboard_pwd_id", null);
+  if (error || !Array.isArray(data)) return new Set();
+  const ids = new Set();
+  for (const row of data) {
+    const cred = row.operacional_credenciais_acesso;
+    const c = Array.isArray(cred) ? cred[0] : cred;
+    if (!c || c.status === "revogada") continue;
+    const rid = c.reserva_id;
+    if (rid) ids.add(String(rid));
+  }
+  return ids;
 }
 
 async function loadReservasFromBackend() {
@@ -551,6 +592,7 @@ async function loadReservasFromBackend() {
     .select("*")
     .order("created_at", { ascending: true });
   if (errReservas || !Array.isArray(reservasRows)) return [];
+  const ttlockCritico = await fetchReservaIdsComTtlockPendenteCritico(supabase);
   const out = [];
   for (const r of reservasRows) {
     const { data: hospedesRows } = await supabase
@@ -563,7 +605,13 @@ async function loadReservasFromBackend() {
       .select("*")
       .eq("reserva_id", r.id)
       .order("criado_em", { ascending: false });
-    out.push(mapDbReservaToInternal(r, hospedesRows || [], eventosRows || []));
+    const { data: fnrhRows } = await supabase
+      .from("fnrh_hospedes")
+      .select("hospede_id, status, link_token")
+      .eq("reserva_id", r.id);
+    const internal = mapDbReservaToInternal(r, hospedesRows || [], eventosRows || [], fnrhRows || []);
+    internal.ttlockBloqueiaLiberado = ttlockCritico.has(String(r.id));
+    out.push(internal);
   }
   return out;
 }
@@ -670,19 +718,19 @@ async function backendConfirmarFnrh(reservaId, guestIndex) {
 async function backendEnviarLinks(reservaId) {
   const supabase = getSupabase();
   if (!supabase) return false;
-  const r = getReservaById(reservaId);
-  if (r && Array.isArray(r.hospedes)) {
-    const now = new Date().toISOString();
-    for (const h of r.hospedes) {
-      if (h.statusOperacional === GUEST_STATUS.PRONTO_PARA_ENVIO && hasContatoSuficiente(h)) {
-        await supabase
-          .from("operacional_hospedes")
-          .update({ status_operacional: GUEST_STATUS.ENVIADO, ultimo_envio_canal: "mock", ultimo_envio_em: now, tentativas_envio: (h.tentativasEnvio || 0) + 1 })
-          .eq("id", h.id);
-      }
-    }
+  const session = await supabase.auth.getSession().then((r) => r.data?.session);
+  const functionsUrl = (typeof supabase.supabaseUrl === "string" ? supabase.supabaseUrl : "")?.replace(/\/$/, "") + "/functions/v1";
+  const baseUrl = (typeof window !== "undefined" && window.location?.origin) ? window.location.origin : "";
+  const res = await fetch(functionsUrl + "/send-fnrh-links", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + (session?.access_token || "") },
+    body: JSON.stringify({ reserva_id: reservaId, tipo_evento: "manual", base_url: baseUrl }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    console.warn("[backendEnviarLinks]", data.error || res.statusText);
+    return false;
   }
-  await backendAddEvento(reservaId, "envio_link", "Envio/reenvio de link", "Envio simulado (canal mock). Persistido para histórico.");
   return true;
 }
 
@@ -698,6 +746,36 @@ async function backendLiberarAcesso(reservaId) {
   if (!rid) {
     return { ok: false, error: "ID da reserva inválido." };
   }
+
+  const usarProvisionTtlock =
+    PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && typeof auth?.invokeLifecycleAction === "function";
+
+  if (usarProvisionTtlock) {
+    try {
+      const data = await auth.invokeLifecycleAction("lifecycle_provision", { reservaId: rid });
+      if (data && data.error) {
+        return { ok: false, error: String(data.error) };
+      }
+      if (data && data.ok === false) {
+        return { ok: false, error: data.error ? String(data.error) : "Provisionamento TTLock recusado." };
+      }
+      const falhas = Number(data?.falhas ?? 0);
+      const st = String(data?.status ?? "");
+      if (falhas > 0 || st === "falhou" || st === "parcial") {
+        const erros = Array.isArray(data?.erros) ? data.erros.filter(Boolean).join("; ") : "";
+        return {
+          ok: false,
+          error:
+            "TTLock não concluiu o provisionamento de todos os itens. " +
+            (erros || `status=${st || "—"}, falhas=${falhas}.`) +
+            " Corrija e tente liberar de novo.",
+        };
+      }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   const { error: updateError } = await supabase
     .from("operacional_reservas")
     .update({ acesso_liberado: true })
@@ -732,6 +810,9 @@ async function backendLiberarAcesso(reservaId) {
 async function backendMarcarEntrada(reservaId) {
   const supabase = getSupabase();
   if (!supabase) return false;
+  const { data: row, error: errSelect } = await supabase.from("operacional_reservas").select("entrou_no_apto").eq("id", reservaId).maybeSingle();
+  if (errSelect || !row) return false;
+  if (row.entrou_no_apto === true) return true;
   const { error } = await supabase.from("operacional_reservas").update({ entrou_no_apto: true }).eq("id", reservaId);
   if (error) return false;
   await backendAddEvento(reservaId, "entrada_apto", "Entrada no apartamento", "Hóspede marcado como entrado no apartamento.");
@@ -1009,11 +1090,11 @@ function isFnrhCompleta(reserva) {
 }
 
 function isProntaParaLiberarAcesso(reserva) {
-  return isPagamentoOk(reserva) && isFnrhCompleta(reserva) && !reserva.acessoLiberado;
+  return isPagamentoOk(reserva) && isFnrhCompleta(reserva) && !acessoLiberadoEfetivo(reserva);
 }
 
 function isCheckinConcluido(reserva) {
-  return reserva.acessoLiberado === true && reserva.entrouNoApto === true;
+  return acessoLiberadoEfetivo(reserva) === true && reserva.entrouNoApto === true;
 }
 
 const ETAPA_FUNIL = {
@@ -1045,7 +1126,7 @@ function isDadosPendentes(reserva) {
 
 function getEtapaFunilReserva(reserva) {
   if (isCheckinConcluido(reserva)) return ETAPA_FUNIL.CHECKIN_CONCLUIDO;
-  if (reserva.acessoLiberado === true && reserva.entrouNoApto !== true) return ETAPA_FUNIL.ACESSO_LIBERADO;
+  if (acessoLiberadoEfetivo(reserva) === true && reserva.entrouNoApto !== true) return ETAPA_FUNIL.ACESSO_LIBERADO;
   if (isProntaParaLiberarAcesso(reserva)) return ETAPA_FUNIL.PRONTA_LIBERAR;
   if (isDadosPendentes(reserva)) return ETAPA_FUNIL.DADOS_PENDENTES;
   return ETAPA_FUNIL.FNRH_EM_ANDAMENTO;
@@ -1083,8 +1164,16 @@ function getBloqueiosReserva(reserva) {
 function getStatusOperacionalReservaTexto(reserva) {
   const bloqueios = getBloqueiosReserva(reserva);
   if (bloqueios.length > 0) return "Bloqueios: " + bloqueios.join("; ");
+  if (
+    ttlockBloqueiaLiberadoNoPainel(reserva) &&
+    reserva.acessoLiberado &&
+    isPagamentoOk(reserva) &&
+    isFnrhCompleta(reserva)
+  ) {
+    return "Acesso marcado; TTLock ainda não provisionado nos itens.";
+  }
   if (isProntaParaLiberarAcesso(reserva)) return "Pronta para liberar acesso";
-  if (reserva.acessoLiberado && !reserva.entrouNoApto) return "Acesso liberado, aguardando entrada";
+  if (acessoLiberadoEfetivo(reserva) && !reserva.entrouNoApto) return "Acesso liberado, aguardando entrada";
   if (isCheckinConcluido(reserva)) return "Check-in concluído";
   return "—";
 }
@@ -1119,7 +1208,7 @@ function getProximaAcaoReserva(reserva) {
   if (enviados > 0) return "Aguardar confirmação das FNRHs";
   if (!isPagamentoOk(reserva)) return "Regularizar pagamento";
   if (isProntaParaLiberarAcesso(reserva)) return "Liberar acesso";
-  if (reserva.acessoLiberado && !reserva.entrouNoApto) return "Aguardar entrada no apartamento";
+  if (acessoLiberadoEfetivo(reserva) && !reserva.entrouNoApto) return "Aguardar entrada no apartamento";
   if (isCheckinConcluido(reserva)) return "Check-in concluído";
   return "";
 }
@@ -1152,10 +1241,13 @@ function derivarStatusOperacional(reserva) {
   if (hasFnrhPendente(reserva)) {
     return { label: "Pendente FNRH", type: "pendente-fnrh" };
   }
-  if (!reserva.acessoLiberado) {
+  if (!acessoLiberadoEfetivo(reserva)) {
+    if (ttlockBloqueiaLiberadoNoPainel(reserva) && reserva.acessoLiberado) {
+      return { label: "TTLock pendente (liberação incompleta)", type: "pronto-liberar" };
+    }
     return { label: "Pronto para liberar acesso", type: "pronto-liberar" };
   }
-  if (reserva.acessoLiberado && !reserva.entrouNoApto) {
+  if (acessoLiberadoEfetivo(reserva) && !reserva.entrouNoApto) {
     return { label: "Acesso liberado, aguardando chegada", type: "aguardando-chegada" };
   }
   if (reserva.entrouNoApto) {
@@ -1177,10 +1269,10 @@ function filtrarReservas(lista, filtroAtivo) {
     return lista.filter((r) => hasFnrhPendente(r));
   }
   if (filtroAtivo === FILTER_ACESSO_LIBERADO) {
-    return lista.filter((r) => r.acessoLiberado === true);
+    return lista.filter((r) => acessoLiberadoEfetivo(r));
   }
   if (filtroAtivo === FILTER_NAO_ENTROU) {
-    return lista.filter((r) => r.acessoLiberado === true && r.entrouNoApto === false);
+    return lista.filter((r) => acessoLiberadoEfetivo(r) && r.entrouNoApto === false);
   }
   if (filtroAtivo === FILTER_ENTROU) {
     return lista.filter((r) => r.entrouNoApto === true);
@@ -1353,10 +1445,17 @@ async function acaoLiberarAcesso(id) {
   refresh();
 }
 
+let _confirmarCheckinInProgress = false;
 async function acaoConfirmarCheckin(id) {
+  if (_confirmarCheckinInProgress) return;
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
-    const ok = await backendMarcarEntrada(id);
-    if (ok) await refreshFromSource();
+    _confirmarCheckinInProgress = true;
+    try {
+      const ok = await backendMarcarEntrada(id);
+      if (ok) await refreshFromSource();
+    } finally {
+      _confirmarCheckinInProgress = false;
+    }
     return;
   }
   const r = getReservaById(id);
@@ -1368,10 +1467,10 @@ async function acaoConfirmarCheckin(id) {
 }
 
 function primaryActionFor(reserva) {
-  if (!reserva.acessoLiberado && isProntaParaLiberarAcesso(reserva)) {
+  if (isProntaParaLiberarAcesso(reserva)) {
     return { label: "Liberar acesso", action: "liberar_acesso", id: reserva.id };
   }
-  if (reserva.acessoLiberado && !reserva.entrouNoApto) {
+  if (acessoLiberadoEfetivo(reserva) && !reserva.entrouNoApto) {
     return { label: "Marcar entrada no apartamento", action: "confirmar_checkin", id: reserva.id };
   }
   return null;
@@ -1399,13 +1498,13 @@ function renderList() {
       const badgeClasses = [
         reserva.pagamento === "pago" ? "badge badge-pago" : "badge badge-pendente",
         "badge fnrh-badge " + fnrhStatus.class,
-        reserva.acessoLiberado ? "badge badge-liberado" : "badge badge-nao-liberado",
+        acessoLiberadoEfetivo(reserva) ? "badge badge-liberado" : "badge badge-nao-liberado",
         reserva.entrouNoApto ? "badge badge-entrou" : "badge badge-nao-entrou",
       ];
       const badgeLabels = [
         reserva.pagamento === "pago" ? "Pago" : "Pendente",
         fnrhStatus.label,
-        reserva.acessoLiberado ? "Liberado" : "Nao liberado",
+        acessoLiberadoEfetivo(reserva) ? "Liberado" : "Nao liberado",
         reserva.entrouNoApto ? "Entrou" : "Nao entrou",
       ];
 
@@ -1806,6 +1905,9 @@ function renderDetail(reserva) {
         h.statusOperacional === GUEST_STATUS.ENVIADO && hasContatoSuficiente(h)
           ? `<button type="button" class="guest-link-btn guest-reenviar-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Reenviar</button>`
           : "";
+      const fnrhLinkHtml = h.fnrhLink
+        ? `<a href="${escapeHtml(h.fnrhLink)}" target="_blank" rel="noopener" class="guest-link-btn">Abrir link FNRH</a>`
+        : "";
 
       return `
         <div class="guest-detail-card" data-guest-index="${index}">
@@ -1820,6 +1922,7 @@ function renderDetail(reserva) {
           </div>
           <p class="guest-detail-pendency">${escapeHtml(operationalMsg)}</p>
           ${comunicacaoHtml}
+          ${fnrhLinkHtml ? `<div class="guest-detail-composition">${fnrhLinkHtml}</div>` : ""}
           ${reenviarBtn ? `<div class="guest-detail-composition">${reenviarBtn}</div>` : ""}
           ${vehicleHtml}
           <div class="guest-detail-contact-row">
@@ -1869,6 +1972,11 @@ function renderDetail(reserva) {
   } else if (enviadosCount > 0) {
     enviarSection = `<div class="detail-enviar-links-alert is-ok">Link(s) enviado(s) para ${enviadosCount} hóspede(s). Aguardando confirmação.</div>`;
   }
+
+  const enviarSenhaSection =
+    PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND
+      ? `<div class="reservation-detail-section"><button type="button" class="primary-button detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}">Enviar senha</button></div>`
+      : "";
 
   const statusOperacionalTexto = getStatusOperacionalReservaTexto(reserva);
   const bloqueios = getBloqueiosReserva(reserva);
@@ -1952,6 +2060,7 @@ function renderDetail(reserva) {
     <div class="reservation-detail-section">
       ${enviarSection}
     </div>
+    ${enviarSenhaSection}
   `;
 
   bindDetailListeners(reserva);
@@ -2073,6 +2182,63 @@ function bindDetailListeners(reserva) {
       reenviarHospede(rid, idx);
     });
   });
+
+  const enviarSenhaBtn = detailBodyElement.querySelector("#detail-enviar-senha-btn");
+  if (enviarSenhaBtn) {
+    enviarSenhaBtn.addEventListener("click", () => {
+      const rid = enviarSenhaBtn.dataset.reservaId;
+      if (rid) openModalEnviarSenha(rid);
+    });
+  }
+}
+
+async function backendEnviarSenha(reservaId, email, whatsapp) {
+  const supabase = getSupabase();
+  if (!supabase) return { ok: false, error: "Não autenticado." };
+  const session = await supabase.auth.getSession().then((r) => r.data?.session);
+  const functionsUrl = (typeof supabase.supabaseUrl === "string" ? supabase.supabaseUrl : "")?.replace(/\/$/, "") + "/functions/v1";
+  const res = await fetch(functionsUrl + "/send-senha", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + (session?.access_token || "") },
+    body: JSON.stringify({
+      reserva_id: reservaId,
+      manual: true,
+      email: (email || "").trim() || undefined,
+      whatsapp: (whatsapp || "").trim() || undefined,
+      usuario_id: session?.user?.id || undefined,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data.error || res.statusText };
+  return { ok: true, data };
+}
+
+let _modalEnviarSenhaReservaId = null;
+function openModalEnviarSenha(reservaId) {
+  const r = getReservaById(reservaId);
+  if (!r) return;
+  _modalEnviarSenhaReservaId = reservaId;
+  const principal = Array.isArray(r.hospedes) ? r.hospedes.find((h) => h.principal) : null;
+  const email = principal?.email?.trim() || "";
+  const whatsapp = principal?.whatsapp?.trim() || "";
+  const overlay = document.getElementById("modal-enviar-senha-overlay");
+  const form = document.getElementById("modal-enviar-senha-form");
+  const msgEl = document.getElementById("modal-enviar-senha-msg");
+  if (form) {
+    form.querySelector("#modal-enviar-senha-email").value = email;
+    form.querySelector("#modal-enviar-senha-whatsapp").value = whatsapp;
+  }
+  if (msgEl) {
+    msgEl.classList.add("hidden");
+    msgEl.textContent = "";
+  }
+  if (overlay) overlay.classList.remove("hidden");
+}
+
+function closeModalEnviarSenha() {
+  _modalEnviarSenhaReservaId = null;
+  const overlay = document.getElementById("modal-enviar-senha-overlay");
+  if (overlay) overlay.classList.add("hidden");
 }
 
 function showAccessState(title, message, actionLabel) {
@@ -2145,6 +2311,47 @@ async function initCheckinOperacional() {
 
   detailCloseButtonElement?.addEventListener("click", closeDetail);
   detailBackdropElement?.addEventListener("click", closeDetail);
+
+  const modalEnviarSenhaCancel = document.getElementById("modal-enviar-senha-cancel");
+  const modalEnviarSenhaForm = document.getElementById("modal-enviar-senha-form");
+  const modalEnviarSenhaOverlay = document.getElementById("modal-enviar-senha-overlay");
+  if (modalEnviarSenhaCancel) modalEnviarSenhaCancel.addEventListener("click", closeModalEnviarSenha);
+  if (modalEnviarSenhaOverlay) {
+    modalEnviarSenhaOverlay.addEventListener("click", (e) => {
+      if (e.target === modalEnviarSenhaOverlay) closeModalEnviarSenha();
+    });
+  }
+  if (modalEnviarSenhaForm) {
+    modalEnviarSenhaForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const reservaId = _modalEnviarSenhaReservaId;
+      if (!reservaId) return;
+      const email = (document.getElementById("modal-enviar-senha-email")?.value || "").trim();
+      const whatsapp = (document.getElementById("modal-enviar-senha-whatsapp")?.value || "").trim();
+      if (!email && !whatsapp) {
+        const msgEl = document.getElementById("modal-enviar-senha-msg");
+        if (msgEl) {
+          msgEl.textContent = "Informe pelo menos um contato (e-mail ou WhatsApp).";
+          msgEl.classList.remove("hidden");
+        }
+        return;
+      }
+      const msgEl = document.getElementById("modal-enviar-senha-msg");
+      const submitBtn = document.getElementById("modal-enviar-senha-submit");
+      if (submitBtn) submitBtn.disabled = true;
+      const result = await backendEnviarSenha(reservaId, email, whatsapp);
+      if (submitBtn) submitBtn.disabled = false;
+      if (result.ok) {
+        closeModalEnviarSenha();
+        await refreshFromSource();
+      } else {
+        if (msgEl) {
+          msgEl.textContent = result.error || "Falha ao enviar.";
+          msgEl.classList.remove("hidden");
+        }
+      }
+    });
+  }
 }
 
 logoutButtonElement?.addEventListener("click", async () => {
