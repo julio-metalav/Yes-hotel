@@ -750,32 +750,12 @@ async function backendLiberarAcesso(reservaId) {
   const usarProvisionTtlock =
     PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && typeof auth?.invokeLifecycleAction === "function";
 
-  if (usarProvisionTtlock) {
-    try {
-      const data = await auth.invokeLifecycleAction("lifecycle_provision", { reservaId: rid });
-      if (data && data.error) {
-        return { ok: false, error: String(data.error) };
-      }
-      if (data && data.ok === false) {
-        return { ok: false, error: data.error ? String(data.error) : "Provisionamento TTLock recusado." };
-      }
-      const falhas = Number(data?.falhas ?? 0);
-      const st = String(data?.status ?? "");
-      if (falhas > 0 || st === "falhou" || st === "parcial") {
-        const erros = Array.isArray(data?.erros) ? data.erros.filter(Boolean).join("; ") : "";
-        return {
-          ok: false,
-          error:
-            "TTLock não concluiu o provisionamento de todos os itens. " +
-            (erros || `status=${st || "—"}, falhas=${falhas}.`) +
-            " Corrija e tente liberar de novo.",
-        };
-      }
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) };
-    }
-  }
-
+  /**
+   * A credencial principal + itens são criados pelo trigger em operacional_reservas
+   * só na transição acesso_liberado false → true (migration 0006).
+   * lifecycle_provision precisa dessa linha em operacional_credenciais_acesso; por isso
+   * o UPDATE da reserva vem antes do invoke, não depois.
+   */
   const { error: updateError } = await supabase
     .from("operacional_reservas")
     .update({ acesso_liberado: true })
@@ -803,6 +783,37 @@ async function backendLiberarAcesso(reservaId) {
       error: "Update não aplicou acesso_liberado=true (valor no banco permanece diferente).",
     };
   }
+
+  if (usarProvisionTtlock) {
+    try {
+      const data = await auth.invokeLifecycleAction("lifecycle_provision", { reservaId: rid });
+      if (data && data.error) {
+        await supabase.from("operacional_reservas").update({ acesso_liberado: false }).eq("id", rid);
+        return { ok: false, error: String(data.error) };
+      }
+      if (data && data.ok === false) {
+        await supabase.from("operacional_reservas").update({ acesso_liberado: false }).eq("id", rid);
+        return { ok: false, error: data.error ? String(data.error) : "Provisionamento TTLock recusado." };
+      }
+      const falhas = Number(data?.falhas ?? 0);
+      const st = String(data?.status ?? "");
+      if (falhas > 0 || st === "falhou" || st === "parcial") {
+        const erros = Array.isArray(data?.erros) ? data.erros.filter(Boolean).join("; ") : "";
+        await supabase.from("operacional_reservas").update({ acesso_liberado: false }).eq("id", rid);
+        return {
+          ok: false,
+          error:
+            "TTLock não concluiu o provisionamento de todos os itens. " +
+            (erros || `status=${st || "—"}, falhas=${falhas}.`) +
+            " Corrija e tente liberar de novo.",
+        };
+      }
+    } catch (e) {
+      await supabase.from("operacional_reservas").update({ acesso_liberado: false }).eq("id", rid);
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   await backendAddEvento(rid, "acesso_liberado", "Acesso liberado", "Acesso ao apartamento liberado.");
   return { ok: true };
 }
