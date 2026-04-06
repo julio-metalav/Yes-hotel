@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Yes Hotel - Usuarios e Login MVP</title>
-    <link rel="stylesheet" href="./usuarios-login-mvp.css" />
+    <link rel="stylesheet" href="./usuarios-login-mvp.css?v=4" />
   </head>
   <body>
     <main class="app-shell">
@@ -59,14 +59,42 @@
         <div class="session-bar">
           <div id="session-user"></div>
           <div class="session-actions">
-            <a class="secondary-link" href="./cafe-da-manha-mvp.html">Ir para cafe</a>
             <button class="secondary-button" id="logout-button" type="button">
               Sair
             </button>
           </div>
         </div>
 
-        <section class="users-section">
+        <nav class="operacional-nav" aria-label="Áreas operacionais">
+          <h2 class="operacional-nav-title">Áreas operacionais</h2>
+          <p class="helper-text operacional-nav-intro">
+            Escolha uma tela para continuar o trabalho do dia.
+          </p>
+          <div class="operacional-nav-grid">
+            <a class="operacional-nav-card" href="./checkin-operacional-mvp.html">
+              <span class="operacional-nav-card-label">Check-in operacional</span>
+              <span class="operacional-nav-card-desc">Reservas, hóspedes, FNRH, TTLock e liberação de acesso</span>
+            </a>
+            <a class="operacional-nav-card" href="./cafe-da-manha-mvp.html">
+              <span class="operacional-nav-card-label">Café da manhã</span>
+              <span class="operacional-nav-card-desc">Lista e controle do serviço de café</span>
+            </a>
+            <a class="operacional-nav-card" href="./comunicacao-mvp.html">
+              <span class="operacional-nav-card-label">Central de comunicação</span>
+              <span class="operacional-nav-card-desc">WhatsApp e mensagens operacionais</span>
+            </a>
+            <a class="operacional-nav-card" href="./importar-reservas-mvp.html">
+              <span class="operacional-nav-card-label">Importar reservas</span>
+              <span class="operacional-nav-card-desc">Carga de reservas a partir de JSON (admin)</span>
+            </a>
+            <a class="operacional-nav-card operacional-nav-card--anchor" href="#gestao-usuarios-section">
+              <span class="operacional-nav-card-label">Usuários internos</span>
+              <span class="operacional-nav-card-desc">Cadastro e perfis nesta página, abaixo</span>
+            </a>
+          </div>
+        </nav>
+
+        <section class="users-section" id="gestao-usuarios-section">
           <div class="section-header">
             <div>
               <h2>Usuarios cadastrados</h2>
