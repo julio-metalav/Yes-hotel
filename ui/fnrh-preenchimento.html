@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FNRH — Ficha Nacional de Registro de Hóspedes</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 1rem; }
+    h1 { font-size: 1.25rem; margin-bottom: 0.5rem; }
+    .muted { color: #666; font-size: 0.9rem; }
+    label { display: block; margin-top: 0.75rem; font-weight: 500; }
+    input, textarea { width: 100%; padding: 0.5rem; margin-top: 0.25rem; border: 1px solid #ccc; border-radius: 4px; }
+    textarea { min-height: 60px; resize: vertical; }
+    .row { display: flex; gap: 1rem; }
+    .row > * { flex: 1; }
+    button { margin-top: 1rem; padding: 0.6rem 1.2rem; background: #0d6efd; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .error { color: #c00; margin-top: 0.5rem; }
+    .success { color: #0a0; margin-top: 0.5rem; }
+    #signatureCanvas { border: 1px solid #ccc; border-radius: 4px; cursor: crosshair; touch-action: none; }
+    .signature-label { margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <p class="muted">Carregando...</p>
+  </div>
+
+  <script src="./yes-supabase-config.js"></script>
+  <script>
+    (function () {
+      const config = typeof window.YES_HOTEL_SUPABASE_CONFIG !== "undefined" ? window.YES_HOTEL_SUPABASE_CONFIG : {};
+      const supabaseUrl = (config.url || "").replace(/\/+$/, "");
+      const functionsUrl = supabaseUrl ? supabaseUrl + "/functions/v1" : "";
+
+      const params = new URLSearchParams(window.location.search);
+      const guestId = params.get("guest_id") || params.get("guest-id");
+      const token = params.get("token");
+
+      if (!guestId || !token) {
+        document.getElementById("app").innerHTML = "<p class=\"error\">Link inválido. É necessário guest_id e token na URL.</p>";
+        return;
+      }
+
+      if (!functionsUrl) {
+        document.getElementById("app").innerHTML = "<p class=\"error\">Configuração do sistema não encontrada.</p>";
+        return;
+      }
+
+      function getFormDataUrl() {
+        return functionsUrl + "/fnrh-get?guest_id=" + encodeURIComponent(guestId) + "&token=" + encodeURIComponent(token);
+      }
+      function getSubmitUrl() {
+        return functionsUrl + "/fnrh-submit";
+      }
+
+      fetch(getFormDataUrl())
+        .then(function (r) {
+          if (r.status === 404) throw new Error("Link inválido ou expirado.");
+          return r.json();
+        })
+        .then(function (data) {
+          if (data.error) throw new Error(data.error);
+          if (data.status === "preenchido") {
+            document.getElementById("app").innerHTML = "<h1>FNRH</h1><p class=\"success\">Esta FNRH já foi preenchida.</p>";
+            return;
+          }
+          renderForm(data);
+        })
+        .catch(function (err) {
+          document.getElementById("app").innerHTML = "<h1>FNRH</h1><p class=\"error\">" + (err.message || "Erro ao carregar.") + "</p>";
+        });
+
+      function renderForm(data) {
+        const hospedeNome = (data.hospede_nome || "Hóspede").trim();
+        const pre = data.preenchido || {};
+        const principal = !!data.principal;
+        const app = document.getElementById("app");
+        var lprBlock = "";
+        if (principal) {
+          lprBlock = [
+            "  <label>Placa do veículo (opcional)</label><input name=\"placa_veiculo\" placeholder=\"Ex: ABC1D23\" value=\"" + escapeHtml(pre.placa_veiculo || "") + "\" />",
+            "  <label>Cor do veículo (opcional)</label><input name=\"cor_veiculo\" placeholder=\"Ex: Prata\" value=\"" + escapeHtml(pre.cor_veiculo || "") + "\" />",
+            "  <label>Modelo do veículo (opcional)</label><input name=\"modelo_veiculo\" placeholder=\"Ex: Fiat Uno\" value=\"" + escapeHtml(pre.modelo_veiculo || "") + "\" />"
+          ].join("");
+        } else {
+          lprBlock = "  <label>Placa do veículo (se houver)</label><input name=\"placa_veiculo\" placeholder=\"Opcional\" value=\"" + escapeHtml(pre.placa_veiculo || "") + "\" />";
+        }
+        app.innerHTML = [
+          "<h1>FNRH — Ficha Nacional de Registro de Hóspedes</h1>",
+          "<p class=\"muted\">Hóspede: " + escapeHtml(hospedeNome) + "</p>",
+          "<form id=\"fnrh-form\">",
+          "  <label>Nome completo *</label><input name=\"hospede_nome\" required value=\"" + escapeHtml(hospedeNome) + "\" />",
+          "  <label>Documento (CPF/RG) *</label><input name=\"documento\" required placeholder=\"CPF ou RG\" value=\"" + escapeHtml(pre.documento || "") + "\" />",
+          "  <label>Data de nascimento</label><input name=\"data_nascimento\" type=\"date\" value=\"" + escapeHtml(pre.data_nascimento || "") + "\" />",
+          "  <label>Nacionalidade *</label><input name=\"nacionalidade\" required placeholder=\"ex: Brasileira\" value=\"" + escapeHtml(pre.nacionalidade || "") + "\" />",
+          "  <label>Endereço completo *</label><textarea name=\"endereco\" required placeholder=\"Rua, número, bairro, cidade, estado, CEP\">" + escapeHtml(pre.endereco || "") + "</textarea>",
+          "  <label>Telefone *</label><input name=\"telefone\" type=\"tel\" required placeholder=\"(00) 00000-0000\" value=\"" + escapeHtml(pre.telefone || "") + "\" />",
+          "  <label>E-mail *</label><input name=\"email\" type=\"email\" required value=\"" + escapeHtml(pre.email || "") + "\" />",
+          "  <label>Procedência (cidade/país de onde vem) *</label><input name=\"procedencia\" required value=\"" + escapeHtml(pre.procedencia || "") + "\" />",
+          "  <label>Destino (para onde vai após) *</label><input name=\"destino\" required value=\"" + escapeHtml(pre.destino || "") + "\" />",
+          lprBlock,
+          "  <p class=\"signature-label\"><strong>Assinatura *</strong></p>",
+          "  <canvas id=\"signatureCanvas\" width=\"500\" height=\"120\"></canvas>",
+          "  <p class=\"muted\" style=\"margin-top:0.25rem\">Desenhe sua assinatura no quadro acima.</p>",
+          "  <button type=\"button\" id=\"clearSig\">Limpar assinatura</button>",
+          "  <div id=\"formMessage\"></div>",
+          "  <button type=\"submit\" id=\"submitBtn\">Enviar FNRH</button>",
+          "</form>"
+        ].join("");
+
+        const canvas = document.getElementById("signatureCanvas");
+        const ctx = canvas.getContext("2d");
+        let drawing = false;
+        function getPos(e) {
+          const rect = canvas.getBoundingClientRect();
+          const ev = e.touches ? e.touches[0] : e;
+          return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+        }
+        canvas.addEventListener("mousedown", function (e) { drawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
+        canvas.addEventListener("mousemove", function (e) { if (!drawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+        canvas.addEventListener("mouseup", function () { drawing = false; });
+        canvas.addEventListener("mouseleave", function () { drawing = false; });
+        canvas.addEventListener("touchstart", function (e) { e.preventDefault(); drawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }, { passive: false });
+        canvas.addEventListener("touchmove", function (e) { e.preventDefault(); if (!drawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }, { passive: false });
+        canvas.addEventListener("touchend", function () { drawing = false; });
+        document.getElementById("clearSig").addEventListener("click", function () {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        });
+
+        document.getElementById("fnrh-form").addEventListener("submit", function (e) {
+          e.preventDefault();
+          const msgEl = document.getElementById("formMessage");
+          const btn = document.getElementById("submitBtn");
+          var hasStroke = false;
+          try {
+            var id = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            for (var i = 0; i < id.data.length; i += 4) {
+              if (id.data[i + 3] > 0) { hasStroke = true; break; }
+            }
+          } catch (_) { hasStroke = true; }
+          if (!hasStroke) {
+            msgEl.innerHTML = "<p class=\"error\">Desenhe sua assinatura antes de enviar.</p>";
+            return;
+          }
+          const formData = new FormData(e.target);
+          const body = {
+            hospede_id: guestId,
+            token: token,
+            hospede_nome: formData.get("hospede_nome") || "",
+            documento: formData.get("documento") || "",
+            data_nascimento: formData.get("data_nascimento") || null,
+            nacionalidade: formData.get("nacionalidade") || "",
+            endereco: formData.get("endereco") || "",
+            telefone: formData.get("telefone") || "",
+            email: formData.get("email") || "",
+            procedencia: formData.get("procedencia") || "",
+            destino: formData.get("destino") || "",
+            placa_veiculo: formData.get("placa_veiculo") || "",
+            cor_veiculo: formData.get("cor_veiculo") || "",
+            modelo_veiculo: formData.get("modelo_veiculo") || "",
+            assinatura_base64: canvas.toDataURL("image/png")
+          };
+          btn.disabled = true;
+          msgEl.innerHTML = "";
+          fetch(getSubmitUrl(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+              if (res.ok) {
+                msgEl.innerHTML = "<p class=\"success\">" + (res.message || "FNRH enviada com sucesso.") + "</p>";
+                app.querySelector("form").remove();
+              } else {
+                msgEl.innerHTML = "<p class=\"error\">" + (res.error || "Falha ao enviar.") + "</p>";
+                btn.disabled = false;
+              }
+            })
+            .catch(function () {
+              msgEl.innerHTML = "<p class=\"error\">Erro de conexão. Tente novamente.</p>";
+              btn.disabled = false;
+            });
+        });
+      }
+
+      function escapeHtml(s) {
+        const div = document.createElement("div");
+        div.textContent = s;
+        return div.innerHTML;
+      }
+    })();
+  </script>
+</body>
+</html>
