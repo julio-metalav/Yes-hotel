@@ -152,7 +152,7 @@ Deno.serve(async (req: Request) => {
     .eq("reserva_id", reservaId);
   const links = (fnrhList ?? []).map(
     (r: { hospede_id: string; link_token: string }) =>
-      `${baseUrl}/ui/fnrh-preenchimento.html?guest_id=${encodeURIComponent(r.hospede_id)}&token=${encodeURIComponent(r.link_token)}`,
+      `${baseUrl}/fnrh-preenchimento.html?guest_id=${encodeURIComponent(r.hospede_id)}&token=${encodeURIComponent(r.link_token)}`,
   );
   const linksText = links.length > 0
     ? links.map((url: string, i: number) => `${i + 1}. ${url}`).join("\n")

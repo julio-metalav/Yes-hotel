@@ -125,7 +125,8 @@ Deno.serve(async (req: Request) => {
     const hospede = (hospedes as { id: string; nome: string; email: string; whatsapp: string }[] | null)?.find((h) => h.id === p.hospede_id);
     const email = (hospede?.email ?? "").trim();
     const nome = (hospede?.nome ?? p.hospede_nome ?? "Hóspede").trim();
-    const link = `${baseUrl}/ui/fnrh-preenchimento.html?guest_id=${encodeURIComponent(p.hospede_id)}&token=${encodeURIComponent(p.link_token)}`;
+    // base_url = origem do painel (ex.: Vercel com raiz = conteúdo de /ui → sem prefixo /ui)
+    const link = `${baseUrl}/fnrh-preenchimento.html?guest_id=${encodeURIComponent(p.hospede_id)}&token=${encodeURIComponent(p.link_token)}`;
 
     if (email) {
       tentativasComEmail++;
