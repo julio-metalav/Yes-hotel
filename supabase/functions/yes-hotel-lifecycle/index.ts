@@ -56,6 +56,54 @@ function ensureText(value: unknown, label: string): string {
   return s;
 }
 
+/** Campos de reserva/credencial às vezes vêm na raiz do JSON (ex.: mesmo padrão de outras functions) em vez de só em `payload`. */
+const PAYLOAD_MERGE_KEYS = [
+  "reservaId",
+  "reserva_id",
+  "reservationId",
+  "id",
+  "credencialId",
+  "credencial_id",
+] as const;
+
+function resolvePayloadRecord(body: Record<string, unknown>): Record<string, unknown> {
+  const raw = body["payload"];
+  const base = typeof raw === "object" && raw !== null && !Array.isArray(raw)
+    ? { ...(raw as Record<string, unknown>) }
+    : {};
+  for (const key of PAYLOAD_MERGE_KEYS) {
+    const inBase = base[key];
+    const baseEmpty = inBase == null || String(inBase).trim() === "";
+    const fromBody = body[key];
+    if (baseEmpty && fromBody != null && String(fromBody).trim() !== "") {
+      base[key] = fromBody;
+    }
+  }
+  return base;
+}
+
+/** Contrato de reserva: camelCase (painel) ou snake_case (APIs / fetch direto). */
+function pickReservaId(payload: Record<string, unknown>): string {
+  for (const k of ["reservaId", "reserva_id", "reservationId"] as const) {
+    const s = String(payload[k] ?? "").trim();
+    if (s) return s;
+  }
+  const id = String(payload.id ?? "").trim();
+  if (id) return id;
+  return "";
+}
+
+function requireReservaId(payload: Record<string, unknown>): string {
+  const id = pickReservaId(payload);
+  if (!id) {
+    throw new HttpError(
+      "Identificador da reserva obrigatório: informe em payload reservaId, reserva_id, reservationId ou id.",
+      400,
+    );
+  }
+  return id;
+}
+
 const adminClient = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
@@ -739,7 +787,7 @@ async function revokeCredencial(
 
 async function handleLifecycleProvision(request: Request, payload: Record<string, unknown>): Promise<Response> {
   await ensureCallerAllowed(request);
-  const reservaId = ensureText(payload.reservaId, "reservaId");
+  const reservaId = requireReservaId(payload);
 
   const credencial = await getCredencialForProvision(reservaId);
   if (!credencial) {
@@ -999,7 +1047,7 @@ async function handleCancelOrCheckout(
   motivo: "cancelamento" | "checkout",
 ): Promise<Response> {
   await ensureCallerAllowed(request);
-  const reservaId = ensureText(payload.reservaId, "reservaId");
+  const reservaId = requireReservaId(payload);
 
   const credencial = await getCredencialPorReserva(reservaId);
   if (!credencial) {
@@ -1143,10 +1191,15 @@ async function getSyncSummary(request: Request, reservaId: string): Promise<Resp
 
 async function retrySync(request: Request, payload: Record<string, unknown>): Promise<Response> {
   await ensureCallerAllowed(request);
-  const reservaId = (payload.reservaId as string)?.trim();
-  const credencialId = (payload.credencialId as string)?.trim();
+  const reservaId = pickReservaId(payload);
+  const credencialId =
+    String(payload.credencialId ?? payload.credencial_id ?? "").trim() ||
+    undefined;
   if (!credencialId && !reservaId) {
-    return jsonResponse({ ok: false, error: "Informe credencialId ou reservaId." }, 400);
+    return jsonResponse({
+      ok: false,
+      error: "Informe credencialId (ou credencial_id) ou reservaId (ou reserva_id / reservationId / id).",
+    }, 400);
   }
 
   let cid = credencialId;
@@ -1216,9 +1269,9 @@ Deno.serve(async (request: Request) => {
   }
 
   try {
-    const requestBody = (await request.json()) as { action?: string; payload?: Record<string, unknown> };
-    const action = (requestBody.action ?? "").trim();
-    const payload = requestBody.payload ?? {};
+    const requestBody = (await request.json()) as Record<string, unknown>;
+    const action = String(requestBody.action ?? "").trim();
+    const payload = resolvePayloadRecord(requestBody);
     if (typeof console !== "undefined") console.log("[lifecycle] action=" + action);
 
     if (action === "lifecycle_cancel") {
@@ -1228,7 +1281,7 @@ Deno.serve(async (request: Request) => {
       return await handleCancelOrCheckout(request, payload, "checkout");
     }
     if (action === "sync_summary") {
-      const reservaId = ensureText(payload.reservaId, "reservaId");
+      const reservaId = requireReservaId(payload);
       return await getSyncSummary(request, reservaId);
     }
     if (action === "retry_sync") {
