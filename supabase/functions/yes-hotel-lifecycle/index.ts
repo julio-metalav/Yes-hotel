@@ -60,9 +60,26 @@ const adminClient = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-const anonClient = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: { autoRefreshToken: false, persistSession: false },
-});
+/** Erro com status HTTP explícito (autorização / validação). */
+class HttpError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "HttpError";
+    this.status = status;
+  }
+}
+
+function createRequestClientWithAuth(request: Request) {
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: {
+      headers: {
+        Authorization: request.headers.get("Authorization") ?? "",
+      },
+    },
+  });
+}
 
 /** Timeline operacional: não propaga falha para não quebrar lifecycle TTLock. */
 async function insertReservaEvento(
@@ -90,45 +107,50 @@ async function insertReservaEvento(
   }
 }
 
-async function getCallerProfile(request: Request): Promise<{ role: string; active: boolean } | null> {
+/**
+ * Mesmo padrão de `internal-users-admin`: client com Authorization nos headers globais + getUser(),
+ * em vez de getClaims/getUser(jwt) num client sem header (comportamento inconsistente no Edge).
+ */
+async function ensureCallerAllowed(request: Request): Promise<void> {
   const authHeader = request.headers.get("Authorization") ?? "";
-  const hasBearer = /^\s*Bearer\s+/i.test(authHeader);
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-  if (typeof console !== "undefined") {
-    console.log("[lifecycle] getCallerProfile authHeaderPresent=" + (authHeader.length > 0) + " hasBearer=" + hasBearer + " tokenLen=" + token.length);
+  if (!token) {
+    throw new HttpError("Autenticação obrigatória.", 401);
   }
-  if (!token) return null;
-  let authUserId: string | null = null;
-  try {
-    const claimsResult = await anonClient.auth.getClaims(token);
-    if (claimsResult.error) {
-      if (typeof console !== "undefined") console.warn("[lifecycle] getClaims error", claimsResult.error.message);
-      throw claimsResult.error;
+
+  const requestClient = createRequestClientWithAuth(request);
+  const {
+    data: { user },
+    error: userError,
+  } = await requestClient.auth.getUser();
+
+  if (userError || !user?.id) {
+    if (typeof console !== "undefined") {
+      console.warn("[lifecycle] ensureCallerAllowed getUser", userError?.message ?? "no user");
     }
-    if (claimsResult.data?.claims?.sub) authUserId = claimsResult.data.claims.sub as string;
-  } catch (claimsErr) {
-    if (typeof console !== "undefined") console.warn("[lifecycle] getClaims threw", claimsErr instanceof Error ? claimsErr.message : String(claimsErr));
-    const userResult = await anonClient.auth.getUser(token);
-    if (userResult.error || !userResult.data?.user?.id) {
-      if (typeof console !== "undefined") console.warn("[lifecycle] getUser fallback error", userResult.error?.message ?? "no user");
-      return null;
-    }
-    authUserId = userResult.data.user.id;
+    throw new HttpError("Sessão inválida ou expirada.", 401);
   }
-  if (!authUserId) return null;
+
   const { data: row, error: rowError } = await adminClient
     .from("usuarios_internos")
     .select("perfil_usuario, ativo")
-    .eq("auth_user_id", authUserId)
+    .eq("auth_user_id", user.id)
     .maybeSingle();
-  if (rowError || !row) return null;
-  return { role: row.perfil_usuario, active: !!row.ativo };
-}
 
-async function ensureCallerAllowed(request: Request): Promise<void> {
-  const profile = await getCallerProfile(request);
-  if (!profile || !profile.active || (profile.role !== "admin" && profile.role !== "recepcao")) {
-    throw new Error("Apenas admin ou recepção ativos podem executar esta ação.");
+  if (rowError || !row) {
+    if (typeof console !== "undefined") {
+      console.warn("[lifecycle] ensureCallerAllowed usuarios_internos", rowError?.message ?? "no row", "auth_uid=" + user.id);
+    }
+    throw new HttpError("Usuário sem cadastro interno autorizado.", 403);
+  }
+
+  if (!row.ativo) {
+    throw new HttpError("Usuário interno inativo.", 403);
+  }
+
+  const role = String(row.perfil_usuario ?? "").trim().toLowerCase();
+  if (role !== "admin" && role !== "recepcao") {
+    throw new HttpError("Apenas admin ou recepção ativos podem executar esta ação.", 403);
   }
 }
 
@@ -1224,6 +1246,9 @@ Deno.serve(async (request: Request) => {
       400,
     );
   } catch (error) {
+    if (error instanceof HttpError) {
+      return jsonResponse({ error: error.message }, error.status);
+    }
     return jsonResponse(
       { error: error instanceof Error ? error.message : "Erro inesperado na edge function." },
       500,
