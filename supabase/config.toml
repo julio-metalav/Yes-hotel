@@ -1,5 +1,21 @@
+# Formulário FNRH público: segurança por guest_id (fnrh_hospedes.id) + link_token no corpo/query — sem sessão Supabase.
+[functions.fnrh-get]
+verify_jwt = false
+
+[functions.fnrh-submit]
+verify_jwt = false
+
 [functions.internal-users-admin]
 verify_jwt = false
 
 [functions.yes-hotel-lifecycle]
+verify_jwt = false
+
+[functions.fnrh-auto-reenvio]
+verify_jwt = false
+
+[functions.send-fnrh-links]
+verify_jwt = false
+
+[functions.send-whatsapp-message]
 verify_jwt = false
