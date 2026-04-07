@@ -92,7 +92,8 @@ Deno.serve(async (req: Request) => {
     .eq("reserva_id", reservaId);
   if (errF || !Array.isArray(fnrhList)) return jsonResponse({ ok: false, error: "Falha ao listar FNRH." }, 500);
 
-  const pendentes = fnrhList.filter((r: { status: string }) => r.status === "pendente");
+  const aberto = new Set(["pendente", "rascunho", "pendente_confirmacao"]);
+  const pendentes = fnrhList.filter((r: { status: string }) => aberto.has(r.status));
   if (pendentes.length === 0) {
     return jsonResponse(
       {
@@ -126,7 +127,7 @@ Deno.serve(async (req: Request) => {
     const email = (hospede?.email ?? "").trim();
     const nome = (hospede?.nome ?? p.hospede_nome ?? "Hóspede").trim();
     // guest_id = fnrh_hospedes.id (formulário público + fnrh-get)
-    const link = `${baseUrl}/fnrh-preenchimento.html?guest_id=${encodeURIComponent(p.id)}&token=${encodeURIComponent(p.link_token)}`;
+    const link = `${baseUrl}/fnrh-preenchimento.html?v=2&guest_id=${encodeURIComponent(p.id)}&token=${encodeURIComponent(p.link_token)}`;
 
     if (email) {
       tentativasComEmail++;

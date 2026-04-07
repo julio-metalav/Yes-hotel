@@ -3,23 +3,27 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>FNRH — Ficha Nacional de Registro de Hóspedes</title>
+  <title>FNRH — Yes Hotel (pré-preenchimento)</title>
   <style>
     * { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 1rem; }
     h1 { font-size: 1.25rem; margin-bottom: 0.5rem; }
     .muted { color: #666; font-size: 0.9rem; }
+    .banner { background: #e7f1ff; border: 1px solid #b6d4fe; border-radius: 8px; padding: 0.65rem 0.85rem; margin-bottom: 1rem; font-size: 0.9rem; }
+    .draft-status { font-size: 0.85rem; margin-top: 0.5rem; min-height: 1.25rem; }
+    .draft-status.is-ok { color: #0a6; }
+    .draft-status.is-err { color: #c00; }
     label { display: block; margin-top: 0.75rem; font-weight: 500; }
     input, textarea { width: 100%; padding: 0.5rem; margin-top: 0.25rem; border: 1px solid #ccc; border-radius: 4px; }
     textarea { min-height: 60px; resize: vertical; }
-    .row { display: flex; gap: 1rem; }
-    .row > * { flex: 1; }
     button { margin-top: 1rem; padding: 0.6rem 1.2rem; background: #0d6efd; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
+    button.secondary { background: #6c757d; }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
     .error { color: #c00; margin-top: 0.5rem; }
     .success { color: #0a0; margin-top: 0.5rem; }
-    #signatureCanvas { border: 1px solid #ccc; border-radius: 4px; cursor: crosshair; touch-action: none; }
+    #signatureCanvas { border: 1px solid #ccc; border-radius: 4px; cursor: crosshair; touch-action: none; max-width: 100%; }
     .signature-label { margin-top: 1rem; }
+    .actions-confirm { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #ddd; }
   </style>
 </head>
 <body>
@@ -30,16 +34,17 @@
   <script src="./yes-supabase-config.js"></script>
   <script>
     (function () {
-      const config = typeof window.YES_HOTEL_SUPABASE_CONFIG !== "undefined" ? window.YES_HOTEL_SUPABASE_CONFIG : {};
-      const supabaseUrl = (config.url || "").replace(/\/+$/, "");
-      const functionsUrl = supabaseUrl ? supabaseUrl + "/functions/v1" : "";
+      var DEBOUNCE_MS = 850;
+      var config = typeof window.YES_HOTEL_SUPABASE_CONFIG !== "undefined" ? window.YES_HOTEL_SUPABASE_CONFIG : {};
+      var supabaseUrl = (config.url || "").replace(/\/+$/, "");
+      var functionsUrl = supabaseUrl ? supabaseUrl + "/functions/v1" : "";
 
-      const params = new URLSearchParams(window.location.search);
-      const guestId = params.get("guest_id") || params.get("guest-id");
-      const token = params.get("token");
+      var params = new URLSearchParams(window.location.search);
+      var guestId = params.get("guest_id") || params.get("guest-id");
+      var token = params.get("token");
 
       if (!guestId || !token) {
-        document.getElementById("app").innerHTML = "<p class=\"error\">Link inválido. São necessários guest_id (id da FNRH em fnrh_hospedes) e token na URL.</p>";
+        document.getElementById("app").innerHTML = "<p class=\"error\">Link inválido. São necessários guest_id (id da FNRH) e token na URL.</p>";
         return;
       }
 
@@ -55,6 +60,16 @@
         return functionsUrl + "/fnrh-submit";
       }
 
+      function escapeHtml(s) {
+        var div = document.createElement("div");
+        div.textContent = s;
+        return div.innerHTML;
+      }
+
+      function formatTime(d) {
+        return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      }
+
       fetch(getFormDataUrl())
         .then(function (r) {
           if (r.status === 404) throw new Error("Link inválido ou expirado.");
@@ -62,104 +77,208 @@
         })
         .then(function (data) {
           if (data.error) throw new Error(data.error);
-          if (data.status === "preenchido") {
-            document.getElementById("app").innerHTML = "<h1>FNRH</h1><p class=\"success\">Esta FNRH já foi preenchida.</p>";
+          if (data.fechado) {
+            document.getElementById("app").innerHTML = "<h1>FNRH</h1><p class=\"success\">" + escapeHtml(data.message || "Concluído.") + "</p>";
             return;
           }
           renderForm(data);
         })
         .catch(function (err) {
-          document.getElementById("app").innerHTML = "<h1>FNRH</h1><p class=\"error\">" + (err.message || "Erro ao carregar.") + "</p>";
+          document.getElementById("app").innerHTML = "<h1>FNRH</h1><p class=\"error\">" + escapeHtml(err.message || "Erro ao carregar.") + "</p>";
         });
 
       function renderForm(data) {
-        const hospedeNome = (data.hospede_nome || "Hóspede").trim();
-        const pre = data.preenchido || {};
-        const principal = !!data.principal;
-        const app = document.getElementById("app");
+        var pre = data.preenchido || {};
+        var principal = !!data.principal;
+        var meta = data.meta || {};
+        var aptLine = meta.apartamento ? "Apartamento " + escapeHtml(meta.apartamento) + " · " : "";
+        var app = document.getElementById("app");
         var lprBlock = "";
         if (principal) {
           lprBlock = [
-            "  <label>Placa do veículo (opcional)</label><input name=\"placa_veiculo\" placeholder=\"Ex: ABC1D23\" value=\"" + escapeHtml(pre.placa_veiculo || "") + "\" />",
-            "  <label>Cor do veículo (opcional)</label><input name=\"cor_veiculo\" placeholder=\"Ex: Prata\" value=\"" + escapeHtml(pre.cor_veiculo || "") + "\" />",
-            "  <label>Modelo do veículo (opcional)</label><input name=\"modelo_veiculo\" placeholder=\"Ex: Fiat Uno\" value=\"" + escapeHtml(pre.modelo_veiculo || "") + "\" />"
+            "  <label>Placa do veículo (opcional)</label><input name=\"placa_veiculo\" data-draft=\"1\" placeholder=\"Ex: ABC1D23\" value=\"" + escapeHtml(pre.placa_veiculo || "") + "\" />",
+            "  <label>Cor do veículo (opcional)</label><input name=\"cor_veiculo\" data-draft=\"1\" placeholder=\"Ex: Prata\" value=\"" + escapeHtml(pre.cor_veiculo || "") + "\" />",
+            "  <label>Modelo do veículo (opcional)</label><input name=\"modelo_veiculo\" data-draft=\"1\" placeholder=\"Ex: Fiat Uno\" value=\"" + escapeHtml(pre.modelo_veiculo || "") + "\" />"
           ].join("");
         } else {
-          lprBlock = "  <label>Placa do veículo (se houver)</label><input name=\"placa_veiculo\" placeholder=\"Opcional\" value=\"" + escapeHtml(pre.placa_veiculo || "") + "\" />";
+          lprBlock = "  <label>Placa do veículo (se houver)</label><input name=\"placa_veiculo\" data-draft=\"1\" placeholder=\"Opcional\" value=\"" + escapeHtml(pre.placa_veiculo || "") + "\" />";
         }
+
+        var statusHint = "";
+        if (data.status === "rascunho") statusHint = " Você tem um rascunho salvo — continue de onde parou.";
+
         app.innerHTML = [
-          "<h1>FNRH — Ficha Nacional de Registro de Hóspedes</h1>",
-          "<p class=\"muted\">Hóspede: " + escapeHtml(hospedeNome) + "</p>",
+          "<h1>FNRH — Ficha de registro (Yes Hotel)</h1>",
+          "<div class=\"banner\">Esta página é a <strong>etapa do hotel</strong> para reunir seus dados. Depois, o hotel poderá enviar à ficha oficial (MTur/SNRHos) quando integrado." + statusHint + "</div>",
+          "<p class=\"muted\">" + aptLine + "Revise os dados já conhecidos pelo hotel, complete o que faltar e confirme ao final.</p>",
           "<form id=\"fnrh-form\">",
-          "  <label>Nome completo *</label><input name=\"hospede_nome\" required value=\"" + escapeHtml(hospedeNome) + "\" />",
-          "  <label>Documento (CPF/RG) *</label><input name=\"documento\" required placeholder=\"CPF ou RG\" value=\"" + escapeHtml(pre.documento || "") + "\" />",
-          "  <label>Data de nascimento</label><input name=\"data_nascimento\" type=\"date\" value=\"" + escapeHtml(pre.data_nascimento || "") + "\" />",
-          "  <label>Nacionalidade *</label><input name=\"nacionalidade\" required placeholder=\"ex: Brasileira\" value=\"" + escapeHtml(pre.nacionalidade || "") + "\" />",
-          "  <label>Endereço completo *</label><textarea name=\"endereco\" required placeholder=\"Rua, número, bairro, cidade, estado, CEP\">" + escapeHtml(pre.endereco || "") + "</textarea>",
-          "  <label>Telefone *</label><input name=\"telefone\" type=\"tel\" required placeholder=\"(00) 00000-0000\" value=\"" + escapeHtml(pre.telefone || "") + "\" />",
-          "  <label>E-mail *</label><input name=\"email\" type=\"email\" required value=\"" + escapeHtml(pre.email || "") + "\" />",
-          "  <label>Procedência (cidade/país de onde vem) *</label><input name=\"procedencia\" required value=\"" + escapeHtml(pre.procedencia || "") + "\" />",
-          "  <label>Destino (para onde vai após) *</label><input name=\"destino\" required value=\"" + escapeHtml(pre.destino || "") + "\" />",
+          "  <label>Nome completo *</label><input name=\"hospede_nome\" data-draft=\"1\" value=\"" + escapeHtml(pre.hospede_nome || "") + "\" />",
+          "  <label>Documento (CPF/RG) *</label><input name=\"documento\" data-draft=\"1\" placeholder=\"CPF ou RG\" value=\"" + escapeHtml(pre.documento || "") + "\" />",
+          "  <label>Data de nascimento</label><input name=\"data_nascimento\" data-draft=\"1\" type=\"date\" value=\"" + escapeHtml(pre.data_nascimento || "") + "\" />",
+          "  <label>Nacionalidade *</label><input name=\"nacionalidade\" data-draft=\"1\" placeholder=\"ex: Brasileira\" value=\"" + escapeHtml(pre.nacionalidade || "") + "\" />",
+          "  <label>Endereço completo *</label><textarea name=\"endereco\" data-draft=\"1\" placeholder=\"Rua, número, bairro, cidade, estado, CEP\">" + escapeHtml(pre.endereco || "") + "</textarea>",
+          "  <label>Telefone *</label><input name=\"telefone\" data-draft=\"1\" type=\"tel\" placeholder=\"(00) 00000-0000\" value=\"" + escapeHtml(pre.telefone || "") + "\" />",
+          "  <label>E-mail *</label><input name=\"email\" data-draft=\"1\" type=\"email\" value=\"" + escapeHtml(pre.email || "") + "\" />",
+          "  <label>Procedência (cidade/país de onde vem) *</label><input name=\"procedencia\" data-draft=\"1\" value=\"" + escapeHtml(pre.procedencia || "") + "\" />",
+          "  <label>Destino (para onde vai após) *</label><input name=\"destino\" data-draft=\"1\" value=\"" + escapeHtml(pre.destino || "") + "\" />",
           lprBlock,
-          "  <p class=\"signature-label\"><strong>Assinatura *</strong></p>",
-          "  <canvas id=\"signatureCanvas\" width=\"500\" height=\"120\"></canvas>",
-          "  <p class=\"muted\" style=\"margin-top:0.25rem\">Desenhe sua assinatura no quadro acima.</p>",
-          "  <button type=\"button\" id=\"clearSig\">Limpar assinatura</button>",
-          "  <div id=\"formMessage\"></div>",
-          "  <button type=\"submit\" id=\"submitBtn\">Enviar FNRH</button>",
+          "  <div class=\"draft-status muted\" id=\"draft-status\" aria-live=\"polite\"></div>",
+          "  <div class=\"actions-confirm\">",
+          "    <p class=\"signature-label\"><strong>Assinatura (obrigatória só na confirmação final) *</strong></p>",
+          "    <canvas id=\"signatureCanvas\" width=\"500\" height=\"120\"></canvas>",
+          "    <p class=\"muted\" style=\"margin-top:0.25rem\">Desenhe no quadro acima. O rascunho pode salvar a assinatura se você já desenhou.</p>",
+          "    <button type=\"button\" class=\"secondary\" id=\"clearSig\">Limpar assinatura</button>",
+          "    <div id=\"formMessage\"></div>",
+          "    <button type=\"submit\" id=\"submitBtn\">Confirmar e enviar FNRH</button>",
+          "  </div>",
           "</form>"
         ].join("");
 
-        const canvas = document.getElementById("signatureCanvas");
-        const ctx = canvas.getContext("2d");
-        let drawing = false;
+        var form = document.getElementById("fnrh-form");
+        var draftEl = document.getElementById("draft-status");
+        var canvas = document.getElementById("signatureCanvas");
+        var ctx = canvas.getContext("2d");
+        var drawing = false;
+        var draftTimer = null;
+        var draftAbort = null;
+
         function getPos(e) {
-          const rect = canvas.getBoundingClientRect();
-          const ev = e.touches ? e.touches[0] : e;
+          var rect = canvas.getBoundingClientRect();
+          var ev = e.touches ? e.touches[0] : e;
           return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
         }
-        canvas.addEventListener("mousedown", function (e) { drawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
-        canvas.addEventListener("mousemove", function (e) { if (!drawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
-        canvas.addEventListener("mouseup", function () { drawing = false; });
+        canvas.addEventListener("mousedown", function (e) { drawing = true; var p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); scheduleDraftSoon(); });
+        canvas.addEventListener("mousemove", function (e) { if (!drawing) return; var p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); scheduleDraftSoon(); });
+        canvas.addEventListener("mouseup", function () { drawing = false; scheduleDraftSoon(); });
         canvas.addEventListener("mouseleave", function () { drawing = false; });
-        canvas.addEventListener("touchstart", function (e) { e.preventDefault(); drawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }, { passive: false });
-        canvas.addEventListener("touchmove", function (e) { e.preventDefault(); if (!drawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }, { passive: false });
-        canvas.addEventListener("touchend", function () { drawing = false; });
+        canvas.addEventListener("touchstart", function (e) { e.preventDefault(); drawing = true; var p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); scheduleDraftSoon(); }, { passive: false });
+        canvas.addEventListener("touchmove", function (e) { e.preventDefault(); if (!drawing) return; var p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); scheduleDraftSoon(); }, { passive: false });
+        canvas.addEventListener("touchend", function () { drawing = false; scheduleDraftSoon(); });
+
         document.getElementById("clearSig").addEventListener("click", function () {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
+          scheduleDraftSoon();
         });
 
-        document.getElementById("fnrh-form").addEventListener("submit", function (e) {
-          e.preventDefault();
-          const msgEl = document.getElementById("formMessage");
-          const btn = document.getElementById("submitBtn");
-          var hasStroke = false;
+        if (data.assinatura_base64 && String(data.assinatura_base64).indexOf("data:image") === 0) {
+          var img = new Image();
+          img.onload = function () {
+            try {
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            } catch (_) {}
+          };
+          img.src = data.assinatura_base64;
+        }
+
+        function canvasHasInk() {
           try {
             var id = ctx.getImageData(0, 0, canvas.width, canvas.height);
             for (var i = 0; i < id.data.length; i += 4) {
-              if (id.data[i + 3] > 0) { hasStroke = true; break; }
+              if (id.data[i + 3] > 0) return true;
             }
-          } catch (_) { hasStroke = true; }
-          if (!hasStroke) {
-            msgEl.innerHTML = "<p class=\"error\">Desenhe sua assinatura antes de enviar.</p>";
-            return;
-          }
-          const formData = new FormData(e.target);
-          const body = {
+          } catch (_) { return true; }
+          return false;
+        }
+
+        function buildDraftBody() {
+          var fd = new FormData(form);
+          var body = {
             hospede_id: guestId,
             token: token,
-            hospede_nome: formData.get("hospede_nome") || "",
-            documento: formData.get("documento") || "",
-            data_nascimento: formData.get("data_nascimento") || null,
-            nacionalidade: formData.get("nacionalidade") || "",
-            endereco: formData.get("endereco") || "",
-            telefone: formData.get("telefone") || "",
-            email: formData.get("email") || "",
-            procedencia: formData.get("procedencia") || "",
-            destino: formData.get("destino") || "",
-            placa_veiculo: formData.get("placa_veiculo") || "",
-            cor_veiculo: formData.get("cor_veiculo") || "",
-            modelo_veiculo: formData.get("modelo_veiculo") || "",
+            action: "draft",
+            hospede_nome: fd.get("hospede_nome") || "",
+            documento: fd.get("documento") || "",
+            data_nascimento: fd.get("data_nascimento") || null,
+            nacionalidade: fd.get("nacionalidade") || "",
+            endereco: fd.get("endereco") || "",
+            telefone: fd.get("telefone") || "",
+            email: fd.get("email") || "",
+            procedencia: fd.get("procedencia") || "",
+            destino: fd.get("destino") || "",
+            placa_veiculo: fd.get("placa_veiculo") || "",
+            cor_veiculo: fd.get("cor_veiculo") || "",
+            modelo_veiculo: fd.get("modelo_veiculo") || ""
+          };
+          if (canvasHasInk()) body.assinatura_base64 = canvas.toDataURL("image/png");
+          return body;
+        }
+
+        function doDraft() {
+          if (draftAbort) draftAbort.abort();
+          draftAbort = new AbortController();
+          fetch(getSubmitUrl(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(buildDraftBody()),
+            signal: draftAbort.signal
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+              if (res.ok) {
+                draftEl.textContent = "Rascunho salvo automaticamente às " + formatTime(new Date()) + ".";
+                draftEl.className = "draft-status is-ok";
+              } else {
+                draftEl.textContent = res.error || "Não foi possível salvar o rascunho.";
+                draftEl.className = "draft-status is-err";
+              }
+            })
+            .catch(function (e) {
+              if (e.name === "AbortError") return;
+              draftEl.textContent = "Erro de rede ao salvar rascunho.";
+              draftEl.className = "draft-status is-err";
+            });
+        }
+
+        function scheduleDraftSoon() {
+          if (draftTimer) clearTimeout(draftTimer);
+          draftTimer = setTimeout(doDraft, DEBOUNCE_MS);
+        }
+
+        form.querySelectorAll("[data-draft]").forEach(function (el) {
+          el.addEventListener("input", scheduleDraftSoon);
+          el.addEventListener("blur", function () {
+            if (draftTimer) clearTimeout(draftTimer);
+            doDraft();
+          });
+        });
+
+        form.addEventListener("submit", function (e) {
+          e.preventDefault();
+          var msgEl = document.getElementById("formMessage");
+          var btn = document.getElementById("submitBtn");
+          var fd = new FormData(form);
+          var hospede_nome = (fd.get("hospede_nome") || "").toString().trim();
+          var documento = (fd.get("documento") || "").toString().trim();
+          var nacionalidade = (fd.get("nacionalidade") || "").toString().trim();
+          var endereco = (fd.get("endereco") || "").toString().trim();
+          var telefone = (fd.get("telefone") || "").toString().trim();
+          var email = (fd.get("email") || "").toString().trim();
+          var procedencia = (fd.get("procedencia") || "").toString().trim();
+          var destino = (fd.get("destino") || "").toString().trim();
+          if (!hospede_nome || !documento || !nacionalidade || !endereco || !telefone || !email || !procedencia || !destino) {
+            msgEl.innerHTML = "<p class=\"error\">Preencha todos os campos obrigatórios antes de confirmar.</p>";
+            return;
+          }
+          if (!canvasHasInk()) {
+            msgEl.innerHTML = "<p class=\"error\">Desenhe sua assinatura para confirmar.</p>";
+            return;
+          }
+          var body = {
+            hospede_id: guestId,
+            token: token,
+            action: "confirm",
+            hospede_nome: hospede_nome,
+            documento: documento,
+            data_nascimento: fd.get("data_nascimento") || null,
+            nacionalidade: nacionalidade,
+            endereco: endereco,
+            telefone: telefone,
+            email: email,
+            procedencia: procedencia,
+            destino: destino,
+            placa_veiculo: fd.get("placa_veiculo") || "",
+            cor_veiculo: fd.get("cor_veiculo") || "",
+            modelo_veiculo: fd.get("modelo_veiculo") || "",
             assinatura_base64: canvas.toDataURL("image/png")
           };
           btn.disabled = true;
@@ -172,10 +291,9 @@
             .then(function (r) { return r.json(); })
             .then(function (res) {
               if (res.ok) {
-                msgEl.innerHTML = "<p class=\"success\">" + (res.message || "FNRH enviada com sucesso.") + "</p>";
-                app.querySelector("form").remove();
+                app.innerHTML = "<h1>FNRH</h1><p class=\"success\">" + escapeHtml(res.message || "FNRH confirmada.") + "</p>";
               } else {
-                msgEl.innerHTML = "<p class=\"error\">" + (res.error || "Falha ao enviar.") + "</p>";
+                msgEl.innerHTML = "<p class=\"error\">" + escapeHtml(res.error || "Falha ao confirmar.") + "</p>";
                 btn.disabled = false;
               }
             })
@@ -184,12 +302,8 @@
               btn.disabled = false;
             });
         });
-      }
 
-      function escapeHtml(s) {
-        const div = document.createElement("div");
-        div.textContent = s;
-        return div.innerHTML;
+        setTimeout(doDraft, 400);
       }
     })();
   </script>

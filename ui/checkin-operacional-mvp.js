@@ -537,7 +537,7 @@ function mapDbHospedeToInternal(row, fnrhRow) {
     tentativasEnvio: row.tentativas_envio != null ? Number(row.tentativas_envio) : 0,
   };
   if (fnrhRow && fnrhRow.link_token && fnrhRow.id) {
-    base.fnrhLink = "./fnrh-preenchimento.html?guest_id=" + encodeURIComponent(fnrhRow.id) + "&token=" + encodeURIComponent(fnrhRow.link_token);
+    base.fnrhLink = "./fnrh-preenchimento.html?v=2&guest_id=" + encodeURIComponent(fnrhRow.id) + "&token=" + encodeURIComponent(fnrhRow.link_token);
     base.fnrhStatus = fnrhRow.status || "pendente";
   }
   return base;
