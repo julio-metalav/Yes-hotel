@@ -939,6 +939,42 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
             " itens; diagnostico=" + JSON.stringify(diag ?? []),
         );
       }
+      const rows = Array.isArray(diag) ? diag : [];
+      const allProvisionado =
+        rows.length === count &&
+        rows.length > 0 &&
+        rows.every((i) => i.status_provisionamento === "provisionado");
+      if (allProvisionado) {
+        if (credencial.status !== "provisionada") {
+          await adminClient
+            .from("operacional_credenciais_acesso")
+            .update({ status: "provisionada" })
+            .eq("id", credIdForItens);
+        }
+        await insertReservaEvento(reservaId, "ttlock_provision_ja_concluido", "TTLock: provisionamento já concluído (idempotente)", {
+          action: "lifecycle_provision",
+          credencial_id: credIdForItens,
+          status_final: "provisionada",
+          total_itens: count,
+          provisionados: count,
+          falhas: 0,
+          revogados: 0,
+          erro_resumido: null,
+        });
+        return jsonResponse({
+          ok: true,
+          idempotente: true,
+          message: "Todos os itens já estavam provisionados no TTLock.",
+          credencialId: credIdForItens,
+          reservaId,
+          status: "provisionada",
+          passcode: credencial.codigo_credencial ?? null,
+          totalItens: count,
+          provisionados: count,
+          falhas: 0,
+          erros: [],
+        });
+      }
       await insertReservaEvento(reservaId, "ttlock_provision_sem_pendente_com_itens", "TTLock: itens na credencial sem status pendente", {
         action: "lifecycle_provision",
         credencial_id: credIdForItens,
