@@ -141,7 +141,56 @@ export async function outboundWhatsappParaConversa(
 }
 
 /**
- * WhatsApp transacional sem linha em comunicacao_conversas (FNRH, senha).
+ * Localiza ou cria conversa WhatsApp por (canal, telefone) — índice único 0013.
+ */
+async function findOrCreateConversaWhatsappTransacional(
+  admin: SupabaseClient,
+  params: { telefoneDigits: string; reservaId: string; hospedeId: string },
+): Promise<{ conversaId: string | null; error: string | null }> {
+  const { telefoneDigits, reservaId, hospedeId } = params;
+  const { data: found, error: selErr } = await admin
+    .from("comunicacao_conversas")
+    .select("id")
+    .eq("canal", "whatsapp")
+    .eq("telefone", telefoneDigits)
+    .maybeSingle();
+  if (selErr) {
+    return { conversaId: null, error: selErr.message };
+  }
+  if (found?.id) {
+    return { conversaId: found.id, error: null };
+  }
+  const { data: created, error: insErr } = await admin
+    .from("comunicacao_conversas")
+    .insert({
+      canal: "whatsapp",
+      telefone: telefoneDigits,
+      reserva_id: reservaId,
+      hospede_id: hospedeId,
+      status: "aberta",
+    })
+    .select("id")
+    .single();
+  if (!insErr && created?.id) {
+    return { conversaId: created.id, error: null };
+  }
+  const code = (insErr as { code?: string } | null)?.code ?? "";
+  const msg = insErr?.message ?? "";
+  if (code === "23505" || msg.toLowerCase().includes("duplicate")) {
+    const { data: retry, error: retryErr } = await admin
+      .from("comunicacao_conversas")
+      .select("id")
+      .eq("canal", "whatsapp")
+      .eq("telefone", telefoneDigits)
+      .maybeSingle();
+    if (retryErr) return { conversaId: null, error: retryErr.message };
+    if (retry?.id) return { conversaId: retry.id, error: null };
+  }
+  return { conversaId: null, error: insErr?.message ?? "insert comunicacao_conversas falhou" };
+}
+
+/**
+ * WhatsApp transacional (FNRH, senha): DigiSac + trilha em comunicacao_* (mesmo padrão de outboundWhatsappParaConversa).
  */
 export async function outboundWhatsappTransacional(
   admin: SupabaseClient,
@@ -153,16 +202,109 @@ export async function outboundWhatsappTransacional(
     proposito: ComunicacaoProposito;
   },
 ): Promise<{ ok: boolean; error?: string; provider_message_id?: string }> {
+  const telefoneDigits = normalizePhoneDigits(params.telefoneRaw);
+  const mask = maskPhoneForLog(telefoneDigits);
+  const previewText = previewCorpo(params.text, PREVIEW_MAX);
   const cfg = readDigisacEnv();
+
+  const { conversaId, error: convErr } = telefoneDigits
+    ? await findOrCreateConversaWhatsappTransacional(admin, {
+      telefoneDigits,
+      reservaId: params.reservaId,
+      hospedeId: params.hospedeId,
+    })
+    : { conversaId: null as string | null, error: "telefone sem dígitos" };
+
+  if (!telefoneDigits && typeof console !== "undefined") {
+    console.warn("[comunicacao-operacional] transacional: telefone sem dígitos; inbox omitido");
+  } else if (!conversaId && typeof console !== "undefined") {
+    console.warn(
+      "[comunicacao-operacional] transacional: conversa inbox não disponível; DigiSac segue. Motivo:",
+      convErr ?? "desconhecido",
+    );
+  }
+
+  let msgRowId: string | null = null;
+  let msgCreatedAt: string | null = null;
+  if (conversaId) {
+    const { data: msg, error: msgInsErr } = await admin
+      .from("comunicacao_mensagens")
+      .insert({
+        conversa_id: conversaId,
+        direcao: "saida",
+        tipo_mensagem: "texto",
+        mensagem: params.text,
+        status_envio: "enviando",
+      })
+      .select("id, created_at")
+      .single();
+    if (msgInsErr || !msg) {
+      if (typeof console !== "undefined") {
+        console.warn(
+          "[comunicacao-operacional] transacional: insert comunicacao_mensagens falhou:",
+          msgInsErr?.message ?? "sem id",
+        );
+      }
+    } else {
+      msgRowId = msg.id;
+      msgCreatedAt = typeof msg.created_at === "string" ? msg.created_at : null;
+    }
+  }
+
   const digi = await sendDigisacMessage(cfg, { telefoneRaw: params.telefoneRaw, text: params.text });
-  const mask = maskPhoneForLog(normalizePhoneDigits(params.telefoneRaw));
+
+  if (conversaId && msgRowId) {
+    if (digi.ok) {
+      const statusGravado = digi.provider_used === "digisac_stub" ? "mock_enviado" : "enviada";
+      await admin
+        .from("comunicacao_mensagens")
+        .update({
+          status_envio: statusGravado,
+          provider_message_id: digi.provider_message_id ?? null,
+          metadata: {
+            provider: digi.provider_used,
+            canal_operacional: "digisac",
+            proposito: params.proposito,
+          },
+        })
+        .eq("id", msgRowId);
+      await admin
+        .from("comunicacao_conversas")
+        .update({
+          ultima_mensagem_em: msgCreatedAt ?? new Date().toISOString(),
+          ultima_mensagem_preview: previewText,
+        })
+        .eq("id", conversaId);
+    } else {
+      await admin
+        .from("comunicacao_mensagens")
+        .update({
+          status_envio: "falha",
+          metadata: {
+            error: digi.error ?? "Falha DigiSac.",
+            provider: digi.provider_used,
+            proposito: params.proposito,
+          },
+        })
+        .eq("id", msgRowId);
+    }
+  } else if (digi.ok && typeof console !== "undefined") {
+    console.warn(
+      "[comunicacao-operacional] transacional: DigiSac OK mas inbox incompleto (conversa=" +
+        Boolean(conversaId) +
+        " mensagem=" +
+        Boolean(msgRowId) +
+        ")",
+    );
+  }
+
   const statusRegistro = digi.ok
     ? (digi.provider_used === "digisac_stub" ? "simulado" as const : "enviada" as const)
     : "falha" as const;
 
   await registrarOperacionalComunicacaoEnvio(admin, {
     reserva_id: params.reservaId,
-    conversa_id: null,
+    conversa_id: conversaId,
     hospede_id: params.hospedeId,
     proposito: params.proposito,
     canal: "whatsapp",
@@ -171,7 +313,11 @@ export async function outboundWhatsappTransacional(
     status: statusRegistro,
     provider: digi.provider_used === "digisac_stub" ? "digisac_stub" : "digisac",
     provider_message_id: digi.provider_message_id ?? null,
-    metadata: { fluxo: "transacional_sem_conversa" },
+    metadata: {
+      fluxo: "transacional",
+      message_row_id: msgRowId,
+      inbox_ok: Boolean(conversaId && msgRowId),
+    },
     erro: digi.ok ? null : digi.error ?? null,
   });
 
