@@ -124,6 +124,23 @@
     return normalizedAccessToken;
   }
 
+  /**
+   * Headers para fetch direto a /functions/v1/* (igual invokeLifecycleAction):
+   * exige apikey (anon) + Bearer com JWT atualizado via refreshSession.
+   * Sem apikey, o gateway Supabase costuma responder 401 Invalid JWT.
+   */
+  async function getEdgeFunctionFetchHeaders() {
+    if (!client) {
+      throw new Error(getConfigError());
+    }
+    const bearerToken = await getFunctionBearerToken(true);
+    return {
+      "Content-Type": "application/json",
+      apikey: config.anonKey,
+      Authorization: `Bearer ${bearerToken}`,
+    };
+  }
+
   async function invokeAdminAction(action, payload = {}, options = {}) {
     if (!client || !ADMIN_FUNCTION_URL) {
       throw new Error(getConfigError());
@@ -485,6 +502,7 @@
     createUser,
     updateUser,
     getSupabaseClient,
+    getEdgeFunctionFetchHeaders,
     invokeLifecycleAction,
     invokeOperacionalComunicacaoDispatch,
   };

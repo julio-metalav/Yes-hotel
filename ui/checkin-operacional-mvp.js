@@ -795,13 +795,21 @@ async function backendConfirmarFnrh(reservaId, guestIndex) {
 
 async function backendEnviarLinks(reservaId) {
   const supabase = getSupabase();
-  if (!supabase) return false;
-  const session = await supabase.auth.getSession().then((r) => r.data?.session);
+  if (!supabase || !auth?.getEdgeFunctionFetchHeaders) return false;
+  let headers;
+  try {
+    headers = await auth.getEdgeFunctionFetchHeaders();
+  } catch (e) {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("[backendEnviarLinks] auth headers", e);
+    }
+    return false;
+  }
   const functionsUrl = (typeof supabase.supabaseUrl === "string" ? supabase.supabaseUrl : "")?.replace(/\/$/, "") + "/functions/v1";
   const baseUrl = (typeof window !== "undefined" && window.location?.origin) ? window.location.origin : "";
   const res = await fetch(functionsUrl + "/send-fnrh-links", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + (session?.access_token || "") },
+    headers,
     body: JSON.stringify({ reserva_id: reservaId, tipo_evento: "manual", base_url: baseUrl }),
   });
   const data = await res.json().catch(() => ({}));
@@ -2292,11 +2300,21 @@ function bindDetailListeners(reserva) {
 async function backendEnviarSenha(reservaId, email, whatsapp) {
   const supabase = getSupabase();
   if (!supabase) return { ok: false, error: "Não autenticado." };
-  const session = await supabase.auth.getSession().then((r) => r.data?.session);
+  if (!auth?.getEdgeFunctionFetchHeaders) {
+    return { ok: false, error: "Atualize yes-supabase-auth.js (getEdgeFunctionFetchHeaders)." };
+  }
+  let headers;
+  try {
+    headers = await auth.getEdgeFunctionFetchHeaders();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  const { data: sessionData } = await supabase.auth.getSession();
+  const session = sessionData?.session;
   const functionsUrl = (typeof supabase.supabaseUrl === "string" ? supabase.supabaseUrl : "")?.replace(/\/$/, "") + "/functions/v1";
   const res = await fetch(functionsUrl + "/send-senha", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + (session?.access_token || "") },
+    headers,
     body: JSON.stringify({
       reserva_id: reservaId,
       manual: true,
