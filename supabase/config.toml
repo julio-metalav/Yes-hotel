@@ -19,3 +19,6 @@ verify_jwt = false
 
 [functions.send-whatsapp-message]
 verify_jwt = false
+
+[functions.operacional-comunicacao-dispatch]
+verify_jwt = false

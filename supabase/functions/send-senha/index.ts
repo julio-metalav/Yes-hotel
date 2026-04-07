@@ -1,10 +1,12 @@
 /**
  * Envio de senha TTLock + links FNRH (manual ou automático).
+ * E-mail via Resend; WhatsApp via camada DigiSac (stub/real).
  * POST: { reserva_id, manual?: boolean, usuario_id?: string, email?: string, whatsapp?: string }.
  * Se manual e email/whatsapp informados, salva nos contatos do hóspede principal.
- * Mensagem: "Olá, sua reserva está pronta. 🔐 Senha de acesso: {senha}. Para agilizar seu check-in, preencha seus dados: {links}"
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { outboundWhatsappTransacional } from "../_shared/comunicacao-operacional/outbound-whatsapp.ts";
+import { maskEmailForLog, previewCorpo, registrarOperacionalComunicacaoEnvio } from "../_shared/comunicacao-operacional/registro-envio.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -171,7 +173,23 @@ Deno.serve(async (req: Request) => {
 
   const now = new Date().toISOString();
   let enviado = false;
+  let enviadoEmail = false;
+  let enviadoWhatsapp = false;
   let erroEmail: string | null = null;
+  let erroWhatsapp: string | null = null;
+  let hospedeIdEnvio =
+    principal && typeof (principal as { id?: string }).id === "string"
+      ? (principal as { id: string }).id
+      : "";
+  if (!hospedeIdEnvio) {
+    const { data: umHospede } = await admin
+      .from("operacional_hospedes")
+      .select("id")
+      .eq("reserva_id", reservaId)
+      .limit(1)
+      .maybeSingle();
+    if (umHospede?.id) hospedeIdEnvio = String(umHospede.id);
+  }
 
   if (emailTo) {
     const result = await sendEmail(
@@ -179,24 +197,55 @@ Deno.serve(async (req: Request) => {
       "Sua senha de acesso — " + (r.apartamento || "reserva"),
       html,
     );
-    if (result.ok) enviado = true;
-    else erroEmail = result.error ?? "Falha ao enviar e-mail.";
+    if (result.ok) {
+      enviado = true;
+      enviadoEmail = true;
+      await registrarOperacionalComunicacaoEnvio(admin, {
+        reserva_id: reservaId,
+        conversa_id: null,
+        hospede_id: hospedeIdEnvio || null,
+        proposito: "senha_acesso",
+        canal: "email",
+        destinatario_mascara: maskEmailForLog(emailTo),
+        corpo_preview: previewCorpo(msg),
+        status: "enviada",
+        provider: "resend",
+        provider_message_id: null,
+        metadata: { manual: isManual },
+        erro: null,
+      });
+    } else erroEmail = result.error ?? "Falha ao enviar e-mail.";
   }
 
-  if (whatsappTo && !enviado) {
-    console.warn(
-      "[send-senha] WhatsApp automático inativo (DigiSac/manual); número informado mas sem envio pelo Yes:",
-      whatsappTo,
-    );
+  if (!enviado && whatsappTo) {
+    if (!hospedeIdEnvio) {
+      erroWhatsapp = "Inclua ao menos um hóspede na reserva para registrar envio por WhatsApp.";
+    } else {
+      const wResult = await outboundWhatsappTransacional(admin, {
+        reservaId,
+        hospedeId: hospedeIdEnvio,
+        telefoneRaw: whatsappTo,
+        text: msg,
+        proposito: "senha_acesso",
+      });
+      if (wResult.ok) {
+        enviado = true;
+        enviadoWhatsapp = true;
+      } else {
+        erroWhatsapp = wResult.error ?? "Falha ao enviar WhatsApp (DigiSac).";
+      }
+    }
   }
 
   if (!enviado) {
     let mensagemErro: string;
-    if (emailTo) {
+    if (emailTo && whatsappTo) {
+      mensagemErro = [erroEmail, erroWhatsapp].filter(Boolean).join(" · ") || "Nenhum canal conseguiu entregar.";
+    } else if (emailTo) {
       mensagemErro = erroEmail ?? "E-mail não enviado.";
     } else if (whatsappTo) {
-      mensagemErro =
-        "Sem e-mail para envio automático. WhatsApp pelo Yes não está ativo (use e-mail com RESEND_API_KEY ou envie manualmente pela DigiSac).";
+      mensagemErro = erroWhatsapp ??
+        "WhatsApp não enviado (verifique DigiSac ou use e-mail com RESEND_API_KEY).";
     } else {
       mensagemErro = "Nenhum envio realizado.";
     }
@@ -227,19 +276,24 @@ Deno.serve(async (req: Request) => {
     titulo: isManual ? "Envio manual de senha" : "Envio automático de senha",
     detalhe: JSON.stringify({
       usuario_id: usuarioId || null,
-      canais: { email: true, whatsapp: false },
+      canais: { email: enviadoEmail, whatsapp: enviadoWhatsapp },
+      canal_operacional_whatsapp: enviadoWhatsapp ? "digisac" : null,
       qtd_fnrh_links: links.length,
       timestamp: now,
     }),
   });
 
+  const msgOk = enviadoWhatsapp
+    ? "Senha e links enviados por WhatsApp (DigiSac)."
+    : "Senha e links enviados por e-mail.";
+
   return jsonResponse(
     {
       ok: true,
-      message: "Senha e links enviados por e-mail.",
+      message: msgOk,
       reserva_id: reservaId,
-      enviado_email: true,
-      enviado_whatsapp: false,
+      enviado_email: enviadoEmail,
+      enviado_whatsapp: enviadoWhatsapp,
     },
     200,
   );

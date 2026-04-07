@@ -1,9 +1,10 @@
 /**
- * Compatibilidade: URL legada do painel. Encaminha para a camada DigiSac compartilhada
- * (operacional-comunicacao-dispatch). Meta Cloud API / mock antigo removidos.
+ * Camada única de envio WhatsApp operacional (DigiSac stub/real).
+ * POST JSON: { conversa_id, text, proposito?: "chat_operador" | "generico" }
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { outboundWhatsappParaConversa } from "../_shared/comunicacao-operacional/outbound-whatsapp.ts";
+import type { ComunicacaoProposito } from "../_shared/comunicacao-operacional/types.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,7 +24,7 @@ const admin = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-const whatsappInternalTestToken = Deno.env.get("WHATSAPP_INTERNAL_TEST_TOKEN")?.trim() ?? "";
+const internalTestToken = Deno.env.get("WHATSAPP_INTERNAL_TEST_TOKEN")?.trim() ?? "";
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -48,52 +49,59 @@ async function ensureAuth(request: Request): Promise<{ user: { id: string } } | 
 }
 
 function hasInternalTestAccess(request: Request): boolean {
-  if (!whatsappInternalTestToken) return false;
+  if (!internalTestToken) return false;
   const token = request.headers.get("x-whatsapp-internal-test-token")?.trim() ?? "";
-  return token.length > 0 && token === whatsappInternalTestToken;
+  return token.length > 0 && token === internalTestToken;
 }
 
-interface SendBody {
+interface Body {
   conversa_id?: string;
   text?: string;
+  proposito?: string;
+}
+
+function parseProposito(raw: string | undefined): ComunicacaoProposito {
+  const p = (raw ?? "").trim();
+  if (p === "generico") return "generico";
+  return "chat_operador";
 }
 
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
-
   if (request.method !== "POST") {
-    return jsonResponse({ ok: false, error: "Metodo permitido: POST." }, 405);
+    return jsonResponse({ ok: false, error: "Método permitido: POST." }, 405);
   }
 
   const internalTest = hasInternalTestAccess(request);
   const auth = internalTest ? { user: { id: "internal-test" } } : await ensureAuth(request);
   if (!auth) {
-    return jsonResponse({ ok: false, error: "Nao autorizado. Envie Authorization: Bearer <jwt>." }, 401);
+    return jsonResponse({ ok: false, error: "Não autorizado. Envie Authorization: Bearer <jwt>." }, 401);
   }
 
-  let body: SendBody;
+  let body: Body;
   try {
-    body = (await request.json()) as SendBody;
+    body = (await request.json()) as Body;
   } catch {
-    return jsonResponse({ ok: false, error: "Body JSON invalido." }, 400);
+    return jsonResponse({ ok: false, error: "Body JSON inválido." }, 400);
   }
 
   const conversaId = typeof body.conversa_id === "string" ? body.conversa_id.trim() : "";
   const text = typeof body.text === "string" ? body.text.trim() : "";
+  const proposito = parseProposito(body.proposito);
 
   if (!conversaId) {
-    return jsonResponse({ ok: false, error: "conversa_id obrigatorio." }, 400);
+    return jsonResponse({ ok: false, error: "conversa_id obrigatório." }, 400);
   }
-  if (text === "") {
-    return jsonResponse({ ok: false, error: "text obrigatorio." }, 400);
+  if (!text) {
+    return jsonResponse({ ok: false, error: "text obrigatório." }, 400);
   }
 
   const result = await outboundWhatsappParaConversa(admin, {
     conversaId,
     text,
-    proposito: "chat_operador",
+    proposito,
   });
 
   if (result.ok) {

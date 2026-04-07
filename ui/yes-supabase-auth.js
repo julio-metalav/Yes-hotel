@@ -22,6 +22,10 @@
   const LIFECYCLE_FUNCTION_URL = config.url
     ? `${config.url}/functions/v1/${LIFECYCLE_FUNCTION_NAME}`
     : "";
+  const COMUNICACAO_DISPATCH_FUNCTION_NAME = "operacional-comunicacao-dispatch";
+  const COMUNICACAO_DISPATCH_FUNCTION_URL = config.url
+    ? `${config.url}/functions/v1/${COMUNICACAO_DISPATCH_FUNCTION_NAME}`
+    : "";
 
   function getConfigError() {
     if (!globalScope.supabase?.createClient) {
@@ -187,6 +191,36 @@
       throw new Error(data.error);
     }
 
+    return data;
+  }
+
+  /**
+   * Envio WhatsApp operacional (DigiSac stub/real) — central de comunicação.
+   * Body: { conversa_id, text, proposito?: "chat_operador" | "generico" }
+   */
+  async function invokeOperacionalComunicacaoDispatch(payload) {
+    if (!client || !COMUNICACAO_DISPATCH_FUNCTION_URL) {
+      throw new Error(getConfigError());
+    }
+    const bearerToken = await getFunctionBearerToken(true);
+    const response = await fetch(COMUNICACAO_DISPATCH_FUNCTION_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: config.anonKey,
+        Authorization: `Bearer ${bearerToken}`,
+      },
+      body: JSON.stringify(payload || {}),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      const errorMessage =
+        data?.error || data?.message || `Comunicação retornou status ${response.status}.`;
+      throw new Error(errorMessage);
+    }
+    if (data && data.ok === false) {
+      throw new Error(data.error || "Falha no envio da mensagem.");
+    }
     return data;
   }
 
@@ -452,5 +486,6 @@
     updateUser,
     getSupabaseClient,
     invokeLifecycleAction,
+    invokeOperacionalComunicacaoDispatch,
   };
 })(window);

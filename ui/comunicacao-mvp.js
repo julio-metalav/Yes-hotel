@@ -300,13 +300,6 @@ async function handleQuickAction(action, conv) {
   }
 }
 
-function getSendMessageFunctionUrl() {
-  const config = window.YES_HOTEL_SUPABASE_CONFIG;
-  const base = config && typeof config.url === "string" ? config.url.trim() : "";
-  if (!base) return "";
-  return base.replace(/\/$/, "") + "/functions/v1/send-whatsapp-message";
-}
-
 async function sendMessage() {
   const text = (chatInputEl?.value || "").trim();
   if (!text || !selectedConversaId) return;
@@ -315,46 +308,21 @@ async function sendMessage() {
   const supabase = getSupabase();
   if (!supabase) return;
 
-  // WhatsApp: usar Edge Function (real/mock). Fallback: se tiver telefone e não for canal "interno", também usar function (robusto contra canal ausente no payload).
+  // WhatsApp: camada operacional DigiSac (Edge operacional-comunicacao-dispatch).
   const useWhatsAppFunction = conv.canal === "whatsapp" || (conv.telefone && conv.canal !== "interno");
   if (useWhatsAppFunction) {
-    const url = getSendMessageFunctionUrl();
-    if (!url) {
-      if (window.alert) window.alert("Configuração do Supabase indisponível. Não foi possível enviar.");
-      return;
-    }
-    let token = null;
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      token = session?.access_token;
-    } catch (_) {}
-    if (!token) {
-      if (window.alert) window.alert("Sessão expirada. Faça login novamente.");
+    if (!auth || typeof auth.invokeOperacionalComunicacaoDispatch !== "function") {
+      if (window.alert) {
+        window.alert("Atualize o bundle de autenticação (yes-supabase-auth) ou faça login novamente.");
+      }
       return;
     }
     try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer " + token,
-        },
-        body: JSON.stringify({ conversa_id: selectedConversaId, text }),
+      await auth.invokeOperacionalComunicacaoDispatch({
+        conversa_id: selectedConversaId,
+        text,
+        proposito: "chat_operador",
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const msg = data.error || "Erro ao enviar (" + res.status + ").";
-        if (window.alert) window.alert(msg);
-        return;
-      }
-      if (data.ok === false) {
-        if (window.alert) window.alert(data.error || "Falha no envio.");
-        chatInputEl.value = "";
-        const msgs = await loadMensagens(selectedConversaId);
-        renderMessages(msgs);
-        renderConversasList();
-        return;
-      }
       chatInputEl.value = "";
       const msgs = await loadMensagens(selectedConversaId);
       renderMessages(msgs);
@@ -362,8 +330,13 @@ async function sendMessage() {
       renderConversasList();
       return;
     } catch (err) {
-      console.warn("[comunicacao] sendMessage fetch error", err);
-      if (window.alert) window.alert("Erro de rede ao enviar. Tente novamente.");
+      console.warn("[comunicacao] sendMessage dispatch error", err);
+      if (window.alert) window.alert(err instanceof Error ? err.message : "Falha ao enviar.");
+      try {
+        const msgs = await loadMensagens(selectedConversaId);
+        renderMessages(msgs);
+        renderConversasList();
+      } catch (_) {}
       return;
     }
   }
