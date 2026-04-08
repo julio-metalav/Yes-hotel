@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Yes Hotel - Painel de Check-in Operacional</title>
-    <link rel="stylesheet" href="./checkin-operacional-mvp.css" />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=10" />
   </head>
   <body>
     <main class="app-shell">
@@ -27,15 +27,21 @@
           </div>
         </div>
 
-        <div class="summary-cards" id="summary-cards"></div>
+        <div class="operacional-toolbar" id="operacional-toolbar">
+          <div class="summary-cards" id="summary-cards"></div>
+          <nav class="filter-bar filter-bar--tabs" id="filter-bar" aria-label="Filtros da lista"></nav>
+        </div>
 
-        <div class="filter-bar" id="filter-bar"></div>
+        <section class="operacional-excecoes hidden" id="operacional-excecoes" aria-label="Exceções operacionais"></section>
 
         <section class="lista-operacional" id="lista-operacional" aria-live="polite"></section>
 
         <aside class="reservation-detail-panel hidden" id="reservation-detail-panel" aria-label="Detalhe da reserva">
           <div class="reservation-detail-header">
-            <h2 class="reservation-detail-title" id="reservation-detail-title">Reserva</h2>
+            <div class="reservation-detail-header-text">
+              <h2 class="reservation-detail-title" id="reservation-detail-title">Reserva</h2>
+              <p class="reservation-detail-subtitle muted" id="reservation-detail-subtitle"></p>
+            </div>
             <button type="button" class="reservation-detail-close" id="reservation-detail-close" aria-label="Fechar">Fechar</button>
           </div>
           <div class="reservation-detail-body" id="reservation-detail-body"></div>
@@ -44,8 +50,8 @@
 
         <div class="modal-overlay hidden" id="modal-enviar-senha-overlay" aria-hidden="true">
           <div class="modal-enviar-senha" role="dialog" aria-labelledby="modal-enviar-senha-title">
-            <h3 id="modal-enviar-senha-title">Enviar senha de acesso</h3>
-            <p class="modal-enviar-senha-desc">Informe pelo menos um contato (e-mail ou WhatsApp) para envio da senha e dos links da FNRH.</p>
+            <h3 id="modal-enviar-senha-title">Gerar e enviar senha</h3>
+            <p class="modal-enviar-senha-desc">Exceção operacional: ignora a régua automática de FNRH/24h. Se já existir senha ativa na reserva, apenas reenvia; caso contrário, gera via provisionamento e envia. Informe pelo menos um contato (e-mail ou WhatsApp).</p>
             <form id="modal-enviar-senha-form">
               <label for="modal-enviar-senha-email">E-mail</label>
               <input type="email" id="modal-enviar-senha-email" name="email" placeholder="exemplo@email.com" />
@@ -53,7 +59,7 @@
               <input type="tel" id="modal-enviar-senha-whatsapp" name="whatsapp" placeholder="(00) 00000-0000" />
               <div class="modal-enviar-senha-actions">
                 <button type="button" class="secondary-button" id="modal-enviar-senha-cancel">Cancelar</button>
-                <button type="submit" class="primary-button" id="modal-enviar-senha-submit">Enviar senha</button>
+                <button type="submit" class="primary-button" id="modal-enviar-senha-submit">Gerar e enviar</button>
               </div>
             </form>
             <p class="modal-enviar-senha-msg hidden" id="modal-enviar-senha-msg"></p>
@@ -65,6 +71,6 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
-    <script defer src="./checkin-operacional-mvp.js?v=5"></script>
+    <script defer src="./checkin-operacional-mvp.js?v=9"></script>
   </body>
 </html>
