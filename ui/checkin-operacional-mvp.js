@@ -21,10 +21,12 @@ const sessionUserElement = document.querySelector("#session-user");
 const logoutButtonElement = document.querySelector("#logout-button");
 const summaryCardsElement = document.querySelector("#summary-cards");
 const filterBarElement = document.querySelector("#filter-bar");
+const excecoesStripElement = document.querySelector("#operacional-excecoes");
 const listaElement = document.querySelector("#lista-operacional");
 const detailPanelElement = document.querySelector("#reservation-detail-panel");
 const detailBackdropElement = document.querySelector("#reservation-detail-backdrop");
 const detailTitleElement = document.querySelector("#reservation-detail-title");
+const detailSubtitleElement = document.querySelector("#reservation-detail-subtitle");
 const detailBodyElement = document.querySelector("#reservation-detail-body");
 const detailCloseButtonElement = document.querySelector("#reservation-detail-close");
 
@@ -46,11 +48,13 @@ function formatHistoricoTimestamp(date) {
 function addHistoricoEvento(reserva, tipo, titulo, detalhe) {
   if (!reserva) return;
   if (!reserva.historicoOperacional) reserva.historicoOperacional = [];
+  const now = new Date();
   reserva.historicoOperacional.push({
     tipo,
     titulo,
     detalhe: detalhe || null,
-    em: formatHistoricoTimestamp(new Date()),
+    em: formatHistoricoTimestamp(now),
+    criadoEmIso: now.toISOString(),
   });
 }
 
@@ -301,6 +305,13 @@ function ensureReservaDefaults(payload) {
   const veiculoPlaca = sanitizeString(payload.veiculoPlaca ?? payload.vehicle_plate ?? "") || "";
   const veiculoCor = sanitizeString(payload.veiculoCor ?? payload.vehicle_color ?? "") || "";
   const historicoOperacional = Array.isArray(payload.historicoOperacional) ? payload.historicoOperacional : [];
+  const fnrhStatusAgregado =
+    sanitizeString(payload.fnrhStatusAgregado ?? payload.fnrh_status_agregado ?? "fnrh_pendente") || "fnrh_pendente";
+  const fnrhCompletoEm = payload.fnrhCompletoEm ?? payload.fnrh_completo_em ?? null;
+  const senhaEnviadaEm = payload.senhaEnviadaEm ?? payload.senha_enviada_em ?? null;
+  const comunicacaoEnviosOperacional = Array.isArray(payload.comunicacaoEnviosOperacional)
+    ? payload.comunicacaoEnviosOperacional
+    : [];
   return {
     id,
     apartamento,
@@ -314,6 +325,10 @@ function ensureReservaDefaults(payload) {
     veiculoCor,
     hospedes: [],
     historicoOperacional,
+    fnrhStatusAgregado,
+    fnrhCompletoEm,
+    senhaEnviadaEm,
+    comunicacaoEnviosOperacional,
   };
 }
 
@@ -512,12 +527,14 @@ function formatDateForDb(dateStr) {
 
 function mapDbEventoToHistorico(row) {
   if (!row) return null;
-  const d = row.criado_em ? new Date(row.criado_em) : null;
+  const iso = row.criado_em || null;
+  const d = iso ? new Date(iso) : null;
   return {
     tipo: row.tipo || "",
     titulo: row.titulo || "",
     detalhe: row.detalhe || null,
     em: d && !isNaN(d.getTime()) ? formatHistoricoTimestamp(d) : "",
+    criadoEmIso: iso,
   };
 }
 
@@ -543,7 +560,21 @@ function mapDbHospedeToInternal(row, fnrhRow) {
   return base;
 }
 
-function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows) {
+function mapDbComunicacaoEnviosToInternal(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.map(function (row) {
+    return {
+      proposito: row.proposito || "",
+      canal: row.canal || "",
+      status: row.status || "",
+      corpoPreview: row.corpo_preview || null,
+      erro: row.erro || null,
+      createdAt: row.created_at || null,
+    };
+  });
+}
+
+function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows, enviosRows) {
   const checkIn = r.check_in_previsto;
   const checkOut = r.check_out_previsto;
   const fnrhMap = (fnrhRows || []).reduce(function (acc, f) {
@@ -566,8 +597,11 @@ function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows) {
     veiculoPlaca: (r.veiculo_placa || "").trim(),
     veiculoCor: (r.veiculo_cor || "").trim(),
     fnrhStatusAgregado: r.fnrh_status_agregado || "fnrh_pendente",
+    fnrhCompletoEm: r.fnrh_completo_em || null,
+    senhaEnviadaEm: r.senha_enviada_em || null,
     hospedes,
     historicoOperacional: historico,
+    comunicacaoEnviosOperacional: mapDbComunicacaoEnviosToInternal(enviosRows || []),
   };
 }
 
@@ -685,7 +719,13 @@ async function loadReservasFromBackend() {
       .from("fnrh_hospedes")
       .select("id, hospede_id, status, link_token")
       .eq("reserva_id", r.id);
-    const internal = mapDbReservaToInternal(r, hospedesRows || [], eventosRows || [], fnrhRows || []);
+    const { data: enviosRows } = await supabase
+      .from("operacional_comunicacao_envios")
+      .select("proposito, canal, status, corpo_preview, erro, created_at")
+      .eq("reserva_id", r.id)
+      .order("created_at", { ascending: false })
+      .limit(80);
+    const internal = mapDbReservaToInternal(r, hospedesRows || [], eventosRows || [], fnrhRows || [], enviosRows || []);
     const ridKey = String(r.id);
     internal.ttlockBloqueiaLiberado = ttlockCritico.has(ridKey);
     internal.ttlockPrincipalTodosProvisionados = principalTtlockOk.has(ridKey);
@@ -1429,8 +1469,8 @@ function renderSummary(summary) {
       },
     )
     .join("");
-  const chegadasHtml = `<div class="summary-card is-neutral summary-card-aux" title="Chegadas previstas hoje"><span class="summary-card-value">${summary.chegadasHoje}</span><span class="summary-card-label">Chegadas hoje</span></div>`;
-  summaryCardsElement.innerHTML = `<div class="summary-cards-funnel">${funnelHtml}</div>${chegadasHtml}`;
+  const chegadasHtml = `<div class="summary-card is-neutral summary-card-aux" title="Chegadas previstas hoje"><span class="summary-card-value">${summary.chegadasHoje}</span><span class="summary-card-label">Hoje</span></div>`;
+  summaryCardsElement.innerHTML = `<div class="summary-cards-funnel">${funnelHtml}${chegadasHtml}</div>`;
 
   summaryCardsElement.querySelectorAll(".summary-card-funnel").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1571,10 +1611,20 @@ async function acaoConfirmarCheckin(id) {
 
 function primaryActionFor(reserva) {
   if (isProntaParaLiberarAcesso(reserva)) {
-    return { label: "Liberar acesso", action: "liberar_acesso", id: reserva.id };
+    return {
+      label: "Liberar acesso",
+      action: "liberar_acesso",
+      id: reserva.id,
+      title: "Liberar acesso (TTLock)",
+    };
   }
   if (acessoLiberadoEfetivo(reserva) && !reserva.entrouNoApto) {
-    return { label: "Marcar entrada no apartamento", action: "confirmar_checkin", id: reserva.id };
+    return {
+      label: "Marcar entrada",
+      action: "confirmar_checkin",
+      id: reserva.id,
+      title: "Marcar entrada no apartamento",
+    };
   }
   return null;
 }
@@ -1589,7 +1639,6 @@ function renderList() {
       const status = derivarStatusOperacional(reserva);
       const primary = primaryActionFor(reserva);
       const prioridade = getPrioridadeReserva(reserva);
-      const prioridadeLabel = getPrioridadeLabel(prioridade);
       const period = `${reserva.checkInPrevisto} a ${reserva.checkOutPrevisto}`;
       const fnrhStatus = getFnrhStatus(reserva);
       const hospedesTotal = getHospedesTotal(reserva);
@@ -1598,48 +1647,40 @@ function renderList() {
           ? `${(reserva.veiculoPlaca || "").trim()}${reserva.veiculoCor ? " • " + (reserva.veiculoCor || "").trim() : ""}`
           : "";
 
-      const badgeClasses = [
-        reserva.pagamento === "pago" ? "badge badge-pago" : "badge badge-pendente",
-        "badge fnrh-badge " + fnrhStatus.class,
-        acessoLiberadoEfetivo(reserva) ? "badge badge-liberado" : "badge badge-nao-liberado",
-        reserva.entrouNoApto ? "badge badge-entrou" : "badge badge-nao-entrou",
-      ];
-      const badgeLabels = [
-        reserva.pagamento === "pago" ? "Pago" : "Pendente",
-        fnrhStatus.label,
-        acessoLiberadoEfetivo(reserva) ? "Liberado" : "Nao liberado",
-        reserva.entrouNoApto ? "Entrou" : "Nao entrou",
-      ];
-
       let actionsHtml = "";
       if (primary) {
-        actionsHtml = `<button type="button" class="primary-button" data-action="${primary.action}" data-id="${primary.id}">${primary.label}</button>`;
+        const titleAttr =
+          primary.title && typeof primary.title === "string"
+            ? ` title="${escapeHtml(primary.title)}"`
+            : "";
+        actionsHtml = `<button type="button" class="primary-button operational-card-action-btn" data-action="${primary.action}" data-id="${primary.id}"${titleAttr}>${escapeHtml(primary.label)}</button>`;
       } else {
-        actionsHtml = '<span class="muted" style="font-size:13px;color:var(--muted)">Check-in concluído</span>';
+        actionsHtml = '<span class="operational-card-done">Concluído</span>';
       }
 
-      const badgesHtml = badgeClasses
-        .map((cls, i) => `<span class="${cls}">${badgeLabels[i]}</span>`)
-        .join("");
-
-      const metaParts = [`Hóspedes: ${hospedesTotal}`, fnrhStatus.label];
-      if (veiculoLine) metaParts.push(`Veículo: ${veiculoLine}`);
-      const metaHtml = `<div class="operational-card-meta">${metaParts.map((t) => `<span class="operational-card-meta-item">${t}</span>`).join("")}</div>`;
-
-      const priorityBadgeHtml = `<span class="priority-badge priority-${prioridade}">${prioridadeLabel}</span>`;
+      const metaParts = [];
+      metaParts.push(reserva.pagamento === "pago" ? "Pagamento ok" : "Pagamento pendente");
+      metaParts.push(fnrhStatus.label);
+      metaParts.push(`${hospedesTotal} hósp.`);
+      metaParts.push(acessoLiberadoEfetivo(reserva) ? "Acesso ok" : "Sem acesso");
+      metaParts.push(reserva.entrouNoApto ? "Entrou" : "Não entrou");
+      if (prioridade === PRIORIDADE_ALTA) metaParts.push("Prioridade alta");
+      if (veiculoLine) metaParts.push(veiculoLine);
+      const metaLinha = metaParts.map((t) => escapeHtml(t)).join(" · ");
 
       return `
         <article class="operational-card" data-id="${reserva.id}">
-          <div class="operational-card-header">
-            <span class="operational-card-apt">Apto ${reserva.apartamento}</span>
-            <span class="operational-card-status status-${status.type}">${status.label}</span>
-            ${priorityBadgeHtml}
+          <div class="operational-card-inner">
+            <div class="operational-card-primary">
+              <span class="operational-card-apt-num" aria-hidden="true">${escapeHtml(String(reserva.apartamento || "—"))}</span>
+              <div class="operational-card-copy">
+                <span class="operational-card-guest">${escapeHtml(reserva.hospedePrincipal || "—")}</span>
+                <span class="operational-card-meta">${escapeHtml(period)} · ${metaLinha}</span>
+              </div>
+            </div>
+            <span class="operational-card-status status-${status.type}">${escapeHtml(status.label)}</span>
+            <div class="operational-card-cta">${actionsHtml}</div>
           </div>
-          <div class="operational-card-guest">${reserva.hospedePrincipal}</div>
-          <div class="operational-card-period">${period}</div>
-          <div class="operational-card-badges">${badgesHtml}</div>
-          ${metaHtml}
-          <div class="operational-card-actions">${actionsHtml}</div>
         </article>
       `;
     })
@@ -1668,6 +1709,7 @@ function renderList() {
 function refresh() {
   const summary = calcularResumo(reservas);
   renderSummary(summary);
+  renderExcecoesOperacionais();
   renderList();
   if (detailReservaId) {
     const r = getReservaById(detailReservaId);
@@ -1808,7 +1850,12 @@ function openDetail(reservaId) {
   detailReservaId = reservaId;
   if (detailPanelElement) detailPanelElement.classList.remove("hidden");
   if (detailBackdropElement) detailBackdropElement.classList.remove("hidden");
-  if (detailTitleElement) detailTitleElement.textContent = `Reserva Apto ${reserva.apartamento}`;
+  if (detailTitleElement) detailTitleElement.textContent = "Apto " + (reserva.apartamento || "—");
+  if (detailSubtitleElement) {
+    var subGuest = (reserva.hospedePrincipal || "").trim() || "—";
+    detailSubtitleElement.textContent =
+      subGuest + " · " + (reserva.checkInPrevisto || "—") + " → " + (reserva.checkOutPrevisto || "—");
+  }
   renderDetail(reserva);
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && document.getElementById("detail-ttlock-section")) {
     loadAndRenderTtlockSection(reservaId);
@@ -1907,6 +1954,834 @@ function formatResumoComunicacao(reserva) {
   return parts.length ? parts.join("; ") : "Nenhum envio.";
 }
 
+function formatIsoOperacional(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return formatHistoricoTimestamp(d);
+}
+
+function tryParseEventoDetalheJson(detalhe) {
+  if (detalhe == null) return null;
+  const t = String(detalhe).trim();
+  if (!t || t.charAt(0) !== "{") return null;
+  try {
+    return JSON.parse(t);
+  } catch {
+    return null;
+  }
+}
+
+var RESUMO_FNRH_REMINDER_TIPOS = { "d-1": true, "d0-07h": true, "d0-checkin": true };
+
+function labelTipoEventoFnrh(te) {
+  const t = String(te || "").trim();
+  if (t === "reserva_criada") return "envio inicial";
+  if (t === "d-1") return "lembrete (24h antes do check-in)";
+  if (t === "d0-07h") return "lembrete (07h no dia do check-in)";
+  if (t === "d0-checkin") return "lembrete (horário de check-in)";
+  if (t === "manual") return "envio manual (painel)";
+  return t || "outro";
+}
+
+function labelFnrhAgregadoPainel(agg) {
+  const a = String(agg || "").trim();
+  if (a === "fnrh_completo") return "Completa (todas as FNRH no fluxo digital)";
+  if (a === "fnrh_parcial") return "Parcial";
+  return "Pendente";
+}
+
+function labelPropositoComunicacao(p) {
+  if (p === "fnrh_links") return "links FNRH";
+  if (p === "senha_acesso") return "senha de acesso";
+  if (p === "chat_operador") return "chat operador";
+  if (p === "generico") return "genérico";
+  return p || "—";
+}
+
+function labelCanalComunicacaoPainel(c) {
+  if (c === "whatsapp") return "WhatsApp";
+  if (c === "email") return "E-mail";
+  return c || "—";
+}
+
+function labelStatusEnvioComunicacao(s) {
+  if (s === "enviada") return "sucesso";
+  if (s === "falha") return "falha";
+  if (s === "simulado") return "simulado";
+  return s || "—";
+}
+
+function coletaEventosOrdenadosPorTempo(historico, tiposSet) {
+  var list = (historico || []).filter(function (e) {
+    return e && e.criadoEmIso && tiposSet[e.tipo];
+  });
+  list.sort(function (a, b) {
+    return new Date(a.criadoEmIso).getTime() - new Date(b.criadoEmIso).getTime();
+  });
+  return list;
+}
+
+function agregarEnviosFnrhDoHistorico(historico) {
+  var evs = (historico || [])
+    .filter(function (e) {
+      return e && e.tipo === "envio_auto_fnrh" && e.criadoEmIso;
+    })
+    .map(function (e) {
+      return { at: e.criadoEmIso, p: tryParseEventoDetalheJson(e.detalhe) };
+    })
+    .sort(function (a, b) {
+      return new Date(a.at).getTime() - new Date(b.at).getTime();
+    });
+  function ok(p) {
+    return !!(p && (p.enviado_email || p.enviado_whatsapp));
+  }
+  var firstOk = null;
+  var lastOk = null;
+  var lastAny = evs.length ? evs[evs.length - 1] : null;
+  for (var i = 0; i < evs.length; i++) {
+    if (ok(evs[i].p)) {
+      if (!firstOk) firstOk = evs[i];
+      lastOk = evs[i];
+    }
+  }
+  var reminderOk = [];
+  for (var j = 0; j < evs.length; j++) {
+    var te = evs[j].p && evs[j].p.tipo_evento;
+    if (te && RESUMO_FNRH_REMINDER_TIPOS[te] && ok(evs[j].p)) reminderOk.push(evs[j]);
+  }
+  var lastReminder = reminderOk.length ? reminderOk[reminderOk.length - 1] : null;
+  return {
+    evs: evs,
+    firstOk: firstOk,
+    lastOk: lastOk,
+    lastAny: lastAny,
+    lastReminder: lastReminder,
+    reminderCount: reminderOk.length,
+  };
+}
+
+function coletaEventosSenhaOrdenados(historico) {
+  return (historico || [])
+    .filter(function (e) {
+      return (
+        e &&
+        e.criadoEmIso &&
+        (e.tipo === "envio_manual_senha" || e.tipo === "envio_auto_senha")
+      );
+    })
+    .sort(function (a, b) {
+      return new Date(b.criadoEmIso).getTime() - new Date(a.criadoEmIso).getTime();
+    });
+}
+
+/** Último sucesso e primeira falha mais recente na lista (ordenada do mais novo ao mais antigo). */
+function obterUltimosEventosSenha(reserva) {
+  var senhaSorted = coletaEventosSenhaOrdenados((reserva && reserva.historicoOperacional) || []);
+  var lastOkSenha = null;
+  var lastFailSenha = null;
+  for (var s = 0; s < senhaSorted.length; s++) {
+    var pS = tryParseEventoDetalheJson(senhaSorted[s].detalhe);
+    if (pS && pS.sucesso === true && !lastOkSenha) lastOkSenha = { e: senhaSorted[s], p: pS };
+    if (pS && pS.sucesso === false && !lastFailSenha) lastFailSenha = { e: senhaSorted[s], p: pS };
+  }
+  return { lastOkSenha: lastOkSenha, lastFailSenha: lastFailSenha };
+}
+
+function falhaSenhaMaisRecenteQueSucesso(lastOkSenha, lastFailSenha) {
+  if (!lastFailSenha) return false;
+  if (!lastOkSenha) return true;
+  return new Date(lastFailSenha.e.criadoEmIso).getTime() > new Date(lastOkSenha.e.criadoEmIso).getTime();
+}
+
+function obterUltimoEventoEnvioAutoFnrh(reserva) {
+  var hist = (reserva && reserva.historicoOperacional) || [];
+  var evs = hist.filter(function (e) {
+    return e && e.tipo === "envio_auto_fnrh" && e.criadoEmIso;
+  });
+  evs.sort(function (a, b) {
+    return new Date(b.criadoEmIso).getTime() - new Date(a.criadoEmIso).getTime();
+  });
+  return evs[0] || null;
+}
+
+/** Último envio_auto_fnrh sem sucesso nos canais, com erro ou tentativa a hóspedes com canal (dados do JSON do evento). */
+function ultimoEnvioFnrhTeveFalhaRegistrada(reserva) {
+  var ev = obterUltimoEventoEnvioAutoFnrh(reserva);
+  if (!ev) return false;
+  var p = tryParseEventoDetalheJson(ev.detalhe);
+  if (!p) return false;
+  if (p.enviado_email || p.enviado_whatsapp) return false;
+  var errosT = Number(p.erros_total);
+  if (Number.isFinite(errosT) && errosT > 0) return true;
+  var gc = Number(p.guests_com_canal);
+  return Number.isFinite(gc) && gc > 0;
+}
+
+var OPERACIONAL_EXCECOES_MAX_ITENS = 14;
+
+/**
+ * Uma exceção por reserva (a mais prioritária). null se nada aplicável.
+ */
+function derivarExcecaoOperacionalReserva(reserva) {
+  if (!reserva || isCheckinConcluido(reserva)) return null;
+
+  var isBack = PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND;
+  var ob = obterUltimosEventosSenha(reserva);
+  var lastOk = ob.lastOkSenha;
+  var lastFail = ob.lastFailSenha;
+  var failRecente = falhaSenhaMaisRecenteQueSucesso(lastOk, lastFail);
+
+  var naoIdent = getNaoIdentificados(reserva).length;
+  var faltam = getFaltamContato(reserva).length;
+  var prontos = getProntosParaEnvio(reserva).length;
+
+  if (lastFail && lastFail.p && lastFail.p.tipo_bloqueio === "credencial_revogada" && failRecente) {
+    return {
+      severidade: "critica",
+      prioridade: 1,
+      motivo: "Credencial revogada — envio de senha bloqueado",
+      ctaHint: "Revisar TTLock",
+      codigo: "credencial_revogada",
+    };
+  }
+
+  if (
+    isPagamentoOk(reserva) &&
+    naoIdent === 0 &&
+    prontos === 0 &&
+    faltam > 0 &&
+    !isFnrhCompleta(reserva)
+  ) {
+    return {
+      severidade: "critica",
+      prioridade: 2,
+      motivo: "Sem e-mail/WhatsApp para hóspedes que ainda precisam de FNRH",
+      ctaHint: "Corrigir contato",
+      codigo: "sem_contato_fnrh",
+    };
+  }
+
+  if (isPagamentoOk(reserva) && isChegadaHoje(reserva) && !isFnrhCompleta(reserva)) {
+    return {
+      severidade: "critica",
+      prioridade: 3,
+      motivo: "FNRH pendente com check-in hoje",
+      ctaHint: "Reenviar FNRH",
+      codigo: "checkin_hoje_fnrh",
+    };
+  }
+
+  if (lastFail && lastFail.p && lastFail.p.tipo_bloqueio === "provisionamento" && failRecente) {
+    return {
+      severidade: "critica",
+      prioridade: 4,
+      motivo: "Falha recente ao provisionar senha (TTLock)",
+      ctaHint: "Ver TTLock",
+      codigo: "provisionamento_senha",
+    };
+  }
+
+  if (
+    isBack &&
+    (reserva.fnrhStatusAgregado || "") === "fnrh_completo" &&
+    acessoLiberadoEfetivo(reserva) &&
+    !reserva.senhaEnviadaEm &&
+    !lastOk
+  ) {
+    return {
+      severidade: "critica",
+      prioridade: 5,
+      motivo: "FNRH válida no sistema, acesso liberado, senha não registrada como enviada",
+      ctaHint: "Gerar e enviar senha",
+      codigo: "senha_pendente",
+    };
+  }
+
+  if (isProntaParaLiberarAcesso(reserva)) {
+    return {
+      severidade: "moderada",
+      prioridade: 101,
+      motivo: "Pronta para liberar acesso (FNRH e pagamento ok)",
+      ctaHint: "Liberar acesso",
+      codigo: "liberar_pendente",
+    };
+  }
+
+  var fnrhA = agregarEnviosFnrhDoHistorico(reserva.historicoOperacional || []);
+  if (isPagamentoOk(reserva) && fnrhA.reminderCount > 0 && !isFnrhCompleta(reserva)) {
+    return {
+      severidade: "moderada",
+      prioridade: 102,
+      motivo: "Houve lembrete(s) de FNRH e ainda há pendência",
+      ctaHint: "Ver hóspedes",
+      codigo: "fnrh_lembrete",
+    };
+  }
+
+  if (isBack && (reserva.fnrhStatusAgregado || "") === "fnrh_completo" && !isFnrhCompleta(reserva)) {
+    return {
+      severidade: "moderada",
+      prioridade: 103,
+      motivo: "FNRH completa no cadastro digital e painel ainda não reflete tudo",
+      ctaHint: "Conferir hóspedes",
+      codigo: "inconsistencia_fnrh",
+    };
+  }
+
+  if (ultimoEnvioFnrhTeveFalhaRegistrada(reserva) && !isFnrhCompleta(reserva)) {
+    return {
+      severidade: "moderada",
+      prioridade: 104,
+      motivo: "Último disparo de links FNRH registrado sem sucesso",
+      ctaHint: "Reenviar FNRH",
+      codigo: "fnrh_envio_falhou",
+    };
+  }
+
+  if (
+    failRecente &&
+    lastFail &&
+    lastFail.p &&
+    (lastFail.p.tipo_bloqueio === "sem_contato" || lastFail.p.tipo_bloqueio === "falha_canais")
+  ) {
+    var mSenha = lastFail.p.motivo_bloqueio || "Falha no envio da senha";
+    return {
+      severidade: "moderada",
+      prioridade: 105,
+      motivo: mSenha.length > 90 ? mSenha.slice(0, 87) + "…" : mSenha,
+      ctaHint: "Corrigir contatos",
+      codigo: "senha_falha_envio",
+    };
+  }
+
+  return null;
+}
+
+function renderExcecoesOperacionais() {
+  if (!(excecoesStripElement instanceof HTMLElement)) return;
+  if (!Array.isArray(reservas)) {
+    excecoesStripElement.classList.add("hidden");
+    excecoesStripElement.innerHTML = "";
+    return;
+  }
+  var itens = [];
+  for (var i = 0; i < reservas.length; i++) {
+    var r = reservas[i];
+    var ex = derivarExcecaoOperacionalReserva(r);
+    if (ex) itens.push({ reserva: r, ex: ex });
+  }
+  itens.sort(function (a, b) {
+    var sa = a.ex.severidade === "critica" ? 0 : 1;
+    var sb = b.ex.severidade === "critica" ? 0 : 1;
+    if (sa !== sb) return sa - sb;
+    return a.ex.prioridade - b.ex.prioridade;
+  });
+  var total = itens.length;
+  if (total === 0) {
+    excecoesStripElement.classList.add("hidden");
+    excecoesStripElement.innerHTML = "";
+    return;
+  }
+  var slice = itens.slice(0, OPERACIONAL_EXCECOES_MAX_ITENS);
+  var omitidos = total - slice.length;
+  var crit = itens.filter(function (x) {
+    return x.ex.severidade === "critica";
+  }).length;
+  var mod = itens.filter(function (x) {
+    return x.ex.severidade === "moderada";
+  }).length;
+  var rows = slice
+    .map(function (row) {
+      var apt = (row.reserva.apartamento || "—").trim() || "—";
+      var sev = row.ex.severidade === "critica" ? "critica" : "moderada";
+      var rid = row.reserva.id;
+      return (
+        '<li class="operacional-excecao-item" tabindex="0" role="button" data-reserva-id="' +
+        escapeHtml(String(rid)) +
+        '">' +
+        '<span class="operacional-excecao-sev operacional-excecao-sev--' +
+        sev +
+        '" title="' +
+        (sev === "critica" ? "Crítica" : "Moderada") +
+        '"></span>' +
+        '<span class="operacional-excecao-body">' +
+        '<span class="operacional-excecao-apt">Apto ' +
+        escapeHtml(apt) +
+        "</span>" +
+        '<span class="operacional-excecao-motivo">' +
+        escapeHtml(row.ex.motivo) +
+        "</span>" +
+        (row.ex.ctaHint
+          ? '<span class="operacional-excecao-cta-hint">' + escapeHtml(row.ex.ctaHint) + "</span>"
+          : "") +
+        "</span></li>"
+      );
+    })
+    .join("");
+  var maisTxt =
+    omitidos > 0
+      ? '<p class="operacional-excecoes-mais">' + escapeHtml("E mais " + omitidos + " reserva(s) na lista abaixo.") + "</p>"
+      : "";
+  excecoesStripElement.classList.remove("hidden");
+  excecoesStripElement.innerHTML =
+    '<div class="operacional-excecoes-inner">' +
+    '<div class="operacional-excecoes-head">' +
+    '<span class="operacional-excecoes-title">Exceções operacionais</span>' +
+    '<span class="operacional-excecoes-counts">' +
+    escapeHtml(String(crit)) +
+    (crit === 1 ? " crítica" : " críticas") +
+    " · " +
+    escapeHtml(String(mod)) +
+    (mod === 1 ? " moderada" : " moderadas") +
+    "</span></div>" +
+    '<ul class="operacional-excecoes-list">' +
+    rows +
+    "</ul>" +
+    maisTxt +
+    "</div>";
+
+  excecoesStripElement.querySelectorAll(".operacional-excecao-item").forEach(function (el) {
+    function abrir() {
+      var id = el.getAttribute("data-reserva-id");
+      if (id) openDetail(id);
+    }
+    el.addEventListener("click", abrir);
+    el.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        abrir();
+      }
+    });
+  });
+}
+
+function legendaMotivoEnvioSenha(motivo) {
+  var m = String(motivo || "").trim();
+  if (m === "senha_reenviada_manual") return "Reenvio (manual)";
+  if (m === "senha_gerada_e_enviada_manual") return "Geração e envio (manual)";
+  if (m === "senha_enviada_apos_validacao_tardia") return "Automático (após validação tardia da FNRH)";
+  if (m === "senha_enviada_24h_antes") return "Automático (janela 24h antes do check-in)";
+  if (m === "senha_enviada_manual") return "Manual (legado)";
+  return m || "—";
+}
+
+/**
+ * Próxima ação recomendada no detalhe: baseada em pagamento, FNRH, contatos, eventos de senha e flags da reserva.
+ * ctx vem do render do detalhe (contagens e rótulos do botão de envio).
+ */
+function derivarRecomendacaoOperacional(reserva, ctx) {
+  var naoIdentCount = ctx.naoIdentCount;
+  var faltamCount = ctx.faltamCount;
+  var prontosCount = ctx.prontosCount;
+  var enviadosCount = ctx.enviadosCount;
+  var enviarButtonLabel = ctx.enviarButtonLabel;
+  var temBotaoEnviarLinks = ctx.temBotaoEnviarLinks;
+  var temBotaoSenhaBackend = ctx.temBotaoSenhaBackend;
+
+  var ob = obterUltimosEventosSenha(reserva);
+  var lastOk = ob.lastOkSenha;
+  var lastFail = ob.lastFailSenha;
+  var failRecente = falhaSenhaMaisRecenteQueSucesso(lastOk, lastFail);
+
+  if (isCheckinConcluido(reserva)) {
+    return { variant: "success", texto: "Check-in concluído nesta reserva.", cta: null };
+  }
+
+  if (lastFail && lastFail.p && lastFail.p.tipo_bloqueio === "credencial_revogada" && failRecente) {
+    return {
+      variant: "danger",
+      texto: lastFail.p.motivo_bloqueio || "Envio bloqueado: credencial revogada.",
+      cta: null,
+    };
+  }
+
+  if (!isPagamentoOk(reserva)) {
+    return {
+      variant: "warn",
+      texto: "Pagamento ainda não está confirmado. Regularize antes de liberar acesso ou seguir com a senha.",
+      cta: { kind: "simular_pagamento", label: "Simular pagamento aprovado" },
+    };
+  }
+
+  if (naoIdentCount > 0) {
+    return {
+      variant: "warn",
+      texto: "Complete a identificação dos hóspedes (nome adequado) antes de enviar links.",
+      cta: { kind: "ir_hospedes", label: "Ir para hóspedes" },
+    };
+  }
+
+  if (faltamCount > 0 && prontosCount === 0) {
+    return {
+      variant: "warn",
+      texto: "Não há telefone nem e-mail válidos para comunicação com hóspede(s) que ainda precisam de FNRH.",
+      cta: { kind: "ir_hospedes", label: "Corrigir contatos" },
+    };
+  }
+
+  if (prontosCount > 0 && temBotaoEnviarLinks) {
+    return {
+      variant: "neutral",
+      texto:
+        faltamCount > 0
+          ? "Há hóspedes prontos para receber o link; ainda falta contato em " +
+            faltamCount +
+            ". Envie para os que já têm e-mail ou WhatsApp."
+          : "Envie os links ou confirmações de FNRH para os hóspedes prontos.",
+      cta: { kind: "enviar_fnrh", label: enviarButtonLabel },
+    };
+  }
+
+  if (prontosCount > 0 && !temBotaoEnviarLinks) {
+    return {
+      variant: "neutral",
+      texto: "Há hóspedes elegíveis para envio; use a seção de ações abaixo.",
+      cta: { kind: "ir_hospedes", label: "Ver hóspedes" },
+    };
+  }
+
+  if (enviadosCount > 0 && !isFnrhCompleta(reserva)) {
+    return {
+      variant: "neutral",
+      texto: "FNRH ainda pendente. Reenvie o link ao hóspede pelo cartão abaixo, se necessário.",
+      cta: { kind: "ir_hospedes", label: "Ver hóspedes" },
+    };
+  }
+
+  if (isProntaParaLiberarAcesso(reserva)) {
+    return {
+      variant: "info",
+      texto: "FNRH validada e pagamento ok. Libere o acesso para seguir com a senha.",
+      cta: { kind: "liberar_acesso", label: "Liberar acesso" },
+    };
+  }
+
+  var precisaSenhaBackend =
+    PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND &&
+    temBotaoSenhaBackend &&
+    (reserva.fnrhStatusAgregado || "") === "fnrh_completo" &&
+    acessoLiberadoEfetivo(reserva) &&
+    !reserva.senhaEnviadaEm &&
+    !lastOk;
+
+  if (precisaSenhaBackend) {
+    return {
+      variant: "info",
+      texto: "FNRH validada no sistema e acesso liberado. A senha ainda não foi registrada como enviada.",
+      cta: { kind: "gerar_senha", label: "Gerar e enviar senha" },
+    };
+  }
+
+  if (failRecente && lastFail && lastFail.p) {
+    var tb = lastFail.p.tipo_bloqueio;
+    if (tb === "sem_contato" || tb === "falha_canais") {
+      return {
+        variant: "warn",
+        texto: lastFail.p.motivo_bloqueio || "Falha no envio da senha (contato ou canal).",
+        cta: { kind: "ir_hospedes", label: "Corrigir contatos" },
+      };
+    }
+    if (tb === "sem_credencial") {
+      return {
+        variant: "warn",
+        texto: lastFail.p.motivo_bloqueio || "Libere o acesso na reserva antes de enviar a senha.",
+        cta: isProntaParaLiberarAcesso(reserva)
+          ? { kind: "liberar_acesso", label: "Liberar acesso" }
+          : { kind: "ir_hospedes", label: "Ver hóspedes" },
+      };
+    }
+    if (tb === "provisionamento") {
+      return {
+        variant: "warn",
+        texto: lastFail.p.motivo_bloqueio || "Falha ao provisionar senha no TTLock.",
+        cta: { kind: "ir_ttlock", label: "Ver status TTLock" },
+      };
+    }
+  }
+
+  if (acessoLiberadoEfetivo(reserva) && !reserva.entrouNoApto) {
+    var senhaOk = !!(reserva.senhaEnviadaEm || lastOk);
+    if (senhaOk) {
+      return {
+        variant: "success",
+        texto: "Senha já enviada com sucesso (registrada). Aguarde a chegada do hóspede.",
+        cta: null,
+      };
+    }
+    return {
+      variant: "neutral",
+      texto:
+        "Acesso liberado. A senha pode sair automaticamente na janela definida; use o envio manual abaixo se fizer sentido.",
+      cta: temBotaoSenhaBackend ? { kind: "gerar_senha", label: "Gerar e enviar senha" } : null,
+    };
+  }
+
+  var prox = getProximaAcaoReserva(reserva);
+  if (prox) {
+    return { variant: "neutral", texto: prox, cta: null };
+  }
+  return { variant: "neutral", texto: "Nenhuma ação urgente neste momento.", cta: null };
+}
+
+function buildRecomendacaoDetalheHtml(reserva, ctx) {
+  var rec = derivarRecomendacaoOperacional(reserva, ctx);
+  if (!rec || !rec.texto) return "";
+  var mod = rec.variant || "neutral";
+  var ctaHtml = "";
+  if (rec.cta && rec.cta.kind && rec.cta.label) {
+    ctaHtml =
+      '<div class="reservation-detail-recomendacao-cta">' +
+      '<button type="button" class="primary-button detail-recomendacao-cta-btn" data-recomendacao-cta="' +
+      escapeHtml(rec.cta.kind) +
+      '">' +
+      escapeHtml(rec.cta.label) +
+      "</button></div>";
+  }
+  return (
+    '<div class="reservation-detail-section reservation-detail-recomendacao reservation-detail-recomendacao--' +
+    escapeHtml(mod) +
+    '">' +
+    '<p class="reservation-detail-recomendacao-kicker">Próxima ação recomendada</p>' +
+    '<p class="reservation-detail-recomendacao-texto">' +
+    escapeHtml(rec.texto) +
+    "</p>" +
+    ctaHtml +
+    "</div>"
+  );
+}
+
+function buildResumoOperacionalDetalheHtml(reserva) {
+  var hist = reserva.historicoOperacional || [];
+  var isBackend = PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND;
+  var agg = reserva.fnrhStatusAgregado || "fnrh_pendente";
+  var fnrhA = agregarEnviosFnrhDoHistorico(hist);
+
+  var primeiroEnvioTxt = "Não registrado";
+  if (fnrhA.firstOk) {
+    primeiroEnvioTxt =
+      formatIsoOperacional(fnrhA.firstOk.at) +
+      " · " +
+      labelTipoEventoFnrh(fnrhA.firstOk.p && fnrhA.firstOk.p.tipo_evento);
+  } else if (fnrhA.lastAny) {
+    primeiroEnvioTxt =
+      "Sem sucesso registrado; primeira tentativa em " +
+      formatIsoOperacional(fnrhA.lastAny.at) +
+      " (" +
+      labelTipoEventoFnrh(fnrhA.lastAny.p && fnrhA.lastAny.p.tipo_evento) +
+      ")";
+  }
+
+  var ultimoEnvioTxt = "Não registrado";
+  if (fnrhA.lastOk) {
+    ultimoEnvioTxt =
+      formatIsoOperacional(fnrhA.lastOk.at) +
+      " · " +
+      labelTipoEventoFnrh(fnrhA.lastOk.p && fnrhA.lastOk.p.tipo_evento);
+  } else if (fnrhA.lastAny) {
+    ultimoEnvioTxt =
+      formatIsoOperacional(fnrhA.lastAny.at) +
+      " · " +
+      labelTipoEventoFnrh(fnrhA.lastAny.p && fnrhA.lastAny.p.tipo_evento) +
+      " (sem sucesso de canal)";
+  }
+
+  var ultimoLembreteTxt =
+    fnrhA.lastReminder && fnrhA.lastReminder.p
+      ? formatIsoOperacional(fnrhA.lastReminder.at) +
+        " · " +
+        labelTipoEventoFnrh(fnrhA.lastReminder.p.tipo_evento)
+      : fnrhA.reminderCount === 0
+        ? "Nenhum lembrete com sucesso registrado"
+        : "—";
+
+  var evValidada = coletaEventosOrdenadosPorTempo(hist, { fnrh_validada: true });
+  var ultimaValidada = evValidada.length ? evValidada[evValidada.length - 1] : null;
+  var completoEmDb = reserva.fnrhCompletoEm ? formatIsoOperacional(reserva.fnrhCompletoEm) : "";
+  var completoTxt = completoEmDb
+    ? completoEmDb + " (marco na reserva)"
+    : ultimaValidada
+      ? formatIsoOperacional(ultimaValidada.criadoEmIso) + " (evento na linha do tempo)"
+      : agg === "fnrh_completo"
+        ? "Completo no sistema, sem data registrada"
+        : "—";
+
+  var _evS = obterUltimosEventosSenha(reserva);
+  var lastOkSenha = _evS.lastOkSenha;
+  var lastFailSenha = _evS.lastFailSenha;
+
+  var statusSenha = "Não enviada";
+  if (reserva.senhaEnviadaEm) {
+    statusSenha = "Enviada (há registro de primeiro envio)";
+    if (lastFailSenha && lastOkSenha) {
+      if (new Date(lastFailSenha.e.criadoEmIso).getTime() > new Date(lastOkSenha.e.criadoEmIso).getTime()) {
+        statusSenha = "Enviada antes; última tentativa falhou";
+      }
+    } else if (lastFailSenha && !lastOkSenha) {
+      statusSenha = "Falhou (sem sucesso registrado)";
+    }
+  } else if (lastFailSenha && (!lastOkSenha || lastFailSenha.e.criadoEmIso >= lastOkSenha.e.criadoEmIso)) {
+    statusSenha = "Falhou (sem primeiro envio registrado)";
+  }
+
+  if (lastFailSenha && lastFailSenha.p && lastFailSenha.p.tipo_bloqueio === "credencial_revogada") {
+    statusSenha = reserva.senhaEnviadaEm
+      ? "Credencial revogada — reenvio bloqueado"
+      : "Credencial revogada — envio bloqueado";
+  }
+
+  var enviadaEmTxt = reserva.senhaEnviadaEm
+    ? formatIsoOperacional(reserva.senhaEnviadaEm)
+    : lastOkSenha
+      ? formatIsoOperacional(lastOkSenha.e.criadoEmIso) + " (apenas evento)"
+      : "Não registrado";
+
+  var tipoUltimoTxt = "—";
+  var acaoUltimoTxt = "—";
+  if (lastOkSenha && lastOkSenha.p) {
+    if (lastOkSenha.p.manual === true) {
+      tipoUltimoTxt = "Manual";
+      var am = lastOkSenha.p.acao_manual;
+      if (am === "geracao_via_provisionamento" || am === "geracao_provisionamento") {
+        acaoUltimoTxt = "Geração (provisionamento)";
+      } else if (am === "reenvio_senha_existente" || am === "reenvio_senha") {
+        acaoUltimoTxt = "Reenvio";
+      } else {
+        acaoUltimoTxt = legendaMotivoEnvioSenha(lastOkSenha.p.motivo_envio);
+      }
+    } else {
+      tipoUltimoTxt = "Automática";
+      acaoUltimoTxt = legendaMotivoEnvioSenha(lastOkSenha.p.motivo_envio);
+    }
+  }
+
+  var erroBloqueioTxt = "—";
+  if (lastFailSenha && lastFailSenha.p) {
+    var failT = new Date(lastFailSenha.e.criadoEmIso).getTime();
+    var okT = lastOkSenha ? new Date(lastOkSenha.e.criadoEmIso).getTime() : 0;
+    if (!lastOkSenha || failT > okT) {
+      var mot = lastFailSenha.p.motivo_bloqueio || lastFailSenha.p.erro;
+      var tb = lastFailSenha.p.tipo_bloqueio;
+      erroBloqueioTxt = (tb ? tb + ": " : "") + (mot || "falha registrada");
+      erroBloqueioTxt += " · " + formatIsoOperacional(lastFailSenha.e.criadoEmIso);
+    }
+  }
+
+  if (
+    agg === "fnrh_completo" &&
+    reserva.acessoLiberado &&
+    !reserva.senhaEnviadaEm &&
+    !lastOkSenha &&
+    isBackend
+  ) {
+    erroBloqueioTxt =
+      erroBloqueioTxt === "—"
+        ? "Sem evento de envio de senha ainda (automático pode aguardar janela ou ter falhado sem trilha)."
+        : erroBloqueioTxt;
+  }
+
+  var envios = Array.isArray(reserva.comunicacaoEnviosOperacional) ? reserva.comunicacaoEnviosOperacional : [];
+  var ultimoDisp = envios.length ? envios[0] : null;
+  var ultComCanal = ultimoDisp ? labelCanalComunicacaoPainel(ultimoDisp.canal) : "—";
+  var ultComStatus = ultimoDisp ? labelStatusEnvioComunicacao(ultimoDisp.status) : "—";
+  var ultComQuando = ultimoDisp && ultimoDisp.createdAt ? formatIsoOperacional(ultimoDisp.createdAt) : "—";
+  var ultComProp = ultimoDisp ? labelPropositoComunicacao(ultimoDisp.proposito) : "—";
+  var ultComPreview = ultimoDisp && ultimoDisp.corpoPreview ? String(ultimoDisp.corpoPreview).trim() : "";
+  if (ultComPreview.length > 160) ultComPreview = ultComPreview.slice(0, 157) + "...";
+  var ultComErro = ultimoDisp && ultimoDisp.erro ? String(ultimoDisp.erro).trim() : "";
+
+  if (!ultimoDisp && isBackend) {
+    ultComCanal = "—";
+    ultComStatus = "Sem registros em operacional_comunicacao_envios";
+    ultComQuando = "—";
+    ultComProp = "—";
+    ultComPreview = "";
+  } else if (!ultimoDisp && !isBackend) {
+    ultComStatus = "Indisponível nesta origem (use backend Supabase)";
+  }
+
+  var dicaParts = [];
+  if (agg !== "fnrh_completo" && fnrhA.reminderCount > 0) {
+    dicaParts.push("FNRH ainda não completa; já houve lembrete(s) registrado(s) com sucesso.");
+  }
+  if (agg === "fnrh_completo" && !reserva.senhaEnviadaEm && isBackend) {
+    dicaParts.push("FNRH completa no banco; confira senha e janela automática se nada foi enviado.");
+  }
+  if (lastFailSenha && lastFailSenha.p && lastFailSenha.p.tipo_bloqueio === "credencial_revogada") {
+    dicaParts.push("Credencial revogada: envio manual não deve prosseguir até nova credencial.");
+  }
+  var dicaHtml =
+    dicaParts.length > 0
+      ? '<p class="resumo-op-dica">' + escapeHtml(dicaParts.join(" ")) + "</p>"
+      : "";
+
+  return (
+    '<div class="reservation-detail-section reservation-detail-resumo-operacional">' +
+    '<p class="reservation-detail-section-title">Fluxo operacional (FNRH, senha, comunicação)</p>' +
+    '<div class="resumo-op-wrap">' +
+    '<div class="resumo-op-subgrid">' +
+    '<div class="resumo-op-block">' +
+    "<h4>Status FNRH</h4>" +
+    "<ul class=\"resumo-op-list\">" +
+    "<li><strong>Agregado no sistema:</strong> " +
+    escapeHtml(labelFnrhAgregadoPainel(agg)) +
+    "</li>" +
+    "<li><strong>Primeiro envio com sucesso:</strong> " +
+    escapeHtml(primeiroEnvioTxt) +
+    "</li>" +
+    "<li><strong>Último envio com sucesso:</strong> " +
+    escapeHtml(ultimoEnvioTxt) +
+    "</li>" +
+    "<li><strong>Lembretes (sucesso):</strong> " +
+    escapeHtml(String(fnrhA.reminderCount)) +
+    " · <strong>Último lembrete:</strong> " +
+    escapeHtml(ultimoLembreteTxt) +
+    "</li>" +
+    "<li><strong>FNRH completa / marco:</strong> " +
+    escapeHtml(completoTxt) +
+    "</li>" +
+    "</ul></div>" +
+    '<div class="resumo-op-block">' +
+    "<h4>Status senha</h4>" +
+    "<ul class=\"resumo-op-list\">" +
+    "<li><strong>Resumo:</strong> " +
+    escapeHtml(statusSenha) +
+    "</li>" +
+    "<li><strong>Primeiro envio (campo reserva):</strong> " +
+    escapeHtml(enviadaEmTxt) +
+    "</li>" +
+    "<li><strong>Último envio bem-sucedido:</strong> " +
+    escapeHtml(
+      lastOkSenha ? formatIsoOperacional(lastOkSenha.e.criadoEmIso) + " · " + tipoUltimoTxt + " · " + acaoUltimoTxt : "Não registrado",
+    ) +
+    "</li>" +
+    "<li><strong>Último erro / bloqueio:</strong> " +
+    escapeHtml(erroBloqueioTxt) +
+    "</li>" +
+    "</ul></div></div>" +
+    '<div class="resumo-op-block resumo-op-block-full">' +
+    "<h4>Última comunicação (disparo registrado)</h4>" +
+    "<ul class=\"resumo-op-list\">" +
+    "<li><strong>Finalidade:</strong> " +
+    escapeHtml(ultComProp) +
+    " · <strong>Canal:</strong> " +
+    escapeHtml(ultComCanal) +
+    "</li>" +
+    "<li><strong>Status:</strong> " +
+    escapeHtml(ultComStatus) +
+    " · <strong>Quando:</strong> " +
+    escapeHtml(ultComQuando) +
+    "</li>" +
+    (ultComPreview
+      ? "<li><strong>Preview:</strong> " + escapeHtml(ultComPreview) + "</li>"
+      : "<li><strong>Preview:</strong> não registrado</li>") +
+    (ultComErro ? "<li><strong>Erro (provedor):</strong> " + escapeHtml(ultComErro) + "</li>" : "") +
+    "</ul></div>" +
+    dicaHtml +
+    "</div></div>"
+  );
+}
+
 function createNovoHospede(reserva) {
   const next = Array.isArray(reserva.hospedes) ? reserva.hospedes.length + 1 : 1;
   const h = ensureHospedeDefaults({});
@@ -1975,7 +2850,6 @@ function renderDetail(reserva) {
   const naoIdentificados = getNaoIdentificados(reserva);
   const faltamContato = getFaltamContato(reserva);
   const prontos = getProntosParaEnvio(reserva);
-  const proximaAcao = getProximaAcaoReserva(reserva);
 
   const guestsHtml = hospedes
     .map((h, index) => {
@@ -2078,18 +2952,33 @@ function renderDetail(reserva) {
     enviarSection = `<div class="detail-enviar-links-alert is-ok">Link(s) enviado(s) para ${enviadosCount} hóspede(s). Aguardando confirmação.</div>`;
   }
 
-  const enviarSenhaSection =
-    PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND
-      ? `<div class="reservation-detail-section"><button type="button" class="primary-button detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}">Enviar senha</button></div>`
-      : "";
+  const temBotaoSenhaBackend = PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND;
+  const enviarSenhaBtnHtml = temBotaoSenhaBackend
+    ? `<button type="button" class="primary-button detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}">Gerar e enviar senha</button>`
+    : "";
+
+  const temBotaoEnviarLinks = prontosCount > 0 && naoIdentCount === 0;
+  const ctxRecomendacao = {
+    naoIdentCount: naoIdentCount,
+    faltamCount: faltamCount,
+    prontosCount: prontosCount,
+    enviadosCount: enviadosCount,
+    enviarButtonLabel: getEnviarButtonLabel(),
+    temBotaoEnviarLinks: temBotaoEnviarLinks,
+    temBotaoSenhaBackend: temBotaoSenhaBackend,
+  };
+  const recomendacaoHtml = buildRecomendacaoDetalheHtml(reserva, ctxRecomendacao);
 
   const statusOperacionalTexto = getStatusOperacionalReservaTexto(reserva);
   const bloqueios = getBloqueiosReserva(reserva);
   const statusReservaClass = bloqueios.length > 0 ? "is-blocked" : isCheckinConcluido(reserva) ? "is-ok" : "is-neutral";
   const statusReservaHtml = `<div class="reservation-detail-section reservation-detail-status-reserva reservation-detail-status-${statusReservaClass}">
-    <p class="reservation-detail-section-title">Status da reserva</p>
+    <p class="reservation-detail-section-title">Resumo</p>
+    <p class="reservation-detail-status-period">${escapeHtml(period)}</p>
     <p class="reservation-detail-status-reserva-text">${escapeHtml(statusOperacionalTexto)}</p>
   </div>`;
+
+  const resumoOperacionalHtml = buildResumoOperacionalDetalheHtml(reserva);
 
   const ttlockSectionHtml =
     PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && auth?.invokeLifecycleAction
@@ -2099,13 +2988,6 @@ function renderDetail(reserva) {
     <div class="reservation-detail-ttlock-content hidden" id="detail-ttlock-content"></div>
   </div>`
       : "";
-
-  const proximaAcaoHtml =
-    proximaAcao &&
-    `<div class="reservation-detail-section reservation-detail-proxima-acao">
-      <p class="reservation-detail-section-title">Próxima ação</p>
-      <p class="reservation-detail-proxima-acao-label">${escapeHtml(proximaAcao)}</p>
-    </div>`;
 
   const simuladosBtns = [];
   if (reserva.pagamento !== "pago") {
@@ -2124,8 +3006,8 @@ function renderDetail(reserva) {
       : "";
 
   const resumoComunicacao = formatResumoComunicacao(reserva);
-  const comunicacaoReservaHtml = `<div class="reservation-detail-section reservation-detail-comunicacao">
-    <p class="reservation-detail-section-title">Comunicação da reserva</p>
+  const comunicacaoReservaHtml = `<div class="reservation-detail-section reservation-detail-comunicacao reservation-detail-aux">
+    <p class="reservation-detail-section-title">Comunicação (por hóspede)</p>
     <p class="reservation-detail-comunicacao-text">${escapeHtml(resumoComunicacao)}</p>
   </div>`;
 
@@ -2139,33 +3021,32 @@ function renderDetail(reserva) {
               `<div class="timeline-item"><span class="timeline-time">${escapeHtml(ev.em)}</span> — <span class="timeline-title">${escapeHtml(ev.titulo)}</span>${ev.detalhe ? `<br><span class="timeline-detalhe">${escapeHtml(ev.detalhe)}</span>` : ""}</div>`,
           )
           .join("");
-  const timelineSectionHtml = `<div class="reservation-detail-section reservation-detail-timeline">
-    <p class="reservation-detail-section-title">Linha do tempo da reserva</p>
+  const timelineSectionHtml = `<div class="reservation-detail-section reservation-detail-timeline reservation-detail-aux">
+    <p class="reservation-detail-section-title">Linha do tempo</p>
     <div class="timeline-list">${historicoHtml}</div>
+  </div>`;
+
+  const acoesManuaisHtml = `<div class="reservation-detail-section reservation-detail-acoes-manuais">
+    <p class="reservation-detail-section-title">Ações de envio</p>
+    <div class="reservation-detail-acoes-manuais-inner">${enviarSection}${enviarSenhaBtnHtml}</div>
   </div>`;
 
   detailBodyElement.innerHTML = `
     ${statusReservaHtml}
+    ${recomendacaoHtml}
+    ${resumoOperacionalHtml}
     ${ttlockSectionHtml}
-    ${proximaAcaoHtml || ""}
+    ${comunicacaoReservaHtml}
+    ${timelineSectionHtml}
     ${eventosSimuladosHtml}
-    <div class="reservation-detail-section">
-      <p class="reservation-detail-section-title">Período</p>
-      <p style="margin:0;font-size:14px;color:var(--text)">${escapeHtml(period)}</p>
-    </div>
-    <div class="reservation-detail-section">
+    <div class="reservation-detail-section reservation-detail-hospedes-block" id="detail-hospedes-section">
       <div class="reservation-detail-section-header-row">
         <p class="reservation-detail-section-title">Hóspedes</p>
         <button type="button" class="guest-link-btn detail-add-guest-btn" id="detail-add-guest-btn" data-reserva-id="${escapeHtml(reserva.id)}">Adicionar hóspede</button>
       </div>
       ${guestsHtml}
     </div>
-    ${comunicacaoReservaHtml}
-    ${timelineSectionHtml}
-    <div class="reservation-detail-section">
-      ${enviarSection}
-    </div>
-    ${enviarSenhaSection}
+    ${acoesManuaisHtml}
   `;
 
   bindDetailListeners(reserva);
@@ -2173,6 +3054,36 @@ function renderDetail(reserva) {
 
 function bindDetailListeners(reserva) {
   if (!(detailBodyElement instanceof HTMLElement)) return;
+
+  detailBodyElement.querySelectorAll(".detail-recomendacao-cta-btn").forEach((btn) => {
+    btn.addEventListener("click", function () {
+      var kind = btn.getAttribute("data-recomendacao-cta") || "";
+      var rid = reserva.id;
+      if (kind === "enviar_fnrh") {
+        var el = detailBodyElement.querySelector("#detail-enviar-links-btn");
+        if (el) el.click();
+        else {
+          backendEnviarLinks(rid).then(function (ok) {
+            if (ok) refreshFromSource();
+          });
+        }
+      } else if (kind === "gerar_senha") {
+        openModalEnviarSenha(rid);
+      } else if (kind === "liberar_acesso") {
+        acaoLiberarAcesso(rid);
+      } else if (kind === "marcar_entrada") {
+        acaoConfirmarCheckin(rid);
+      } else if (kind === "simular_pagamento") {
+        acaoMarcarPagamentoOk(rid);
+      } else if (kind === "ir_hospedes") {
+        var sec = document.getElementById("detail-hospedes-section");
+        if (sec) sec.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else if (kind === "ir_ttlock") {
+        var tt = document.getElementById("detail-ttlock-section");
+        if (tt) tt.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  });
 
   detailBodyElement.querySelectorAll(".guest-nome-input").forEach((input) => {
     input.addEventListener("change", (e) => {
@@ -2311,7 +3222,13 @@ async function backendEnviarSenha(reservaId, email, whatsapp) {
   }
   const { data: sessionData } = await supabase.auth.getSession();
   const session = sessionData?.session;
-  const functionsUrl = (typeof supabase.supabaseUrl === "string" ? supabase.supabaseUrl : "")?.replace(/\/$/, "") + "/functions/v1";
+  var baseUrlFn =
+    typeof supabase.supabaseUrl === "string"
+      ? supabase.supabaseUrl
+      : window.YES_HOTEL_SUPABASE_CONFIG && window.YES_HOTEL_SUPABASE_CONFIG.url
+        ? window.YES_HOTEL_SUPABASE_CONFIG.url
+        : "";
+  const functionsUrl = baseUrlFn.replace(/\/$/, "") + "/functions/v1";
   const res = await fetch(functionsUrl + "/send-senha", {
     method: "POST",
     headers,
@@ -2324,7 +3241,13 @@ async function backendEnviarSenha(reservaId, email, whatsapp) {
     }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) return { ok: false, error: data.error || res.statusText };
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: data.mensagem || data.error || res.statusText,
+      detalhe: data.error || null,
+    };
+  }
   return { ok: true, data };
 }
 
@@ -2345,6 +3268,7 @@ function openModalEnviarSenha(reservaId) {
   }
   if (msgEl) {
     msgEl.classList.add("hidden");
+    msgEl.classList.remove("is-success", "is-error");
     msgEl.textContent = "";
   }
   if (overlay) overlay.classList.remove("hidden");
@@ -2447,22 +3371,44 @@ async function initCheckinOperacional() {
         const msgEl = document.getElementById("modal-enviar-senha-msg");
         if (msgEl) {
           msgEl.textContent = "Informe pelo menos um contato (e-mail ou WhatsApp).";
-          msgEl.classList.remove("hidden");
+          msgEl.classList.remove("hidden", "is-success");
+          msgEl.classList.add("is-error");
         }
         return;
       }
       const msgEl = document.getElementById("modal-enviar-senha-msg");
       const submitBtn = document.getElementById("modal-enviar-senha-submit");
-      if (submitBtn) submitBtn.disabled = true;
+      const labelEnviar = submitBtn ? submitBtn.textContent : "";
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Enviando…";
+      }
+      if (msgEl) {
+        msgEl.classList.remove("is-success", "is-error");
+        msgEl.classList.add("hidden");
+        msgEl.textContent = "";
+      }
       const result = await backendEnviarSenha(reservaId, email, whatsapp);
-      if (submitBtn) submitBtn.disabled = false;
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = labelEnviar || "Gerar e enviar";
+      }
       if (result.ok) {
-        closeModalEnviarSenha();
+        const okText = (result.data && result.data.mensagem) || "Operação concluída.";
+        if (msgEl) {
+          msgEl.textContent = okText;
+          msgEl.classList.remove("hidden", "is-error");
+          msgEl.classList.add("is-success");
+        }
         await refreshFromSource();
+        setTimeout(function () {
+          closeModalEnviarSenha();
+        }, 1400);
       } else {
         if (msgEl) {
-          msgEl.textContent = result.error || "Falha ao enviar.";
-          msgEl.classList.remove("hidden");
+          msgEl.textContent = result.error || "Não foi possível enviar a senha.";
+          msgEl.classList.remove("hidden", "is-success");
+          msgEl.classList.add("is-error");
         }
       }
     });

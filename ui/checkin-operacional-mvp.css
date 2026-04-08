@@ -41,7 +41,7 @@ body {
   width: 100%;
   max-width: 1360px;
   margin: 0 auto;
-  padding: 10px clamp(12px, 2vw, 28px) 18px;
+  padding: 6px clamp(10px, 1.5vw, 22px) 12px;
 }
 
 @media (min-width: 1600px) {
@@ -51,8 +51,8 @@ body {
 }
 
 .page-header {
-  margin-bottom: 8px;
-  padding-bottom: 6px;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -67,17 +67,17 @@ body {
 
 .page-header h1 {
   margin: 0 0 2px;
-  font-size: clamp(17px, 1.65vw, 21px);
+  font-size: clamp(15px, 1.35vw, 18px);
   font-weight: 700;
   letter-spacing: -0.03em;
-  line-height: 1.12;
+  line-height: 1.1;
 }
 
 .page-description {
   margin: 0;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.3;
+  font-size: 10px;
+  line-height: 1.25;
   max-width: 42em;
 }
 
@@ -107,8 +107,8 @@ body {
     grid-row: 2;
     text-align: right;
     justify-self: end;
-    max-width: 26rem;
-    font-size: 10px;
+    max-width: 22rem;
+    font-size: 9px;
   }
 }
 
@@ -121,7 +121,7 @@ body {
   border: none;
   border-radius: 0;
   box-shadow: none;
-  padding: 4px 0 12px;
+  padding: 2px 0 8px;
 }
 
 .access-state {
@@ -161,11 +161,12 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
-  padding-bottom: 4px;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding-bottom: 2px;
   border-bottom: none;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.25;
 }
 
 .session-actions {
@@ -176,13 +177,14 @@ body {
 
 .secondary-link,
 .secondary-button {
-  min-height: 30px;
-  padding: 4px 10px;
-  border-radius: 6px;
+  min-height: 26px;
+  padding: 2px 8px;
+  border-radius: 5px;
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   text-decoration: none;
   cursor: pointer;
+  line-height: 1.25;
 }
 
 .secondary-link {
@@ -203,12 +205,19 @@ body {
   flex-wrap: wrap;
   align-items: stretch;
   gap: 0;
-  margin-bottom: 8px;
+  margin-bottom: 5px;
   background: var(--card);
-  border-radius: 8px;
-  padding: 3px 6px 3px 8px;
+  border-radius: 6px;
+  padding: 2px 4px 2px 6px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
   border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+@media (min-width: 900px) {
+  .operacional-toolbar {
+    flex-wrap: nowrap;
+    align-items: center;
+  }
 }
 
 .summary-cards {
@@ -270,20 +279,20 @@ body {
 }
 
 .summary-card-value {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 800;
-  line-height: 1.05;
+  line-height: 1;
   letter-spacing: -0.02em;
 }
 
 .summary-card-label {
-  font-size: 7px;
+  font-size: 6px;
   color: var(--muted);
   margin-top: 0;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  line-height: 1.15;
+  letter-spacing: 0.05em;
+  line-height: 1.1;
   display: block;
   padding: 0 1px;
 }
@@ -299,12 +308,26 @@ body {
   flex-wrap: wrap;
   align-items: center;
   align-content: center;
-  gap: 0 1px;
+  gap: 0;
   margin-bottom: 0;
-  padding: 1px 0 1px 10px;
+  padding: 0 0 0 8px;
   border-left: 1px solid var(--border);
   flex: 1 1 200px;
   min-width: min(100%, 280px);
+}
+
+@media (min-width: 900px) {
+  .filter-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    min-width: 0;
+    flex: 1 1 0;
+    scrollbar-width: thin;
+    align-items: center;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
 }
 
 @media (max-width: 960px) {
@@ -328,18 +351,19 @@ body {
 }
 
 .filter-btn {
-  padding: 2px 7px;
-  border-radius: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
   border: none;
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   cursor: pointer;
   border-bottom: 2px solid transparent;
   margin-bottom: 0;
   line-height: 1.2;
+  flex-shrink: 0;
 }
 
 .filter-btn:hover {
@@ -485,7 +509,7 @@ body {
 .lista-operacional {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .operational-card {
@@ -506,32 +530,43 @@ body {
 .operational-card-inner {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 6px 12px;
+  gap: 4px 8px;
   align-items: center;
-  padding: 4px 8px 4px 10px;
-  min-height: 34px;
+  padding: 2px 6px 2px 8px;
+  min-height: 28px;
+}
+
+@media (min-width: 561px) {
+  .operational-card-inner {
+    grid-template-columns: minmax(0, 1fr) max-content max-content;
+  }
+
+  .operational-card-cta .primary-button {
+    width: auto;
+    max-width: none;
+  }
 }
 
 .operational-card-primary {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
 .operational-card-apt-num {
   flex-shrink: 0;
-  width: 2rem;
-  font-size: 1rem;
+  width: 1.75rem;
+  font-size: 0.875rem;
   font-weight: 800;
   line-height: 1;
   letter-spacing: -0.04em;
   color: var(--text);
   font-variant-numeric: tabular-nums;
   text-align: center;
-  padding: 1px 0;
+  padding: 0;
   border-right: 1px solid var(--border);
-  padding-right: 8px;
+  padding-right: 6px;
   margin-right: 0;
 }
 
@@ -543,17 +578,17 @@ body {
 }
 
 .operational-card-status {
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
   white-space: nowrap;
-  max-width: 10.5rem;
+  max-width: 9rem;
   overflow: hidden;
   text-overflow: ellipsis;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  line-height: 1.25;
+  line-height: 1.2;
 }
 
 .operational-card-status.status-pendente-pagamento {
@@ -605,26 +640,26 @@ body {
 }
 
 .operational-card-copy .operational-card-guest {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text);
   margin: 0;
   letter-spacing: -0.02em;
-  line-height: 1.2;
+  line-height: 1.15;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .operational-card-meta {
-  font-size: 9px;
+  font-size: 8px;
   color: #64748b;
-  line-height: 1.2;
+  line-height: 1.15;
   display: block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  opacity: 0.92;
+  opacity: 0.9;
 }
 
 .operational-card-cta {
@@ -635,12 +670,13 @@ body {
 }
 
 .operational-card-action-btn {
-  padding: 3px 10px;
-  font-size: 11px;
+  padding: 2px 8px;
+  font-size: 10px;
   font-weight: 600;
   white-space: nowrap;
-  line-height: 1.25;
-  border-radius: 5px;
+  line-height: 1.2;
+  border-radius: 4px;
+  min-height: 0;
 }
 
 .operational-card-done {
@@ -672,12 +708,12 @@ body {
 .fnrh-badge.fnrh-ok { background: var(--ok-bg); color: var(--ok-text); }
 .fnrh-badge.fnrh-neutral { background: var(--neutral-bg); color: var(--neutral-text); }
 
-@media (max-width: 720px) {
+@media (max-width: 560px) {
   .operational-card-inner {
     grid-template-columns: 1fr auto;
     grid-template-rows: auto auto;
-    gap: 8px 10px;
-    padding: 8px 10px;
+    gap: 6px 8px;
+    padding: 6px 8px;
     min-height: 0;
   }
 
