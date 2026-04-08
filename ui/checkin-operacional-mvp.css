@@ -28,6 +28,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  min-height: 100vh;
 }
 
 .muted {
@@ -41,7 +42,15 @@ body {
   width: 100%;
   max-width: 1360px;
   margin: 0 auto;
-  padding: 6px clamp(10px, 1.5vw, 22px) 12px;
+  padding: 4px clamp(10px, 1.5vw, 22px) 6px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+.app-shell > .page-header {
+  flex-shrink: 0;
 }
 
 @media (min-width: 1600px) {
@@ -124,6 +133,14 @@ body {
   padding: 2px 0 8px;
 }
 
+/* Painel principal: coluna flex; lista cresce e rola (sem “vazio” gigante abaixo) */
+#content-panel.panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  min-height: 0;
+}
+
 .access-state {
   background: var(--card);
   border: 1px solid var(--border);
@@ -167,6 +184,7 @@ body {
   border-bottom: none;
   font-size: 11px;
   line-height: 1.25;
+  flex-shrink: 0;
 }
 
 .session-actions {
@@ -205,15 +223,16 @@ body {
   flex-wrap: wrap;
   align-items: stretch;
   gap: 0;
-  margin-bottom: 5px;
+  margin-bottom: 4px;
   background: var(--card);
   border-radius: 6px;
-  padding: 2px 4px 2px 6px;
+  padding: 1px 4px 1px 6px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
   border: 1px solid rgba(148, 163, 184, 0.22);
+  flex-shrink: 0;
 }
 
-@media (min-width: 900px) {
+@media (min-width: 1024px) {
   .operacional-toolbar {
     flex-wrap: nowrap;
     align-items: center;
@@ -297,6 +316,42 @@ body {
   padding: 0 1px;
 }
 
+/* Desktop: KPI uma linha (número + rótulo) — corta altura da faixa */
+@media (min-width: 1024px) {
+  .summary-card.summary-card-funnel,
+  .summary-card.summary-card-aux {
+    display: flex;
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: center;
+    gap: 4px;
+    padding: 1px 3px;
+    text-align: left;
+    min-height: 0;
+  }
+
+  .summary-card.summary-card-funnel .summary-card-label,
+  .summary-card.summary-card-aux .summary-card-label {
+    display: inline;
+    font-size: 8px;
+    line-height: 1.15;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1 1 auto;
+    max-width: 100%;
+  }
+
+  .summary-card.summary-card-funnel .summary-card-value,
+  .summary-card.summary-card-aux .summary-card-value {
+    font-size: 11px;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+}
+
 .summary-card.is-ok .summary-card-value { color: var(--ok-text); }
 .summary-card.is-warn .summary-card-value { color: var(--warn-text); }
 .summary-card.is-danger .summary-card-value { color: var(--danger-text); }
@@ -316,7 +371,7 @@ body {
   min-width: min(100%, 280px);
 }
 
-@media (min-width: 900px) {
+@media (min-width: 1024px) {
   .filter-bar {
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -330,17 +385,17 @@ body {
   }
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1023px) {
   .operacional-toolbar {
     flex-direction: column;
-    padding: 6px 8px;
+    padding: 5px 6px;
   }
 
   .filter-bar {
     border-left: none;
     border-top: 1px solid var(--border);
-    padding: 6px 0 2px;
-    margin-top: 4px;
+    padding: 4px 0 2px;
+    margin-top: 3px;
     width: 100%;
     min-width: 0;
   }
@@ -381,7 +436,8 @@ body {
 
 /* Faixa de exceções operacionais (acima da lista) */
 .operacional-excecoes {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+  flex-shrink: 0;
 }
 
 .operacional-excecoes.hidden {
@@ -509,7 +565,13 @@ body {
 .lista-operacional {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  align-content: flex-start;
+  -webkit-overflow-scrolling: touch;
 }
 
 .operational-card {
@@ -530,15 +592,16 @@ body {
 .operational-card-inner {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 4px 8px;
+  gap: 3px 6px;
   align-items: center;
-  padding: 2px 6px 2px 8px;
-  min-height: 28px;
+  padding: 1px 5px 1px 6px;
+  min-height: 0;
 }
 
 @media (min-width: 561px) {
   .operational-card-inner {
     grid-template-columns: minmax(0, 1fr) max-content max-content;
+    min-height: 0;
   }
 
   .operational-card-cta .primary-button {
@@ -556,8 +619,8 @@ body {
 
 .operational-card-apt-num {
   flex-shrink: 0;
-  width: 1.75rem;
-  font-size: 0.875rem;
+  width: 1.5rem;
+  font-size: 0.8125rem;
   font-weight: 800;
   line-height: 1;
   letter-spacing: -0.04em;
@@ -640,12 +703,12 @@ body {
 }
 
 .operational-card-copy .operational-card-guest {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text);
   margin: 0;
   letter-spacing: -0.02em;
-  line-height: 1.15;
+  line-height: 1.1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -654,7 +717,7 @@ body {
 .operational-card-meta {
   font-size: 8px;
   color: #64748b;
-  line-height: 1.15;
+  line-height: 1.1;
   display: block;
   white-space: nowrap;
   overflow: hidden;
@@ -670,12 +733,12 @@ body {
 }
 
 .operational-card-action-btn {
-  padding: 2px 8px;
+  padding: 1px 7px;
   font-size: 10px;
   font-weight: 600;
   white-space: nowrap;
-  line-height: 1.2;
-  border-radius: 4px;
+  line-height: 1.15;
+  border-radius: 3px;
   min-height: 0;
 }
 
