@@ -1537,10 +1537,44 @@ function filtrarPorPeriodo(lista, periodo) {
   });
 }
 
+/**
+ * Instantâneo local: 11:00 do dia **seguinte** ao check-in previsto.
+ * Após esse momento, a reserva pode sair da lista padrão se não houver pendência relevante.
+ */
+function getCutoffOcultarListaPadraoAposCheckin(checkInPrevisto) {
+  const ymd = String(checkInPrevisto || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
+  const d = new Date(ymd + "T12:00:00");
+  if (isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + 1);
+  d.setHours(11, 0, 0, 0);
+  return d;
+}
+
+/** Pendência que mantém reserva “viva” na lista padrão (fila operacional + exceções já reconhecidas pelo painel). */
+function temPendenciaOperacionalRelevanteParaListaPadrao(reserva) {
+  if (!reserva) return true;
+  if (getFilaOperacionalRank(reserva) < 4) return true;
+  if (derivarExcecaoOperacionalReserva(reserva)) return true;
+  return false;
+}
+
+/** Ocultar da lista padrão: já passou o corte após check-in e não há pendência operacional relevante. */
+function reservaOcultaDaListaPadraoOperacional(reserva) {
+  if (temPendenciaOperacionalRelevanteParaListaPadrao(reserva)) return false;
+  const cutoff = getCutoffOcultarListaPadraoAposCheckin(reserva.checkInPrevisto);
+  if (!cutoff) return false;
+  return Date.now() >= cutoff.getTime();
+}
+
 /** Base para contadores das abas: aplica busca + período, não o filtro da aba */
 function listaBaseContagens() {
   let L = Array.isArray(reservas) ? reservas.slice() : [];
   L = filtrarPorPeriodo(L, periodoAtivo);
+  const buscaAtiva = String(buscaLista || "").trim().length > 0;
+  if (!buscaAtiva) {
+    L = L.filter((r) => !reservaOcultaDaListaPadraoOperacional(r));
+  }
   L = filtrarPorBusca(L, buscaLista);
   return L;
 }
