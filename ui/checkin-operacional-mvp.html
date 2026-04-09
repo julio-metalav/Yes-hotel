@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Yes Hotel — Painel de Check-in Operacional</title>
-    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=22" />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=23" />
   </head>
   <body class="op-body">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -17,12 +17,12 @@
         </div>
         <div class="op-header__right">
           <p class="op-header__support op-header__support--desktop">
-            Acompanhamento por reserva: pagamento, FNRH, acesso e entrada no apartamento.
+            Dados mestres da reserva (apto, pagamento, datas) vêm do <strong>PMS</strong>. O Yes opera FNRH, senha, acesso e trilha operacional.
           </p>
           <button type="button" class="op-btn op-btn--ghost" id="op-logout-btn">Sair</button>
         </div>
         <p class="op-header__support op-header__support--mobile">
-          Acompanhamento por reserva: pagamento, FNRH, acesso e entrada no apartamento.
+          Reserva reflete o <strong>PMS</strong>; o Yes cobre FNRH, senha e acesso operacional.
         </p>
       </header>
 
@@ -77,7 +77,7 @@
                   <thead>
                     <tr>
                       <th class="op-th op-th--apt">Apto</th>
-                      <th class="op-th">Hóspede</th>
+                      <th class="op-th op-th--guest">Hóspede</th>
                       <th class="op-th op-th--period">Período</th>
                       <th class="op-th op-th--flux">Fluxo</th>
                       <th class="op-th op-th--status">Status</th>
@@ -112,7 +112,7 @@
             </div>
             <div id="op-detail-empty" class="op-detail__placeholder">
               <p class="op-detail__placeholder-title">Selecione uma reserva</p>
-              <p class="op-detail__placeholder-text">Clique em uma linha ou em <strong>Ver</strong> para ver detalhes, hóspedes e ações.</p>
+              <p class="op-detail__placeholder-text">Clique em uma linha ou em <strong>Ver</strong> para detalhes, hóspedes e ações operacionais. Dados principais da reserva vêm do PMS; aqui você acompanha FNRH, acesso e comunicação.</p>
             </div>
             <div id="op-detail-filled" class="op-detail__filled hidden">
               <header class="op-detail__header">

@@ -1694,32 +1694,45 @@ function listaProximaAcaoOperacional(reserva) {
   return { texto, destaque: !!(rec && rec.cta) };
 }
 
-/** Resumo curto para coluna Fluxo (lista): pagamento + FNRH + no máximo um terceiro sinal. */
+/** Resumo curto para coluna Fluxo (lista): PAGO/NÃO PAGO em destaque + FNRH + no máximo um terceiro sinal. Retorna HTML seguro. */
 function linhaFluxoResumo(reserva) {
   const total = getHospedesTotal(reserva);
   const confirmadas = getFnrhConfirmadas(reserva);
   const pago = isPagamentoOk(reserva);
 
-  const pag = pago ? "Pago" : "Pagamento pendente";
+  const pagClass = pago ? "op-flux-pag op-flux-pag--paid" : "op-flux-pag op-flux-pag--unpaid";
+  const pagText = pago ? "PAGO" : "NÃO PAGO";
+  const pagHtml = `<span class="${pagClass}">${escapeHtml(pagText)}</span>`;
+
   let fnrh;
   if (total === 0) fnrh = "FNRH —";
   else if (confirmadas === 0) fnrh = `FNRH 0/${total}`;
   else if (confirmadas < total) fnrh = "FNRH parcial";
   else fnrh = `FNRH ${total}/${total}`;
 
-  const parts = [pag, fnrh];
+  const rest = [fnrh];
 
   if (pago) {
     if (reserva.entrouNoApto) {
-      parts.push("Entrou");
+      rest.push("Entrou");
     } else if (total > 0 && confirmadas === total) {
-      parts.push(acessoLiberadoEfetivo(reserva) ? "Acesso ok" : "Sem acesso");
+      rest.push(acessoLiberadoEfetivo(reserva) ? "Acesso ok" : "Sem acesso");
     } else if (total > 0) {
-      parts.push(`${total} hósp.`);
+      rest.push(`${total} hósp.`);
     }
   }
 
-  return parts.map((t) => escapeHtml(t)).join(" · ");
+  const restHtml = rest.map((t) => escapeHtml(t)).join(" · ");
+  return `${pagHtml} · ${restHtml}`;
+}
+
+/** Título HTML seguro para tooltip do nome na lista. */
+function titleAttrEscape(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function updateRowSelectionUi() {
@@ -1763,11 +1776,13 @@ function renderOperacionalLista() {
       const proxCls = proxInfo.destaque ? "op-next-action" : "op-next-action op-next-action--muted";
       const flux = linhaFluxoResumo(reserva);
       const rid = escapeHtml(String(reserva.id));
+      const guestName = reserva.hospedePrincipal || "—";
+      const guestTitle = titleAttrEscape(guestName);
       return `<tr class="op-tr" data-id="${rid}" tabindex="0" role="row">
         <td class="op-td op-td--apt"><span class="op-apt-num">${escapeHtml(String(reserva.apartamento || "—"))}</span></td>
-        <td class="op-td">
-          <span class="op-guest-name">${escapeHtml(reserva.hospedePrincipal || "—")}</span>
-          <span class="op-guest-sub">${escapeHtml(String(reserva.id || "").slice(0, 8))}${reserva.id && String(reserva.id).length > 8 ? "…" : ""}</span>
+        <td class="op-td op-td--guest">
+          <span class="op-guest-name" title="${guestTitle}">${escapeHtml(guestName)}</span>
+          <span class="op-guest-sub" title="${guestTitle}">${escapeHtml(String(reserva.id || "").slice(0, 12))}${reserva.id && String(reserva.id).length > 12 ? "…" : ""}</span>
         </td>
         <td class="op-td">
           <div class="op-period-line">${ci} → ${co}</div>
@@ -1797,12 +1812,14 @@ function renderOperacionalLista() {
       const proxInfoM = listaProximaAcaoOperacional(reserva);
       const prox = proxInfoM.texto;
       const rid = escapeHtml(String(reserva.id));
+      const mGuest = reserva.hospedePrincipal || "—";
+      const mGuestTitle = titleAttrEscape(mGuest);
       return `<button type="button" class="op-mcard" data-id="${rid}">
         <div class="op-mcard__r1">
           <span class="op-mcard__apt">${escapeHtml(String(reserva.apartamento || "—"))}</span>
           <span class="${badgeCls}">${escapeHtml(status.label)}</span>
         </div>
-        <div class="op-mcard__name">${escapeHtml(reserva.hospedePrincipal || "—")}</div>
+        <div class="op-mcard__name" title="${mGuestTitle}">${escapeHtml(mGuest)}</div>
         <div class="op-mcard__meta">${ci} → ${co}</div>
         <div class="op-mcard__flux">${linhaFluxoResumo(reserva)}</div>
         <div class="op-mcard__row5">
@@ -1950,7 +1967,7 @@ async function loadAndRenderTtlockSection(reservaId) {
     }
     if (data.temCredencial && data.status !== "revogada") {
       html += `<div class="reservation-detail-ttlock-actions">
-        <button type="button" class="secondary-button detail-ttlock-cancel-btn" data-reserva-id="${escapeHtml(reservaId)}">Cancelar reserva (revogar acesso TTLock)</button>
+        <button type="button" class="secondary-button detail-ttlock-cancel-btn" data-reserva-id="${escapeHtml(reservaId)}">Revogar acesso TTLock (exceção — não cancela no PMS)</button>
         <button type="button" class="secondary-button detail-ttlock-checkout-btn" data-reserva-id="${escapeHtml(reservaId)}">Checkout (revogar acesso TTLock)</button>
       </div>`;
     }
@@ -1985,7 +2002,7 @@ async function loadAndRenderTtlockSection(reservaId) {
 
 async function acaoLifecycleCancel(reservaId) {
   if (!reservaId || !auth?.invokeLifecycleAction) return;
-  if (!confirm("Revogar acesso TTLock desta reserva (cancelamento)? A ação é irreversível para a credencial.")) return;
+  if (!confirm("Revogar credencial TTLock (exceção operacional)? Não altera a reserva no PMS. Ação irreversível para a credencial.")) return;
   try {
     const data = await auth.invokeLifecycleAction("lifecycle_cancel", { reservaId });
     const msg = data.idempotente
@@ -2645,11 +2662,14 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
   }
 
   if (!isPagamentoOk(reserva)) {
+    var pagamentoEhPms = PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND;
     return {
       variant: "warn",
-      texto: "Pagamento ainda não está confirmado. Regularize antes de liberar acesso ou seguir com a senha.",
-      listaLabel: "Regularizar pagamento",
-      cta: { kind: "simular_pagamento", label: "Simular pagamento aprovado" },
+      texto: pagamentoEhPms
+        ? "Pagamento ainda não consta como confirmado nos dados sincronizados do PMS. O Yes não altera pagamento; aguarde a atualização no PMS ou trate diretamente lá."
+        : "Pagamento ainda não está confirmado (modo local/demo). Em produção, o status vem do PMS.",
+      listaLabel: pagamentoEhPms ? "Não pago (PMS)" : "Regularizar pagamento",
+      cta: pagamentoEhPms ? null : { kind: "simular_pagamento", label: "Simular pagamento (demo)" },
     };
   }
 
@@ -3128,9 +3148,10 @@ function renderDetail(reserva) {
           ? `<div class="guest-detail-vehicle">Veículo: ${escapeHtml(reserva.veiculoPlaca.trim())}${reserva.veiculoCor ? " • " + escapeHtml(reserva.veiculoCor.trim()) : ""}</div>`
           : "";
       const onlyConfirmarEnviado = h.statusOperacional === GUEST_STATUS.ENVIADO;
-      const confirmarBtn = onlyConfirmarEnviado
-        ? `<button type="button" class="secondary-button guest-confirmar-fnrh-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Simular confirmação</button>`
-        : "";
+      const confirmarBtn =
+        PAINEL_DATA_SOURCE !== PAINEL_DATA_SOURCE_BACKEND && onlyConfirmarEnviado
+          ? `<button type="button" class="secondary-button guest-confirmar-fnrh-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Simular confirmação (demo)</button>`
+          : "";
       const setPrincipalBtn = !h.principal
         ? `<button type="button" class="guest-link-btn guest-set-principal-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Definir como principal</button>`
         : "";
@@ -3226,8 +3247,13 @@ function renderDetail(reserva) {
   const statusOperacionalTexto = getStatusOperacionalReservaTexto(reserva);
   const bloqueios = getBloqueiosReserva(reserva);
   const statusReservaClass = bloqueios.length > 0 ? "is-blocked" : isCheckinConcluido(reserva) ? "is-ok" : "is-neutral";
+  const pmsNote =
+    PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND
+      ? "Apartamento, datas e pagamento refletem o PMS. O Yes acompanha FNRH, acesso TTLock e comunicação."
+      : "Modo local/demo: em produção, dados mestres da reserva vêm do PMS; o Yes foca na operação (FNRH, senha, acesso).";
   const statusReservaHtml = `<div class="reservation-detail-section reservation-detail-status-reserva reservation-detail-status-${statusReservaClass}">
     <p class="reservation-detail-section-title">Resumo</p>
+    <p class="reservation-detail-pms-note">${escapeHtml(pmsNote)}</p>
     <p class="reservation-detail-status-period">${escapeHtml(period)}</p>
     <p class="reservation-detail-status-reserva-text">${escapeHtml(statusOperacionalTexto)}</p>
   </div>`;
@@ -3244,17 +3270,23 @@ function renderDetail(reserva) {
       : "";
 
   const simuladosBtns = [];
-  if (reserva.pagamento !== "pago") {
-    simuladosBtns.push(`<button type="button" class="secondary-button detail-simular-pagamento-btn" data-reserva-id="${escapeHtml(reserva.id)}">Simular pagamento aprovado</button>`);
-  }
-  if (hasFnrhPendente(reserva)) {
-    simuladosBtns.push(`<button type="button" class="secondary-button detail-simular-fnrh-btn" data-reserva-id="${escapeHtml(reserva.id)}">Simular confirmação de FNRH</button>`);
+  if (PAINEL_DATA_SOURCE !== PAINEL_DATA_SOURCE_BACKEND) {
+    if (reserva.pagamento !== "pago") {
+      simuladosBtns.push(
+        `<button type="button" class="secondary-button detail-simular-pagamento-btn" data-reserva-id="${escapeHtml(reserva.id)}">Simular pagamento (demo local)</button>`,
+      );
+    }
+    if (hasFnrhPendente(reserva)) {
+      simuladosBtns.push(
+        `<button type="button" class="secondary-button detail-simular-fnrh-btn" data-reserva-id="${escapeHtml(reserva.id)}">Simular confirmação FNRH (demo)</button>`,
+      );
+    }
   }
   const eventosSimuladosHtml =
     simuladosBtns.length > 0
       ? `<div class="reservation-detail-section reservation-detail-eventos-simulados">
-    <p class="reservation-detail-section-title">Eventos simulados</p>
-    <p class="reservation-detail-eventos-desc">Simular retorno do sistema para testar o fluxo.</p>
+    <p class="reservation-detail-section-title">Eventos simulados (somente demo local)</p>
+    <p class="reservation-detail-eventos-desc">Atalhos para teste sem integração completa. Com backend, pagamento e dados mestres da reserva vêm do PMS.</p>
     <div class="reservation-detail-eventos-btns">${simuladosBtns.join(" ")}</div>
   </div>`
       : "";

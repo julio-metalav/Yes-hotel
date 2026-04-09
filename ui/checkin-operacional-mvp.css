@@ -624,13 +624,18 @@
   text-align: center;
 }
 
+.op-th--guest {
+  min-width: 200px;
+  width: 26%;
+}
+
 .op-th--period {
-  width: 128px;
+  width: 118px;
 }
 
 .op-th--flux {
-  width: 24%;
-  min-width: 160px;
+  width: 20%;
+  min-width: 148px;
 }
 
 .op-th--status {
@@ -677,6 +682,11 @@
   width: 76px;
 }
 
+.op-td--guest {
+  min-width: 200px;
+  vertical-align: middle;
+}
+
 .op-td--flux {
   vertical-align: middle;
 }
@@ -712,11 +722,16 @@
 .op-guest-name {
   font-weight: 600;
   color: var(--op-text);
-  display: block;
-  max-width: 100%;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
 }
 
 .op-guest-sub {
@@ -744,13 +759,27 @@
 .op-flux {
   font-size: 11px;
   color: #64748b;
-  line-height: 1.4;
+  line-height: 1.45;
   max-width: none;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.op-flux-pag {
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+.op-flux-pag--paid {
+  color: #15803d;
+}
+
+.op-flux-pag--unpaid {
+  color: #b91c1c;
 }
 
 .op-next-action {
@@ -941,6 +970,9 @@
 .op-mcard__name {
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .op-mcard__meta {
@@ -1259,6 +1291,13 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #64748b;
+}
+
+.op-detail__scroll .reservation-detail-pms-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #475569;
 }
 
 .op-detail__scroll .guest-detail-card {
