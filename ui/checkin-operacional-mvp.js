@@ -1685,31 +1685,13 @@ async function acaoConfirmarCheckin(id) {
   refresh();
 }
 
-function primaryActionFor(reserva) {
-  if (isProntaParaLiberarAcesso(reserva)) {
-    return {
-      label: "Liberar acesso",
-      action: "liberar_acesso",
-      id: reserva.id,
-      title: "Liberar acesso (TTLock)",
-    };
-  }
-  if (acessoLiberadoEfetivo(reserva) && !reserva.entrouNoApto) {
-    return {
-      label: "Marcar entrada",
-      action: "confirmar_checkin",
-      id: reserva.id,
-      title: "Marcar entrada no apartamento",
-    };
-  }
-  return null;
-}
-
-function textoProximaAcaoLista(reserva) {
-  const primary = primaryActionFor(reserva);
-  if (primary) return primary.label;
-  const t = getProximaAcaoReserva(reserva);
-  return t && String(t).trim() ? t : "—";
+/** Texto curto + destaque (CTA no detalhe) para coluna Próxima ação — alinhado a derivarRecomendacaoOperacional. */
+function listaProximaAcaoOperacional(reserva) {
+  const ctx = buildRecomendacaoOperacionalCtx(reserva);
+  const rec = derivarRecomendacaoOperacional(reserva, ctx);
+  const raw = rec && rec.listaLabel != null ? String(rec.listaLabel).trim() : "";
+  const texto = raw || "—";
+  return { texto, destaque: !!(rec && rec.cta) };
 }
 
 function linhaFluxoResumo(reserva) {
@@ -1761,8 +1743,9 @@ function renderOperacionalLista() {
       const co = formatDataBR(reserva.checkOutPrevisto);
       const n = noitesEntre(reserva.checkInPrevisto, reserva.checkOutPrevisto);
       const noitesTxt = n != null ? `${n} ${n === 1 ? "noite" : "noites"}` : "";
-      const prox = textoProximaAcaoLista(reserva);
-      const proxCls = primaryActionFor(reserva) ? "op-next-action" : "op-next-action op-next-action--muted";
+      const proxInfo = listaProximaAcaoOperacional(reserva);
+      const prox = proxInfo.texto;
+      const proxCls = proxInfo.destaque ? "op-next-action" : "op-next-action op-next-action--muted";
       const flux = linhaFluxoResumo(reserva);
       const rid = escapeHtml(String(reserva.id));
       return `<tr class="op-tr" data-id="${rid}" tabindex="0" role="row">
@@ -1796,7 +1779,8 @@ function renderOperacionalLista() {
       const badgeCls = badgeClassFromStatusType(status.type);
       const ci = formatDataBR(reserva.checkInPrevisto);
       const co = formatDataBR(reserva.checkOutPrevisto);
-      const prox = textoProximaAcaoLista(reserva);
+      const proxInfoM = listaProximaAcaoOperacional(reserva);
+      const prox = proxInfoM.texto;
       const rid = escapeHtml(String(reserva.id));
       return `<button type="button" class="op-mcard" data-id="${rid}">
         <div class="op-mcard__r1">
@@ -1807,7 +1791,7 @@ function renderOperacionalLista() {
         <div class="op-mcard__meta">${ci} → ${co}</div>
         <div class="op-mcard__flux">${linhaFluxoResumo(reserva)}</div>
         <div class="op-mcard__row5">
-          <span class="op-next-action${primaryActionFor(reserva) ? "" : " op-next-action--muted"}">${escapeHtml(prox)}</span>
+          <span class="op-next-action${proxInfoM.destaque ? "" : " op-next-action--muted"}">${escapeHtml(prox)}</span>
           <span class="op-btn-table op-btn-ver-inline" data-stop="1">Ver</span>
         </div>
       </button>`;
@@ -2562,9 +2546,61 @@ function legendaMotivoEnvioSenha(motivo) {
   return m || "—";
 }
 
+/** Mesmas contagens/flags do detalhe, para recomendação e coluna da lista. */
+function buildRecomendacaoOperacionalCtx(reserva) {
+  const hospedes = Array.isArray(reserva.hospedes) ? reserva.hospedes : [];
+  const naoIdentificados = getNaoIdentificados(reserva);
+  const faltamContato = getFaltamContato(reserva);
+  const prontos = getProntosParaEnvio(reserva);
+  const prontosCount = prontos.length;
+  const prontosSimplificada = prontos.filter((h) => h.modoColetaFnrh === MODO_COLETA_FNRH.CONFIRMACAO_SIMPLIFICADA).length;
+  const prontosCompleto = prontos.filter((h) => h.modoColetaFnrh === MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO).length;
+  const naoIdentCount = naoIdentificados.length;
+  const faltamCount = faltamContato.length;
+  const enviadosCount = hospedes.filter((h) => h.statusOperacional === GUEST_STATUS.ENVIADO).length;
+  function getEnviarButtonLabel() {
+    if (prontosSimplificada > 0 && prontosCompleto === 0) {
+      return `Enviar confirmação${prontosSimplificada > 1 ? "ões" : ""} simplificada${prontosSimplificada > 1 ? "s" : ""} (${prontosCount})`;
+    }
+    if (prontosCompleto > 0 && prontosSimplificada === 0) {
+      return `Enviar FNRH${prontosCompleto > 1 ? "s" : ""} completa${prontosCompleto > 1 ? "s" : ""} (${prontosCount})`;
+    }
+    return `Enviar confirmações e FNRHs (${prontosCount})`;
+  }
+  const enviarButtonLabel = prontosCount > 0 ? getEnviarButtonLabel() : "";
+  const temBotaoEnviarLinks = prontosCount > 0 && naoIdentCount === 0;
+  const temBotaoSenhaBackend = PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND;
+  return {
+    naoIdentCount,
+    faltamCount,
+    prontosCount,
+    enviadosCount,
+    enviarButtonLabel,
+    temBotaoEnviarLinks,
+    temBotaoSenhaBackend,
+    prontosSimplificada,
+    prontosCompleto,
+  };
+}
+
+function enviarFnrhListaCurta(ctx) {
+  const ps = ctx.prontosSimplificada || 0;
+  const pc = ctx.prontosCompleto || 0;
+  if (ps > 0 && pc === 0) return "Enviar confirmações simplificadas";
+  if (pc > 0 && ps === 0) return "Enviar FNRHs completas";
+  return "Enviar confirmações e FNRHs";
+}
+
+function listaLabelBloqueioCurto(motivo) {
+  const m = String(motivo || "").trim();
+  if (!m) return "Envio bloqueado";
+  if (m.length <= 52) return m;
+  return m.slice(0, 49) + "…";
+}
+
 /**
  * Próxima ação recomendada no detalhe: baseada em pagamento, FNRH, contatos, eventos de senha e flags da reserva.
- * ctx vem do render do detalhe (contagens e rótulos do botão de envio).
+ * ctx vem de buildRecomendacaoOperacionalCtx (detalhe e lista).
  */
 function derivarRecomendacaoOperacional(reserva, ctx) {
   var naoIdentCount = ctx.naoIdentCount;
@@ -2581,13 +2617,14 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
   var failRecente = falhaSenhaMaisRecenteQueSucesso(lastOk, lastFail);
 
   if (isCheckinConcluido(reserva)) {
-    return { variant: "success", texto: "Check-in concluído nesta reserva.", cta: null };
+    return { variant: "success", texto: "Check-in concluído nesta reserva.", listaLabel: "Check-in concluído", cta: null };
   }
 
   if (lastFail && lastFail.p && lastFail.p.tipo_bloqueio === "credencial_revogada" && failRecente) {
     return {
       variant: "danger",
       texto: lastFail.p.motivo_bloqueio || "Envio bloqueado: credencial revogada.",
+      listaLabel: listaLabelBloqueioCurto(lastFail.p.motivo_bloqueio || "Credencial revogada"),
       cta: null,
     };
   }
@@ -2596,6 +2633,7 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
     return {
       variant: "warn",
       texto: "Pagamento ainda não está confirmado. Regularize antes de liberar acesso ou seguir com a senha.",
+      listaLabel: "Regularizar pagamento",
       cta: { kind: "simular_pagamento", label: "Simular pagamento aprovado" },
     };
   }
@@ -2604,6 +2642,7 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
     return {
       variant: "warn",
       texto: "Complete a identificação dos hóspedes (nome adequado) antes de enviar links.",
+      listaLabel: "Completar dados dos hóspedes",
       cta: { kind: "ir_hospedes", label: "Ir para hóspedes" },
     };
   }
@@ -2612,6 +2651,7 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
     return {
       variant: "warn",
       texto: "Não há telefone nem e-mail válidos para comunicação com hóspede(s) que ainda precisam de FNRH.",
+      listaLabel: "Corrigir contatos",
       cta: { kind: "ir_hospedes", label: "Corrigir contatos" },
     };
   }
@@ -2625,6 +2665,7 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
             faltamCount +
             ". Envie para os que já têm e-mail ou WhatsApp."
           : "Envie os links ou confirmações de FNRH para os hóspedes prontos.",
+      listaLabel: enviarFnrhListaCurta(ctx),
       cta: { kind: "enviar_fnrh", label: enviarButtonLabel },
     };
   }
@@ -2633,6 +2674,7 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
     return {
       variant: "neutral",
       texto: "Há hóspedes elegíveis para envio; use a seção de ações abaixo.",
+      listaLabel: "Ver hóspedes",
       cta: { kind: "ir_hospedes", label: "Ver hóspedes" },
     };
   }
@@ -2641,6 +2683,7 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
     return {
       variant: "neutral",
       texto: "FNRH ainda pendente. Reenvie o link ao hóspede pelo cartão abaixo, se necessário.",
+      listaLabel: "Reenviar FNRH",
       cta: { kind: "ir_hospedes", label: "Ver hóspedes" },
     };
   }
@@ -2649,6 +2692,7 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
     return {
       variant: "info",
       texto: "FNRH validada e pagamento ok. Libere o acesso para seguir com a senha.",
+      listaLabel: "Liberar acesso",
       cta: { kind: "liberar_acesso", label: "Liberar acesso" },
     };
   }
@@ -2665,6 +2709,7 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
     return {
       variant: "info",
       texto: "FNRH validada no sistema e acesso liberado. A senha ainda não foi registrada como enviada.",
+      listaLabel: "Gerar e enviar senha",
       cta: { kind: "gerar_senha", label: "Gerar e enviar senha" },
     };
   }
@@ -2675,22 +2720,26 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
       return {
         variant: "warn",
         texto: lastFail.p.motivo_bloqueio || "Falha no envio da senha (contato ou canal).",
+        listaLabel: listaLabelBloqueioCurto(lastFail.p.motivo_bloqueio) || "Corrigir contatos",
         cta: { kind: "ir_hospedes", label: "Corrigir contatos" },
       };
     }
     if (tb === "sem_credencial") {
+      var ctaSemCred = isProntaParaLiberarAcesso(reserva)
+        ? { kind: "liberar_acesso", label: "Liberar acesso" }
+        : { kind: "ir_hospedes", label: "Ver hóspedes" };
       return {
         variant: "warn",
         texto: lastFail.p.motivo_bloqueio || "Libere o acesso na reserva antes de enviar a senha.",
-        cta: isProntaParaLiberarAcesso(reserva)
-          ? { kind: "liberar_acesso", label: "Liberar acesso" }
-          : { kind: "ir_hospedes", label: "Ver hóspedes" },
+        listaLabel: ctaSemCred.label,
+        cta: ctaSemCred,
       };
     }
     if (tb === "provisionamento") {
       return {
         variant: "warn",
         texto: lastFail.p.motivo_bloqueio || "Falha ao provisionar senha no TTLock.",
+        listaLabel: listaLabelBloqueioCurto(lastFail.p.motivo_bloqueio) || "Conferir TTLock",
         cta: { kind: "ir_ttlock", label: "Ver status TTLock" },
       };
     }
@@ -2702,6 +2751,7 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
       return {
         variant: "success",
         texto: "Senha já enviada com sucesso (registrada). Aguarde a chegada do hóspede.",
+        listaLabel: "Aguardar chegada",
         cta: null,
       };
     }
@@ -2709,15 +2759,17 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
       variant: "neutral",
       texto:
         "Acesso liberado. A senha pode sair automaticamente na janela definida; use o envio manual abaixo se fizer sentido.",
+      listaLabel: temBotaoSenhaBackend ? "Gerar e enviar senha" : "Aguardar envio da senha",
       cta: temBotaoSenhaBackend ? { kind: "gerar_senha", label: "Gerar e enviar senha" } : null,
     };
   }
 
   var prox = getProximaAcaoReserva(reserva);
   if (prox) {
-    return { variant: "neutral", texto: prox, cta: null };
+    var listaProx = prox === "Aguardar entrada no apartamento" ? "Aguardar chegada" : prox;
+    return { variant: "neutral", texto: prox, listaLabel: listaProx, cta: null };
   }
-  return { variant: "neutral", texto: "Nenhuma ação urgente neste momento.", cta: null };
+  return { variant: "neutral", texto: "Nenhuma ação urgente neste momento.", listaLabel: "—", cta: null };
 }
 
 function buildRecomendacaoDetalheHtml(reserva, ctx) {
@@ -3153,16 +3205,7 @@ function renderDetail(reserva) {
     ? `<button type="button" class="primary-button detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}">Gerar e enviar senha</button>`
     : "";
 
-  const temBotaoEnviarLinks = prontosCount > 0 && naoIdentCount === 0;
-  const ctxRecomendacao = {
-    naoIdentCount: naoIdentCount,
-    faltamCount: faltamCount,
-    prontosCount: prontosCount,
-    enviadosCount: enviadosCount,
-    enviarButtonLabel: getEnviarButtonLabel(),
-    temBotaoEnviarLinks: temBotaoEnviarLinks,
-    temBotaoSenhaBackend: temBotaoSenhaBackend,
-  };
+  const ctxRecomendacao = buildRecomendacaoOperacionalCtx(reserva);
   const recomendacaoHtml = buildRecomendacaoDetalheHtml(reserva, ctxRecomendacao);
 
   const statusOperacionalTexto = getStatusOperacionalReservaTexto(reserva);
