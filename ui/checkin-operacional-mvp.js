@@ -133,17 +133,48 @@ function getPrioridadeLabel(prioridade) {
   return labels[prioridade] || "";
 }
 
+/**
+ * Fila operacional da lista: 0 = mais urgente … 4 = concluído.
+ * Usa os mesmos predicados do painel (pagamento, FNRH, acesso, senha backend, entrada).
+ */
+function getFilaOperacionalRank(reserva) {
+  if (!isPagamentoOk(reserva)) return 0;
+  if (hasFnrhPendente(reserva) || !isFnrhCompleta(reserva)) return 1;
+  if (!acessoLiberadoEfetivo(reserva)) return 2;
+  if (!reserva.entrouNoApto) {
+    if (senhaOperacionalPendenteLista(reserva)) return 2;
+    return 3;
+  }
+  return 4;
+}
+
+/** Senha não enviada/registrada com backend, com FNRH completa no sistema e acesso liberado — mesmo recorte da recomendação operacional. */
+function senhaOperacionalPendenteLista(reserva) {
+  if (PAINEL_DATA_SOURCE !== PAINEL_DATA_SOURCE_BACKEND) return false;
+  if (!acessoLiberadoEfetivo(reserva) || reserva.entrouNoApto) return false;
+  if (!isFnrhCompleta(reserva)) return false;
+  const agg = String(reserva.fnrhStatusAgregado || "").trim();
+  if (agg !== "" && agg !== "fnrh_completo") return false;
+  if (reserva.senhaEnviadaEm) return false;
+  const ob = obterUltimosEventosSenha(reserva);
+  if (ob && ob.lastOkSenha) return false;
+  return true;
+}
+
+function compareApartamentoCrescente(a, b) {
+  const sa = String(a.apartamento != null ? a.apartamento : "").trim();
+  const sb = String(b.apartamento != null ? b.apartamento : "").trim();
+  return sa.localeCompare(sb, "pt-BR", { numeric: true, sensitivity: "base" });
+}
+
 function sortReservasPorPrioridade(lista) {
-  const ordem = { [PRIORIDADE_ALTA]: 0, [PRIORIDADE_MEDIA]: 1, [PRIORIDADE_BAIXA]: 2 };
-  const hoje = todayStr();
   return [...lista].sort((a, b) => {
-    const pa = ordem[getPrioridadeReserva(a)] ?? 1;
-    const pb = ordem[getPrioridadeReserva(b)] ?? 1;
-    if (pa !== pb) return pa - pb;
-    const aHoje = a.checkInPrevisto === hoje ? 1 : 0;
-    const bHoje = b.checkInPrevisto === hoje ? 1 : 0;
-    if (bHoje !== aHoje) return bHoje - aHoje;
-    return (a.apartamento || "").localeCompare(b.apartamento || "");
+    const ra = getFilaOperacionalRank(a);
+    const rb = getFilaOperacionalRank(b);
+    if (ra !== rb) return ra - rb;
+    const apt = compareApartamentoCrescente(a, b);
+    if (apt !== 0) return apt;
+    return String(a.id || "").localeCompare(String(b.id || ""), "pt-BR");
   });
 }
 
