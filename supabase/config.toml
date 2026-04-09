@@ -14,11 +14,21 @@ verify_jwt = false
 [functions.fnrh-auto-reenvio]
 verify_jwt = false
 
+[functions.senha-auto-envio]
+verify_jwt = false
+
 [functions.send-fnrh-links]
+verify_jwt = false
+
+[functions.send-senha]
 verify_jwt = false
 
 [functions.send-whatsapp-message]
 verify_jwt = false
 
 [functions.operacional-comunicacao-dispatch]
+verify_jwt = false
+
+# Pull PMS (Hospedin): service_role + opcional x-hospedin-sync-secret (ver docs).
+[functions.pms-hospedin-sync]
 verify_jwt = false
