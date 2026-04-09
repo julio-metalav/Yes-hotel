@@ -2229,6 +2229,164 @@ async function reenviarLinksFnrhTopo(reservaId) {
   refresh();
 }
 
+var _detailTopContatoModo = null;
+
+function getPrincipalGuestIndexForReserva(reserva) {
+  if (!reserva || !Array.isArray(reserva.hospedes) || reserva.hospedes.length === 0) return -1;
+  const i = reserva.hospedes.findIndex((h) => h.principal);
+  return i >= 0 ? i : 0;
+}
+
+async function persistirContatoPrincipalSemRefresh(reservaId, guestIndex, email, whatsapp) {
+  const r = getReservaById(reservaId);
+  const h = getHospede(r, guestIndex);
+  if (!r || !h) return false;
+  h.email = String(email || "").trim();
+  h.whatsapp = String(whatsapp || "").trim();
+  syncGuestStatus(h);
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    return await backendUpdateHospedeFull(reservaId, guestIndex, h);
+  }
+  return true;
+}
+
+async function executarEnvioLinksFnrhReserva(reservaId) {
+  const r = getReservaById(reservaId);
+  if (!r || !Array.isArray(r.hospedes)) return;
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    const ok = await backendEnviarLinks(reservaId);
+    if (ok) await refreshFromSource();
+    return;
+  }
+  let porEmail = 0;
+  let porWhatsapp = 0;
+  let porAmbos = 0;
+  r.hospedes.forEach((h) => {
+    if (h.statusOperacional === GUEST_STATUS.PRONTO_PARA_ENVIO && hasContatoSuficiente(h)) {
+      h.statusOperacional = GUEST_STATUS.ENVIADO;
+      registrarEnvioHospede(h);
+      const canal = getCanalEnvioMock(h);
+      if (canal === CANAL_ENVIO.EMAIL) porEmail++;
+      else if (canal === CANAL_ENVIO.WHATSAPP) porWhatsapp++;
+      else if (canal === CANAL_ENVIO.AMBOS) porAmbos++;
+    }
+  });
+  const totalEnviados = porEmail + porWhatsapp + porAmbos;
+  if (totalEnviados > 0) {
+    const parts = [];
+    if (porWhatsapp > 0) parts.push(porWhatsapp + " por WhatsApp");
+    if (porEmail > 0) parts.push(porEmail + " por e-mail");
+    if (porAmbos > 0) parts.push(porAmbos + " por ambos");
+    addHistoricoEvento(r, "links_enviados", "Links de FNRH enviados", parts.join("; "));
+  }
+  refresh();
+}
+
+function openTopContatoPanel(reservaId, modo) {
+  const panel = document.getElementById("detail-top-contato-panel");
+  if (!panel) return;
+  const r = getReservaById(reservaId);
+  if (!r) return;
+  const idx = getPrincipalGuestIndexForReserva(r);
+  if (idx < 0) return;
+  const h = r.hospedes[idx];
+  _detailTopContatoModo = modo;
+  panel.dataset.reservaId = String(reservaId);
+  panel.dataset.guestIndex = String(idx);
+  panel.classList.remove("hidden");
+  const emailEl = document.getElementById("detail-top-contato-email");
+  const waEl = document.getElementById("detail-top-contato-whatsapp");
+  const titleEl = document.getElementById("detail-top-contato-title");
+  if (emailEl) emailEl.value = (h.email || "").trim();
+  if (waEl) waEl.value = (h.whatsapp || "").trim();
+  if (titleEl) {
+    titleEl.textContent =
+      modo === "senha"
+        ? "Confirme o contato e envie a senha"
+        : modo === "fnrh_reenviar"
+          ? "Confirme o contato e reenvie o link FNRH"
+          : "Confirme o contato e envie o link FNRH";
+  }
+  const msgEl = document.getElementById("detail-top-contato-msg");
+  if (msgEl) {
+    msgEl.textContent = "";
+    msgEl.classList.add("hidden");
+    msgEl.classList.remove("is-error", "is-success");
+  }
+}
+
+function closeTopContatoPanel() {
+  _detailTopContatoModo = null;
+  const panel = document.getElementById("detail-top-contato-panel");
+  if (panel) panel.classList.add("hidden");
+}
+
+async function submitDetailTopContatoPanel() {
+  const panel = document.getElementById("detail-top-contato-panel");
+  if (!panel) return;
+  const rid = panel.dataset.reservaId;
+  const idx = parseInt(panel.dataset.guestIndex || "-1", 10);
+  const modo = _detailTopContatoModo;
+  const email = (document.getElementById("detail-top-contato-email")?.value || "").trim();
+  const whatsapp = (document.getElementById("detail-top-contato-whatsapp")?.value || "").trim();
+  const msgEl = document.getElementById("detail-top-contato-msg");
+  const confirmBtn = document.getElementById("detail-top-contato-confirm");
+  if (!rid || idx < 0 || !modo) return;
+  if (!email && !whatsapp) {
+    if (msgEl) {
+      msgEl.textContent = "Informe pelo menos e-mail ou WhatsApp.";
+      msgEl.classList.remove("hidden", "is-success");
+      msgEl.classList.add("is-error");
+    }
+    return;
+  }
+  if (msgEl) {
+    msgEl.classList.add("hidden");
+    msgEl.textContent = "";
+    msgEl.classList.remove("is-error", "is-success");
+  }
+  if (confirmBtn) confirmBtn.disabled = true;
+  try {
+    const okPersist = await persistirContatoPrincipalSemRefresh(rid, idx, email, whatsapp);
+    if (!okPersist) {
+      if (msgEl) {
+        msgEl.textContent = "Não foi possível salvar o contato. Tente novamente.";
+        msgEl.classList.remove("hidden", "is-success");
+        msgEl.classList.add("is-error");
+      }
+      return;
+    }
+    if (modo === "senha") {
+      const result = await backendEnviarSenha(rid, email, whatsapp);
+      if (result.ok) {
+        const okText = (result.data && result.data.mensagem) || "Operação concluída.";
+        if (msgEl) {
+          msgEl.textContent = okText;
+          msgEl.classList.remove("hidden", "is-error");
+          msgEl.classList.add("is-success");
+        }
+        await refreshFromSource();
+        closeTopContatoPanel();
+      } else {
+        if (msgEl) {
+          msgEl.textContent = humanizarMensagemModalEnviarSenha(result.error || "Não foi possível enviar a senha.");
+          msgEl.classList.remove("hidden", "is-success");
+          msgEl.classList.add("is-error");
+        }
+      }
+      return;
+    }
+    if (modo === "fnrh_reenviar") {
+      await reenviarLinksFnrhTopo(rid);
+    } else {
+      await executarEnvioLinksFnrhReserva(rid);
+    }
+    closeTopContatoPanel();
+  } finally {
+    if (confirmBtn) confirmBtn.disabled = false;
+  }
+}
+
 function getResumoComunicacaoReserva(reserva) {
   if (!Array.isArray(reserva.hospedes)) return { porWhatsapp: 0, porEmail: 0, porAmbos: 0, naoEnviado: 0 };
   let porWhatsapp = 0;
@@ -2980,15 +3138,31 @@ function buildSituacaoAcaoTopoHtml(
 
   var secondaryRow = "";
   if (temBotaoSenhaBackend && enviarSenhaBtnHtml && !usedSenhaAsPrimary) {
-    secondaryRow =
-      '<div class="detail-top-actions-secondary detail-top-actions-senha-apoio">' +
-      '<button type="button" class="secondary-button detail-enviar-senha-btn detail-enviar-senha-btn--topo-apoio" id="detail-enviar-senha-btn" data-reserva-id="' +
-      rid +
-      '">Gerar e enviar senha</button></div>';
+    secondaryRow = enviarSenhaBtnHtml;
   }
 
   var situacaoLinha = escapeHtml(st.label);
   var acaoHint = rec.listaLabel && String(rec.listaLabel).trim() && rec.listaLabel !== "—" ? escapeHtml(rec.listaLabel) : "";
+
+  var contatoPanelHtml = "";
+  if (primaryRow || secondaryRow) {
+    contatoPanelHtml =
+      '<div class="detail-top-contato-panel hidden" id="detail-top-contato-panel" data-reserva-id="' +
+      rid +
+      '">' +
+      '<p class="detail-top-contato-title" id="detail-top-contato-title"></p>' +
+      '<div class="detail-top-contato-fields">' +
+      '<label class="detail-top-contato-label" for="detail-top-contato-email">E-mail</label>' +
+      '<input type="email" id="detail-top-contato-email" class="detail-top-contato-input" placeholder="email@exemplo.com" autocomplete="email" />' +
+      '<label class="detail-top-contato-label" for="detail-top-contato-whatsapp">WhatsApp</label>' +
+      '<input type="text" id="detail-top-contato-whatsapp" class="detail-top-contato-input" placeholder="11999990000" inputmode="tel" />' +
+      "</div>" +
+      '<p class="detail-top-contato-msg hidden" id="detail-top-contato-msg" role="status"></p>' +
+      '<div class="detail-top-contato-actions">' +
+      '<button type="button" class="primary-button detail-top-acao-btn detail-top-contato-confirm" id="detail-top-contato-confirm">Confirmar envio</button>' +
+      '<button type="button" class="secondary-button detail-top-contato-cancel" id="detail-top-contato-cancel">Cancelar</button>' +
+      "</div></div>";
+  }
 
   var acaoBlock = "";
   if (primaryRow || secondaryRow) {
@@ -2997,7 +3171,8 @@ function buildSituacaoAcaoTopoHtml(
       '<div class="detail-top-actions">' +
       (primaryRow || "") +
       secondaryRow +
-      "</div>";
+      "</div>" +
+      contatoPanelHtml;
   }
 
   var contextBlock = "";
@@ -3419,9 +3594,9 @@ function renderDetail(reserva) {
     enviarAlertsOnly = `<div class="detail-enviar-links-alert is-warn">Falta contato para ${faltamCount} hóspede(s). Preencha e-mail ou WhatsApp para enviar o link.</div>`;
   } else if (faltamCount > 0 && prontosCount > 0) {
     enviarAlertsOnly = `<div class="detail-enviar-links-alert is-warn">Falta contato para ${faltamCount} hóspede(s).</div>`;
-    enviarLinksBtnHtml = `<button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}" title="${escapeHtml(getEnviarButtonLabel())}">${escapeHtml(getEnviarLinkTopoLabel())}</button>`;
+    enviarLinksBtnHtml = `<button type="button" class="primary-button detail-top-acao-btn detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}" title="${escapeHtml(getEnviarButtonLabel())}">${escapeHtml(getEnviarLinkTopoLabel())}</button>`;
   } else if (prontosCount > 0) {
-    enviarLinksBtnHtml = `<button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}" title="${escapeHtml(getEnviarButtonLabel())}">${escapeHtml(getEnviarLinkTopoLabel())}</button>`;
+    enviarLinksBtnHtml = `<button type="button" class="primary-button detail-top-acao-btn detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}" title="${escapeHtml(getEnviarButtonLabel())}">${escapeHtml(getEnviarLinkTopoLabel())}</button>`;
   } else if (confirmadosCount === totalH) {
     enviarAlertsOnly = acessoLiberadoEfetivo(reserva)
       ? '<div class="detail-enviar-links-alert is-ok">Todas as FNRHs confirmadas. Acesso liberado; aguardando chegada do hóspede.</div>'
@@ -3432,7 +3607,7 @@ function renderDetail(reserva) {
 
   const temBotaoSenhaBackend = PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND;
   const enviarSenhaBtnHtml = temBotaoSenhaBackend
-    ? `<button type="button" class="primary-button detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}">Gerar e enviar senha</button>`
+    ? `<button type="button" class="primary-button detail-top-acao-btn detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}">Gerar e enviar senha</button>`
     : "";
 
   let reenviarFnrhTopoBtnHtml = "";
@@ -3441,7 +3616,7 @@ function renderDetail(reserva) {
     prontosCount === 0 &&
     hospedes.some((h) => h.statusOperacional === GUEST_STATUS.ENVIADO && hasContatoSuficiente(h));
   if (podeReenviarFnrhTopo) {
-    reenviarFnrhTopoBtnHtml = `<button type="button" class="primary-button detail-reenviar-fnrh-topo-btn" id="detail-reenviar-fnrh-topo-btn" data-reserva-id="${escapeHtml(reserva.id)}">Reenviar link FNRH</button>`;
+    reenviarFnrhTopoBtnHtml = `<button type="button" class="primary-button detail-top-acao-btn detail-reenviar-fnrh-topo-btn" id="detail-reenviar-fnrh-topo-btn" data-reserva-id="${escapeHtml(reserva.id)}">Reenviar link FNRH</button>`;
   }
 
   const ctxRecomendacao = buildRecomendacaoOperacionalCtx(reserva);
@@ -3546,7 +3721,7 @@ function bindDetailListeners(reserva) {
           });
         }
       } else if (kind === "gerar_senha") {
-        openModalEnviarSenha(rid);
+        openTopContatoPanel(rid, "senha");
       } else if (kind === "liberar_acesso") {
         acaoLiberarAcesso(rid);
       } else if (kind === "marcar_entrada") {
@@ -3637,42 +3812,17 @@ function bindDetailListeners(reserva) {
 
   const reenviarFnrhTopoBtn = detailBodyElement.querySelector("#detail-reenviar-fnrh-topo-btn");
   if (reenviarFnrhTopoBtn) {
-    reenviarFnrhTopoBtn.addEventListener("click", async () => {
-      await reenviarLinksFnrhTopo(reenviarFnrhTopoBtn.dataset.reservaId);
+    reenviarFnrhTopoBtn.addEventListener("click", () => {
+      const rid = reenviarFnrhTopoBtn.dataset.reservaId;
+      if (rid) openTopContatoPanel(rid, "fnrh_reenviar");
     });
   }
 
   const enviarBtn = detailBodyElement.querySelector("#detail-enviar-links-btn");
   if (enviarBtn) {
-    enviarBtn.addEventListener("click", async () => {
+    enviarBtn.addEventListener("click", () => {
       const rid = enviarBtn.dataset.reservaId;
-      const r = getReservaById(rid);
-      if (!r || !Array.isArray(r.hospedes)) return;
-      if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
-        const ok = await backendEnviarLinks(rid);
-        if (ok) await refreshFromSource();
-        return;
-      }
-      let porEmail = 0, porWhatsapp = 0, porAmbos = 0;
-      r.hospedes.forEach((h) => {
-        if (h.statusOperacional === GUEST_STATUS.PRONTO_PARA_ENVIO && hasContatoSuficiente(h)) {
-          h.statusOperacional = GUEST_STATUS.ENVIADO;
-          registrarEnvioHospede(h);
-          const canal = getCanalEnvioMock(h);
-          if (canal === CANAL_ENVIO.EMAIL) porEmail++;
-          else if (canal === CANAL_ENVIO.WHATSAPP) porWhatsapp++;
-          else if (canal === CANAL_ENVIO.AMBOS) porAmbos++;
-        }
-      });
-      const totalEnviados = porEmail + porWhatsapp + porAmbos;
-      if (totalEnviados > 0) {
-        const parts = [];
-        if (porWhatsapp > 0) parts.push(porWhatsapp + " por WhatsApp");
-        if (porEmail > 0) parts.push(porEmail + " por e-mail");
-        if (porAmbos > 0) parts.push(porAmbos + " por ambos");
-        addHistoricoEvento(r, "links_enviados", "Links de FNRH enviados", parts.join("; "));
-      }
-      refresh();
+      if (rid) openTopContatoPanel(rid, "fnrh");
     });
   }
 
@@ -3680,7 +3830,20 @@ function bindDetailListeners(reserva) {
   if (enviarSenhaBtn) {
     enviarSenhaBtn.addEventListener("click", () => {
       const rid = enviarSenhaBtn.dataset.reservaId;
-      if (rid) openModalEnviarSenha(rid);
+      if (rid) openTopContatoPanel(rid, "senha");
+    });
+  }
+
+  const contatoConfirm = detailBodyElement.querySelector("#detail-top-contato-confirm");
+  if (contatoConfirm) {
+    contatoConfirm.addEventListener("click", () => {
+      submitDetailTopContatoPanel();
+    });
+  }
+  const contatoCancel = detailBodyElement.querySelector("#detail-top-contato-cancel");
+  if (contatoCancel) {
+    contatoCancel.addEventListener("click", () => {
+      closeTopContatoPanel();
     });
   }
 }

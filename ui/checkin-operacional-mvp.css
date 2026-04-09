@@ -1453,33 +1453,94 @@
   gap: 8px;
 }
 
-.op-detail__scroll .detail-top-actions .primary-button {
+.op-detail__scroll .detail-top-actions .primary-button,
+.op-detail__scroll .detail-top-actions .detail-top-acao-btn {
   width: 100%;
   justify-content: center;
 }
 
-.op-detail__scroll .detail-top-actions-secondary .secondary-button {
-  width: 100%;
+/* Ações equivalentes no topo (FNRH + senha): mesmo tratamento visual */
+.op-detail__scroll .detail-top-acao-btn {
+  font-size: 13px;
+  font-weight: 600;
 }
 
-/* Senha no topo: claramente secundária em relação ao FNRH */
-.op-detail__scroll .detail-enviar-senha-btn--topo-apoio {
-  font-size: 12px;
-  font-weight: 500;
-  color: #64748b;
-  background: #f8fafc;
+.op-detail__scroll .detail-top-contato-panel {
+  margin-top: 12px;
+  padding: 12px 12px 14px;
+  border-radius: 8px;
   border: 1px solid #e2e8f0;
-  box-shadow: none;
+  background: #f8fafc;
 }
 
-.op-detail__scroll .detail-enviar-senha-btn--topo-apoio:hover {
-  background: #f1f5f9;
-  color: #475569;
-  border-color: #cbd5e1;
+.op-detail__scroll .detail-top-contato-title {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  line-height: 1.35;
 }
 
-.op-detail__scroll .detail-top-actions-senha-apoio {
-  margin-top: 2px;
+.op-detail__scroll .detail-top-contato-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.op-detail__scroll .detail-top-contato-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
+.op-detail__scroll .detail-top-contato-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  font-family: inherit;
+}
+
+.op-detail__scroll .detail-top-contato-input:focus {
+  outline: none;
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.op-detail__scroll .detail-top-contato-msg {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.op-detail__scroll .detail-top-contato-msg.is-error {
+  color: #b91c1c;
+}
+
+.op-detail__scroll .detail-top-contato-msg.is-success {
+  color: #166534;
+}
+
+.op-detail__scroll .detail-top-contato-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  align-items: center;
+}
+
+.op-detail__scroll .detail-top-contato-actions .detail-top-contato-confirm {
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+
+.op-detail__scroll .detail-top-contato-actions .detail-top-contato-cancel {
+  flex: 0 0 auto;
 }
 
 /* Contexto operacional dentro do mesmo card do topo (envios, pendências) */
