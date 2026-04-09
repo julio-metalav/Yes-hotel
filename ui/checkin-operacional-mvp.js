@@ -2024,13 +2024,16 @@ async function loadAndRenderTtlockSection(reservaId) {
     const statusClass = syncStatus === "ok" ? "sync-ok" : syncStatus === "pending" ? "sync-pending" : syncStatus === "partial" ? "sync-partial" : "sync-failed";
     const statusLabel = syncStatus === "ok" ? "Sync OK" : syncStatus === "pending" ? "Sync pendente" : syncStatus === "partial" ? "Sync parcial" : syncStatus === "failed" ? "Sync falhou" : "—";
     let html = `<div class="ttlock-panel-stack">`;
+    html += `<div class="ttlock-card-status-block ttlock-card-status-block--${statusClass}">`;
+    html += `<p class="ttlock-card-status-label">Status TTLock</p>`;
     html += `<div class="ttlock-status-row"><span class="ttlock-sync-badge ${statusClass}" role="status">${escapeHtml(statusLabel)}</span></div>`;
     html += `<p class="reservation-detail-ttlock-resumo">${escapeHtml(data.resumo || "")}</p>`;
+    html += `</div>`;
     if (data.lastSyncAttemptAt) {
       html += `<p class="reservation-detail-ttlock-meta">Última tentativa: ${escapeHtml(data.lastSyncAttemptAt)}</p>`;
     }
     if (data.lastSyncError) {
-      html += `<p class="reservation-detail-ttlock-error">${escapeHtml(data.lastSyncError)}</p>`;
+      html += `<div class="ttlock-card-attention ttlock-card-attention--error"><p class="ttlock-card-attention-kicker">Atenção</p><p class="reservation-detail-ttlock-error">${escapeHtml(data.lastSyncError)}</p></div>`;
     }
     if (data.temCredencial && data.status !== "revogada") {
       html += `<div class="reservation-detail-ttlock-actions">
@@ -2044,7 +2047,7 @@ async function loadAndRenderTtlockSection(reservaId) {
       </div>`;
     }
     if (data.temCredencial === false) {
-      html += `<p class="reservation-detail-ttlock-muted">Sem credencial operacional para esta reserva.</p>`;
+      html += `<div class="ttlock-card-attention ttlock-card-attention--muted"><p class="reservation-detail-ttlock-muted">Sem credencial operacional para esta reserva.</p></div>`;
     }
     html += `</div>`;
     contentEl.innerHTML = html;
@@ -2936,8 +2939,16 @@ function buildRecomendacaoDetalheHtml(reserva, ctx, opts) {
   return inner;
 }
 
-/** Topo do detalhe: situação + ação principal (FNRH / senha / outras, exceto “Ver hóspedes”) + senha secundária só quando FNRH não está pendente. */
-function buildSituacaoAcaoTopoHtml(reserva, ctx, enviarLinksBtnHtml, reenviarFnrhTopoBtnHtml, enviarSenhaBtnHtml, temBotaoSenhaBackend) {
+/** Topo do detalhe: situação, orientação curta, ação + botões, e contexto operacional (envios etc.) tudo no mesmo card. */
+function buildSituacaoAcaoTopoHtml(
+  reserva,
+  ctx,
+  enviarLinksBtnHtml,
+  reenviarFnrhTopoBtnHtml,
+  enviarSenhaBtnHtml,
+  temBotaoSenhaBackend,
+  topContextInnerHtml,
+) {
   var st = derivarStatusOperacional(reserva);
   var rec = derivarRecomendacaoOperacional(reserva, ctx);
   var rid = escapeHtml(String(reserva.id));
@@ -2987,6 +2998,11 @@ function buildSituacaoAcaoTopoHtml(reserva, ctx, enviarLinksBtnHtml, reenviarFnr
       "</div>";
   }
 
+  var contextBlock = "";
+  if (topContextInnerHtml && String(topContextInnerHtml).trim()) {
+    contextBlock = '<div class="detail-top-context">' + topContextInnerHtml + "</div>";
+  }
+
   return (
     '<div class="reservation-detail-section reservation-detail-top-hero">' +
     '<p class="detail-situacao-kicker">Situação</p>' +
@@ -2995,6 +3011,7 @@ function buildSituacaoAcaoTopoHtml(reserva, ctx, enviarLinksBtnHtml, reenviarFnr
     "</p>" +
     (acaoHint ? '<p class="detail-acao-hint">' + acaoHint + "</p>" : "") +
     acaoBlock +
+    contextBlock +
     "</div>"
   );
 }
@@ -3426,25 +3443,28 @@ function renderDetail(reserva) {
   }
 
   const ctxRecomendacao = buildRecomendacaoOperacionalCtx(reserva);
-  const situacaoAcaoTopoHtml =
-    buildSituacaoAcaoTopoHtml(
-      reserva,
-      ctxRecomendacao,
-      enviarLinksBtnHtml,
-      reenviarFnrhTopoBtnHtml,
-      enviarSenhaBtnHtml,
-      temBotaoSenhaBackend,
-    ) + (enviarAlertsOnly ? `<div class="detail-top-alerts">${enviarAlertsOnly}</div>` : "");
+  const situacaoAcaoTopoHtml = buildSituacaoAcaoTopoHtml(
+    reserva,
+    ctxRecomendacao,
+    enviarLinksBtnHtml,
+    reenviarFnrhTopoBtnHtml,
+    enviarSenhaBtnHtml,
+    temBotaoSenhaBackend,
+    enviarAlertsOnly,
+  );
 
   const ttlockSectionHtml =
     PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && auth?.invokeLifecycleAction
-      ? `<details class="detail-collapsible detail-collapsible--ttlock" id="detail-ttlock-wrap">
-    <summary class="detail-collapsible-summary">Acesso TTLock</summary>
-    <div class="reservation-detail-section reservation-detail-ttlock reservation-detail-ttlock-panel" id="detail-ttlock-section">
-    <p class="reservation-detail-section-title reservation-detail-section-title--inner">Status e ações</p>
-    <p class="reservation-detail-ttlock-loading" id="detail-ttlock-loading">Carregando...</p>
-    <div class="reservation-detail-ttlock-content hidden" id="detail-ttlock-content"></div>
-  </div></details>`
+      ? `<div class="reservation-detail-section reservation-detail-ttlock-card" id="detail-ttlock-wrap">
+    <div class="ttlock-card-head">
+      <p class="ttlock-card-title">Acesso TTLock</p>
+      <p class="ttlock-card-desc">Credencial na fechadura, sincronização e ações operacionais.</p>
+    </div>
+    <div class="ttlock-card-body" id="detail-ttlock-section">
+      <p class="reservation-detail-ttlock-loading" id="detail-ttlock-loading">Carregando status…</p>
+      <div class="reservation-detail-ttlock-content hidden" id="detail-ttlock-content"></div>
+    </div>
+  </div>`
       : "";
 
   const simuladosBtns = [];
@@ -3472,10 +3492,6 @@ function renderDetail(reserva) {
       : "";
 
   const resumoComunicacao = formatResumoComunicacao(reserva);
-  const comunicacaoReservaHtml = `<div class="reservation-detail-section reservation-detail-comunicacao reservation-detail-aux">
-    <p class="reservation-detail-section-title">Comunicação (por hóspede)</p>
-    <p class="reservation-detail-comunicacao-text">${escapeHtml(resumoComunicacao)}</p>
-  </div>`;
 
   const historico = (reserva.historicoOperacional || []).slice().reverse();
   const historicoHtml =
@@ -3497,13 +3513,13 @@ function renderDetail(reserva) {
   detailBodyElement.innerHTML = `
     ${situacaoAcaoTopoHtml}
     ${ttlockSectionHtml}
-    ${comunicacaoReservaHtml}
     ${eventosSimuladosHtml}
-    <div class="reservation-detail-section reservation-detail-hospedes-block reservation-detail-hospedes-block--support" id="detail-hospedes-section">
-      <div class="reservation-detail-section-header-row">
-        <p class="reservation-detail-section-title">Hóspedes</p>
-        <button type="button" class="guest-link-btn detail-add-guest-btn" id="detail-add-guest-btn" data-reserva-id="${escapeHtml(reserva.id)}">Adicionar hóspede</button>
+    <div class="reservation-detail-section reservation-detail-hospedes-block reservation-detail-hospedes-apoio" id="detail-hospedes-section">
+      <div class="reservation-detail-section-header-row reservation-detail-hospedes-header">
+        <p class="reservation-detail-section-title reservation-detail-hospedes-title">Hóspedes e contatos</p>
+        <button type="button" class="guest-link-btn guest-link-btn--subtle detail-add-guest-btn" id="detail-add-guest-btn" data-reserva-id="${escapeHtml(reserva.id)}">Adicionar</button>
       </div>
+      <p class="hospedes-block-comunicacao-line" title="Resumo de canais de envio por hóspede">${escapeHtml(resumoComunicacao)}</p>
       ${guestsHtml}
     </div>
     ${timelineSectionHtml}
@@ -3540,9 +3556,7 @@ function bindDetailListeners(reserva) {
         if (sec) sec.scrollIntoView({ behavior: "smooth", block: "start" });
       } else if (kind === "ir_ttlock") {
         var tw = document.getElementById("detail-ttlock-wrap");
-        if (tw && tw.tagName === "DETAILS") tw.open = true;
-        var tt = document.getElementById("detail-ttlock-section");
-        if (tt) tt.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (tw) tw.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     });
   });
