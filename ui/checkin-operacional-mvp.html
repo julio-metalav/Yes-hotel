@@ -3,74 +3,156 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Yes Hotel - Painel de Check-in Operacional</title>
-    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=13" />
+    <title>Yes Hotel — Painel de Check-in Operacional</title>
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=22" />
   </head>
-  <body>
-    <main class="app-shell">
-      <header class="page-header">
-        <p class="eyebrow">Yes Hotel</p>
-        <h1>Painel de Check-in Operacional</h1>
-        <p class="page-description">
+  <body class="op-body">
+    <div id="access-state" class="op-access hidden" aria-live="polite"></div>
+
+    <div id="content-panel" class="op-app hidden">
+      <header class="op-header">
+        <div class="op-header__left">
+          <h1 class="op-header__title">Painel de Check-in Operacional</h1>
+          <p id="session-user" class="op-header__user" aria-live="polite"></p>
+        </div>
+        <div class="op-header__right">
+          <p class="op-header__support op-header__support--desktop">
+            Acompanhamento por reserva: pagamento, FNRH, acesso e entrada no apartamento.
+          </p>
+          <button type="button" class="op-btn op-btn--ghost" id="op-logout-btn">Sair</button>
+        </div>
+        <p class="op-header__support op-header__support--mobile">
           Acompanhamento por reserva: pagamento, FNRH, acesso e entrada no apartamento.
         </p>
       </header>
 
-      <section class="access-state hidden" id="access-state"></section>
-
-      <section class="panel hidden" id="content-panel">
-        <div class="session-bar">
-          <div id="session-user"></div>
-          <div class="session-actions">
-            <a class="secondary-link" href="./recepcao-mvp.html">Voltar para recepcao</a>
-            <button class="secondary-button" id="logout-button" type="button">Sair</button>
-          </div>
+      <div class="op-controls" aria-label="Filtros e situação">
+        <div class="op-toolbar" role="toolbar" aria-label="Ferramentas do painel">
+          <input
+            type="search"
+            id="op-search"
+            class="op-field op-toolbar__search"
+            placeholder="Buscar apto, hóspede ou reserva…"
+            aria-label="Buscar reservas"
+            autocomplete="off"
+          />
+          <select id="op-toolbar-status" class="op-field op-toolbar__status" aria-label="Filtrar por situação (atalho)">
+            <option value="all">Todos</option>
+            <option value="chegando_hoje">Chegando hoje</option>
+            <option value="pendente_pagamento">Pendente pagamento</option>
+            <option value="pendente_fnrh">Pendente FNRH</option>
+            <option value="acesso_liberado">Acesso liberado</option>
+            <option value="nao_entrou">Não entrou</option>
+            <option value="entrou">Concluído</option>
+          </select>
+          <select id="op-period" class="op-field op-toolbar__period" aria-label="Período do check-in">
+            <option value="all">Todo o período</option>
+            <option value="checkin_today">Check-in hoje</option>
+            <option value="checkin_week">Próximos 7 dias</option>
+            <option value="checkin_month">Mês atual</option>
+          </select>
+          <a href="./importar-reservas-mvp.html" id="op-import-link" class="op-btn op-btn--primary op-toolbar__import hidden">Importar reservas</a>
+          <button type="button" class="op-btn op-btn--secondary" id="op-refresh-btn">Atualizar</button>
         </div>
+        <nav id="op-status-tabs" class="op-tabs" role="tablist" aria-label="Situação da reserva"></nav>
+      </div>
 
-        <div class="operacional-toolbar" id="operacional-toolbar">
-          <div class="summary-cards" id="summary-cards"></div>
-          <nav class="filter-bar filter-bar--tabs" id="filter-bar" aria-label="Filtros da lista"></nav>
-        </div>
+      <section id="operacional-excecoes" class="op-excecoes hidden" aria-label="Exceções operacionais"></section>
 
-        <section class="operacional-excecoes hidden" id="operacional-excecoes" aria-label="Exceções operacionais"></section>
-
-        <section class="lista-operacional" id="lista-operacional" aria-live="polite"></section>
-
-        <aside class="reservation-detail-panel hidden" id="reservation-detail-panel" aria-label="Detalhe da reserva">
-          <div class="reservation-detail-header">
-            <div class="reservation-detail-header-text">
-              <h2 class="reservation-detail-title" id="reservation-detail-title">Reserva</h2>
-              <p class="reservation-detail-subtitle muted" id="reservation-detail-subtitle"></p>
+      <div class="op-main">
+        <div class="op-master">
+          <div class="op-panel">
+            <div class="op-panel__head">
+              <span class="op-panel__title">Reservas</span>
+              <span id="op-table-count" class="op-panel__count"></span>
             </div>
-            <button type="button" class="reservation-detail-close" id="reservation-detail-close" aria-label="Fechar">Fechar</button>
-          </div>
-          <div class="reservation-detail-body" id="reservation-detail-body"></div>
-        </aside>
-        <div class="reservation-detail-backdrop hidden" id="reservation-detail-backdrop" aria-hidden="true"></div>
-
-        <div class="modal-overlay hidden" id="modal-enviar-senha-overlay" aria-hidden="true">
-          <div class="modal-enviar-senha" role="dialog" aria-labelledby="modal-enviar-senha-title">
-            <h3 id="modal-enviar-senha-title">Gerar e enviar senha</h3>
-            <p class="modal-enviar-senha-desc">Exceção operacional: ignora a régua automática de FNRH/24h. Se já existir senha ativa na reserva, apenas reenvia; caso contrário, gera via provisionamento e envia. Informe pelo menos um contato (e-mail ou WhatsApp).</p>
-            <form id="modal-enviar-senha-form">
-              <label for="modal-enviar-senha-email">E-mail</label>
-              <input type="email" id="modal-enviar-senha-email" name="email" placeholder="exemplo@email.com" />
-              <label for="modal-enviar-senha-whatsapp">WhatsApp</label>
-              <input type="tel" id="modal-enviar-senha-whatsapp" name="whatsapp" placeholder="(00) 00000-0000" />
-              <div class="modal-enviar-senha-actions">
-                <button type="button" class="secondary-button" id="modal-enviar-senha-cancel">Cancelar</button>
-                <button type="submit" class="primary-button" id="modal-enviar-senha-submit">Gerar e enviar</button>
+            <div class="op-panel__body">
+              <div id="op-loading" class="op-skeleton hidden" aria-hidden="true">
+                <div class="op-skeleton__row"></div>
+                <div class="op-skeleton__row"></div>
+                <div class="op-skeleton__row"></div>
               </div>
-            </form>
-            <p class="modal-enviar-senha-msg hidden" id="modal-enviar-senha-msg"></p>
+              <div class="op-table-wrap">
+                <table class="op-table op-table--desktop" aria-label="Lista de reservas">
+                  <thead>
+                    <tr>
+                      <th class="op-th op-th--apt">Apto</th>
+                      <th class="op-th">Hóspede</th>
+                      <th class="op-th op-th--period">Período</th>
+                      <th class="op-th op-th--flux">Fluxo</th>
+                      <th class="op-th op-th--status">Status</th>
+                      <th class="op-th op-th--next">Próxima ação</th>
+                      <th class="op-th op-th--actions">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody id="op-table-body"></tbody>
+                </table>
+              </div>
+              <div id="op-mobile-list" class="op-mobile-cards" aria-live="polite"></div>
+              <div id="op-empty" class="op-empty hidden">
+                <div class="op-empty__icon" aria-hidden="true">📋</div>
+                <p class="op-empty__title">Nenhuma reserva encontrada</p>
+                <p class="op-empty__hint">Ajuste os filtros, o período ou importe novas reservas.</p>
+              </div>
+            </div>
           </div>
         </div>
-      </section>
-    </main>
+
+        <aside
+          id="reservation-detail-panel"
+          class="op-detail"
+          aria-label="Detalhe da reserva"
+        >
+          <div id="reservation-detail-backdrop" class="op-detail__backdrop hidden" aria-hidden="true"></div>
+          <div class="op-detail__surface">
+            <div class="op-detail__top">
+              <button type="button" class="op-detail__close" id="reservation-detail-close" aria-label="Fechar detalhes">
+                Fechar
+              </button>
+            </div>
+            <div id="op-detail-empty" class="op-detail__placeholder">
+              <p class="op-detail__placeholder-title">Selecione uma reserva</p>
+              <p class="op-detail__placeholder-text">Clique em uma linha ou em <strong>Ver</strong> para ver detalhes, hóspedes e ações.</p>
+            </div>
+            <div id="op-detail-filled" class="op-detail__filled hidden">
+              <header class="op-detail__header">
+                <div class="op-detail__header-row">
+                  <span id="op-detail-apto" class="op-detail__apto" aria-hidden="true">—</span>
+                  <span id="op-detail-badge-wrap"></span>
+                </div>
+                <h2 id="reservation-detail-title" class="op-detail__guestname">Reserva</h2>
+                <p id="reservation-detail-subtitle" class="op-detail__sub"></p>
+              </header>
+              <div id="reservation-detail-body" class="op-detail__scroll"></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <div class="modal-overlay hidden" id="modal-enviar-senha-overlay" aria-hidden="true">
+        <div class="modal-enviar-senha" role="dialog" aria-labelledby="modal-enviar-senha-title">
+          <h3 id="modal-enviar-senha-title">Gerar e enviar senha</h3>
+          <p class="modal-enviar-senha-desc">
+            Exceção operacional: ignora a régua automática de FNRH/24h. Se já existir senha ativa na reserva, apenas reenvia; caso contrário, gera via provisionamento e envia. Informe pelo menos um contato (e-mail ou WhatsApp).
+          </p>
+          <form id="modal-enviar-senha-form">
+            <label for="modal-enviar-senha-email">E-mail</label>
+            <input type="email" id="modal-enviar-senha-email" name="email" placeholder="exemplo@email.com" />
+            <label for="modal-enviar-senha-whatsapp">WhatsApp</label>
+            <input type="tel" id="modal-enviar-senha-whatsapp" name="whatsapp" placeholder="(00) 00000-0000" />
+            <div class="modal-enviar-senha-actions">
+              <button type="button" class="op-btn op-btn--secondary" id="modal-enviar-senha-cancel">Cancelar</button>
+              <button type="submit" class="op-btn op-btn--primary" id="modal-enviar-senha-submit">Gerar e enviar</button>
+            </div>
+          </form>
+          <p class="modal-enviar-senha-msg hidden" id="modal-enviar-senha-msg"></p>
+        </div>
+      </div>
+    </div>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
-    <script defer src="./checkin-operacional-mvp.js?v=9"></script>
+    <script defer src="./checkin-operacional-mvp.js?v=22"></script>
   </body>
 </html>

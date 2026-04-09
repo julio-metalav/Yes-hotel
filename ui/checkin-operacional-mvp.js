@@ -18,17 +18,29 @@ const auth = window.YesHotelAuthApp;
 const accessStateElement = document.querySelector("#access-state");
 const contentPanelElement = document.querySelector("#content-panel");
 const sessionUserElement = document.querySelector("#session-user");
-const logoutButtonElement = document.querySelector("#logout-button");
-const summaryCardsElement = document.querySelector("#summary-cards");
-const filterBarElement = document.querySelector("#filter-bar");
+const logoutButtonElement = document.querySelector("#op-logout-btn");
+const opStatusTabsElement = document.querySelector("#op-status-tabs");
+const opSearchInput = document.querySelector("#op-search");
+const opToolbarStatusSelect = document.querySelector("#op-toolbar-status");
+const opPeriodSelect = document.querySelector("#op-period");
+const opRefreshBtn = document.querySelector("#op-refresh-btn");
+const opImportLink = document.querySelector("#op-import-link");
+const opTableBody = document.querySelector("#op-table-body");
+const opMobileList = document.querySelector("#op-mobile-list");
+const opEmptyState = document.querySelector("#op-empty");
+const opTableCount = document.querySelector("#op-table-count");
+const opLoadingEl = document.querySelector("#op-loading");
 const excecoesStripElement = document.querySelector("#operacional-excecoes");
-const listaElement = document.querySelector("#lista-operacional");
 const detailPanelElement = document.querySelector("#reservation-detail-panel");
 const detailBackdropElement = document.querySelector("#reservation-detail-backdrop");
 const detailTitleElement = document.querySelector("#reservation-detail-title");
 const detailSubtitleElement = document.querySelector("#reservation-detail-subtitle");
 const detailBodyElement = document.querySelector("#reservation-detail-body");
 const detailCloseButtonElement = document.querySelector("#reservation-detail-close");
+const opDetailEmpty = document.querySelector("#op-detail-empty");
+const opDetailFilled = document.querySelector("#op-detail-filled");
+const opDetailApto = document.querySelector("#op-detail-apto");
+const opDetailBadgeWrap = document.querySelector("#op-detail-badge-wrap");
 
 /* ---------- Utils (data/hora, formatação) ---------- */
 function todayStr() {
@@ -1445,73 +1457,137 @@ const MAPA_FILTRO_ETAPA = {
 
 /* ---------- Estado de UI (filtro ativo, drawer aberto) ---------- */
 let filtroAtivo = FILTER_ALL;
+let periodoAtivo = "all";
+let buscaLista = "";
 let detailReservaId = null;
 
+const OP_TAB_DEFS = [
+  [FILTER_ALL, "Todos"],
+  [FILTER_CHEGANDO_HOJE, "Chegando hoje"],
+  [FILTER_PENDENTE_PAGAMENTO, "Pendente pagamento"],
+  [FILTER_PENDENTE_FNRH, "Pendente FNRH"],
+  [FILTER_ACESSO_LIBERADO, "Acesso liberado"],
+  [FILTER_NAO_ENTROU, "Não entrou"],
+  [FILTER_ENTROU, "Concluído"],
+];
+
+function filtrarPorBusca(lista, q) {
+  const t = (q || "").trim().toLowerCase();
+  if (!t) return lista;
+  return lista.filter((r) => {
+    const apt = String(r.apartamento || "").toLowerCase();
+    const nome = String(r.hospedePrincipal || "").toLowerCase();
+    const id = String(r.id || "").toLowerCase();
+    return apt.includes(t) || nome.includes(t) || id.includes(t);
+  });
+}
+
+function filtrarPorPeriodo(lista, periodo) {
+  if (periodo === "all" || !periodo) return lista;
+  const todayYMD = todayStr();
+  const hoje = new Date();
+  return lista.filter((r) => {
+    const ci = r.checkInPrevisto;
+    if (!ci || String(ci).length < 10) return false;
+    const ymd = String(ci).slice(0, 10);
+    if (periodo === "checkin_today") return ymd === todayYMD;
+    if (periodo === "checkin_week") {
+      const d = new Date(ymd + "T12:00:00");
+      const start = new Date(todayYMD + "T12:00:00");
+      const end = new Date(start);
+      end.setDate(end.getDate() + 7);
+      return !isNaN(d.getTime()) && d >= start && d <= end;
+    }
+    if (periodo === "checkin_month") {
+      const d = new Date(ymd + "T12:00:00");
+      return !isNaN(d.getTime()) && d.getMonth() === hoje.getMonth() && d.getFullYear() === hoje.getFullYear();
+    }
+    return true;
+  });
+}
+
+/** Base para contadores das abas: aplica busca + período, não o filtro da aba */
+function listaBaseContagens() {
+  let L = Array.isArray(reservas) ? reservas.slice() : [];
+  L = filtrarPorPeriodo(L, periodoAtivo);
+  L = filtrarPorBusca(L, buscaLista);
+  return L;
+}
+
+function listaParaExibicao() {
+  let L = listaBaseContagens();
+  L = filtrarReservas(L, filtroAtivo);
+  return sortReservasPorPrioridade(L);
+}
+
+function formatDataBR(ymd) {
+  if (!ymd || String(ymd).length < 10) return "—";
+  const p = String(ymd).slice(0, 10).split("-");
+  if (p.length !== 3) return "—";
+  return `${p[2]}/${p[1]}`;
+}
+
+function noitesEntre(checkIn, checkOut) {
+  const a = new Date(String(checkIn).slice(0, 10) + "T12:00:00");
+  const b = new Date(String(checkOut).slice(0, 10) + "T12:00:00");
+  if (isNaN(a.getTime()) || isNaN(b.getTime())) return null;
+  const ms = b.getTime() - a.getTime();
+  const n = Math.round(ms / (86400000));
+  return n > 0 ? n : null;
+}
+
+function badgeClassFromStatusType(type) {
+  const map = {
+    "pendente-pagamento": "op-badge op-badge--pend-pag",
+    "pendente-fnrh": "op-badge op-badge--pend-fnrh",
+    "pronto-liberar": "op-badge op-badge--pronto",
+    "aguardando-chegada": "op-badge op-badge--aguardando",
+    entrou: "op-badge op-badge--concluido",
+    neutral: "op-badge op-badge--neutral",
+  };
+  return map[type] || "op-badge op-badge--neutral";
+}
+
+function isMobileDetailLayout() {
+  return typeof window !== "undefined" && window.matchMedia && window.matchMedia("(max-width: 767px)").matches;
+}
+
+function syncToolbarSelectFromFiltro() {
+  if (opToolbarStatusSelect instanceof HTMLSelectElement) {
+    const v = filtroAtivo;
+    const opt = Array.from(opToolbarStatusSelect.options).some((o) => o.value === v);
+    opToolbarStatusSelect.value = opt ? v : FILTER_ALL;
+  }
+}
+
+function renderStatusTabs() {
+  if (!(opStatusTabsElement instanceof HTMLElement)) return;
+  const base = listaBaseContagens();
+  const tabsHtml = OP_TAB_DEFS.map(([key, label]) => {
+    const count = filtrarReservas(base, key).length;
+    const selected = filtroAtivo === key;
+    return `<button type="button" role="tab" class="op-tab" data-filter="${key}" aria-selected="${selected}" aria-label="${escapeHtml(label + ", " + count + " reservas")}">
+      <span>${escapeHtml(label)}</span>
+      <span class="op-tab__count">${count}</span>
+    </button>`;
+  }).join("");
+  opStatusTabsElement.innerHTML = tabsHtml;
+  opStatusTabsElement.querySelectorAll(".op-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      filtroAtivo = btn.getAttribute("data-filter") || FILTER_ALL;
+      syncToolbarSelectFromFiltro();
+      renderStatusTabs();
+      renderOperacionalLista();
+      if (opTableCount) {
+        const list = listaParaExibicao();
+        opTableCount.textContent = list.length === 1 ? "1 reserva" : `${list.length} reservas`;
+      }
+    });
+  });
+  syncToolbarSelectFromFiltro();
+}
+
 /* ---------- Render ---------- */
-function renderSummary(summary) {
-  if (!(summaryCardsElement instanceof HTMLElement)) return;
-  const cards = [
-    { key: ETAPA_FUNIL.DADOS_PENDENTES, label: "Dados pendentes", value: summary.dadosPendentes, css: "is-danger" },
-    { key: ETAPA_FUNIL.FNRH_EM_ANDAMENTO, label: "FNRH em andamento", value: summary.fnrhEmAndamento, css: "is-warn" },
-    { key: ETAPA_FUNIL.PRONTA_LIBERAR, label: "Prontas para liberar acesso", value: summary.prontaLiberar, css: "is-info" },
-    { key: ETAPA_FUNIL.ACESSO_LIBERADO, label: "Acesso liberado", value: summary.acessoLiberado, css: "is-info" },
-    { key: ETAPA_FUNIL.CHECKIN_CONCLUIDO, label: "Check-in concluído", value: summary.checkinConcluido, css: "is-ok" },
-  ];
-  const funnelHtml = cards
-    .map(
-      (c) => {
-        const filtro = MAPA_FILTRO_ETAPA[c.key];
-        const active = filtroAtivo === filtro ? " summary-card-is-active" : "";
-        return `<button type="button" class="summary-card summary-card-funnel ${c.css}${active}" data-etapa="${c.key}" aria-label="Filtrar: ${escapeHtml(c.label)}">
-          <span class="summary-card-value">${c.value}</span>
-          <span class="summary-card-label">${escapeHtml(c.label)}</span>
-        </button>`;
-      },
-    )
-    .join("");
-  const chegadasHtml = `<div class="summary-card is-neutral summary-card-aux" title="Chegadas previstas hoje"><span class="summary-card-value">${summary.chegadasHoje}</span><span class="summary-card-label">Hoje</span></div>`;
-  summaryCardsElement.innerHTML = `<div class="summary-cards-funnel">${funnelHtml}${chegadasHtml}</div>`;
-
-  summaryCardsElement.querySelectorAll(".summary-card-funnel").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const etapa = btn.dataset.etapa;
-      const filtro = MAPA_FILTRO_ETAPA[etapa];
-      filtroAtivo = filtroAtivo === filtro ? FILTER_ALL : filtro;
-      renderFilters();
-      refresh();
-    });
-  });
-}
-
-function renderFilters() {
-  if (!(filterBarElement instanceof HTMLElement)) return;
-  const filters = [
-    [FILTER_ALL, "Todos"],
-    [FILTER_CHEGANDO_HOJE, "Chegando hoje"],
-    [FILTER_PENDENTE_PAGAMENTO, "Pendente pagamento"],
-    [FILTER_PENDENTE_FNRH, "Pendente FNRH"],
-    [FILTER_ACESSO_LIBERADO, "Acesso liberado"],
-    [FILTER_NAO_ENTROU, "Nao entrou"],
-    [FILTER_ENTROU, "Entrou"],
-    [FILTER_PRIORIDADE_ALTA, "Alta"],
-    [FILTER_PRIORIDADE_MEDIA, "Média"],
-    [FILTER_PRIORIDADE_BAIXA, "Baixa"],
-  ];
-  filterBarElement.innerHTML = filters
-    .map(
-      ([key, label]) =>
-        `<button type="button" class="filter-btn ${filtroAtivo === key ? "is-active" : ""}" data-filter="${key}">${label}</button>`,
-    )
-    .join("");
-
-  filterBarElement.querySelectorAll(".filter-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      filtroAtivo = btn.dataset.filter;
-      renderFilters();
-      refresh();
-    });
-  });
-}
 
 /* ---------- Ações de domínio (mutam estado e chamam refresh) ---------- */
 /* Aliases semânticos para futura integração: simularPagamentoAprovado=acaoMarcarPagamentoOk,
@@ -1629,91 +1705,209 @@ function primaryActionFor(reserva) {
   return null;
 }
 
-function renderList() {
-  if (!(listaElement instanceof HTMLElement)) return;
-  const filtradas = filtrarReservas(reservas, filtroAtivo);
-  const ordenadas = sortReservasPorPrioridade(filtradas);
+function textoProximaAcaoLista(reserva) {
+  const primary = primaryActionFor(reserva);
+  if (primary) return primary.label;
+  const t = getProximaAcaoReserva(reserva);
+  return t && String(t).trim() ? t : "—";
+}
 
-  listaElement.innerHTML = ordenadas
-    .map((reserva) => {
-      const status = derivarStatusOperacional(reserva);
-      const primary = primaryActionFor(reserva);
-      const prioridade = getPrioridadeReserva(reserva);
-      const period = `${reserva.checkInPrevisto} a ${reserva.checkOutPrevisto}`;
-      const fnrhStatus = getFnrhStatus(reserva);
-      const hospedesTotal = getHospedesTotal(reserva);
-      const veiculoLine =
-        reserva.veiculoPlaca && reserva.veiculoPlaca.trim()
-          ? `${(reserva.veiculoPlaca || "").trim()}${reserva.veiculoCor ? " • " + (reserva.veiculoCor || "").trim() : ""}`
-          : "";
+function linhaFluxoResumo(reserva) {
+  const fnrhStatus = getFnrhStatus(reserva);
+  const hospedesTotal = getHospedesTotal(reserva);
+  const parts = [
+    reserva.pagamento === "pago" ? "Pagamento ok" : "Pag. pendente",
+    fnrhStatus.label,
+    `${hospedesTotal} hósp.`,
+    acessoLiberadoEfetivo(reserva) ? "Acesso ok" : "Sem acesso",
+    reserva.entrouNoApto ? "Entrou" : "Não entrou",
+  ];
+  return parts.map((t) => escapeHtml(t)).join(" · ");
+}
 
-      let actionsHtml = "";
-      if (primary) {
-        const titleAttr =
-          primary.title && typeof primary.title === "string"
-            ? ` title="${escapeHtml(primary.title)}"`
-            : "";
-        actionsHtml = `<button type="button" class="primary-button operational-card-action-btn" data-action="${primary.action}" data-id="${primary.id}"${titleAttr}>${escapeHtml(primary.label)}</button>`;
-      } else {
-        actionsHtml = '<span class="operational-card-done">Concluído</span>';
-      }
-
-      const metaParts = [];
-      metaParts.push(reserva.pagamento === "pago" ? "Pagamento ok" : "Pagamento pendente");
-      metaParts.push(fnrhStatus.label);
-      metaParts.push(`${hospedesTotal} hósp.`);
-      metaParts.push(acessoLiberadoEfetivo(reserva) ? "Acesso ok" : "Sem acesso");
-      metaParts.push(reserva.entrouNoApto ? "Entrou" : "Não entrou");
-      if (prioridade === PRIORIDADE_ALTA) metaParts.push("Prioridade alta");
-      if (veiculoLine) metaParts.push(veiculoLine);
-      const metaLinha = metaParts.map((t) => escapeHtml(t)).join(" · ");
-
-      return `
-        <article class="operational-card" data-id="${reserva.id}">
-          <div class="operational-card-inner">
-            <div class="operational-card-primary">
-              <span class="operational-card-apt-num" aria-hidden="true">${escapeHtml(String(reserva.apartamento || "—"))}</span>
-              <div class="operational-card-copy">
-                <span class="operational-card-guest">${escapeHtml(reserva.hospedePrincipal || "—")}</span>
-                <span class="operational-card-meta">${escapeHtml(period)} · ${metaLinha}</span>
-              </div>
-            </div>
-            <span class="operational-card-status status-${status.type}">${escapeHtml(status.label)}</span>
-            <div class="operational-card-cta">${actionsHtml}</div>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
-
-  listaElement.querySelectorAll("[data-action]").forEach((btn) => {
-    if (!(btn instanceof HTMLButtonElement)) return;
-    const action = btn.dataset.action;
-    const id = btn.dataset.id;
-    if (action === "marcar_pagamento") btn.addEventListener("click", () => acaoMarcarPagamentoOk(id));
-    if (action === "avancar_fnrh") btn.addEventListener("click", () => acaoAvançarFnrh(id));
-    if (action === "liberar_acesso") btn.addEventListener("click", () => acaoLiberarAcesso(id));
-    if (action === "confirmar_checkin") btn.addEventListener("click", () => acaoConfirmarCheckin(id));
+function updateRowSelectionUi() {
+  const sel = detailReservaId || "";
+  document.querySelectorAll("tr.op-tr").forEach((tr) => {
+    const id = tr.getAttribute("data-id");
+    tr.setAttribute("aria-selected", id === sel ? "true" : "false");
   });
-
-  listaElement.querySelectorAll(".operational-card").forEach((card) => {
-    const reservaId = card.dataset.id;
-    if (!reservaId) return;
-    card.addEventListener("click", (e) => {
-      if (e.target.closest("button")) return;
-      openDetail(reservaId);
-    });
+  document.querySelectorAll("button.op-mcard").forEach((btn) => {
+    const id = btn.getAttribute("data-id");
+    btn.setAttribute("aria-selected", id === sel ? "true" : "false");
   });
 }
 
+function renderOperacionalLista() {
+  const ordenadas = listaParaExibicao();
+
+  if (opTableCount instanceof HTMLElement) {
+    opTableCount.textContent = ordenadas.length === 1 ? "1 reserva" : `${ordenadas.length} reservas`;
+  }
+
+  if (ordenadas.length === 0) {
+    if (opTableBody instanceof HTMLElement) opTableBody.innerHTML = "";
+    if (opMobileList instanceof HTMLElement) opMobileList.innerHTML = "";
+    if (opEmptyState instanceof HTMLElement) opEmptyState.classList.remove("hidden");
+    updateRowSelectionUi();
+    return;
+  }
+  if (opEmptyState instanceof HTMLElement) opEmptyState.classList.add("hidden");
+
+  const rowsHtml = ordenadas
+    .map((reserva) => {
+      const status = derivarStatusOperacional(reserva);
+      const badgeCls = badgeClassFromStatusType(status.type);
+      const ci = formatDataBR(reserva.checkInPrevisto);
+      const co = formatDataBR(reserva.checkOutPrevisto);
+      const n = noitesEntre(reserva.checkInPrevisto, reserva.checkOutPrevisto);
+      const noitesTxt = n != null ? `${n} ${n === 1 ? "noite" : "noites"}` : "";
+      const prox = textoProximaAcaoLista(reserva);
+      const proxCls = primaryActionFor(reserva) ? "op-next-action" : "op-next-action op-next-action--muted";
+      const flux = linhaFluxoResumo(reserva);
+      const rid = escapeHtml(String(reserva.id));
+      return `<tr class="op-tr" data-id="${rid}" tabindex="0" role="row">
+        <td class="op-td op-td--apt"><span class="op-apt-num">${escapeHtml(String(reserva.apartamento || "—"))}</span></td>
+        <td class="op-td">
+          <span class="op-guest-name">${escapeHtml(reserva.hospedePrincipal || "—")}</span>
+          <span class="op-guest-sub">${escapeHtml(String(reserva.id || "").slice(0, 8))}${reserva.id && String(reserva.id).length > 8 ? "…" : ""}</span>
+        </td>
+        <td class="op-td">
+          <div class="op-period-line">${ci} → ${co}</div>
+          ${noitesTxt ? `<div class="op-period-sub">${escapeHtml(noitesTxt)}</div>` : ""}
+        </td>
+        <td class="op-td op-td--flux"><div class="op-flux">${flux}</div></td>
+        <td class="op-td op-td--status"><span class="${badgeCls}">${escapeHtml(status.label)}</span></td>
+        <td class="op-td op-td--next"><span class="${proxCls}">${escapeHtml(prox)}</span></td>
+        <td class="op-td op-td--actions">
+          <div class="op-actions-cell">
+            <button type="button" class="op-btn-table op-btn-ver" data-id="${rid}">Ver</button>
+            <button type="button" class="op-btn-icon op-btn-more" data-id="${rid}" title="Detalhes" aria-label="Abrir detalhes">⋯</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+
+  if (opTableBody instanceof HTMLElement) opTableBody.innerHTML = rowsHtml;
+
+  const mobileHtml = ordenadas
+    .map((reserva) => {
+      const status = derivarStatusOperacional(reserva);
+      const badgeCls = badgeClassFromStatusType(status.type);
+      const ci = formatDataBR(reserva.checkInPrevisto);
+      const co = formatDataBR(reserva.checkOutPrevisto);
+      const prox = textoProximaAcaoLista(reserva);
+      const rid = escapeHtml(String(reserva.id));
+      return `<button type="button" class="op-mcard" data-id="${rid}">
+        <div class="op-mcard__r1">
+          <span class="op-mcard__apt">${escapeHtml(String(reserva.apartamento || "—"))}</span>
+          <span class="${badgeCls}">${escapeHtml(status.label)}</span>
+        </div>
+        <div class="op-mcard__name">${escapeHtml(reserva.hospedePrincipal || "—")}</div>
+        <div class="op-mcard__meta">${ci} → ${co}</div>
+        <div class="op-mcard__flux">${linhaFluxoResumo(reserva)}</div>
+        <div class="op-mcard__row5">
+          <span class="op-next-action${primaryActionFor(reserva) ? "" : " op-next-action--muted"}">${escapeHtml(prox)}</span>
+          <span class="op-btn-table op-btn-ver-inline" data-stop="1">Ver</span>
+        </div>
+      </button>`;
+    })
+    .join("");
+  if (opMobileList instanceof HTMLElement) opMobileList.innerHTML = mobileHtml;
+
+  function bindRowOpen(tr) {
+    const id = tr.getAttribute("data-id");
+    if (!id) return;
+    tr.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      openDetail(id);
+    });
+    tr.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        openDetail(id);
+      }
+    });
+  }
+
+  opTableBody?.querySelectorAll("tr.op-tr").forEach(bindRowOpen);
+  opTableBody?.querySelectorAll(".op-btn-ver, .op-btn-more").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute("data-id");
+      if (id) openDetail(id);
+    });
+  });
+
+  opMobileList?.querySelectorAll(".op-mcard").forEach((card) => {
+    card.addEventListener("click", (e) => {
+      const id = card.getAttribute("data-id");
+      if (!id) return;
+      if ((e.target).closest && (e.target).closest("[data-stop]")) {
+        e.stopPropagation();
+        openDetail(id);
+        return;
+      }
+      openDetail(id);
+    });
+  });
+
+  updateRowSelectionUi();
+}
+
+function syncDetailPanelChrome(reserva) {
+  const has = !!(reserva && reserva.id);
+  if (opDetailEmpty instanceof HTMLElement) {
+    opDetailEmpty.classList.toggle("hidden", has);
+  }
+  if (opDetailFilled instanceof HTMLElement) {
+    opDetailFilled.classList.toggle("hidden", !has);
+  }
+  if (!has) {
+    if (opDetailApto instanceof HTMLElement) opDetailApto.textContent = "—";
+    if (opDetailBadgeWrap instanceof HTMLElement) opDetailBadgeWrap.innerHTML = "";
+    if (detailTitleElement instanceof HTMLElement) detailTitleElement.textContent = "Reserva";
+    if (detailSubtitleElement instanceof HTMLElement) detailSubtitleElement.textContent = "";
+    return;
+  }
+  const st = derivarStatusOperacional(reserva);
+  const badgeHtml = `<span class="${badgeClassFromStatusType(st.type)}">${escapeHtml(st.label)}</span>`;
+  if (opDetailApto instanceof HTMLElement) {
+    opDetailApto.textContent = String(reserva.apartamento || "—");
+  }
+  if (opDetailBadgeWrap instanceof HTMLElement) {
+    opDetailBadgeWrap.innerHTML = badgeHtml;
+  }
+  if (detailTitleElement instanceof HTMLElement) {
+    detailTitleElement.textContent = (reserva.hospedePrincipal || "").trim() || "—";
+  }
+  if (detailSubtitleElement instanceof HTMLElement) {
+    const ci = formatDataBR(reserva.checkInPrevisto);
+    const co = formatDataBR(reserva.checkOutPrevisto);
+    const idShort = String(reserva.id || "").trim();
+    const pri = getPrioridadeLabel(getPrioridadeReserva(reserva));
+    const parts = [`${ci} → ${co}`, idShort ? `Reserva ${idShort}` : "", pri ? `Prioridade ${pri}` : ""].filter(Boolean);
+    detailSubtitleElement.textContent = parts.join(" · ");
+  }
+}
+
 function refresh() {
-  const summary = calcularResumo(reservas);
-  renderSummary(summary);
   renderExcecoesOperacionais();
-  renderList();
+  renderStatusTabs();
+  renderOperacionalLista();
   if (detailReservaId) {
     const r = getReservaById(detailReservaId);
-    if (r) renderDetail(r);
+    if (r) {
+      syncDetailPanelChrome(r);
+      renderDetail(r);
+      if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && document.getElementById("detail-ttlock-section")) {
+        loadAndRenderTtlockSection(detailReservaId);
+      }
+    } else {
+      closeDetail();
+    }
+  } else {
+    syncDetailPanelChrome(null);
   }
 }
 
@@ -1848,24 +2042,26 @@ function openDetail(reservaId) {
   const reserva = getReservaById(reservaId);
   if (!reserva) return;
   detailReservaId = reservaId;
-  if (detailPanelElement) detailPanelElement.classList.remove("hidden");
-  if (detailBackdropElement) detailBackdropElement.classList.remove("hidden");
-  if (detailTitleElement) detailTitleElement.textContent = "Apto " + (reserva.apartamento || "—");
-  if (detailSubtitleElement) {
-    var subGuest = (reserva.hospedePrincipal || "").trim() || "—";
-    detailSubtitleElement.textContent =
-      subGuest + " · " + (reserva.checkInPrevisto || "—") + " → " + (reserva.checkOutPrevisto || "—");
-  }
+  syncDetailPanelChrome(reserva);
   renderDetail(reserva);
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && document.getElementById("detail-ttlock-section")) {
     loadAndRenderTtlockSection(reservaId);
   }
+  if (isMobileDetailLayout()) {
+    detailPanelElement?.classList.add("op-detail--open");
+    detailBackdropElement?.classList.remove("hidden");
+  }
+  updateRowSelectionUi();
 }
 
 function closeDetail() {
   detailReservaId = null;
-  if (detailPanelElement) detailPanelElement.classList.add("hidden");
-  if (detailBackdropElement) detailBackdropElement.classList.add("hidden");
+  syncDetailPanelChrome(null);
+  if (isMobileDetailLayout()) {
+    detailPanelElement?.classList.remove("op-detail--open");
+    detailBackdropElement?.classList.add("hidden");
+  }
+  updateRowSelectionUi();
 }
 
 const CANAL_ENVIO = {
@@ -3335,17 +3531,59 @@ async function initCheckinOperacional() {
       `${currentUser.name} | ${auth.getRoleLabel(currentUser.role)} | sessao de ${auth.getSessionDurationHours()} horas`;
   }
 
-  const sessionActions = contentPanelElement?.querySelector(".session-actions");
-  if (sessionActions && currentUser.role === "admin") {
-    const importLink = document.createElement("a");
-    importLink.className = "secondary-link";
-    importLink.href = "./importar-reservas-mvp.html";
-    importLink.textContent = "Importar reservas";
-    sessionActions.insertBefore(importLink, sessionActions.firstChild);
+  if (opImportLink instanceof HTMLElement) {
+    opImportLink.classList.toggle("hidden", currentUser.role !== "admin");
   }
 
   reservas = await loadReservasOperacionaisFromProvider();
-  renderFilters();
+
+  if (opSearchInput instanceof HTMLInputElement) {
+    opSearchInput.addEventListener("input", () => {
+      buscaLista = opSearchInput.value;
+      renderStatusTabs();
+      renderOperacionalLista();
+    });
+  }
+  if (opPeriodSelect instanceof HTMLSelectElement) {
+    opPeriodSelect.addEventListener("change", () => {
+      periodoAtivo = opPeriodSelect.value || "all";
+      renderStatusTabs();
+      renderOperacionalLista();
+    });
+  }
+  if (opToolbarStatusSelect instanceof HTMLSelectElement) {
+    opToolbarStatusSelect.addEventListener("change", () => {
+      filtroAtivo = opToolbarStatusSelect.value || FILTER_ALL;
+      renderStatusTabs();
+      renderOperacionalLista();
+    });
+  }
+  opRefreshBtn?.addEventListener("click", () => {
+    refreshFromSource().catch(() => refresh());
+  });
+
+  window.addEventListener("resize", () => {
+    if (!detailReservaId) {
+      if (!isMobileDetailLayout()) {
+        detailPanelElement?.classList.remove("op-detail--open");
+        detailBackdropElement?.classList.add("hidden");
+      }
+      return;
+    }
+    if (isMobileDetailLayout()) {
+      detailPanelElement?.classList.add("op-detail--open");
+      detailBackdropElement?.classList.remove("hidden");
+    } else {
+      detailPanelElement?.classList.remove("op-detail--open");
+      detailBackdropElement?.classList.add("hidden");
+    }
+  });
+
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape" || !detailReservaId) return;
+    if (isMobileDetailLayout()) closeDetail();
+  });
+
   refresh();
 
   detailCloseButtonElement?.addEventListener("click", closeDetail);
