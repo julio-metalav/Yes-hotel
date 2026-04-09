@@ -2610,17 +2610,20 @@ function renderExcecoesOperacionais() {
         '" title="' +
         (sev === "critica" ? "Crítica" : "Moderada") +
         '"></span>' +
-        '<span class="operacional-excecao-body">' +
-        '<span class="operacional-excecao-apt">Apto ' +
+        '<div class="operacional-excecao-main">' +
+        '<div class="operacional-excecao-line">' +
+        '<span class="operacional-excecao-apt">Apto <strong>' +
         escapeHtml(apt) +
-        "</span>" +
+        "</strong></span>" +
+        '<span class="operacional-excecao-sep" aria-hidden="true"> — </span>' +
         '<span class="operacional-excecao-motivo">' +
         escapeHtml(row.ex.motivo) +
         "</span>" +
+        "</div></div>" +
         (row.ex.ctaHint
-          ? '<span class="operacional-excecao-cta-hint">' + escapeHtml(row.ex.ctaHint) + "</span>"
+          ? '<span class="operacional-excecao-cta">' + escapeHtml(row.ex.ctaHint) + "</span>"
           : "") +
-        "</span></li>"
+        "</li>"
       );
     })
     .join("");
