@@ -2978,8 +2978,8 @@ function buildSituacaoAcaoTopoHtml(
   var secondaryRow = "";
   if (temBotaoSenhaBackend && enviarSenhaBtnHtml && !usedSenhaAsPrimary) {
     secondaryRow =
-      '<div class="detail-top-actions-secondary">' +
-      '<button type="button" class="secondary-button detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="' +
+      '<div class="detail-top-actions-secondary detail-top-actions-senha-apoio">' +
+      '<button type="button" class="secondary-button detail-enviar-senha-btn detail-enviar-senha-btn--topo-apoio" id="detail-enviar-senha-btn" data-reserva-id="' +
       rid +
       '">Gerar e enviar senha</button></div>';
   }
@@ -3682,6 +3682,58 @@ function bindDetailListeners(reserva) {
   }
 }
 
+/** Mensagens do modal de senha: linguagem operacional, sem jargão de banco/API. */
+function humanizarMensagemModalEnviarSenha(raw) {
+  if (raw == null) return "Não foi possível concluir o envio. Tente novamente em instantes.";
+  const t = String(raw).trim();
+  if (!t) return "Não foi possível concluir o envio. Tente novamente em instantes.";
+  const lower = t.toLowerCase();
+
+  if (lower.includes("atualize yes-supabase-auth") || lower.includes("getedgefunctionfetchheaders")) {
+    return "Não foi possível autenticar o envio. Atualize a página ou entre de novo no painel.";
+  }
+  if (lower === "não autenticado." || lower === "nao autenticado." || lower.includes("não autenticado")) {
+    return "Sessão expirada ou indisponível. Entre novamente no painel e tente de novo.";
+  }
+  if (lower.includes("resend_api_key") || lower.includes("resend não configurado")) {
+    return "Envio por e-mail não está disponível neste ambiente. Tente WhatsApp ou contate o suporte.";
+  }
+
+  if (lower.includes("reserva_id") && lower.includes("obrigat")) {
+    return "Referência da reserva não reconhecida. Atualize a página e tente de novo.";
+  }
+
+  const cheiraTecnico =
+    /status_provisionamento|operacional_|credencial_id|remote_keyboard|insert into|select \*|duplicate key|violates|constraint|postgres|internal server|yes-hotel-lifecycle|lifecycle_provision|unexpected token|syntax error|json\.parse|erro ao consultar credencial de acesso:/i.test(
+      t,
+    );
+
+  if (cheiraTecnico) {
+    if (lower.includes("revog")) {
+      return "Credencial encerrada ou revogada. Não é possível enviar senha para esta reserva neste estado.";
+    }
+    if (lower.includes("consultar credencial")) {
+      return "Não foi possível verificar o acesso desta reserva. Tente novamente em instantes.";
+    }
+    return "Não há nova senha para gerar neste momento, ou o envio não pôde ser concluído. Verifique se a senha já foi enviada, se o acesso já está ativo ou aguarde a sincronização com a fechadura.";
+  }
+
+  if (lower.includes("falha na chamada yes-hotel-lifecycle") || /\bhttp 5\d\d\b/i.test(t)) {
+    return "O serviço de acesso não respondeu. Tente novamente em instantes.";
+  }
+  if (lower.includes("lifecycle sem passcode") || lower.includes("sem passcode")) {
+    return "Ainda não há senha disponível para envio. Conclua a liberação de acesso no fluxo da reserva e tente de novo.";
+  }
+  if (lower.includes("falha no provisionamento") || lower.includes("provisionamento da senha")) {
+    return "Não foi possível preparar a senha na fechadura. Verifique o TTLock e tente novamente em instantes.";
+  }
+  if (lower.includes("failed to fetch") || lower.includes("networkerror") || lower === "load failed") {
+    return "Sem conexão com o servidor. Verifique a internet e tente novamente.";
+  }
+
+  return t;
+}
+
 async function backendEnviarSenha(reservaId, email, whatsapp) {
   const supabase = getSupabase();
   if (!supabase) return { ok: false, error: "Não autenticado." };
@@ -3922,7 +3974,7 @@ async function initCheckinOperacional() {
         }, 1400);
       } else {
         if (msgEl) {
-          msgEl.textContent = result.error || "Não foi possível enviar a senha.";
+          msgEl.textContent = humanizarMensagemModalEnviarSenha(result.error || "Não foi possível enviar a senha.");
           msgEl.classList.remove("hidden", "is-success");
           msgEl.classList.add("is-error");
         }

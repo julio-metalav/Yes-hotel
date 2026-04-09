@@ -1357,6 +1357,26 @@
   width: 100%;
 }
 
+/* Senha no topo: claramente secundária em relação ao FNRH */
+.op-detail__scroll .detail-enviar-senha-btn--topo-apoio {
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  box-shadow: none;
+}
+
+.op-detail__scroll .detail-enviar-senha-btn--topo-apoio:hover {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+.op-detail__scroll .detail-top-actions-senha-apoio {
+  margin-top: 2px;
+}
+
 /* Contexto operacional dentro do mesmo card do topo (envios, pendências) */
 .op-detail__scroll .detail-top-context {
   margin-top: 14px;
@@ -1479,31 +1499,31 @@
 }
 
 .op-detail__scroll .reservation-detail-hospedes-apoio {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
   box-shadow: none;
-  padding: 12px 14px 14px;
+  padding: 9px 11px 11px;
 }
 
 .op-detail__scroll .reservation-detail-hospedes-header {
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .op-detail__scroll .reservation-detail-hospedes-title {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.07em;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #94a3b8;
+  color: #b4b8c0;
   margin: 0;
 }
 
 .op-detail__scroll .hospedes-block-comunicacao-line {
-  margin: 0 0 12px;
-  font-size: 11px;
-  line-height: 1.4;
-  color: #9ca3af;
+  margin: 0 0 8px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: #c4c9d2;
 }
 
 .op-detail__scroll .guest-link-btn--subtle {
@@ -1522,45 +1542,45 @@
 }
 
 .op-detail__scroll .reservation-detail-hospedes-apoio .guest-detail-card {
-  background: #fcfcfd;
-  border: 1px solid #e8eaef;
-  padding: 10px 11px;
-  margin-bottom: 8px;
-  border-radius: 8px;
+  background: transparent;
+  border: 1px solid #ececec;
+  padding: 8px 9px;
+  margin-bottom: 6px;
+  border-radius: 6px;
   box-shadow: none;
 }
 
 .op-detail__scroll .reservation-detail-hospedes-apoio .guest-detail-name-row {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .op-detail__scroll .reservation-detail-hospedes-apoio .guest-detail-contact-row {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .op-detail__scroll .reservation-detail-hospedes-apoio .guest-detail-contact-row label {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #a1a1aa;
-  margin-bottom: 2px;
+  color: #c4c4cc;
+  margin-bottom: 1px;
 }
 
 .op-detail__scroll .reservation-detail-hospedes-apoio .guest-detail-contact-row input {
-  font-size: 13px;
-  padding: 7px 9px;
-  border-radius: 6px;
-  border: 1px solid #e5e7eb;
-  background: #fff;
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  border: 1px solid #ebebeb;
+  background: rgba(255, 255, 255, 0.65);
   width: 100%;
   box-sizing: border-box;
 }
 
 .op-detail__scroll .reservation-detail-hospedes-apoio .guest-detail-pendency {
-  font-size: 11px;
-  color: #78716c;
-  margin: 0 0 8px;
+  font-size: 10px;
+  color: #a8a29e;
+  margin: 0 0 6px;
 }
 
 .op-detail__scroll .guest-detail-card {
@@ -1875,7 +1895,7 @@
   margin: 0 0 16px;
   font-size: 13px;
   color: var(--op-text-muted);
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 .modal-enviar-senha form label {
