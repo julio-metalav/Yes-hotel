@@ -2952,7 +2952,6 @@ function buildSituacaoAcaoTopoHtml(
   var st = derivarStatusOperacional(reserva);
   var rec = derivarRecomendacaoOperacional(reserva, ctx);
   var rid = escapeHtml(String(reserva.id));
-  var fnrhPendente = hasFnrhPendente(reserva);
 
   var primaryRow = "";
   var usedSenhaAsPrimary = false;
@@ -2971,13 +2970,13 @@ function buildSituacaoAcaoTopoHtml(
       '">' +
       escapeHtml(rec.cta.label) +
       "</button>";
-  } else if (temBotaoSenhaBackend && enviarSenhaBtnHtml && !fnrhPendente && isFnrhCompleta(reserva)) {
+  } else if (temBotaoSenhaBackend && enviarSenhaBtnHtml) {
     primaryRow = enviarSenhaBtnHtml;
     usedSenhaAsPrimary = true;
   }
 
   var secondaryRow = "";
-  if (temBotaoSenhaBackend && enviarSenhaBtnHtml && !usedSenhaAsPrimary && !fnrhPendente && isFnrhCompleta(reserva)) {
+  if (temBotaoSenhaBackend && enviarSenhaBtnHtml && !usedSenhaAsPrimary) {
     secondaryRow =
       '<div class="detail-top-actions-secondary">' +
       '<button type="button" class="secondary-button detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="' +
