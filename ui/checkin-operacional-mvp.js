@@ -1694,16 +1694,31 @@ function listaProximaAcaoOperacional(reserva) {
   return { texto, destaque: !!(rec && rec.cta) };
 }
 
+/** Resumo curto para coluna Fluxo (lista): pagamento + FNRH + no máximo um terceiro sinal. */
 function linhaFluxoResumo(reserva) {
-  const fnrhStatus = getFnrhStatus(reserva);
-  const hospedesTotal = getHospedesTotal(reserva);
-  const parts = [
-    reserva.pagamento === "pago" ? "Pagamento ok" : "Pag. pendente",
-    fnrhStatus.label,
-    `${hospedesTotal} hósp.`,
-    acessoLiberadoEfetivo(reserva) ? "Acesso ok" : "Sem acesso",
-    reserva.entrouNoApto ? "Entrou" : "Não entrou",
-  ];
+  const total = getHospedesTotal(reserva);
+  const confirmadas = getFnrhConfirmadas(reserva);
+  const pago = isPagamentoOk(reserva);
+
+  const pag = pago ? "Pago" : "Pagamento pendente";
+  let fnrh;
+  if (total === 0) fnrh = "FNRH —";
+  else if (confirmadas === 0) fnrh = `FNRH 0/${total}`;
+  else if (confirmadas < total) fnrh = "FNRH parcial";
+  else fnrh = `FNRH ${total}/${total}`;
+
+  const parts = [pag, fnrh];
+
+  if (pago) {
+    if (reserva.entrouNoApto) {
+      parts.push("Entrou");
+    } else if (total > 0 && confirmadas === total) {
+      parts.push(acessoLiberadoEfetivo(reserva) ? "Acesso ok" : "Sem acesso");
+    } else if (total > 0) {
+      parts.push(`${total} hósp.`);
+    }
+  }
+
   return parts.map((t) => escapeHtml(t)).join(" · ");
 }
 
