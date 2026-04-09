@@ -2023,7 +2023,9 @@ async function loadAndRenderTtlockSection(reservaId) {
     const syncStatus = data.syncStatus ?? null;
     const statusClass = syncStatus === "ok" ? "sync-ok" : syncStatus === "pending" ? "sync-pending" : syncStatus === "partial" ? "sync-partial" : "sync-failed";
     const statusLabel = syncStatus === "ok" ? "Sync OK" : syncStatus === "pending" ? "Sync pendente" : syncStatus === "partial" ? "Sync parcial" : syncStatus === "failed" ? "Sync falhou" : "—";
-    let html = `<p class="reservation-detail-ttlock-resumo"><span class="ttlock-sync-badge ${statusClass}">${escapeHtml(statusLabel)}</span> ${escapeHtml(data.resumo || "")}</p>`;
+    let html = `<div class="ttlock-panel-stack">`;
+    html += `<div class="ttlock-status-row"><span class="ttlock-sync-badge ${statusClass}" role="status">${escapeHtml(statusLabel)}</span></div>`;
+    html += `<p class="reservation-detail-ttlock-resumo">${escapeHtml(data.resumo || "")}</p>`;
     if (data.lastSyncAttemptAt) {
       html += `<p class="reservation-detail-ttlock-meta">Última tentativa: ${escapeHtml(data.lastSyncAttemptAt)}</p>`;
     }
@@ -2032,18 +2034,19 @@ async function loadAndRenderTtlockSection(reservaId) {
     }
     if (data.temCredencial && data.status !== "revogada") {
       html += `<div class="reservation-detail-ttlock-actions">
-        <button type="button" class="secondary-button detail-ttlock-cancel-btn" data-reserva-id="${escapeHtml(reservaId)}">Revogar acesso TTLock (exceção — não cancela no PMS)</button>
-        <button type="button" class="secondary-button detail-ttlock-checkout-btn" data-reserva-id="${escapeHtml(reservaId)}">Checkout (revogar acesso TTLock)</button>
+        <button type="button" class="secondary-button detail-ttlock-btn detail-ttlock-btn--danger detail-ttlock-cancel-btn" data-reserva-id="${escapeHtml(reservaId)}">Revogar acesso TTLock (exceção — não cancela no PMS)</button>
+        <button type="button" class="secondary-button detail-ttlock-btn detail-ttlock-btn--neutral detail-ttlock-checkout-btn" data-reserva-id="${escapeHtml(reservaId)}">Checkout (revogar acesso TTLock)</button>
       </div>`;
     }
     if (data.temCredencial && data.status === "revogada" && data.syncStatus && data.syncStatus !== "ok") {
       html += `<div class="reservation-detail-ttlock-actions">
-        <button type="button" class="secondary-button detail-ttlock-retry-btn" data-reserva-id="${escapeHtml(reservaId)}">Reprocessar sincronização</button>
+        <button type="button" class="secondary-button detail-ttlock-btn detail-ttlock-btn--accent detail-ttlock-retry-btn" data-reserva-id="${escapeHtml(reservaId)}">Reprocessar sincronização</button>
       </div>`;
     }
     if (data.temCredencial === false) {
-      html += `<p class="muted">Sem credencial operacional para esta reserva.</p>`;
+      html += `<p class="reservation-detail-ttlock-muted">Sem credencial operacional para esta reserva.</p>`;
     }
+    html += `</div>`;
     contentEl.innerHTML = html;
     loadingEl.classList.add("hidden");
     contentEl.classList.remove("hidden");
@@ -2059,7 +2062,7 @@ async function loadAndRenderTtlockSection(reservaId) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (typeof console !== "undefined" && console.warn) console.warn("[TTLock] loadAndRenderTtlockSection error", msg);
-    contentEl.innerHTML = `<p class="reservation-detail-ttlock-error">Erro ao carregar status: ${escapeHtml(msg)}</p>`;
+    contentEl.innerHTML = `<div class="ttlock-panel-stack"><p class="reservation-detail-ttlock-error reservation-detail-ttlock-error--banner">Erro ao carregar status: ${escapeHtml(msg)}</p></div>`;
     loadingEl.classList.add("hidden");
     contentEl.classList.remove("hidden");
   }
@@ -2198,6 +2201,28 @@ async function reenviarHospede(reservaId, guestIndex) {
   }
   registrarEnvioHospede(h);
   addHistoricoEvento(r, "reenvio", "Link reenviado para " + (h.nome || "hóspede"), null);
+  refresh();
+}
+
+/** Reenvio em nível de reserva (topo do painel): mesmo efeito do backend `send` links; no mock, um único refresh. */
+async function reenviarLinksFnrhTopo(reservaId) {
+  const r = getReservaById(reservaId);
+  if (!r || !Array.isArray(r.hospedes)) return;
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    const ok = await backendEnviarLinks(reservaId);
+    if (ok) await refreshFromSource();
+    return;
+  }
+  let n = 0;
+  r.hospedes.forEach((h) => {
+    if (h.statusOperacional === GUEST_STATUS.ENVIADO && hasContatoSuficiente(h)) {
+      registrarEnvioHospede(h);
+      n++;
+    }
+  });
+  if (n > 0) {
+    addHistoricoEvento(r, "reenvio", "Link(s) FNRH reenviado(s) (" + n + " hóspede(s))", null);
+  }
   refresh();
 }
 
@@ -2911,34 +2936,37 @@ function buildRecomendacaoDetalheHtml(reserva, ctx, opts) {
   return inner;
 }
 
-/** Topo do detalhe: situação (badge textual) + uma ação principal + opcional senha secundária + alertas de envio. */
-function buildSituacaoAcaoTopoHtml(reserva, ctx, enviarLinksBtnHtml, enviarSenhaBtnHtml, temBotaoSenhaBackend) {
+/** Topo do detalhe: situação + ação principal (FNRH / senha / outras, exceto “Ver hóspedes”) + senha secundária só quando FNRH não está pendente. */
+function buildSituacaoAcaoTopoHtml(reserva, ctx, enviarLinksBtnHtml, reenviarFnrhTopoBtnHtml, enviarSenhaBtnHtml, temBotaoSenhaBackend) {
   var st = derivarStatusOperacional(reserva);
   var rec = derivarRecomendacaoOperacional(reserva, ctx);
   var rid = escapeHtml(String(reserva.id));
+  var fnrhPendente = hasFnrhPendente(reserva);
 
   var primaryRow = "";
   var usedSenhaAsPrimary = false;
 
   if (enviarLinksBtnHtml && String(enviarLinksBtnHtml).indexOf("detail-enviar-links-btn") !== -1) {
     primaryRow = enviarLinksBtnHtml;
+  } else if (reenviarFnrhTopoBtnHtml && String(reenviarFnrhTopoBtnHtml).indexOf("detail-reenviar-fnrh-topo-btn") !== -1) {
+    primaryRow = reenviarFnrhTopoBtnHtml;
   } else if (rec.cta && rec.cta.kind === "gerar_senha" && temBotaoSenhaBackend && enviarSenhaBtnHtml) {
     primaryRow = enviarSenhaBtnHtml;
     usedSenhaAsPrimary = true;
-  } else if (rec.cta && rec.cta.kind && rec.cta.label) {
+  } else if (rec.cta && rec.cta.kind && rec.cta.kind !== "ir_hospedes" && rec.cta.label) {
     primaryRow =
       '<button type="button" class="primary-button detail-recomendacao-cta-btn" data-recomendacao-cta="' +
       escapeHtml(rec.cta.kind) +
       '">' +
       escapeHtml(rec.cta.label) +
       "</button>";
-  } else if (temBotaoSenhaBackend && enviarSenhaBtnHtml) {
+  } else if (temBotaoSenhaBackend && enviarSenhaBtnHtml && !fnrhPendente && isFnrhCompleta(reserva)) {
     primaryRow = enviarSenhaBtnHtml;
     usedSenhaAsPrimary = true;
   }
 
   var secondaryRow = "";
-  if (temBotaoSenhaBackend && enviarSenhaBtnHtml && !usedSenhaAsPrimary) {
+  if (temBotaoSenhaBackend && enviarSenhaBtnHtml && !usedSenhaAsPrimary && !fnrhPendente && isFnrhCompleta(reserva)) {
     secondaryRow =
       '<div class="detail-top-actions-secondary">' +
       '<button type="button" class="secondary-button detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="' +
@@ -3267,7 +3295,6 @@ async function definirPrincipal(reservaId, guestIndex) {
 
 function renderDetail(reserva) {
   if (!(detailBodyElement instanceof HTMLElement) || !reserva) return;
-  const period = `${reserva.checkInPrevisto} a ${reserva.checkOutPrevisto}`;
   const hospedes = Array.isArray(reserva.hospedes) ? reserva.hospedes : [];
   const naoIdentificados = getNaoIdentificados(reserva);
   const faltamContato = getFaltamContato(reserva);
@@ -3301,12 +3328,8 @@ function renderDetail(reserva) {
       const enviadoEm = h.ultimoEnvioEm || null;
       const tentativas = h.tentativasEnvio != null ? h.tentativasEnvio : 0;
       const comunicacaoHtml = `<p class="guest-detail-comunicacao guest-detail-comunicacao--muted">Último envio: ${escapeHtml(canalLabel)}${enviadoEm ? ` · ${escapeHtml(enviadoEm)}` : ""} · Tent.: ${tentativas}</p>`;
-      const reenviarBtn =
-        h.statusOperacional === GUEST_STATUS.ENVIADO && hasContatoSuficiente(h)
-          ? `<button type="button" class="guest-link-btn guest-reenviar-btn guest-reenviar-btn--destaque" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Reenviar</button>`
-          : "";
-      const fnrhLinkHtml = h.fnrhLink
-        ? `<a href="${escapeHtml(h.fnrhLink)}" target="_blank" rel="noopener" class="guest-link-btn">Abrir link FNRH</a>`
+      const fnrhLinkApoioHtml = h.fnrhLink
+        ? `<p class="guest-detail-fnrh-apoio"><a href="${escapeHtml(h.fnrhLink)}" target="_blank" rel="noopener" class="guest-fnrh-apoio-link">Abrir link FNRH</a></p>`
         : "";
       const metaDetalhesHtml =
         `<details class="guest-detail-meta-collapsible">` +
@@ -3314,6 +3337,7 @@ function renderDetail(reserva) {
         `<p class="guest-detail-origin-mode">${escapeHtml(origemLabel)} · ${escapeHtml(modoLabel)}</p>` +
         `${vehicleHtml}` +
         `${comunicacaoHtml}` +
+        `${fnrhLinkApoioHtml}` +
         `</details>`;
       const maisOpcoesHtml =
         `<details class="guest-detail-extra-collapsible">` +
@@ -3334,10 +3358,6 @@ function renderDetail(reserva) {
             <input type="text" class="guest-nome-input" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}" value="${escapeHtml((h.nome || "").trim())}" placeholder="Nome do hóspede" />
           </div>
           <p class="guest-detail-pendency">${escapeHtml(operationalMsg)}</p>
-          <div class="guest-detail-acoes-rapidas">
-            ${fnrhLinkHtml ? `<span class="guest-detail-acoes-rapidas-inner">${fnrhLinkHtml}</span>` : ""}
-            ${reenviarBtn ? `<span class="guest-detail-acoes-rapidas-inner">${reenviarBtn}</span>` : ""}
-          </div>
           <div class="guest-detail-contact-row">
             <label>E-mail</label>
             <input type="text" class="guest-email-input" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}" value="${escapeHtml((h.email || "").trim())}" placeholder="email@exemplo.com" />
@@ -3369,15 +3389,20 @@ function renderDetail(reserva) {
     return `Enviar confirmações e FNRHs (${prontosCount})`;
   }
 
+  function getEnviarLinkTopoLabel() {
+    if (prontosCount <= 1) return "Enviar link FNRH";
+    return "Enviar link FNRH (" + prontosCount + ")";
+  }
+
   if (naoIdentCount > 0) {
     enviarAlertsOnly = `<div class="detail-enviar-links-alert is-warn">Completar dados de ${naoIdentCount} hóspede(s). Preencha o nome (evite "Hospede 2", "Acompanhante", etc.).</div>`;
   } else if (faltamCount > 0 && prontosCount === 0) {
     enviarAlertsOnly = `<div class="detail-enviar-links-alert is-warn">Falta contato para ${faltamCount} hóspede(s). Preencha e-mail ou WhatsApp para enviar o link.</div>`;
   } else if (faltamCount > 0 && prontosCount > 0) {
     enviarAlertsOnly = `<div class="detail-enviar-links-alert is-warn">Falta contato para ${faltamCount} hóspede(s).</div>`;
-    enviarLinksBtnHtml = `<button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}">${escapeHtml(getEnviarButtonLabel())}</button>`;
+    enviarLinksBtnHtml = `<button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}" title="${escapeHtml(getEnviarButtonLabel())}">${escapeHtml(getEnviarLinkTopoLabel())}</button>`;
   } else if (prontosCount > 0) {
-    enviarLinksBtnHtml = `<button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}">${escapeHtml(getEnviarButtonLabel())}</button>`;
+    enviarLinksBtnHtml = `<button type="button" class="primary-button detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}" title="${escapeHtml(getEnviarButtonLabel())}">${escapeHtml(getEnviarLinkTopoLabel())}</button>`;
   } else if (confirmadosCount === totalH) {
     enviarAlertsOnly = acessoLiberadoEfetivo(reserva)
       ? '<div class="detail-enviar-links-alert is-ok">Todas as FNRHs confirmadas. Acesso liberado; aguardando chegada do hóspede.</div>'
@@ -3391,31 +3416,31 @@ function renderDetail(reserva) {
     ? `<button type="button" class="primary-button detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}">Gerar e enviar senha</button>`
     : "";
 
+  let reenviarFnrhTopoBtnHtml = "";
+  const podeReenviarFnrhTopo =
+    hasFnrhPendente(reserva) &&
+    prontosCount === 0 &&
+    hospedes.some((h) => h.statusOperacional === GUEST_STATUS.ENVIADO && hasContatoSuficiente(h));
+  if (podeReenviarFnrhTopo) {
+    reenviarFnrhTopoBtnHtml = `<button type="button" class="primary-button detail-reenviar-fnrh-topo-btn" id="detail-reenviar-fnrh-topo-btn" data-reserva-id="${escapeHtml(reserva.id)}">Reenviar link FNRH</button>`;
+  }
+
   const ctxRecomendacao = buildRecomendacaoOperacionalCtx(reserva);
   const situacaoAcaoTopoHtml =
-    buildSituacaoAcaoTopoHtml(reserva, ctxRecomendacao, enviarLinksBtnHtml, enviarSenhaBtnHtml, temBotaoSenhaBackend) +
-    (enviarAlertsOnly ? `<div class="detail-top-alerts">${enviarAlertsOnly}</div>` : "");
-  const recomendacaoHtml = buildRecomendacaoDetalheHtml(reserva, ctxRecomendacao, { omitCta: true, wrapInDetails: true });
-
-  const bloqueios = getBloqueiosReserva(reserva);
-  const statusReservaClass = bloqueios.length > 0 ? "is-blocked" : isCheckinConcluido(reserva) ? "is-ok" : "is-neutral";
-  const pmsNote =
-    PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND
-      ? "Apartamento, datas e pagamento refletem o PMS. O Yes acompanha FNRH, acesso TTLock e comunicação."
-      : "Modo local/demo: em produção, dados mestres da reserva vêm do PMS; o Yes foca na operação (FNRH, senha, acesso).";
-  const statusReservaHtml = `<div class="reservation-detail-section reservation-detail-status-reserva reservation-detail-status-${statusReservaClass}">
-    <p class="reservation-detail-section-title">Resumo</p>
-    <p class="reservation-detail-pms-note">${escapeHtml(pmsNote)}</p>
-    <p class="reservation-detail-status-period">${escapeHtml(period)}</p>
-  </div>`;
-
-  const resumoOperacionalHtml = buildResumoOperacionalDetalheHtml(reserva);
+    buildSituacaoAcaoTopoHtml(
+      reserva,
+      ctxRecomendacao,
+      enviarLinksBtnHtml,
+      reenviarFnrhTopoBtnHtml,
+      enviarSenhaBtnHtml,
+      temBotaoSenhaBackend,
+    ) + (enviarAlertsOnly ? `<div class="detail-top-alerts">${enviarAlertsOnly}</div>` : "");
 
   const ttlockSectionHtml =
     PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && auth?.invokeLifecycleAction
       ? `<details class="detail-collapsible detail-collapsible--ttlock" id="detail-ttlock-wrap">
     <summary class="detail-collapsible-summary">Acesso TTLock</summary>
-    <div class="reservation-detail-section reservation-detail-ttlock" id="detail-ttlock-section">
+    <div class="reservation-detail-section reservation-detail-ttlock reservation-detail-ttlock-panel" id="detail-ttlock-section">
     <p class="reservation-detail-section-title reservation-detail-section-title--inner">Status e ações</p>
     <p class="reservation-detail-ttlock-loading" id="detail-ttlock-loading">Carregando...</p>
     <div class="reservation-detail-ttlock-content hidden" id="detail-ttlock-content"></div>
@@ -3471,13 +3496,10 @@ function renderDetail(reserva) {
 
   detailBodyElement.innerHTML = `
     ${situacaoAcaoTopoHtml}
-    ${statusReservaHtml}
-    ${recomendacaoHtml}
-    ${resumoOperacionalHtml}
     ${ttlockSectionHtml}
     ${comunicacaoReservaHtml}
     ${eventosSimuladosHtml}
-    <div class="reservation-detail-section reservation-detail-hospedes-block" id="detail-hospedes-section">
+    <div class="reservation-detail-section reservation-detail-hospedes-block reservation-detail-hospedes-block--support" id="detail-hospedes-section">
       <div class="reservation-detail-section-header-row">
         <p class="reservation-detail-section-title">Hóspedes</p>
         <button type="button" class="guest-link-btn detail-add-guest-btn" id="detail-add-guest-btn" data-reserva-id="${escapeHtml(reserva.id)}">Adicionar hóspede</button>
@@ -3597,6 +3619,13 @@ function bindDetailListeners(reserva) {
     });
   });
 
+  const reenviarFnrhTopoBtn = detailBodyElement.querySelector("#detail-reenviar-fnrh-topo-btn");
+  if (reenviarFnrhTopoBtn) {
+    reenviarFnrhTopoBtn.addEventListener("click", async () => {
+      await reenviarLinksFnrhTopo(reenviarFnrhTopoBtn.dataset.reservaId);
+    });
+  }
+
   const enviarBtn = detailBodyElement.querySelector("#detail-enviar-links-btn");
   if (enviarBtn) {
     enviarBtn.addEventListener("click", async () => {
@@ -3630,14 +3659,6 @@ function bindDetailListeners(reserva) {
       refresh();
     });
   }
-
-  detailBodyElement.querySelectorAll(".guest-reenviar-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const rid = btn.dataset.reservaId;
-      const idx = parseInt(btn.dataset.guestIndex, 10);
-      reenviarHospede(rid, idx);
-    });
-  });
 
   const enviarSenhaBtn = detailBodyElement.querySelector("#detail-enviar-senha-btn");
   if (enviarSenhaBtn) {
