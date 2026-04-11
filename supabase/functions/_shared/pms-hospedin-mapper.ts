@@ -62,15 +62,37 @@ function pickDateStr(obj: Record<string, unknown>, keys: string[]): string {
   return "";
 }
 
-function isCancelledStatus(raw: string): boolean {
-  const s = raw.toLowerCase();
-  return (
-    s.includes("cancel") ||
-    s.includes("canceled") ||
-    s.includes("cancelada") ||
-    s === "c" ||
-    s === "cancelado"
-  );
+/** Leitura explícita do PMS; `null` = campo ausente (mantém inferência só pelo status). */
+function readExplicitCancelledFlag(obj: Record<string, unknown>): boolean | null {
+  const keys = ["cancelled", "canceled", "is_cancelled", "isCanceled"];
+  for (const k of keys) {
+    if (!(k in obj)) continue;
+    const v = obj[k];
+    if (typeof v === "boolean") return v;
+    if (typeof v === "number") {
+      if (v === 1) return true;
+      if (v === 0) return false;
+    }
+    if (typeof v === "string") {
+      const t = v.trim().toLowerCase();
+      if (t === "true" || t === "1" || t === "yes" || t === "sim") return true;
+      if (t === "false" || t === "0" || t === "no" || t === "nao" || t === "não") return false;
+    }
+  }
+  return null;
+}
+
+/**
+ * Cancelamento a partir do texto de status (sem `includes("cancel")`, que dá
+ * falso positivo em valores como `not_cancelled` / `not-cancelled`).
+ */
+function statusImpliesCancellation(raw: string): boolean {
+  const s = raw.toLowerCase().trim();
+  if (!s) return false;
+  if (/^(not|non|sem)[\s_-]+(cancel(?:led|ed|ada|ado|amento)?|cancellation)\b/i.test(s)) return false;
+  if (/^(cancelled|canceled|cancelado|cancelada|cancellation|cancelamento)\b/i.test(s)) return true;
+  if (/\b(cancelled|canceled|cancelado|cancelada|cancellation)\b/.test(s)) return true;
+  return false;
 }
 
 function isPaidish(raw: string): boolean {
@@ -184,7 +206,13 @@ function normalizeReservation(obj: Record<string, unknown>, index: number): Norm
   ]);
   if (!checkIn || !checkOut) return null;
 
-  const statusRaw = pickStr(obj, ["status", "situacao", "state", "booking_status"]);
+  const pickedStatus = pickStr(obj, ["status", "situacao", "state", "booking_status"]);
+  const explicitCancelled = readExplicitCancelledFlag(obj);
+  const fromStatus = statusImpliesCancellation(pickedStatus);
+  const isCancelled = fromStatus || explicitCancelled === true;
+  const statusRaw = isCancelled
+    ? (fromStatus ? (pickedStatus.trim() || "cancelled") : "cancelled")
+    : (pickedStatus.trim() || "unknown");
   const payRaw = pickStr(obj, [
     "payment_status",
     "pagamento",
@@ -219,8 +247,8 @@ function normalizeReservation(obj: Record<string, unknown>, index: number): Norm
     unitName: unitName || "",
     checkIn,
     checkOut,
-    statusRaw: statusRaw || "unknown",
-    isCancelled: isCancelledStatus(statusRaw),
+    statusRaw,
+    isCancelled,
     paymentStatusRaw: payRaw,
     paymentMapped: isPaidish(payRaw) ? "pago" : "pendente",
     hospedePrincipalNome,
