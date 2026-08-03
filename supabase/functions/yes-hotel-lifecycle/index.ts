@@ -1,6 +1,7 @@
 /**
  * Yes Hotel — Lifecycle TTLock (Fase 3.2).
- * Ações: lifecycle_provision, lifecycle_gerar_nova_senha, cancelamento, checkout, sync_summary, retry_sync.
+ * Ações: lifecycle_provision, lifecycle_gerar_nova_senha, lifecycle_update_validity,
+ * cancelamento, checkout, sync_summary, retry_sync.
  * Autenticação: usuário interno (admin ou recepção) via Supabase Auth.
  */
 
@@ -15,6 +16,7 @@ import {
   resolveDefaultCredentialValidityIso,
   validityIsoToTtlockMs,
 } from "../_shared/hotel-timezone.ts";
+import { executeLifecycleUpdateValidity } from "../_shared/lifecycle-update-validity.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -69,6 +71,8 @@ const PAYLOAD_MERGE_KEYS = [
   "id",
   "credencialId",
   "credencial_id",
+  "valido_de",
+  "valido_ate",
 ] as const;
 
 function resolvePayloadRecord(body: Record<string, unknown>): Record<string, unknown> {
@@ -513,6 +517,116 @@ async function ttlockAddKeyboardPassword(
     timestamp: new Date().toISOString(),
   });
   return data.keyboardPwdId;
+}
+
+/**
+ * Altera somente startDate/endDate de um passcode existente (keyboardPwd/change).
+ * NÃO envia newKeyboardPwd — preserva a senha remota.
+ */
+async function ttlockChangeKeyboardPasswordValidity(
+  lockId: string | number,
+  keyboardPwdId: number,
+  startDateMs: number,
+  endDateMs: number,
+  ctx?: { reserva_id?: string; credencial_id?: string; credencial_item_id?: string; codigo_logico_destino?: string },
+): Promise<void> {
+  const lockIdNum = typeof lockId === "string" ? parseInt(lockId, 10) : lockId;
+  logTtlockLifecycle({
+    action: "change_validity",
+    source: "edge_function",
+    reserva_id: ctx?.reserva_id,
+    credencial_id: ctx?.credencial_id,
+    credencial_item_id: ctx?.credencial_item_id,
+    codigo_logico_destino: ctx?.codigo_logico_destino,
+    remote_keyboard_pwd_id: keyboardPwdId,
+    lock_id: lockIdNum,
+    start_date_ms: startDateMs,
+    end_date_ms: endDateMs,
+    status: "start",
+    timestamp: new Date().toISOString(),
+  });
+  const token = await getTtlockToken();
+  const params = new URLSearchParams();
+  params.append("clientId", ttlockClientId);
+  params.append("accessToken", token);
+  params.append("lockId", String(lockIdNum));
+  params.append("keyboardPwdId", String(keyboardPwdId));
+  params.append("startDate", String(startDateMs));
+  params.append("endDate", String(endDateMs));
+  params.append("changeType", "2");
+  params.append("date", String(Date.now()));
+  const res = await fetch(`${ttlockApiBase}/v3/keyboardPwd/change`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+  const text = await res.text();
+  let data: { errcode?: number; errmsg?: string };
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    const errMsg = "TTLock change respondeu não-JSON: " + text.substring(0, 200);
+    logTtlockLifecycle({
+      action: "change_validity",
+      source: "edge_function",
+      reserva_id: ctx?.reserva_id,
+      credencial_id: ctx?.credencial_id,
+      credencial_item_id: ctx?.credencial_item_id,
+      codigo_logico_destino: ctx?.codigo_logico_destino,
+      remote_keyboard_pwd_id: keyboardPwdId,
+      lock_id: lockIdNum,
+      status: "error",
+      error_message: errMsg,
+      timestamp: new Date().toISOString(),
+    });
+    throw new Error(errMsg);
+  }
+  if (data.errcode != null && data.errcode !== 0) {
+    const errMsg = `TTLock erro ${data.errcode}: ${data.errmsg ?? "change failed"}`;
+    logTtlockLifecycle({
+      action: "change_validity",
+      source: "edge_function",
+      reserva_id: ctx?.reserva_id,
+      credencial_id: ctx?.credencial_id,
+      credencial_item_id: ctx?.credencial_item_id,
+      codigo_logico_destino: ctx?.codigo_logico_destino,
+      remote_keyboard_pwd_id: keyboardPwdId,
+      lock_id: lockIdNum,
+      status: "error",
+      error_message: errMsg,
+      timestamp: new Date().toISOString(),
+    });
+    throw new Error(errMsg);
+  }
+  if (!res.ok) {
+    const errMsg = data.errmsg ?? `Change passcode validity: ${res.status}`;
+    logTtlockLifecycle({
+      action: "change_validity",
+      source: "edge_function",
+      reserva_id: ctx?.reserva_id,
+      credencial_id: ctx?.credencial_id,
+      credencial_item_id: ctx?.credencial_item_id,
+      codigo_logico_destino: ctx?.codigo_logico_destino,
+      remote_keyboard_pwd_id: keyboardPwdId,
+      lock_id: lockIdNum,
+      status: "error",
+      error_message: errMsg,
+      timestamp: new Date().toISOString(),
+    });
+    throw new Error(errMsg);
+  }
+  logTtlockLifecycle({
+    action: "change_validity",
+    source: "edge_function",
+    reserva_id: ctx?.reserva_id,
+    credencial_id: ctx?.credencial_id,
+    credencial_item_id: ctx?.credencial_item_id,
+    codigo_logico_destino: ctx?.codigo_logico_destino,
+    remote_keyboard_pwd_id: keyboardPwdId,
+    lock_id: lockIdNum,
+    status: "success",
+    timestamp: new Date().toISOString(),
+  });
 }
 
 type CredencialRow = {
@@ -1804,6 +1918,156 @@ async function retrySync(request: Request, payload: Record<string, unknown>): Pr
   );
 }
 
+/**
+ * Ajusta somente valido_de/valido_ate da credencial e dos passcodes remotos existentes.
+ * Não lê, não altera e não retorna senha.
+ */
+async function handleLifecycleUpdateValidity(
+  request: Request,
+  payload: Record<string, unknown>,
+): Promise<Response> {
+  await ensureCallerAllowed(request);
+
+  if (!isTtlockAvailable()) {
+    return jsonResponse(
+      { ok: false, error: "TTLock não configurado (variáveis de ambiente).", database_updated: false },
+      503,
+    );
+  }
+
+  const result = await executeLifecycleUpdateValidity(payload, {
+    async getCredencial(credencialId) {
+      const row = await getCredencialPrincipalPorId(credencialId);
+      if (!row) return null;
+      return {
+        id: row.id,
+        reserva_id: row.reserva_id,
+        status: row.status,
+        valido_de: row.valido_de,
+        valido_ate: row.valido_ate,
+      };
+    },
+    async getItens(credencialId) {
+      const { data, error } = await adminClient
+        .from("operacional_credencial_itens")
+        .select(
+          "id, codigo_logico_destino, lock_id_ttlock, remote_keyboard_pwd_id, status_provisionamento",
+        )
+        .eq("credencial_id", credencialId);
+      if (error) {
+        throw new HttpError("Falha ao listar itens da credencial: " + error.message, 500);
+      }
+      return (Array.isArray(data) ? data : []) as Array<{
+        id: string;
+        codigo_logico_destino: string;
+        lock_id_ttlock: string | number | null;
+        remote_keyboard_pwd_id: number | null;
+        status_provisionamento: string;
+      }>;
+    },
+    async getReserva(reservaId) {
+      const { data } = await adminClient
+        .from("operacional_reservas")
+        .select("check_in_previsto, check_out_previsto")
+        .eq("id", reservaId)
+        .maybeSingle();
+      if (!data) return null;
+      return data as { check_in_previsto: string; check_out_previsto: string };
+    },
+    async changeItemValidity({ item, startDateMs, endDateMs }) {
+      await ttlockChangeKeyboardPasswordValidity(
+        item.lock_id_ttlock!,
+        item.remote_keyboard_pwd_id!,
+        startDateMs,
+        endDateMs,
+        {
+          credencial_id: String(payload.credencial_id ?? payload.credencialId ?? "").trim() || undefined,
+          credencial_item_id: item.id,
+          codigo_logico_destino: item.codigo_logico_destino,
+        },
+      );
+    },
+    async updateCredencialValidity({ credencialId, valido_de, valido_ate }) {
+      const { error } = await adminClient
+        .from("operacional_credenciais_acesso")
+        .update({
+          valido_de,
+          valido_ate,
+          last_sync_attempt_at: new Date().toISOString(),
+          last_sync_error: null,
+          sync_status: "ok",
+        })
+        .eq("id", credencialId);
+      if (error) {
+        // Colunas sync_* podem não existir; tenta update mínimo.
+        const { error: err2 } = await adminClient
+          .from("operacional_credenciais_acesso")
+          .update({ valido_de, valido_ate })
+          .eq("id", credencialId);
+        if (err2) {
+          throw new HttpError(
+            "Validade remota OK, mas falha ao gravar no banco: " + err2.message,
+            500,
+          );
+        }
+      }
+    },
+  });
+
+  if (result.ok) {
+    const credencialId = result.credencial_id;
+    const { data: credRow } = await adminClient
+      .from("operacional_credenciais_acesso")
+      .select("reserva_id")
+      .eq("id", credencialId)
+      .maybeSingle();
+    const reservaId = (credRow as { reserva_id?: string } | null)?.reserva_id;
+    if (reservaId) {
+      await insertReservaEvento(
+        reservaId,
+        result.idempotent ? "ttlock_validity_idempotent" : "ttlock_validity_updated",
+        result.idempotent
+          ? "TTLock: validade já estava correta (idempotente)"
+          : "TTLock: validade da credencial atualizada",
+        {
+          action: "lifecycle_update_validity",
+          credencial_id: credencialId,
+          valido_de: result.valido_de,
+          valido_ate: result.valido_ate,
+          itens_atualizados: result.itens_atualizados,
+          database_updated: result.database_updated,
+          idempotent: !!result.idempotent,
+        },
+      );
+    }
+    return jsonResponse({
+      ok: true,
+      message: result.idempotent
+        ? "Validade já estava aplicada; nenhuma alteração."
+        : "Validade atualizada nos itens remotos e no banco.",
+      credencial_id: result.credencial_id,
+      valido_de: result.valido_de,
+      valido_ate: result.valido_ate,
+      itens_atualizados: result.itens_atualizados,
+      itens: result.itens,
+      database_updated: result.database_updated,
+      idempotent: !!result.idempotent,
+    });
+  }
+
+  return jsonResponse(
+    {
+      ok: false,
+      error: result.error,
+      credencial_id: result.credencial_id,
+      itens_alterados: result.itens_alterados,
+      itens_falha: result.itens_falha,
+      database_updated: false,
+    },
+    result.status,
+  );
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -1834,6 +2098,9 @@ Deno.serve(async (request: Request) => {
     if (action === "lifecycle_gerar_nova_senha") {
       return await handleGerarNovaSenha(request, payload);
     }
+    if (action === "lifecycle_update_validity") {
+      return await handleLifecycleUpdateValidity(request, payload);
+    }
     if (action === "list_pending_cleanup") {
       return await listPendingCleanup(request);
     }
@@ -1841,7 +2108,7 @@ Deno.serve(async (request: Request) => {
     return jsonResponse(
       {
         error:
-          "Ação não suportada. Use: lifecycle_cancel, lifecycle_checkout, lifecycle_provision, lifecycle_gerar_nova_senha, sync_summary, retry_sync, list_pending_cleanup.",
+          "Ação não suportada. Use: lifecycle_cancel, lifecycle_checkout, lifecycle_provision, lifecycle_gerar_nova_senha, lifecycle_update_validity, sync_summary, retry_sync, list_pending_cleanup.",
       },
       400,
     );
