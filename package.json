@@ -13,6 +13,7 @@
     "test:hits:reservations": "tsx scripts/test-hits-reservations.ts",
     "test:hits:reservation": "tsx scripts/test-hits-reservation-detail.ts",
     "test:yes:credential-release": "tsx scripts/test-credential-release-policy.ts",
+    "test:yes:credential-release-orchestrator": "tsx scripts/test-credential-release-orchestrator.ts",
     "test:yes:access:normal": "tsx scripts/test-yes-access-normal.ts",
     "test:yes:access:early-checkin": "tsx scripts/test-yes-access-early-checkin.ts",
     "test:yes:access:late-checkout": "tsx scripts/test-yes-access-late-checkout.ts",

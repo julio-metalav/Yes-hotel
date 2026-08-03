@@ -228,13 +228,17 @@ async function projectOperacional(
 
   const { data: existing } = await client
     .from("operacional_reservas")
-    .select("id")
+    .select("id, pagamento_status, fnrh_status_agregado, senha_enviada_em, acesso_liberado")
     .eq("origem_externa", ORIGEM_OPERACIONAL)
     .eq("external_reservation_id", r.externalReservationId)
     .maybeSingle();
 
   let reservaId: string;
+  let pagamentoAcabouDeConfirmar = false;
   if (existing?.id) {
+    const prevPagamento = (existing as { pagamento_status?: string }).pagamento_status;
+    pagamentoAcabouDeConfirmar =
+      prevPagamento !== "pago" && r.paymentMapped === "pago";
     const { error } = await client.from("operacional_reservas").update(reservaPayload).eq("id", existing.id);
     if (error) {
       await logError(client, runId, "operacional_reservas.update", error.message, {
@@ -260,6 +264,7 @@ async function projectOperacional(
       return;
     }
     reservaId = ins.id as string;
+    pagamentoAcabouDeConfirmar = r.paymentMapped === "pago";
   }
 
   const externalGuestIds = r.guests.map((g) => g.externalGuestId).filter(Boolean);
@@ -321,6 +326,75 @@ async function projectOperacional(
     if (ext && !keep.has(ext)) {
       await client.from("operacional_hospedes").delete().eq("id", row.id as string);
     }
+  }
+
+  if (pagamentoAcabouDeConfirmar) {
+    await maybeDispararLiberacaoPorPagamento(client, reservaId, existing);
+  }
+}
+
+async function maybeDispararLiberacaoPorPagamento(
+  client: SupabaseClient,
+  reservaId: string,
+  existing:
+    | {
+        fnrh_status_agregado?: string | null;
+        senha_enviada_em?: string | null;
+        acesso_liberado?: boolean | null;
+      }
+    | null
+    | undefined,
+): Promise<void> {
+  try {
+    const { data: reserva } = await client
+      .from("operacional_reservas")
+      .select("id, pagamento_status, fnrh_status_agregado, senha_enviada_em, acesso_liberado")
+      .eq("id", reservaId)
+      .maybeSingle();
+    if (!reserva) return;
+    if ((reserva as { senha_enviada_em?: string | null }).senha_enviada_em) return;
+    if ((reserva as { pagamento_status?: string }).pagamento_status !== "pago") return;
+    const fnrh =
+      (reserva as { fnrh_status_agregado?: string | null }).fnrh_status_agregado ||
+      existing?.fnrh_status_agregado ||
+      "";
+    if (fnrh !== "fnrh_completo") return;
+
+    if (!(reserva as { acesso_liberado?: boolean }).acesso_liberado) {
+      await client
+        .from("operacional_reservas")
+        .update({ acesso_liberado: true, updated_at: new Date().toISOString() })
+        .eq("id", reservaId);
+    }
+
+    const sendUrl = `${supabaseUrl}/functions/v1/send-senha`;
+    const res = await fetch(sendUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+      body: JSON.stringify({
+        reserva_id: reservaId,
+        manual: false,
+        origem: "requisitos",
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.warn("[pms-hospedin-sync] liberação por pagamento falhou:", data);
+      await client.from("operacional_reserva_eventos").insert({
+        reserva_id: reservaId,
+        tipo: "falha_enviar_credenciais",
+        titulo: "Falha ao enviar credenciais",
+        detalhe: JSON.stringify({
+          origem: "requisitos",
+          erro: (data as { error?: string }).error || res.statusText,
+        }),
+      });
+    }
+  } catch (error) {
+    console.warn("[pms-hospedin-sync] maybeDispararLiberacaoPorPagamento:", error);
   }
 }
 

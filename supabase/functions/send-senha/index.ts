@@ -61,7 +61,14 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ ok: false, error: "Método não permitido." }, 405);
 
-  let body: { reserva_id?: string; manual?: boolean; usuario_id?: string; email?: string; whatsapp?: string };
+  let body: {
+    reserva_id?: string;
+    manual?: boolean;
+    usuario_id?: string;
+    email?: string;
+    whatsapp?: string;
+    origem?: string;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -75,6 +82,7 @@ Deno.serve(async (req: Request) => {
   const emailContato = (body.email ?? "").trim();
   const whatsappContato = (body.whatsapp ?? "").trim();
   const usuarioId = (body.usuario_id ?? "").trim();
+  const origemRegistro = (body as { origem?: string }).origem?.trim() || (isManual ? "manual" : "requisitos");
 
   const { data: reserva, error: errR } = await admin
     .from("operacional_reservas")
@@ -82,6 +90,18 @@ Deno.serve(async (req: Request) => {
     .eq("id", reservaId)
     .maybeSingle();
   if (errR || !reserva) return jsonResponse({ ok: false, error: "Reserva não encontrada." }, 404);
+
+  const alreadySentAtStart = (reserva as { senha_enviada_em?: string | null }).senha_enviada_em;
+  // Idempotência automática: nunca reenviar sozinho se já houve envio registrado.
+  if (!isManual && alreadySentAtStart) {
+    return jsonResponse({
+      ok: true,
+      skipped: true,
+      reason: "ja_enviada",
+      message: "Senha já enviada anteriormente; envio automático ignorado.",
+      reserva_id: reservaId,
+    }, 200);
+  }
 
   const { data: credencial, error: errC } = await admin
     .from("operacional_credenciais_acesso")
@@ -276,6 +296,7 @@ Deno.serve(async (req: Request) => {
     titulo: isManual ? "Envio manual de senha" : "Envio automático de senha",
     detalhe: JSON.stringify({
       usuario_id: usuarioId || null,
+      origem: origemRegistro,
       canais: { email: enviadoEmail, whatsapp: enviadoWhatsapp },
       canal_operacional_whatsapp: enviadoWhatsapp ? "digisac" : null,
       qtd_fnrh_links: links.length,

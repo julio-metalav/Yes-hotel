@@ -1783,7 +1783,11 @@ async function atualizarHospedeCampo(reservaId, guestIndex, campo, valor) {
 async function acaoMarcarPagamentoOk(id) {
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
     const ok = await backendSetPagamentoOk(id);
-    if (ok) await refreshFromSource();
+    if (ok) {
+      await refreshFromSource();
+      await tentarLiberacaoPorRequisitos(id);
+      await refreshFromSource();
+    }
     return;
   }
   const r = getReservaById(id);
@@ -1792,12 +1796,17 @@ async function acaoMarcarPagamentoOk(id) {
     addHistoricoEvento(r, "pagamento_aprovado", "Pagamento aprovado", null);
   }
   refresh();
+  await tentarLiberacaoPorRequisitos(id);
 }
 
 async function acaoAvançarFnrh(id) {
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
     const ok = await backendConfirmarFnrh(id, null);
-    if (ok) await refreshFromSource();
+    if (ok) {
+      await refreshFromSource();
+      await tentarLiberacaoPorRequisitos(id);
+      await refreshFromSource();
+    }
     return;
   }
   const r = getReservaById(id);
@@ -1808,6 +1817,9 @@ async function acaoAvançarFnrh(id) {
     maybeRegistrarFnrhCompleta(r, antes);
   }
   refresh();
+  if (isFnrhCompleta(getReservaById(id))) {
+    await tentarLiberacaoPorRequisitos(id);
+  }
 }
 
 async function acaoLiberarAcesso(id) {
@@ -2476,9 +2488,35 @@ async function submitDetailTopContatoPanel() {
       return;
     }
     if (modo === "senha" || modo === "senha_reenviar" || modo === "senha_nova") {
-      const result = await backendEnviarSenha(rid, email, whatsapp);
+      const origemRegistro = "manual";
+      const reservaAtual = getReservaById(rid);
+      if (
+        reservaAtual &&
+        !acessoLiberadoEfetivo(reservaAtual) &&
+        modo !== "senha_reenviar"
+      ) {
+        const liberar = await backendLiberarAcesso(rid);
+        if (!liberar.ok) {
+          if (msgEl) {
+            msgEl.textContent = humanizarMensagemModalEnviarSenha(
+              liberar.error || "Falha ao gerar senha",
+            );
+            msgEl.classList.remove("hidden", "is-success");
+            msgEl.classList.add("is-error");
+          }
+          return;
+        }
+      }
+      const result = await backendEnviarSenha(rid, email, whatsapp, {
+        manual: true,
+        origem: origemRegistro,
+      });
       if (result.ok) {
-        const okText = (result.data && result.data.mensagem) || "Operação concluída.";
+        const okText =
+          (result.data && result.data.mensagem) ||
+          (result.skipped
+            ? "Credenciais já haviam sido enviadas."
+            : "Operação concluída.");
         if (msgEl) {
           msgEl.textContent = okText;
           msgEl.classList.remove("hidden", "is-error");
@@ -2798,8 +2836,229 @@ function registrarLiberacaoManualComPendencias(reserva, pendencias) {
       " · " +
       formatHistoricoTimestamp(now) +
       " · Pendências: " +
-      pendencias.join(", "),
+      pendencias.join(", ") +
+      " · origem=manual",
   );
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+    backendAddEvento(
+      reserva.id,
+      "liberacao_manual_com_pendencias",
+      "Acesso/credenciais liberados manualmente com pendências",
+      JSON.stringify({
+        origem: "manual",
+        pendencias,
+        usuario,
+        em: now.toISOString(),
+      }),
+    );
+  }
+}
+
+/** Trava UI para primeiro gatilho válido vencer. */
+const _liberacaoCredencialInFlight = new Set();
+
+/**
+ * Dispara o fluxo real existente (liberar acesso se preciso + send-senha)
+ * após avaliar a política. Idempotente por reservaId.
+ */
+async function aplicarLiberacaoCredenciaisNoPainel(reservaId, options) {
+  const opts = options && typeof options === "object" ? options : {};
+  const origem = opts.origem || "automatico_requisitos";
+  const reserva = getReservaById(reservaId);
+  if (!reserva) {
+    return { ok: false, skipped: true, error: "Reserva não encontrada." };
+  }
+
+  if (_liberacaoCredencialInFlight.has(String(reservaId))) {
+    return { ok: true, skipped: true, motivo: "envio_em_andamento" };
+  }
+
+  const decisao = avaliarPoliticaCredenciaisReserva(reserva, {
+    origem,
+    confirmacaoManual: !!opts.confirmacaoManual,
+    confirmacaoGerarNova: !!opts.confirmacaoGerarNova,
+    acaoSolicitada: opts.acaoSolicitada || "gerar_enviar",
+  });
+
+  if (!decisao) {
+    return { ok: false, skipped: true, error: "Política indisponível." };
+  }
+
+  if (decisao.exigeConfirmacaoManual && !opts.confirmacaoManual) {
+    return {
+      ok: false,
+      skipped: true,
+      exigeConfirmacaoManual: true,
+      decisao,
+    };
+  }
+
+  if (!decisao.deveEnviar && !decisao.deveGerar) {
+    return { ok: true, skipped: true, motivo: decisao.motivo, decisao };
+  }
+
+  _liberacaoCredencialInFlight.add(String(reservaId));
+  try {
+    // Revalida senha sob trava.
+    const fresh = getReservaById(reservaId);
+    if (
+      fresh &&
+      (fresh.senhaEnviadaEm || obterUltimosEventosSenha(fresh).lastOkSenha) &&
+      (opts.acaoSolicitada || "gerar_enviar") === "gerar_enviar"
+    ) {
+      return { ok: true, skipped: true, motivo: "ja_enviada" };
+    }
+
+    if (origem === "manual" && decisao.pendenciasAtuais.length > 0) {
+      registrarLiberacaoManualComPendencias(reserva, decisao.pendenciasAtuais);
+    }
+
+    if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+      if (!acessoLiberadoEfetivo(reserva) && decisao.deveGerar) {
+        const liberar = await backendLiberarAcesso(reservaId);
+        if (!liberar.ok) {
+          await backendAddEvento(
+            reservaId,
+            "falha_gerar_senha",
+            "Falha ao gerar senha",
+            liberar.error || null,
+          );
+          return {
+            ok: false,
+            skipped: false,
+            error: liberar.error || "Falha ao gerar senha",
+            decisao,
+          };
+        }
+      }
+
+      const origemRegistro =
+        origem === "automatico_13h"
+          ? "horario_13h"
+          : origem === "manual"
+            ? "manual"
+            : "requisitos";
+      const principal = Array.isArray(reserva.hospedes)
+        ? reserva.hospedes.find((h) => h.principal) || reserva.hospedes[0]
+        : null;
+      const result = await backendEnviarSenha(
+        reservaId,
+        opts.email || principal?.email || "",
+        opts.whatsapp || principal?.whatsapp || "",
+        {
+          manual: origem === "manual",
+          origem: origemRegistro,
+        },
+      );
+      if (!result.ok) {
+        await backendAddEvento(
+          reservaId,
+          "falha_enviar_credenciais",
+          "Falha ao enviar credenciais",
+          result.error || null,
+        );
+        return { ok: false, skipped: false, error: result.error, decisao };
+      }
+      return {
+        ok: true,
+        skipped: !!result.skipped,
+        enviado: !result.skipped,
+        origem: origemRegistro,
+        decisao,
+      };
+    }
+
+    // Fallback local/mock: marca enviado sem TTLock/comunicação reais.
+    reserva.senhaEnviadaEm = new Date().toISOString();
+    addHistoricoEvento(
+      reserva,
+      origem === "manual" ? "envio_manual_senha" : "envio_auto_senha",
+      "Credenciais enviadas (simulação local)",
+      "origem=" +
+        (origem === "automatico_13h"
+          ? "horario_13h"
+          : origem === "manual"
+            ? "manual"
+            : "requisitos"),
+    );
+    refresh();
+    return { ok: true, skipped: false, enviado: true, decisao };
+  } finally {
+    _liberacaoCredencialInFlight.delete(String(reservaId));
+  }
+}
+
+async function tentarLiberacaoPorRequisitos(reservaId) {
+  const reserva = getReservaById(reservaId);
+  if (!reserva) return { ok: true, skipped: true };
+  if (!isPagamentoOk(reserva) || !isFnrhCompleta(reserva)) {
+    return { ok: true, skipped: true, motivo: "requisitos_incompletos" };
+  }
+  if (reserva.senhaEnviadaEm || obterUltimosEventosSenha(reserva).lastOkSenha) {
+    return { ok: true, skipped: true, motivo: "ja_enviada" };
+  }
+  return aplicarLiberacaoCredenciaisNoPainel(reservaId, {
+    origem: "automatico_requisitos",
+  });
+}
+
+/**
+ * Gatilho das 13h — chamável por scheduler (sem cron nesta etapa).
+ * Expõe window.YesHotelAplicarLiberacaoCredenciais13h.
+ */
+async function aplicarLiberacaoCredenciais13hNoPainel(options) {
+  const opts = options && typeof options === "object" ? options : {};
+  const agora = opts.dataHoraAtual instanceof Date ? opts.dataHoraAtual : new Date();
+  const ymd =
+    opts.dateYmd ||
+    agora.getFullYear() +
+      "-" +
+      String(agora.getMonth() + 1).padStart(2, "0") +
+      "-" +
+      String(agora.getDate()).padStart(2, "0");
+  const lista = (Array.isArray(reservas) ? reservas : []).filter(
+    (r) => String(r.checkInPrevisto || "").slice(0, 10) === ymd,
+  );
+  const policy = window.YesHotelCredentialReleasePolicy;
+  let enviadas = 0;
+  let ignoradas = 0;
+  let falhas = 0;
+  const resultados = [];
+  for (let i = 0; i < lista.length; i++) {
+    const r = lista[i];
+    if (!policy || !policy.atingiuHorario13hCheckin) {
+      ignoradas += 1;
+      continue;
+    }
+    const checkinDt = String(r.checkInPrevisto).slice(0, 10) + "T14:00:00";
+    if (!policy.atingiuHorario13hCheckin(checkinDt, agora)) {
+      ignoradas += 1;
+      continue;
+    }
+    if (r.senhaEnviadaEm || obterUltimosEventosSenha(r).lastOkSenha) {
+      ignoradas += 1;
+      continue;
+    }
+    const result = await aplicarLiberacaoCredenciaisNoPainel(r.id, {
+      origem: "automatico_13h",
+    });
+    resultados.push(result);
+    if (result.enviado) enviadas += 1;
+    else if (result.error) falhas += 1;
+    else ignoradas += 1;
+  }
+  return {
+    processadas: lista.length,
+    enviadas,
+    ignoradas,
+    falhas,
+    resultados,
+  };
+}
+
+if (typeof window !== "undefined") {
+  window.YesHotelAplicarLiberacaoCredenciais13h =
+    aplicarLiberacaoCredenciais13hNoPainel;
 }
 
 function derivarExcecaoOperacionalReserva(reserva) {
@@ -4162,7 +4421,10 @@ function humanizarMensagemModalEnviarSenha(raw) {
   return t;
 }
 
-async function backendEnviarSenha(reservaId, email, whatsapp) {
+async function backendEnviarSenha(reservaId, email, whatsapp, options) {
+  const opts = options && typeof options === "object" ? options : {};
+  const manual = opts.manual !== false;
+  const origem = opts.origem || (manual ? "manual" : "requisitos");
   const supabase = getSupabase();
   if (!supabase) return { ok: false, error: "Não autenticado." };
   if (!auth?.getEdgeFunctionFetchHeaders) {
@@ -4188,7 +4450,8 @@ async function backendEnviarSenha(reservaId, email, whatsapp) {
     headers,
     body: JSON.stringify({
       reserva_id: reservaId,
-      manual: true,
+      manual: !!manual,
+      origem,
       email: (email || "").trim() || undefined,
       whatsapp: (whatsapp || "").trim() || undefined,
       usuario_id: session?.user?.id || undefined,
@@ -4202,7 +4465,7 @@ async function backendEnviarSenha(reservaId, email, whatsapp) {
       detalhe: data.error || null,
     };
   }
-  return { ok: true, data };
+  return { ok: true, data, skipped: !!data.skipped };
 }
 
 let _modalEnviarSenhaReservaId = null;
@@ -4415,7 +4678,10 @@ async function initCheckinOperacional() {
         msgEl.classList.add("hidden");
         msgEl.textContent = "";
       }
-      const result = await backendEnviarSenha(reservaId, email, whatsapp);
+      const result = await backendEnviarSenha(reservaId, email, whatsapp, {
+        manual: true,
+        origem: "manual",
+      });
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = labelEnviar || "Gerar e enviar";

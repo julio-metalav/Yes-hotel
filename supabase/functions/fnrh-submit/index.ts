@@ -216,6 +216,10 @@ Deno.serve(async (req: Request) => {
 
   await syncFnrhToHits(admin, row.id, reservaId, now);
 
+  if (agregado === "fnrh_completo") {
+    await maybeDispararLiberacaoPorRequisitos(reservaId);
+  }
+
   return jsonResponse({
     ok: true,
     message: "FNRH confirmada com sucesso.",
@@ -224,6 +228,60 @@ Deno.serve(async (req: Request) => {
     status: "confirmado_hospede",
   });
 });
+
+/**
+ * Quando FNRH fecha por último: se pagamento já estiver ok e senha não enviada,
+ * dispara o fluxo existente send-senha (automático). Idempotente via senha_enviada_em.
+ */
+async function maybeDispararLiberacaoPorRequisitos(reservaId: string): Promise<void> {
+  try {
+    const { data: reserva } = await admin
+      .from("operacional_reservas")
+      .select("id, pagamento_status, senha_enviada_em, acesso_liberado")
+      .eq("id", reservaId)
+      .maybeSingle();
+    if (!reserva) return;
+    if ((reserva as { senha_enviada_em?: string | null }).senha_enviada_em) return;
+    if ((reserva as { pagamento_status?: string }).pagamento_status !== "pago") return;
+
+    if (!(reserva as { acesso_liberado?: boolean }).acesso_liberado) {
+      await admin
+        .from("operacional_reservas")
+        .update({ acesso_liberado: true, updated_at: new Date().toISOString() })
+        .eq("id", reservaId);
+    }
+
+    const sendUrl = `${supabaseUrl}/functions/v1/send-senha`;
+    const res = await fetch(sendUrl, {
+      method: "POST",
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+      body: JSON.stringify({
+        reserva_id: reservaId,
+        manual: false,
+        origem: "requisitos",
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.warn("[fnrh-submit] liberação por requisitos falhou:", data);
+      await admin.from("operacional_reserva_eventos").insert({
+        reserva_id: reservaId,
+        tipo: "falha_enviar_credenciais",
+        titulo: "Falha ao enviar credenciais",
+        detalhe: JSON.stringify({
+          origem: "requisitos",
+          erro: (data as { error?: string }).error || res.statusText,
+        }),
+      });
+    }
+  } catch (error) {
+    console.warn("[fnrh-submit] maybeDispararLiberacaoPorRequisitos:", error);
+  }
+}
 
 async function syncFnrhToHits(
   client: ReturnType<typeof createClient>,
