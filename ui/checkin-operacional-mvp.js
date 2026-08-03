@@ -13,6 +13,7 @@
 "use strict";
 
 const auth = window.YesHotelAuthApp;
+const operacionalRepository = window.YesHotelOperacionalRepository;
 
 /* ---------- Refs DOM ---------- */
 const accessStateElement = document.querySelector("#access-state");
@@ -41,6 +42,15 @@ const opDetailEmpty = document.querySelector("#op-detail-empty");
 const opDetailFilled = document.querySelector("#op-detail-filled");
 const opDetailApto = document.querySelector("#op-detail-apto");
 const opDetailBadgeWrap = document.querySelector("#op-detail-badge-wrap");
+const opClearLocalDataButton = document.querySelector("#op-clear-local-data");
+const opRestoreDemoDataButton = document.querySelector("#op-restore-demo-data");
+const opKpiArrivals = document.querySelector("#op-kpi-arrivals");
+const opKpiArrivalsNote = document.querySelector("#op-kpi-arrivals-note");
+const opKpiCompleted = document.querySelector("#op-kpi-completed");
+const opKpiCompletedNote = document.querySelector("#op-kpi-completed-note");
+const opKpiFnrh = document.querySelector("#op-kpi-fnrh");
+const opKpiFnrhNote = document.querySelector("#op-kpi-fnrh-note");
+const opKpiAccess = document.querySelector("#op-kpi-access");
 
 /* ---------- Utils (data/hora, formatação) ---------- */
 function todayStr() {
@@ -355,15 +365,27 @@ function ensureReservaDefaults(payload) {
   const comunicacaoEnviosOperacional = Array.isArray(payload.comunicacaoEnviosOperacional)
     ? payload.comunicacaoEnviosOperacional
     : [];
+  const sourceMode = sanitizeString(payload.sourceMode ?? payload.source_mode ?? "");
+  const quantidadeHospedes = Math.max(
+    1,
+    Number(payload.quantidadeHospedes ?? payload.guestCount) || 1,
+  );
   return {
     id,
+    sourceMode,
     apartamento,
     hospedePrincipal,
     checkInPrevisto,
     checkOutPrevisto,
+    checkInHorario: sanitizeString(payload.checkInHorario ?? payload.checkInTime ?? "14:00") || "14:00",
+    checkOutHorario: sanitizeString(payload.checkOutHorario ?? payload.checkOutTime ?? "12:00") || "12:00",
+    quantidadeHospedes,
+    observacoes: sanitizeString(payload.observacoes ?? payload.observacoesOperacionais ?? ""),
     pagamento,
     acessoLiberado,
     entrouNoApto,
+    ttlockStatus: sanitizeString(payload.ttlockStatus ?? "mock") || "mock",
+    comunicacaoStatus: sanitizeString(payload.comunicacaoStatus ?? "mock") || "mock",
     veiculoPlaca,
     veiculoCor,
     hospedes: [],
@@ -372,6 +394,8 @@ function ensureReservaDefaults(payload) {
     fnrhCompletoEm,
     senhaEnviadaEm,
     comunicacaoEnviosOperacional,
+    createdAt: payload.createdAt ?? null,
+    updatedAt: payload.updatedAt ?? null,
   };
 }
 
@@ -397,6 +421,9 @@ function normalizarReservaExterna(payload) {
   const rawHospedes = payload.hospedes ?? payload.guests;
   const rawGuests = toGuestArray(rawHospedes, reserva.id);
   reserva.hospedes = rawGuests.map((g, i) => normalizarHospedeExterno(g, reserva.id || String(i), i + 1));
+  if (payload.quantidadeHospedes == null && payload.guestCount == null) {
+    reserva.quantidadeHospedes = Math.max(1, reserva.hospedes.length);
+  }
   if (!reserva.hospedePrincipal && reserva.hospedes.length > 0) {
     const principal = reserva.hospedes.find((h) => h.principal) || reserva.hospedes[0];
     reserva.hospedePrincipal = (principal && principal.nome) ? principal.nome : "";
@@ -444,17 +471,27 @@ function serializarReservaOperacional(reserva) {
   if (!reserva) return null;
   return {
     id: reserva.id,
+    sourceMode: reserva.sourceMode || "",
     apartamento: reserva.apartamento,
     hospedePrincipal: reserva.hospedePrincipal,
     checkInPrevisto: reserva.checkInPrevisto,
     checkOutPrevisto: reserva.checkOutPrevisto,
+    checkInHorario: reserva.checkInHorario || "14:00",
+    checkOutHorario: reserva.checkOutHorario || "12:00",
+    quantidadeHospedes: reserva.quantidadeHospedes || (reserva.hospedes || []).length || 1,
+    observacoes: reserva.observacoes || "",
     pagamento: reserva.pagamento,
     acessoLiberado: !!reserva.acessoLiberado,
     entrouNoApto: !!reserva.entrouNoApto,
+    ttlockStatus: reserva.ttlockStatus || "mock",
+    comunicacaoStatus: reserva.comunicacaoStatus || "mock",
     veiculoPlaca: reserva.veiculoPlaca || "",
     veiculoCor: reserva.veiculoCor || "",
     hospedes: (reserva.hospedes || []).map(serializarHospedeOperacional),
     historicoOperacional: Array.isArray(reserva.historicoOperacional) ? reserva.historicoOperacional : [],
+    fnrhStatusAgregado: reserva.fnrhStatusAgregado || "fnrh_pendente",
+    createdAt: reserva.createdAt || null,
+    updatedAt: reserva.updatedAt || null,
   };
 }
 
@@ -552,7 +589,8 @@ const PAINEL_DATA_SOURCE_MOCK_LOCAL = "mock-local";
 const PAINEL_DATA_SOURCE_JSON_LOCAL = "json-local";
 const PAINEL_DATA_SOURCE_HITS_ADAPTER = "hits-adapter";
 const PAINEL_DATA_SOURCE_BACKEND = "backend";
-/** Origem atual: "backend" (Supabase) | "mock-local" | "json-local" | "hits-adapter". */
+const PAINEL_DATA_SOURCE_LOCAL_REPOSITORY = "local-repository";
+/** Origem padrão: backend real. Modo localStorage permanece só como demonstração explícita. */
 const PAINEL_DATA_SOURCE = PAINEL_DATA_SOURCE_BACKEND;
 const PAINEL_JSON_LOCAL_URL = "./data/checkin-operacional-reservas.json";
 
@@ -1024,7 +1062,23 @@ function loadReservasOperacionais() {
   return normalizarListaReservasExternas(payloads);
 }
 
+function loadReservasFromLocalRepository() {
+  if (!operacionalRepository) {
+    return Promise.reject(
+      new Error("Repositório operacional local não foi carregado."),
+    );
+  }
+  return Promise.resolve(
+    normalizarListaReservasExternas(
+      operacionalRepository.listReservations(),
+    ),
+  );
+}
+
 function loadReservasOperacionaisFromProvider() {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY) {
+    return loadReservasFromLocalRepository();
+  }
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
     return loadReservasFromBackend();
   }
@@ -1047,6 +1101,13 @@ function loadReservasOperacionaisFromProvider() {
 }
 
 function getPainelDataSourceInfo() {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY) {
+    return {
+      type: PAINEL_DATA_SOURCE_LOCAL_REPOSITORY,
+      description: "Modo local / demonstração",
+      available: !!operacionalRepository,
+    };
+  }
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
     return { type: PAINEL_DATA_SOURCE_BACKEND, description: "Backend Yes (Supabase)", available: !!getSupabase() };
   }
@@ -1476,6 +1537,44 @@ function filtrarReservas(lista, filtroAtivo) {
 
 function calcularResumo(lista) {
   return getResumoFunil(lista);
+}
+
+function renderOperationalMetrics() {
+  const list = Array.isArray(reservas) ? reservas : [];
+  const summary = calcularResumo(list);
+  const completedToday = list.filter(
+    (reservation) =>
+      isChegadaHoje(reservation) && isCheckinConcluido(reservation),
+  ).length;
+  const fnrhPending = list.filter((reservation) =>
+    hasFnrhPendente(reservation),
+  ).length;
+  const accessGranted = list.filter((reservation) =>
+    acessoLiberadoEfetivo(reservation),
+  ).length;
+  const completionPercent = summary.chegadasHoje
+    ? Math.round((completedToday / summary.chegadasHoje) * 100)
+    : 0;
+
+  if (opKpiArrivals) opKpiArrivals.textContent = String(summary.chegadasHoje);
+  if (opKpiArrivalsNote) {
+    opKpiArrivalsNote.textContent =
+      summary.chegadasHoje === 1
+        ? "1 chegada prevista"
+        : `${summary.chegadasHoje} chegadas previstas`;
+  }
+  if (opKpiCompleted) {
+    opKpiCompleted.textContent = String(completedToday);
+  }
+  if (opKpiCompletedNote) {
+    opKpiCompletedNote.textContent = `${completionPercent}% das chegadas`;
+  }
+  if (opKpiFnrh) opKpiFnrh.textContent = String(fnrhPending);
+  if (opKpiFnrhNote) {
+    opKpiFnrhNote.textContent =
+      fnrhPending > 0 ? "Requer atenção" : "Sem pendências";
+  }
+  if (opKpiAccess) opKpiAccess.textContent = String(accessGranted);
 }
 
 const MAPA_FILTRO_ETAPA = {
@@ -1972,7 +2071,21 @@ function syncDetailPanelChrome(reserva) {
   }
 }
 
+function persistLocalPanelState() {
+  if (
+    PAINEL_DATA_SOURCE !== PAINEL_DATA_SOURCE_LOCAL_REPOSITORY ||
+    !operacionalRepository
+  ) {
+    return;
+  }
+  operacionalRepository.replaceReservations(
+    serializarPainelOperacional(reservas),
+  );
+}
+
 function refresh() {
+  persistLocalPanelState();
+  renderOperationalMetrics();
   renderExcecoesOperacionais();
   renderStatusTabs();
   renderOperacionalLista();
@@ -1993,7 +2106,9 @@ function refresh() {
 }
 
 async function refreshFromSource() {
-  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY) {
+    reservas = await loadReservasFromLocalRepository();
+  } else if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
     reservas = await loadReservasFromBackend();
   }
   refresh();
@@ -2301,8 +2416,12 @@ function openTopContatoPanel(reservaId, modo) {
   if (waEl) waEl.value = (h.whatsapp || "").trim();
   if (titleEl) {
     titleEl.textContent =
-      modo === "senha"
-        ? "Confirme o contato e envie a senha"
+      modo === "senha" || modo === "senha_reenviar" || modo === "senha_nova"
+        ? modo === "senha_reenviar"
+          ? "Confirme o contato e reenvie as credenciais"
+          : modo === "senha_nova"
+            ? "Confirme o contato e gere uma nova senha"
+            : "Confirme o contato e envie as credenciais"
         : modo === "fnrh_reenviar"
           ? "Confirme o contato e reenvie o link FNRH"
           : "Confirme o contato e envie o link FNRH";
@@ -2356,7 +2475,7 @@ async function submitDetailTopContatoPanel() {
       }
       return;
     }
-    if (modo === "senha") {
+    if (modo === "senha" || modo === "senha_reenviar" || modo === "senha_nova") {
       const result = await backendEnviarSenha(rid, email, whatsapp);
       if (result.ok) {
         const okText = (result.data && result.data.mensagem) || "Operação concluída.";
@@ -2586,135 +2705,142 @@ var OPERACIONAL_EXCECOES_MAX_ITENS = 14;
 /**
  * Uma exceção por reserva (a mais prioritária). null se nada aplicável.
  */
+function buildCredentialReleaseInputFromReserva(reserva, overrides) {
+  const pagamentoStatus = isPagamentoOk(reserva) ? "pago" : "pendente";
+  const fnrhStatus = isFnrhCompleta(reserva) ? "completa" : "pendente";
+  const senhaEnviada = !!(reserva && (reserva.senhaEnviadaEm || (obterUltimosEventosSenha(reserva).lastOkSenha)));
+  const checkInDate = reserva?.checkInPrevisto
+    ? String(reserva.checkInPrevisto).slice(0, 10) + "T14:00:00"
+    : new Date().toISOString();
+  const ob = obterUltimosEventosSenha(reserva);
+  const failRecente = falhaSenhaMaisRecenteQueSucesso(ob.lastOkSenha, ob.lastFailSenha);
+  let falhaGeracao = false;
+  let falhaEnvio = false;
+  if (failRecente && ob.lastFailSenha && ob.lastFailSenha.p) {
+    const tipo = ob.lastFailSenha.p.tipo_bloqueio;
+    if (tipo === "provisionamento") falhaGeracao = true;
+    else falhaEnvio = true;
+  }
+  const liberacaoManualComPendencias = !!(
+    reserva?.liberacaoManualComPendencias ||
+    (Array.isArray(reserva?.historicoOperacional) &&
+      reserva.historicoOperacional.some(
+        (ev) =>
+          ev &&
+          ev.tipo === "liberacao_manual_com_pendencias" &&
+          (pagamentoStatus !== "pago" || fnrhStatus !== "completa"),
+      ))
+  );
+
+  return Object.assign(
+    {
+      pagamentoStatus,
+      fnrhStatus,
+      senhaEnviada,
+      dataHoraCheckin: checkInDate,
+      dataHoraAtual: new Date(),
+      origem: "manual",
+      falhaGeracao,
+      falhaEnvio,
+      liberacaoManualComPendencias,
+      acaoSolicitada: senhaEnviada ? "reenviar" : "gerar_enviar",
+    },
+    overrides || {},
+  );
+}
+
+function avaliarPoliticaCredenciaisReserva(reserva, overrides) {
+  const policy = window.YesHotelCredentialReleasePolicy;
+  if (!policy || typeof policy.avaliarLiberacaoCredenciais !== "function") {
+    return null;
+  }
+  return policy.avaliarLiberacaoCredenciais(
+    buildCredentialReleaseInputFromReserva(reserva, overrides),
+  );
+}
+
+function labelAcaoCredenciaisPainel(reserva) {
+  const decisao = avaliarPoliticaCredenciaisReserva(reserva);
+  if (!decisao) {
+    return reserva?.senhaEnviadaEm
+      ? "Reenviar credenciais"
+      : "Gerar e enviar credenciais";
+  }
+  if (decisao.acaoPainel === "reenviar") return "Reenviar credenciais";
+  return "Gerar e enviar credenciais";
+}
+
+function confirmarLiberacaoManualComPendencias(reserva, decisao) {
+  const pendencias = (decisao && decisao.pendenciasAtuais) || [];
+  if (pendencias.length === 0) return true;
+  const labels = pendencias.map((p) =>
+    p === "pagamento" ? "pagamento" : "FNRH",
+  );
+  const texto =
+    "Há pendência(s) ainda aberta(s): " +
+    labels.join(" e ") +
+    ".\n\nDeseja gerar e enviar as credenciais mesmo assim?\n(O evento será registrado no histórico.)";
+  return window.confirm(texto);
+}
+
+function registrarLiberacaoManualComPendencias(reserva, pendencias) {
+  if (!reserva) return;
+  reserva.liberacaoManualComPendencias = pendencias.length > 0;
+  const now = new Date();
+  const usuario =
+    (sessionUserElement && sessionUserElement.textContent) || "operador";
+  addHistoricoEvento(
+    reserva,
+    "liberacao_manual_com_pendencias",
+    "Acesso/credenciais liberados manualmente com pendências",
+    "Usuário: " +
+      usuario +
+      " · " +
+      formatHistoricoTimestamp(now) +
+      " · Pendências: " +
+      pendencias.join(", "),
+  );
+}
+
 function derivarExcecaoOperacionalReserva(reserva) {
   if (!reserva || isCheckinConcluido(reserva)) return null;
 
-  var isBack = PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND;
-  var ob = obterUltimosEventosSenha(reserva);
-  var lastOk = ob.lastOkSenha;
-  var lastFail = ob.lastFailSenha;
-  var failRecente = falhaSenhaMaisRecenteQueSucesso(lastOk, lastFail);
+  const policy = window.YesHotelCredentialReleasePolicy;
+  if (policy && typeof policy.derivarAlertaOperacional === "function") {
+    const input = buildCredentialReleaseInputFromReserva(reserva);
+    const alerta = policy.derivarAlertaOperacional(input);
+    if (
+      input.liberacaoManualComPendencias &&
+      policy.listarPendenciasCredenciais(
+        input.pagamentoStatus,
+        input.fnrhStatus,
+      ).length === 0
+    ) {
+      reserva.liberacaoManualComPendencias = false;
+    }
+    if (!alerta) return null;
 
-  var naoIdent = getNaoIdentificados(reserva).length;
-  var faltam = getFaltamContato(reserva).length;
-  var prontos = getProntosParaEnvio(reserva).length;
+    const isFalha =
+      alerta.indexOf("Falha") === 0 ||
+      alerta.indexOf("Acesso liberado manualmente") === 0;
+    const isSenha = alerta === "Senha ainda não enviada";
+    let ctaHint = "Ver reserva";
+    if (isSenha || alerta.indexOf("Falha") === 0) {
+      ctaHint = input.senhaEnviada
+        ? "Reenviar credenciais"
+        : "Gerar e enviar credenciais";
+    } else if (alerta.indexOf("Acesso liberado manualmente") === 0) {
+      ctaHint = "Resolver pendências";
+    } else if (alerta.indexOf("Pagamento") >= 0 || alerta.indexOf("FNRH") >= 0) {
+      ctaHint = "Ver pendências";
+    }
 
-  if (lastFail && lastFail.p && lastFail.p.tipo_bloqueio === "credencial_revogada" && failRecente) {
     return {
-      severidade: "critica",
-      prioridade: 1,
-      motivo: "Credencial revogada — envio de senha bloqueado",
-      ctaHint: "Revisar TTLock",
-      codigo: "credencial_revogada",
-    };
-  }
-
-  if (
-    isPagamentoOk(reserva) &&
-    naoIdent === 0 &&
-    prontos === 0 &&
-    faltam > 0 &&
-    !isFnrhCompleta(reserva)
-  ) {
-    return {
-      severidade: "critica",
-      prioridade: 2,
-      motivo: "Sem e-mail/WhatsApp para hóspedes que ainda precisam de FNRH",
-      ctaHint: "Corrigir contato",
-      codigo: "sem_contato_fnrh",
-    };
-  }
-
-  if (isPagamentoOk(reserva) && isChegadaHoje(reserva) && !isFnrhCompleta(reserva)) {
-    return {
-      severidade: "critica",
-      prioridade: 3,
-      motivo: "FNRH pendente com check-in hoje",
-      ctaHint: "Reenviar FNRH",
-      codigo: "checkin_hoje_fnrh",
-    };
-  }
-
-  if (lastFail && lastFail.p && lastFail.p.tipo_bloqueio === "provisionamento" && failRecente) {
-    return {
-      severidade: "critica",
-      prioridade: 4,
-      motivo: "Falha recente ao provisionar senha (TTLock)",
-      ctaHint: "Ver TTLock",
-      codigo: "provisionamento_senha",
-    };
-  }
-
-  if (
-    isBack &&
-    (reserva.fnrhStatusAgregado || "") === "fnrh_completo" &&
-    acessoLiberadoEfetivo(reserva) &&
-    !reserva.senhaEnviadaEm &&
-    !lastOk
-  ) {
-    return {
-      severidade: "critica",
-      prioridade: 5,
-      motivo: "FNRH válida no sistema, acesso liberado, senha não registrada como enviada",
-      ctaHint: "Gerar e enviar senha",
-      codigo: "senha_pendente",
-    };
-  }
-
-  if (isProntaParaLiberarAcesso(reserva)) {
-    return {
-      severidade: "moderada",
-      prioridade: 101,
-      motivo: "Pronta para liberar acesso (FNRH e pagamento ok)",
-      ctaHint: "Liberar acesso",
-      codigo: "liberar_pendente",
-    };
-  }
-
-  var fnrhA = agregarEnviosFnrhDoHistorico(reserva.historicoOperacional || []);
-  if (isPagamentoOk(reserva) && fnrhA.reminderCount > 0 && !isFnrhCompleta(reserva)) {
-    return {
-      severidade: "moderada",
-      prioridade: 102,
-      motivo: "Houve lembrete(s) de FNRH e ainda há pendência",
-      ctaHint: "Ver hóspedes",
-      codigo: "fnrh_lembrete",
-    };
-  }
-
-  if (isBack && (reserva.fnrhStatusAgregado || "") === "fnrh_completo" && !isFnrhCompleta(reserva)) {
-    return {
-      severidade: "moderada",
-      prioridade: 103,
-      motivo: "FNRH completa no cadastro digital e painel ainda não reflete tudo",
-      ctaHint: "Conferir hóspedes",
-      codigo: "inconsistencia_fnrh",
-    };
-  }
-
-  if (ultimoEnvioFnrhTeveFalhaRegistrada(reserva) && !isFnrhCompleta(reserva)) {
-    return {
-      severidade: "moderada",
-      prioridade: 104,
-      motivo: "Último disparo de links FNRH registrado sem sucesso",
-      ctaHint: "Reenviar FNRH",
-      codigo: "fnrh_envio_falhou",
-    };
-  }
-
-  if (
-    failRecente &&
-    lastFail &&
-    lastFail.p &&
-    (lastFail.p.tipo_bloqueio === "sem_contato" || lastFail.p.tipo_bloqueio === "falha_canais")
-  ) {
-    var mSenha = lastFail.p.motivo_bloqueio || "Falha no envio da senha";
-    return {
-      severidade: "moderada",
-      prioridade: 105,
-      motivo: mSenha.length > 90 ? mSenha.slice(0, 87) + "…" : mSenha,
-      ctaHint: "Corrigir contatos",
-      codigo: "senha_falha_envio",
+      severidade: isFalha ? "critica" : isSenha ? "critica" : "moderada",
+      prioridade: isFalha ? 1 : isSenha ? 5 : 10,
+      motivo: alerta,
+      ctaHint,
+      codigo: "credencial_politica",
     };
   }
 
@@ -2998,8 +3124,8 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
     return {
       variant: "info",
       texto: "FNRH validada no sistema e acesso liberado. A senha ainda não foi registrada como enviada.",
-      listaLabel: "Gerar e enviar senha",
-      cta: { kind: "gerar_senha", label: "Gerar e enviar senha" },
+      listaLabel: labelAcaoCredenciaisPainel(reserva),
+      cta: { kind: "gerar_senha", label: labelAcaoCredenciaisPainel(reserva) },
     };
   }
 
@@ -3048,8 +3174,10 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
       variant: "neutral",
       texto:
         "Acesso liberado. A senha pode sair automaticamente na janela definida; use o envio manual abaixo se fizer sentido.",
-      listaLabel: temBotaoSenhaBackend ? "Gerar e enviar senha" : "Aguardar envio da senha",
-      cta: temBotaoSenhaBackend ? { kind: "gerar_senha", label: "Gerar e enviar senha" } : null,
+      listaLabel: temBotaoSenhaBackend ? labelAcaoCredenciaisPainel(reserva) : "Aguardar envio da senha",
+      cta: temBotaoSenhaBackend
+        ? { kind: "gerar_senha", label: labelAcaoCredenciaisPainel(reserva) }
+        : null,
     };
   }
 
@@ -3487,6 +3615,55 @@ async function definirPrincipal(reservaId, guestIndex) {
   refresh();
 }
 
+function buildLocalModeDetailHtml(reserva) {
+  if (reserva.sourceMode !== "local-demo") return "";
+  const observation = (reserva.observacoes || "").trim();
+  return `
+    <div class="reservation-detail-section reservation-detail-local-summary">
+      <p class="reservation-detail-section-title">Dados da reserva local</p>
+      <dl class="detail-local-grid">
+        <div><dt>Período</dt><dd>${escapeHtml(formatDataBR(reserva.checkInPrevisto))} ${escapeHtml(reserva.checkInHorario || "14:00")} → ${escapeHtml(formatDataBR(reserva.checkOutPrevisto))} ${escapeHtml(reserva.checkOutHorario || "12:00")}</dd></div>
+        <div><dt>Ocupação</dt><dd>${escapeHtml(String(reserva.quantidadeHospedes || reserva.hospedes?.length || 1))} hóspede(s)</dd></div>
+        <div><dt>FNRH</dt><dd>${escapeHtml(isFnrhCompleta(reserva) ? "Completa (simulação local)" : "Pendente (simulação local)")}</dd></div>
+        <div><dt>Acesso</dt><dd>TTLock mock · nenhuma credencial real</dd></div>
+        <div><dt>Comunicação</dt><dd>Mock · nenhum envio real</dd></div>
+        <div class="detail-local-grid__full"><dt>Observações</dt><dd>${escapeHtml(observation || "Sem observações")}</dd></div>
+      </dl>
+      <button type="button" class="secondary-button detail-copy-access-btn" id="detail-copy-access-btn" data-reserva-id="${escapeHtml(reserva.id)}">Copiar dados de acesso</button>
+      <p class="detail-copy-access-status hidden" id="detail-copy-access-status" role="status"></p>
+    </div>
+  `;
+}
+
+function buildLocalAccessClipboardText(reserva) {
+  return [
+    "YES HOTEL — DADOS DE ACESSO (DEMONSTRAÇÃO)",
+    `Apartamento: ${reserva.apartamento || "—"}`,
+    `Hóspede: ${reserva.hospedePrincipal || "—"}`,
+    `Check-in: ${formatDataBR(reserva.checkInPrevisto)} às ${reserva.checkInHorario || "14:00"}`,
+    `Check-out: ${formatDataBR(reserva.checkOutPrevisto)} às ${reserva.checkOutHorario || "12:00"}`,
+    "TTLock: modo mock — nenhuma senha ou credencial real foi gerada.",
+    "Comunicação: modo mock — mensagem não enviada.",
+  ].join("\n");
+}
+
+async function copyTextToClipboard(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("Cópia não suportada neste navegador.");
+}
+
 function renderDetail(reserva) {
   if (!(detailBodyElement instanceof HTMLElement) || !reserva) return;
   const hospedes = Array.isArray(reserva.hospedes) ? reserva.hospedes : [];
@@ -3606,8 +3783,15 @@ function renderDetail(reserva) {
   }
 
   const temBotaoSenhaBackend = PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND;
+  const labelCredenciais = labelAcaoCredenciaisPainel(reserva);
+  const senhaJaEnviada = !!(
+    reserva.senhaEnviadaEm || obterUltimosEventosSenha(reserva).lastOkSenha
+  );
   const enviarSenhaBtnHtml = temBotaoSenhaBackend
-    ? `<button type="button" class="primary-button detail-top-acao-btn detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}">Gerar e enviar senha</button>`
+    ? `<button type="button" class="primary-button detail-top-acao-btn detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-acao-credencial="${senhaJaEnviada ? "reenviar" : "gerar_enviar"}">${escapeHtml(labelCredenciais)}</button>` +
+      (senhaJaEnviada
+        ? `<button type="button" class="secondary-button detail-top-acao-btn detail-gerar-nova-senha-btn" id="detail-gerar-nova-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}">Gerar nova senha</button>`
+        : "")
     : "";
 
   let reenviarFnrhTopoBtnHtml = "";
@@ -3669,6 +3853,7 @@ function renderDetail(reserva) {
       : "";
 
   const resumoComunicacao = formatResumoComunicacao(reserva);
+  const localModeDetailHtml = buildLocalModeDetailHtml(reserva);
 
   const historico = (reserva.historicoOperacional || []).slice().reverse();
   const historicoHtml =
@@ -3689,6 +3874,7 @@ function renderDetail(reserva) {
 
   detailBodyElement.innerHTML = `
     ${situacaoAcaoTopoHtml}
+    ${localModeDetailHtml}
     ${ttlockSectionHtml}
     ${eventosSimuladosHtml}
     <div class="reservation-detail-section reservation-detail-hospedes-block reservation-detail-hospedes-apoio" id="detail-hospedes-section">
@@ -3708,6 +3894,28 @@ function renderDetail(reserva) {
 function bindDetailListeners(reserva) {
   if (!(detailBodyElement instanceof HTMLElement)) return;
 
+  const copyAccessButton = detailBodyElement.querySelector("#detail-copy-access-btn");
+  copyAccessButton?.addEventListener("click", async () => {
+    const statusElement = detailBodyElement.querySelector(
+      "#detail-copy-access-status",
+    );
+    try {
+      await copyTextToClipboard(buildLocalAccessClipboardText(reserva));
+      if (statusElement) {
+        statusElement.textContent =
+          "Dados demonstrativos copiados. Nenhuma credencial real foi incluída.";
+        statusElement.classList.remove("hidden", "is-error");
+      }
+    } catch (error) {
+      if (statusElement) {
+        statusElement.textContent =
+          error instanceof Error ? error.message : "Não foi possível copiar.";
+        statusElement.classList.remove("hidden");
+        statusElement.classList.add("is-error");
+      }
+    }
+  });
+
   detailBodyElement.querySelectorAll(".detail-recomendacao-cta-btn").forEach((btn) => {
     btn.addEventListener("click", function () {
       var kind = btn.getAttribute("data-recomendacao-cta") || "";
@@ -3721,7 +3929,12 @@ function bindDetailListeners(reserva) {
           });
         }
       } else if (kind === "gerar_senha") {
-        openTopContatoPanel(rid, "senha");
+        var enviarBtnCred = detailBodyElement.querySelector("#detail-enviar-senha-btn");
+        if (enviarBtnCred) {
+          enviarBtnCred.click();
+        } else {
+          openTopContatoPanel(rid, "senha");
+        }
       } else if (kind === "liberar_acesso") {
         acaoLiberarAcesso(rid);
       } else if (kind === "marcar_entrada") {
@@ -3830,7 +4043,56 @@ function bindDetailListeners(reserva) {
   if (enviarSenhaBtn) {
     enviarSenhaBtn.addEventListener("click", () => {
       const rid = enviarSenhaBtn.dataset.reservaId;
-      if (rid) openTopContatoPanel(rid, "senha");
+      if (!rid) return;
+      const reservaAtual = getReservaById(rid);
+      if (!reservaAtual) return;
+      const acao =
+        enviarSenhaBtn.dataset.acaoCredencial === "reenviar"
+          ? "reenviar"
+          : "gerar_enviar";
+      const decisao = avaliarPoliticaCredenciaisReserva(reservaAtual, {
+        origem: "manual",
+        acaoSolicitada: acao,
+      });
+      if (decisao && decisao.exigeConfirmacaoManual) {
+        if (!confirmarLiberacaoManualComPendencias(reservaAtual, decisao)) {
+          return;
+        }
+        registrarLiberacaoManualComPendencias(
+          reservaAtual,
+          decisao.pendenciasAtuais || [],
+        );
+      }
+      openTopContatoPanel(rid, acao === "reenviar" ? "senha_reenviar" : "senha");
+    });
+  }
+
+  const gerarNovaSenhaBtn = detailBodyElement.querySelector(
+    "#detail-gerar-nova-senha-btn",
+  );
+  if (gerarNovaSenhaBtn) {
+    gerarNovaSenhaBtn.addEventListener("click", () => {
+      const rid = gerarNovaSenhaBtn.dataset.reservaId;
+      if (!rid) return;
+      const reservaAtual = getReservaById(rid);
+      if (!reservaAtual) return;
+      const decisao = avaliarPoliticaCredenciaisReserva(reservaAtual, {
+        origem: "manual",
+        acaoSolicitada: "gerar_nova",
+      });
+      if (decisao && decisao.exigeConfirmacaoGerarNova) {
+        const ok = window.confirm(
+          "Gerar uma nova senha invalida a anterior para este hóspede.\n\nDeseja continuar?",
+        );
+        if (!ok) return;
+      }
+      addHistoricoEvento(
+        reservaAtual,
+        "gerar_nova_senha_solicitada",
+        "Geração de nova senha solicitada",
+        "Confirmação do operador registrada antes do envio.",
+      );
+      openTopContatoPanel(rid, "senha_nova");
     });
   }
 
@@ -3985,38 +4247,54 @@ function showAccessState(title, message, actionLabel) {
 
 /* ---------- Bindings / init ---------- */
 async function initCheckinOperacional() {
-  if (!auth || !auth.isConfigured()) {
-    showAccessState(
-      "Autenticacao indisponivel",
-      auth?.getConfigError?.() || "Configuracao de autenticacao indisponivel.",
-      "Ir para login",
-    );
-    return;
-  }
+  let currentUser;
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY) {
+    if (!operacionalRepository) {
+      showAccessState(
+        "Repositório local indisponível",
+        "A camada temporária de dados não foi carregada.",
+        "Recarregar",
+      );
+      return;
+    }
+    currentUser = {
+      name: "Operação local",
+      role: "admin",
+    };
+  } else {
+    if (!auth || !auth.isConfigured()) {
+      showAccessState(
+        "Autenticacao indisponivel",
+        auth?.getConfigError?.() || "Configuracao de autenticacao indisponivel.",
+        "Ir para login",
+      );
+      return;
+    }
 
-  const currentUser = await auth.getCurrentUser();
+    currentUser = await auth.getCurrentUser();
 
-  if (!currentUser) {
-    showAccessState(
-      "Login necessario",
-      "Entre com um usuario interno para acessar o painel de check-in operacional.",
-      "Fazer login",
-    );
-    return;
-  }
+    if (!currentUser) {
+      showAccessState(
+        "Login necessario",
+        "Entre com um usuario interno para acessar o painel de check-in operacional.",
+        "Fazer login",
+      );
+      return;
+    }
 
-  if (currentUser.role === "cafe") {
-    window.location.href = "./cafe-da-manha-mvp.html";
-    return;
-  }
+    if (currentUser.role === "cafe") {
+      window.location.href = "./cafe-da-manha-mvp.html";
+      return;
+    }
 
-  if (currentUser.role !== "admin" && currentUser.role !== "recepcao") {
-    showAccessState(
-      "Acesso nao permitido",
-      "Seu perfil nao tem acesso a esta tela.",
-      "Voltar para login",
-    );
-    return;
+    if (currentUser.role !== "admin" && currentUser.role !== "recepcao") {
+      showAccessState(
+        "Acesso nao permitido",
+        "Seu perfil nao tem acesso a esta tela.",
+        "Voltar para login",
+      );
+      return;
+    }
   }
 
   if (accessStateElement instanceof HTMLElement) accessStateElement.classList.add("hidden");
@@ -4024,7 +4302,15 @@ async function initCheckinOperacional() {
 
   if (sessionUserElement instanceof HTMLElement) {
     sessionUserElement.textContent =
-      `${currentUser.name} | ${auth.getRoleLabel(currentUser.role)} | sessao de ${auth.getSessionDurationHours()} horas`;
+      PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY
+        ? "Modo local / demonstração · sem conexão com Supabase, PMS, TTLock ou comunicação"
+        : `${currentUser.name} | ${auth.getRoleLabel(currentUser.role)} | sessao de ${auth.getSessionDurationHours()} horas`;
+  }
+  if (
+    logoutButtonElement instanceof HTMLButtonElement &&
+    PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY
+  ) {
+    logoutButtonElement.textContent = "Nova reserva";
   }
 
   if (opImportLink instanceof HTMLElement) {
@@ -4081,6 +4367,13 @@ async function initCheckinOperacional() {
   });
 
   refresh();
+
+  const requestedReservationId =
+    new URLSearchParams(window.location.search).get("reserva") ||
+    new URLSearchParams(window.location.hash.replace(/^#/, "")).get("reserva");
+  if (requestedReservationId && getReservaById(requestedReservationId)) {
+    openDetail(requestedReservationId);
+  }
 
   detailCloseButtonElement?.addEventListener("click", closeDetail);
   detailBackdropElement?.addEventListener("click", closeDetail);
@@ -4150,8 +4443,29 @@ async function initCheckinOperacional() {
 }
 
 logoutButtonElement?.addEventListener("click", async () => {
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY) {
+    window.location.href = "./importar-reservas-mvp.html";
+    return;
+  }
   await auth.logout();
   window.location.href = "./usuarios-login-mvp.html";
+});
+
+opClearLocalDataButton?.addEventListener("click", async () => {
+  if (!operacionalRepository) return;
+  if (!window.confirm("Limpar todas as reservas salvas neste navegador?")) return;
+  operacionalRepository.clearData();
+  detailReservaId = null;
+  reservas = await loadReservasFromLocalRepository();
+  refresh();
+});
+
+opRestoreDemoDataButton?.addEventListener("click", async () => {
+  if (!operacionalRepository) return;
+  operacionalRepository.restoreDemoData();
+  detailReservaId = null;
+  reservas = await loadReservasFromLocalRepository();
+  refresh();
 });
 
 initCheckinOperacional().catch((error) => {
