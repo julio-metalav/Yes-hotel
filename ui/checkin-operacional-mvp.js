@@ -2510,13 +2510,32 @@ async function submitDetailTopContatoPanel() {
       const result = await backendEnviarSenha(rid, email, whatsapp, {
         manual: true,
         origem: origemRegistro,
+        gerarNova: modo === "senha_nova",
+        confirmacaoGerarNova: modo === "senha_nova",
       });
       if (result.ok) {
+        if (modo === "senha_nova" && reservaAtual) {
+          const usuario =
+            (sessionUserElement && sessionUserElement.textContent) || "operador";
+          addHistoricoEvento(
+            reservaAtual,
+            "gerar_nova_senha_enviada",
+            "Nova senha gerada e enviada",
+            "Usuário: " +
+              usuario +
+              " · " +
+              formatHistoricoTimestamp(new Date()) +
+              " · origem=manual · credencial anterior substituída",
+          );
+        }
         const okText =
           (result.data && result.data.mensagem) ||
+          (result.data && result.data.message) ||
           (result.skipped
             ? "Credenciais já haviam sido enviadas."
-            : "Operação concluída.");
+            : modo === "senha_nova"
+              ? "Nova senha gerada e enviada."
+              : "Operação concluída.");
         if (msgEl) {
           msgEl.textContent = okText;
           msgEl.classList.remove("hidden", "is-error");
@@ -2948,6 +2967,10 @@ async function aplicarLiberacaoCredenciaisNoPainel(reservaId, options) {
         {
           manual: origem === "manual",
           origem: origemRegistro,
+          gerarNova: (opts.acaoSolicitada || "") === "gerar_nova",
+          confirmacaoGerarNova:
+            (opts.acaoSolicitada || "") === "gerar_nova" &&
+            !!opts.confirmacaoGerarNova,
         },
       );
       if (!result.ok) {
@@ -4611,6 +4634,9 @@ async function backendEnviarSenha(reservaId, email, whatsapp, options) {
       email: (email || "").trim() || undefined,
       whatsapp: (whatsapp || "").trim() || undefined,
       usuario_id: session?.user?.id || undefined,
+      gerar_nova: !!opts.gerarNova,
+      confirmacao_gerar_nova: !!opts.confirmacaoGerarNova,
+      acao: opts.gerarNova ? "gerar_nova" : undefined,
     }),
   });
   const data = await res.json().catch(() => ({}));

@@ -1,6 +1,9 @@
 /**
  * Job temporal de liberação de credenciais (13h Campo Grande/MS) + retry de falhas.
- * Chamável por scheduler (sem cron configurado nesta etapa).
+ * Chamável por scheduler. Configuração versionada pendente:
+ *   docs/YES_HOTEL_SENHA_AUTO_ENVIO_SCHEDULER.md
+ *   supabase/pending/senha-auto-envio-cron.sql
+ * (cron remoto NÃO aplicado nesta etapa.)
  *
  * POST body:
  *   { mode?: "13h" | "retry", limit?: number }

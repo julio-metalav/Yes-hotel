@@ -5,6 +5,7 @@
 
 import { logTtlockLifecycle } from "../../integrations/ttlock";
 import type { TtlockClient } from "../../integrations/ttlock";
+import { generateRandomTtlockPasscode } from "../../domain/yes-hotel/ttlock-credential-format";
 import type { CredencialItemRow, CredencialRow, ProvisioningRepository } from "./provisioning-executor";
 import { processarCredencialDeAcesso } from "./provisioning-executor";
 import type { OperacionalCredencialStatus } from "./types";
@@ -314,6 +315,212 @@ export async function reprovisionCredential(
     falhas: revokeResult.itensFalha + provisionResult.falhas,
     erros: [...revokeResult.erros, ...provisionResult.erros],
   };
+}
+
+export interface ReplacePasscodeResult extends ReprovisionResult {
+  passcodeAnterior: string | null;
+  limpezaPendente: number;
+  /** true quando a geração nova foi bloqueada por limpeza remota pendente. */
+  bloqueadoPorLimpeza: boolean;
+}
+
+const replacePasscodeInFlight = new Set<string>();
+
+/**
+ * Substitui a senha TTLock: revoga a anterior nos locks, gera passcode novo e provisiona.
+ * Distinto de `reprovisionCredential` (que mantém o mesmo passcode).
+ * Se a revogação remota falhar parcialmente, marca pendente_limpeza, NÃO troca o passcode
+ * e NÃO provisiona nova senha (evita estado inconsistente).
+ */
+export async function replaceCredentialWithNewPasscode(
+  credencialId: string,
+  deps: LifecycleDeps & { passcodeGenerator?: (exclude?: string | null) => string },
+): Promise<ReplacePasscodeResult> {
+  const repo = deps.repository;
+  const client = deps.ttlockClient;
+
+  if (replacePasscodeInFlight.has(credencialId)) {
+    return {
+      credencialId,
+      status: "provisionando",
+      passcode: null,
+      passcodeAnterior: null,
+      revogados: 0,
+      provisionados: 0,
+      falhas: 0,
+      erros: ["Geração de nova senha já em andamento para esta credencial."],
+      limpezaPendente: 0,
+      bloqueadoPorLimpeza: false,
+    };
+  }
+
+  replacePasscodeInFlight.add(credencialId);
+  try {
+    const credencial = await repo.getCredencial(credencialId);
+    if (!credencial) throw new Error(`Credencial nao encontrada: ${credencialId}`);
+    if (credencial.status === "revogada") {
+      throw new Error("Não é possível gerar nova senha para credencial revogada.");
+    }
+    if (credencial.status === "provisionando") {
+      return {
+        credencialId,
+        status: "provisionando",
+        passcode: credencial.codigo_credencial,
+        passcodeAnterior: credencial.codigo_credencial,
+        revogados: 0,
+        provisionados: 0,
+        falhas: 0,
+        erros: ["Provisionamento em andamento; tente novamente em instantes."],
+        limpezaPendente: 0,
+        bloqueadoPorLimpeza: false,
+      };
+    }
+
+    const passcodeAnterior = credencial.codigo_credencial;
+    const now = NOW();
+    const erros: string[] = [];
+    let revogados = 0;
+    let limpezaPendente = 0;
+
+    await repo.updateCredencial(credencialId, { status: "provisionando" });
+
+    const itens = await repo.getItens(credencialId);
+
+    for (const item of itens) {
+      const status = item.status_provisionamento;
+      const hasRemote = item.remote_keyboard_pwd_id != null;
+
+      if (status === "pendente_limpeza" || (hasRemote && (status === "provisionado" || status === "falhou"))) {
+        if (!hasRemote) {
+          await repo.updateItem(item.id, {
+            status_provisionamento: "pendente",
+            remote_keyboard_pwd_id: null,
+            codigo_enviado: null,
+            ultimo_erro: null,
+            provisionado_em: null,
+            revogado_em: null,
+          });
+          continue;
+        }
+        if (!client.isAvailable()) {
+          erros.push(`${item.codigo_logico_destino}: TTLock indisponível para revogar senha anterior.`);
+          await repo.updateItem(item.id, {
+            status_provisionamento: "pendente_limpeza",
+            ultimo_erro: "TTLock indisponível ao gerar nova senha.",
+          });
+          limpezaPendente++;
+          continue;
+        }
+        try {
+          await client.deleteKeyboardPassword({
+            lockId: item.lock_id_ttlock,
+            keyboardPwdId: item.remote_keyboard_pwd_id!,
+          });
+          await repo.updateItem(item.id, {
+            status_provisionamento: "pendente",
+            remote_keyboard_pwd_id: null,
+            codigo_enviado: null,
+            ultimo_erro: null,
+            provisionado_em: null,
+            revogado_em: null,
+          });
+          revogados++;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          erros.push(`${item.codigo_logico_destino}: ${msg}`);
+          await repo.updateItem(item.id, {
+            status_provisionamento: "pendente_limpeza",
+            ultimo_erro: msg,
+          });
+          limpezaPendente++;
+        }
+        continue;
+      }
+
+      if (status === "provisionado" || status === "falhou" || status === "revogado" || status === "provisionando") {
+        await repo.updateItem(item.id, {
+          status_provisionamento: "pendente",
+          remote_keyboard_pwd_id: null,
+          codigo_enviado: null,
+          ultimo_erro: null,
+          provisionado_em: null,
+          revogado_em: status === "revogado" ? item.revogado_em : null,
+        });
+      }
+    }
+
+    if (limpezaPendente > 0) {
+      await repo.updateCredencial(credencialId, {
+        status: passcodeAnterior ? "parcial" : "falhou",
+        sync_status: "partial",
+        last_sync_attempt_at: now,
+        last_sync_error: erros.slice(0, 3).join("; ") || "Limpeza remota pendente.",
+      });
+      return {
+        credencialId,
+        status: "parcial",
+        passcode: passcodeAnterior,
+        passcodeAnterior,
+        revogados,
+        provisionados: 0,
+        falhas: limpezaPendente,
+        erros,
+        limpezaPendente,
+        bloqueadoPorLimpeza: true,
+      };
+    }
+
+    const novoPasscode = deps.passcodeGenerator
+      ? deps.passcodeGenerator(passcodeAnterior)
+      : generateRandomTtlockPasscode(passcodeAnterior);
+
+    await repo.updateCredencial(credencialId, {
+      codigo_credencial: novoPasscode,
+      provider_tipo: "ttlock_passcode",
+      status: "pendente",
+      revogado_em: null,
+      motivo_revogacao: null,
+      sync_status: "pending",
+      last_sync_attempt_at: now,
+      last_sync_error: null,
+    });
+
+    const provisionResult = await processarCredencialDeAcesso(credencialId, {
+      repository: repo,
+      ttlockClient: client,
+      passcodeGenerator: () => novoPasscode,
+    });
+
+    if (provisionResult.falhas > 0 || provisionResult.provisionados === 0) {
+      return {
+        credencialId,
+        status: provisionResult.status,
+        passcode: provisionResult.passcode,
+        passcodeAnterior,
+        revogados,
+        provisionados: provisionResult.provisionados,
+        falhas: provisionResult.falhas,
+        erros: [...erros, ...provisionResult.erros],
+        limpezaPendente: 0,
+        bloqueadoPorLimpeza: false,
+      };
+    }
+
+    return {
+      credencialId,
+      status: provisionResult.status,
+      passcode: provisionResult.passcode,
+      passcodeAnterior,
+      revogados,
+      provisionados: provisionResult.provisionados,
+      falhas: 0,
+      erros,
+      limpezaPendente: 0,
+      bloqueadoPorLimpeza: false,
+    };
+  } finally {
+    replacePasscodeInFlight.delete(credencialId);
+  }
 }
 
 /**

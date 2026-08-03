@@ -26,6 +26,16 @@ export function deriveTtlockPasscodeFromReservation(
   return lastFourDigitsPaddedFromDigitRun(uuidDig.length > 0 ? uuidDig : "0");
 }
 
+/** Senha aleatória de 4 dígitos distinta de `exclude` (Gerar nova senha). */
+export function generateRandomTtlockPasscode(exclude?: string | null): string {
+  const blocked = exclude != null && String(exclude).trim() ? String(exclude).trim() : null;
+  for (let i = 0; i < 32; i++) {
+    const code = String(1000 + Math.floor(Math.random() * 9000));
+    if (!blocked || code !== blocked) return code;
+  }
+  return blocked === "9999" ? "1000" : "9999";
+}
+
 function guestFirstAndSecondOrNull(fullName: string | null | undefined): string | null {
   const s = String(fullName ?? "").trim().replace(/\s+/g, " ");
   if (!s) return null;
