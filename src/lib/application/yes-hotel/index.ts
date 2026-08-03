@@ -1,6 +1,7 @@
 export * from "./credential-lifecycle";
 export * from "./credential-lifecycle-status";
 export * from "./credential-release-orchestrator";
+export * from "./first-room-access-commit";
 export * from "./first-room-access-orchestrator";
 export * from "./first-room-access-ports";
 export * from "./first-room-access-types";

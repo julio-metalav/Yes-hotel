@@ -107,10 +107,22 @@ export interface ClockPort {
 
 /**
  * Unidade de trabalho: permite rollback lógico se qualquer passo pós-evento falhar.
- * Adapters reais usariam transação SQL; in-memory restaura snapshot.
+ * Produção (Supabase): commitFirstRoomAccess → RPC única (migration 0025).
+ * In-memory: commit atômico com snapshot.
  */
 export interface UnitOfWorkPort {
+  /**
+   * @deprecated Preferir commitFirstRoomAccess para persistência real.
+   * Mantido para compatibilidade de testes legados.
+   */
   runInTransaction<T>(fn: () => Promise<T>): Promise<T>;
+  /**
+   * Persistência integral do resultado do domínio (evento + tolerância + itens + outbox).
+   * Sem fallback multi-insert. Sem múltiplas chamadas independentes.
+   */
+  commitFirstRoomAccess(
+    command: import("./first-room-access-commit").FirstRoomAccessCommitCommand,
+  ): Promise<import("./first-room-access-types").ProcessFirstRoomAccessResult>;
 }
 
 export type FirstRoomAccessPorts = {

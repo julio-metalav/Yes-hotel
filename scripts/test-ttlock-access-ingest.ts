@@ -565,7 +565,8 @@ async function main() {
     // NaN fails Number.isFinite in validateThreeTargets
     await ingest(notifyPayload(), { ports: h.ports });
     assert.equal(h.state.tolerances.length, 0);
-    assert.equal(h.state.events[0]?.processing_status, "failed");
+    // PR5: falha antes do commit atômico — nenhum evento parcial.
+    assert.equal(h.state.events.length, 0);
     ok("26 item sem remote_keyboard_pwd_id impede tolerância");
   }
 
@@ -575,7 +576,7 @@ async function main() {
     h.itemsPort.setItems([threeItems()[0]!]);
     await ingest(notifyPayload(), { ports: h.ports });
     assert.equal(h.state.tolerances.length, 0);
-    assert.equal(h.state.events[0]?.processing_status, "failed");
+    assert.equal(h.state.events.length, 0);
     ok("27 ausência de 3 itens impede tolerância");
   }
 

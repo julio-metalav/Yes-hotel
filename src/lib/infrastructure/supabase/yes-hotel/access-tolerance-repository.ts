@@ -39,10 +39,9 @@ function mapTol(row: TolRow): AccessToleranceRecord {
 }
 
 /**
- * createTolerance usa RPC transacional `yes_hotel_create_access_tolerance`
- * (migration 0023, versionada, não aplicada neste PR).
- * Sem a RPC, inserts multi-tabela via client NÃO são atômicos — por isso
- * não há fallback de "duas inserts independentes" em produção.
+ * createTolerance (legado PR3) usa RPC `yes_hotel_create_access_tolerance` (0023).
+ * Fluxo completo PR5: preferir UnitOfWork.commitFirstRoomAccess →
+ * `yes_hotel_process_first_room_access` (0025). Sem fallback multi-insert.
  */
 export class SupabaseAccessToleranceRepository implements AccessToleranceRepository {
   constructor(private readonly client: SupabaseClient) {}

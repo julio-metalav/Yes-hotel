@@ -139,17 +139,20 @@ Polling futuro (`lockRecord/list`) deve reutilizar `buildIdempotencyKey` sem alt
 
 ## Atomicidade
 
-- Client Supabase JS **não** transaciona multi-tabela.
-- `yes_hotel_create_access_tolerance` (migration **0023**) é **obrigatória** para criar
-  tolerância + 3 itens de forma atômica. **Não existe** fallback de múltiplos inserts independentes.
-- Atomicidade **completa** entre evento + tolerância + itens + outbox + `markProcessed`
-  **ainda não** está resolvida (passos fora da RPC).
-- Essa lacuna **impede ativação em produção** até RPC/transação ampliada (PR4).
+Ver [FIRST_ROOM_ACCESS_TRANSACTION.md](./FIRST_ROOM_ACCESS_TRANSACTION.md) (PR5).
+
+- Persistência integral via RPC `yes_hotel_process_first_room_access` (migration **0025**, não aplicada).
+- RPC 0023 (`yes_hotel_create_access_tolerance`) ficou **obsoleta** para o fluxo completo.
+- Outbox de fila: `operacional_acesso_outbox` (não `operacional_comunicacao_envios`).
+- **Não existe** fallback de múltiplos inserts independentes.
+- Evento / outbox / markProcessed fora da RPC antiga = lacuna resolvida no desenho PR5 (ainda requer aplicar 0022+0025).
 
 ## Migrations (NÃO aplicadas neste PR)
 
 - `0022_operacional_primeiro_acesso_tolerancia.sql`
 - `0023_first_room_access_create_tolerance_rpc.sql`
+- `0024_operacional_hospedes_fnrh_roles.sql`
+- `0025_first_room_access_transactional_rpc.sql`
 
 ## Proibições
 

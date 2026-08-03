@@ -1,6 +1,6 @@
 /**
- * Orquestrador: processa evento de abertura → tolerância (ports injetáveis).
- * Sem fetch, Supabase, TTLock ou DigiSac.
+ * Orquestrador: processa evento de abertura → decisão de domínio → persistência atômica (UoW).
+ * Sem fetch, Supabase, TTLock ou DigiSac no domínio.
  */
 
 import {
@@ -11,6 +11,7 @@ import {
 } from "../../domain/yes-hotel/first-room-access-policy";
 import { buildWelcomePendingMessage } from "../../domain/yes-hotel/access-grace-messages";
 import { evaluateReservationPendingState } from "../../domain/yes-hotel/reservation-pending-state";
+import type { FirstRoomAccessCommitCommand } from "./first-room-access-commit";
 import type { FirstRoomAccessPorts } from "./first-room-access-ports";
 import type {
   AccessMethodPersisted,
@@ -95,7 +96,7 @@ export type ProcessFirstRoomAccessOptions = {
 
 /**
  * Processa um evento sanitizado de abertura.
- * Mensagens vão para outbox; nunca envia DigiSac/Resend aqui.
+ * Persistência integral via ports.uow.commitFirstRoomAccess (RPC em produção).
  */
 export async function processFirstRoomAccessEvent(
   input: ProcessFirstRoomAccessInput,
@@ -139,222 +140,247 @@ export async function processFirstRoomAccessEvent(
   const receivedAt = now.toISOString();
   const accessMethod = mapAccessMethod(input.record_type);
 
-  const event = await ports.events.insertRawEvent({
-    ...input,
-    access_method: accessMethod,
+  const eventWrite = {
+    source: input.source,
+    source_event_id: input.source_event_id,
+    idempotency_key: input.idempotency_key,
+    occurred_at: input.occurred_at,
     received_at: receivedAt,
-  });
+    lock_id: input.lock_id,
+    keyboard_pwd_id: input.keyboard_pwd_id ?? null,
+    record_type: input.record_type,
+    access_method: accessMethod,
+    success: input.success,
+    raw_payload_sanitized: input.raw_payload_sanitized ?? null,
+  };
 
   try {
-    return await ports.uow.runInTransaction(async () => {
-      const correlation = await ports.correlation.correlateRoomPasscodeEvent({
-        lock_id: input.lock_id,
-        keyboard_pwd_id: input.keyboard_pwd_id,
-        occurred_at: input.occurred_at,
-        record_type: input.record_type,
-        ephemeral_keyboard_pwd: options?.ephemeral_keyboard_pwd,
-      });
-      // Descarta referência local o quanto antes (caller também deve zerar).
-      if (options) {
-        options.ephemeral_keyboard_pwd = undefined;
-      }
+    const correlation = await ports.correlation.correlateRoomPasscodeEvent({
+      lock_id: input.lock_id,
+      keyboard_pwd_id: input.keyboard_pwd_id,
+      occurred_at: input.occurred_at,
+      record_type: input.record_type,
+      ephemeral_keyboard_pwd: options?.ephemeral_keyboard_pwd,
+    });
+    if (options) {
+      options.ephemeral_keyboard_pwd = undefined;
+    }
 
-      await ports.events.attachCorrelation(event.id, {
-        reservation_id: correlation.reservation_id ?? null,
-        credential_id: correlation.credential_id ?? null,
-        credential_item_id: correlation.credential_item_id ?? null,
-        logical_destination: correlation.logical_destination ?? null,
-        keyboard_pwd_id: correlation.keyboard_pwd_id ?? input.keyboard_pwd_id ?? null,
-      });
+    const correlationWrite = {
+      reservation_id: correlation.reservation_id ?? null,
+      credential_id: correlation.credential_id ?? null,
+      credential_item_id: correlation.credential_item_id ?? null,
+      logical_destination: correlation.logical_destination ?? null,
+      keyboard_pwd_id: correlation.keyboard_pwd_id ?? input.keyboard_pwd_id ?? null,
+    };
 
-      if (correlation.ambiguous) {
-        await ports.events.markIgnored(event.id, "ambiguous", ports.clock.now().toISOString());
-        await ports.outbox.enqueueInternalAlert({
-          kind: "internal_alert",
-          code: "access_correlation_ambiguous",
-          message: "Correlação ambígua de primeiro acesso; tolerância não iniciada.",
-          details: { lock_id: input.lock_id, event_id: event.id },
-          idempotency_key: `alert:ambiguous:${event.id}`,
-        });
-        return {
-          status: "ignored",
-          event_id: event.id,
-          ignored_reason: "ambiguous",
-        };
-      }
-
-      const existingTolerance = correlation.credential_id
-        ? await ports.tolerances.findByCredentialId(correlation.credential_id)
-        : null;
-
-      const normalized: NormalizedRoomAccessEvent = {
-        source_event_id: input.source_event_id,
-        occurred_at: input.occurred_at,
-        lock_id: input.lock_id,
-        keyboard_pwd_id: correlation.keyboard_pwd_id ?? input.keyboard_pwd_id,
-        record_type: input.record_type,
-        success: input.success,
-        logical_destination: correlation.logical_destination,
-        lock_type: correlation.lock_type,
-        reservation_id: correlation.reservation_id,
-        credential_id: correlation.credential_id,
-        credential_item_id: correlation.credential_item_id,
-        within_reservation_window: correlation.within_reservation_window,
-        correlated: correlation.correlated,
-        is_admin_operator: input.is_admin_operator,
+    if (correlation.ambiguous) {
+      const cmd: FirstRoomAccessCommitCommand = {
+        decision: "ignored",
+        event: eventWrite,
+        correlation: correlationWrite,
+        ignored_reason: "ambiguous",
+        outbox: {
+          event_type: "internal_alert",
+          channel: "whatsapp",
+          reservation_id: correlation.reservation_id ?? "00000000-0000-4000-8000-000000000000",
+          payload: {
+            kind: "internal_alert",
+            code: "access_correlation_ambiguous",
+            message: "Correlação ambígua de primeiro acesso; tolerância não iniciada.",
+            details: { lock_id: input.lock_id },
+          },
+          idempotency_key: `alert:ambiguous:${input.idempotency_key}`,
+        },
       };
+      // Sem reservation_id válido: não forçar outbox com UUID falso — só ignore.
+      if (!correlation.reservation_id) {
+        cmd.outbox = null;
+      }
+      return await ports.uow.commitFirstRoomAccess(cmd);
+    }
 
-      const decision = evaluateFirstRoomAccessEvent(normalized, {
-        first_access_already_registered: !!existingTolerance,
-        event_already_processed: false,
-        grace_already_started: !!existingTolerance,
-      });
+    const existingTolerance = correlation.credential_id
+      ? await ports.tolerances.findByCredentialId(correlation.credential_id)
+      : null;
 
-      if (!decision.accepted) {
-        const reason = decision.ignored_reason ?? decision.decision;
-        await ports.events.markIgnored(event.id, reason, ports.clock.now().toISOString());
-        if (
-          existingTolerance &&
-          (reason === "already_started" || reason === "duplicate")
-        ) {
-          return {
-            status: "already_started",
-            event_id: event.id,
-            tolerance_id: existingTolerance.id,
-            suspension_due_at: existingTolerance.suspension_due_at,
-            pending_reasons: existingTolerance.pending_snapshot,
-            ignored_reason: reason,
-          };
-        }
-        return {
-          status: "ignored",
-          event_id: event.id,
+    const normalized: NormalizedRoomAccessEvent = {
+      source_event_id: input.source_event_id,
+      occurred_at: input.occurred_at,
+      lock_id: input.lock_id,
+      keyboard_pwd_id: correlation.keyboard_pwd_id ?? input.keyboard_pwd_id,
+      record_type: input.record_type,
+      success: input.success,
+      logical_destination: correlation.logical_destination,
+      lock_type: correlation.lock_type,
+      reservation_id: correlation.reservation_id,
+      credential_id: correlation.credential_id,
+      credential_item_id: correlation.credential_item_id,
+      within_reservation_window: correlation.within_reservation_window,
+      correlated: correlation.correlated,
+      is_admin_operator: input.is_admin_operator,
+    };
+
+    const decision = evaluateFirstRoomAccessEvent(normalized, {
+      first_access_already_registered: !!existingTolerance,
+      event_already_processed: false,
+      grace_already_started: !!existingTolerance,
+    });
+
+    if (!decision.accepted) {
+      const reason = decision.ignored_reason ?? decision.decision;
+      if (
+        existingTolerance &&
+        (reason === "already_started" || reason === "duplicate")
+      ) {
+        return await ports.uow.commitFirstRoomAccess({
+          decision: "already_started",
+          event: eventWrite,
+          correlation: correlationWrite,
           ignored_reason: reason,
-        };
+          existing_tolerance_id: existingTolerance.id,
+          existing_suspension_due_at: existingTolerance.suspension_due_at,
+          existing_pending_snapshot: existingTolerance.pending_snapshot,
+        });
       }
-
-      if (existingTolerance) {
-        await ports.events.markIgnored(event.id, "already_started", ports.clock.now().toISOString());
-        return {
-          status: "already_started",
-          event_id: event.id,
-          tolerance_id: existingTolerance.id,
-          suspension_due_at: existingTolerance.suspension_due_at,
-          pending_reasons: existingTolerance.pending_snapshot,
-          ignored_reason: "already_started",
-        };
-      }
-
-      if (!correlation.reservation_id || !correlation.credential_id) {
-        await ports.events.markIgnored(event.id, "uncorrelated", ports.clock.now().toISOString());
-        return {
-          status: "ignored",
-          event_id: event.id,
-          ignored_reason: "uncorrelated",
-        };
-      }
-
-      const pendingInput = await ports.pending.getReservationPendingInput(
-        correlation.reservation_id,
-      );
-      const pending = evaluateReservationPendingState(pendingInput);
-
-      const grace = decideAccessGrace({
-        event_accepted: true,
-        first_access_already_registered: false,
-        grace_already_started: false,
-        payment_pending: pending.payment_pending,
-        fnrh_pending: pending.fnrh_pending,
-        pending_reasons: pending.pending_reasons,
-        occurred_at: input.occurred_at,
+      return await ports.uow.commitFirstRoomAccess({
+        decision: "ignored",
+        event: eventWrite,
+        correlation: correlationWrite,
+        ignored_reason: reason,
       });
+    }
 
-      if (!grace.start_grace) {
-        await ports.events.markProcessed(event.id, ports.clock.now().toISOString());
-        return {
-          status: "processed_no_pending",
-          event_id: event.id,
-          pending_reasons: [],
-        };
-      }
-
-      const items = await ports.items.listProvisionedItemsByCredentialId(
-        correlation.credential_id,
-      );
-      const targets = validateThreeTargets(items);
-      if (!targets.ok) {
-        throw new Error(targets.error);
-      }
-
-      const originalFrom =
-        correlation.original_valid_from ??
-        (() => {
-          throw new Error("original_valid_from ausente na correlação.");
-        })();
-      const originalUntil =
-        correlation.original_valid_until ??
-        (() => {
-          throw new Error("original_valid_until ausente na correlação.");
-        })();
-
-      const welcome = buildWelcomePendingMessage({
-        payment_pending: pending.payment_pending,
-        fnrh_pending: pending.fnrh_pending,
+    if (existingTolerance) {
+      return await ports.uow.commitFirstRoomAccess({
+        decision: "already_started",
+        event: eventWrite,
+        correlation: correlationWrite,
+        ignored_reason: "already_started",
+        existing_tolerance_id: existingTolerance.id,
+        existing_suspension_due_at: existingTolerance.suspension_due_at,
+        existing_pending_snapshot: existingTolerance.pending_snapshot,
       });
-      if (!welcome) {
-        throw new Error("Mensagem de boas-vindas esperada com pendências.");
-      }
+    }
 
-      const tolerance = await ports.tolerances.createTolerance({
-        reservation_id: correlation.reservation_id,
-        credential_id: correlation.credential_id,
+    if (!correlation.reservation_id || !correlation.credential_id) {
+      return await ports.uow.commitFirstRoomAccess({
+        decision: "ignored",
+        event: eventWrite,
+        correlation: correlationWrite,
+        ignored_reason: "uncorrelated",
+      });
+    }
+
+    const pendingInput = await ports.pending.getReservationPendingInput(
+      correlation.reservation_id,
+    );
+    const pending = evaluateReservationPendingState(pendingInput);
+
+    const grace = decideAccessGrace({
+      event_accepted: true,
+      first_access_already_registered: false,
+      grace_already_started: false,
+      payment_pending: pending.payment_pending,
+      fnrh_pending: pending.fnrh_pending,
+      pending_reasons: pending.pending_reasons,
+      occurred_at: input.occurred_at,
+    });
+
+    if (!grace.start_grace) {
+      return await ports.uow.commitFirstRoomAccess({
+        decision: "processed_no_pending",
+        event: eventWrite,
+        correlation: correlationWrite,
+      });
+    }
+
+    const items = await ports.items.listProvisionedItemsByCredentialId(
+      correlation.credential_id,
+    );
+    const targets = validateThreeTargets(items);
+    if (!targets.ok) {
+      throw new Error(targets.error);
+    }
+
+    const originalFrom =
+      correlation.original_valid_from ??
+      (() => {
+        throw new Error("original_valid_from ausente na correlação.");
+      })();
+    const originalUntil =
+      correlation.original_valid_until ??
+      (() => {
+        throw new Error("original_valid_until ausente na correlação.");
+      })();
+
+    const welcome = buildWelcomePendingMessage({
+      payment_pending: pending.payment_pending,
+      fnrh_pending: pending.fnrh_pending,
+    });
+    if (!welcome) {
+      throw new Error("Mensagem de boas-vindas esperada com pendências.");
+    }
+
+    const itemWrites = [targets.apt, targets.gateExt, targets.gateInt].map((i) => {
+      const lock_class = classifyDestination(i);
+      if (lock_class === "other") {
+        throw new Error(`Destino lógico inválido: ${i.logical_destination}`);
+      }
+      return {
+        credential_item_id: i.id,
+        logical_destination: i.logical_destination,
+        lock_id: i.lock_id,
+        remote_keyboard_pwd_id: i.remote_keyboard_pwd_id,
+        original_valid_from: originalFrom,
+        original_valid_until: originalUntil,
+        lock_class,
+      };
+    });
+
+    const outboxPayload = {
+      kind: "guest_welcome_pending",
+      reservation_id: correlation.reservation_id,
+      credential_id: correlation.credential_id,
+      payment_pending: pending.payment_pending,
+      fnrh_pending: pending.fnrh_pending,
+      body: welcome.body,
+      pending_snapshot: grace.pending_snapshot,
+    };
+    assertNoPasswordLeak(outboxPayload);
+
+    const result = await ports.uow.commitFirstRoomAccess({
+      decision: "grace_started",
+      event: eventWrite,
+      correlation: correlationWrite,
+      grace: {
         first_room_access_at: grace.grace_started_at!,
         grace_started_at: grace.grace_started_at!,
         suspension_due_at: grace.suspension_due_at!,
-        pending_payment_at_start: pending.payment_pending,
-        pending_fnrh_at_start: pending.fnrh_pending,
+        pending_payment: pending.payment_pending,
+        pending_fnrh: pending.fnrh_pending,
         pending_snapshot: grace.pending_snapshot,
         original_valid_from: originalFrom,
         original_valid_until: originalUntil,
-        welcome_message_event_id: event.id,
-        items: [targets.apt, targets.gateExt, targets.gateInt].map((i) => ({
-          credential_item_id: i.id,
-          logical_destination: i.logical_destination,
-          lock_id: i.lock_id,
-          remote_keyboard_pwd_id: i.remote_keyboard_pwd_id,
-        })),
-      });
-
-      await ports.outbox.enqueueGuestWelcomeMessage({
-        kind: "guest_welcome_pending",
+      },
+      items: itemWrites,
+      outbox: {
+        event_type: "guest_welcome_pending",
+        channel: "whatsapp",
         reservation_id: correlation.reservation_id,
         credential_id: correlation.credential_id,
-        tolerance_id: tolerance.id,
-        event_id: event.id,
-        payment_pending: pending.payment_pending,
-        fnrh_pending: pending.fnrh_pending,
-        body: welcome.body,
-        idempotency_key: `welcome:${tolerance.id}`,
-      });
-
-      await ports.events.markProcessed(event.id, ports.clock.now().toISOString());
-
-      const result: ProcessFirstRoomAccessResult = {
-        status: "grace_started",
-        event_id: event.id,
-        tolerance_id: tolerance.id,
-        suspension_due_at: grace.suspension_due_at,
-        pending_reasons: grace.pending_snapshot,
-      };
-      assertNoPasswordLeak(result);
-      return result;
+        template: "access_grace_welcome",
+        payload: outboxPayload,
+        idempotency_key: `welcome:${correlation.credential_id}:${grace.grace_started_at}`,
+      },
     });
+    assertNoPasswordLeak(result);
+    return result;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    await ports.events.markFailed(event.id, msg, ports.clock.now().toISOString());
+    // Domínio/RPC falhou: sem persistência parcial (RPC faz rollback; memória restaura snapshot).
     return {
       status: "failed",
-      event_id: event.id,
       error: msg,
     };
   }

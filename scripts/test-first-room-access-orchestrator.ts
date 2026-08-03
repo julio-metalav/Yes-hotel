@@ -307,7 +307,8 @@ async function main(): Promise<void> {
     assert.equal(r.status, "failed");
     assert.match(r.error ?? "", /apartamento/i);
     assert.equal(h.state.tolerances.length, 0);
-    assert.equal(h.state.events[0].processing_status, "failed");
+    // PR5: falha antes do commit atômico — nenhum evento parcial.
+    assert.equal(h.state.events.length, 0);
   }
 
   // 14) ausência portão
@@ -361,7 +362,8 @@ async function main(): Promise<void> {
     assert.equal(h.state.tolerances.length, 0);
     assert.equal(h.state.toleranceItems.length, 0);
     assert.equal(h.state.outbox.length, 0);
-    assert.equal(h.state.events[0].processing_status, "failed");
+    // PR5: rollback integral — evento também desfeito.
+    assert.equal(h.state.events.length, 0);
   }
 
   // 18–19) falha item + evento não processed
@@ -373,7 +375,7 @@ async function main(): Promise<void> {
     });
     const r = await processFirstRoomAccessEvent(baseInput({ idempotency_key: "idem-items" }), h.ports);
     assert.equal(r.status, "failed");
-    assert.notEqual(h.state.events[0].processing_status, "processed");
+    assert.equal(h.state.events.length, 0);
   }
 
   // 20–21, 25) sem senha + snapshot

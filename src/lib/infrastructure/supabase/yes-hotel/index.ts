@@ -6,7 +6,7 @@ import { SupabaseCommunicationOutboxPort } from "./communication-outbox";
 import { SupabaseCredentialCorrelationPort } from "./credential-correlation";
 import { SupabaseCredentialItemsPort } from "./credential-items";
 import {
-  SupabasePassthroughUnitOfWork,
+  SupabaseFirstRoomAccessUnitOfWork,
   SystemClock,
 } from "./first-room-access-unit-of-work";
 import { SupabaseReservationPendingStatePort } from "./reservation-pending-state";
@@ -22,7 +22,7 @@ export function createSupabaseFirstRoomAccessPorts(
     items: new SupabaseCredentialItemsPort(client),
     outbox: new SupabaseCommunicationOutboxPort(client),
     clock: new SystemClock(),
-    uow: new SupabasePassthroughUnitOfWork(),
+    uow: new SupabaseFirstRoomAccessUnitOfWork(client),
   };
 }
 
