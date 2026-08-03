@@ -3,6 +3,12 @@ import {
   normalizeApartmentCode,
   resolveBlockLayoutByApartment,
 } from "./hotel-layout";
+import {
+  DEFAULT_CHECK_IN_HOUR,
+  DEFAULT_CHECK_OUT_HOUR,
+  extractYmd,
+  hotelLocalToUtcMs,
+} from "./hotel-timezone";
 import type {
   AccessPlan,
   CredentialWindow,
@@ -10,9 +16,6 @@ import type {
   ReservationAdjustment,
   RoomChangePlan,
 } from "./types";
-
-const DEFAULT_CHECK_IN_HOUR = 13;
-const DEFAULT_CHECK_OUT_HOUR = 11;
 
 function parseInputDate(value: string | Date): Date {
   const date = value instanceof Date ? new Date(value) : new Date(value);
@@ -24,10 +27,9 @@ function parseInputDate(value: string | Date): Date {
   return date;
 }
 
-function setTime(dateInput: string | Date, hours: number, minutes = 0): Date {
-  const date = parseInputDate(dateInput);
-  date.setHours(hours, minutes, 0, 0);
-  return date;
+/** Horário civil do hotel (America/Campo_Grande), nunca setHours do runtime. */
+function hotelCivilAt(dateInput: string | Date, hours: number, minutes = 0): Date {
+  return new Date(hotelLocalToUtcMs(extractYmd(dateInput), hours, minutes));
 }
 
 export function resolveBlockCode(apartmentCode: string): string {
@@ -40,10 +42,10 @@ export function calculateCredentialWindow(
 ): CredentialWindow {
   const validFrom = adjustment?.earlyCheckInAt
     ? parseInputDate(adjustment.earlyCheckInAt)
-    : setTime(reservation.checkIn, DEFAULT_CHECK_IN_HOUR);
+    : hotelCivilAt(reservation.checkIn, DEFAULT_CHECK_IN_HOUR);
   const validTo = adjustment?.lateCheckOutAt
     ? parseInputDate(adjustment.lateCheckOutAt)
-    : setTime(reservation.checkOut, DEFAULT_CHECK_OUT_HOUR);
+    : hotelCivilAt(reservation.checkOut, DEFAULT_CHECK_OUT_HOUR);
 
   if (validFrom > validTo) {
     throw new Error(

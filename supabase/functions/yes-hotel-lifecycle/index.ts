@@ -11,6 +11,10 @@ import {
   formatTtlockKeyboardPwdName,
   generateRandomTtlockPasscode,
 } from "../_shared/ttlock-credential-format.ts";
+import {
+  resolveDefaultCredentialValidityIso,
+  validityIsoToTtlockMs,
+} from "../_shared/hotel-timezone.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1077,8 +1081,35 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     erro_resumido: null,
   });
 
-  const validoDeMs = new Date(credencial.valido_de).getTime();
-  const validoAteMs = new Date(credencial.valido_ate).getTime();
+  // Janela civil do hotel (America/Campo_Grande), nunca "13:00" interpretado como UTC.
+  const { data: reservaDatas } = await adminClient
+    .from("operacional_reservas")
+    .select("check_in_previsto, check_out_previsto")
+    .eq("id", reservaId)
+    .maybeSingle();
+  const checkIn = (reservaDatas as { check_in_previsto?: string } | null)?.check_in_previsto;
+  const checkOut = (reservaDatas as { check_out_previsto?: string } | null)?.check_out_previsto;
+  let validoDeIso = String(credencial.valido_de ?? "");
+  let validoAteIso = String(credencial.valido_ate ?? "");
+  if (checkIn && checkOut) {
+    const corrected = resolveDefaultCredentialValidityIso(checkIn, checkOut);
+    const storedDe = new Date(credencial.valido_de).getTime();
+    const storedAte = new Date(credencial.valido_ate).getTime();
+    const wantDe = new Date(corrected.valido_de).getTime();
+    const wantAte = new Date(corrected.valido_ate).getTime();
+    if (storedDe !== wantDe || storedAte !== wantAte) {
+      await adminClient
+        .from("operacional_credenciais_acesso")
+        .update({ valido_de: corrected.valido_de, valido_ate: corrected.valido_ate })
+        .eq("id", credencial.id);
+      validoDeIso = corrected.valido_de;
+      validoAteIso = corrected.valido_ate;
+    }
+  }
+  const { startDateMs: validoDeMs, endDateMs: validoAteMs } = validityIsoToTtlockMs(
+    validoDeIso,
+    validoAteIso,
+  );
   const erros: string[] = [];
   let provisionados = 0;
   let falhas = 0;
