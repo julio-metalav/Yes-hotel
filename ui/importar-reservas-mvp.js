@@ -151,5 +151,64 @@
     }
   }
 
-  btnImportar.addEventListener("click", runImport);
+  const reservationForm = document.getElementById("reservation-form");
+  const guestsContainer = document.getElementById("additional-guests");
+  const addGuestButton = document.getElementById("add-guest");
+
+  function updateSummary() {
+    if (!reservationForm) return;
+    const form = new FormData(reservationForm);
+    const set = (id, value) => {
+      const element = document.getElementById(id);
+      if (element) element.textContent = value || "—";
+    };
+    set("sum-apto", form.get("apartamento"));
+    set("sum-guest", form.get("nome"));
+    set("sum-payment", form.get("pagamento") === "pago" ? "Pago" : "Pendente");
+    const checkIn = form.get("checkIn");
+    const checkOut = form.get("checkOut");
+    set("sum-period", checkIn && checkOut ? checkIn + " → " + checkOut : "—");
+  }
+
+  function addGuest() {
+    if (!guestsContainer) return;
+    const row = document.createElement("div");
+    row.className = "guest";
+    row.innerHTML = '<label>Nome<input data-guest="nome" placeholder="Nome completo" /></label><label>E-mail<input data-guest="email" type="email" placeholder="E-mail" /></label><label>WhatsApp<input data-guest="whatsapp" placeholder="WhatsApp" /></label><button type="button" class="remove" aria-label="Remover hóspede">Remover</button>';
+    row.querySelector(".remove").addEventListener("click", () => row.remove());
+    guestsContainer.appendChild(row);
+  }
+
+  addGuestButton?.addEventListener("click", addGuest);
+  reservationForm?.addEventListener("input", updateSummary);
+  reservationForm?.addEventListener("reset", () => setTimeout(updateSummary, 0));
+  reservationForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = new FormData(reservationForm);
+    const additionalGuests = Array.from(guestsContainer?.querySelectorAll(".guest") || []).map((row) => ({
+      nome: row.querySelector('[data-guest="nome"]').value,
+      email: row.querySelector('[data-guest="email"]').value,
+      whatsapp: row.querySelector('[data-guest="whatsapp"]').value,
+      principal: false,
+      statusOperacional: "nao_identificado",
+      origemCadastro: "novo",
+      modoColetaFnrh: "preenchimento_completo",
+    })).filter((guest) => guest.nome.trim());
+    const principal = {
+      nome: form.get("nome"), email: form.get("email"), whatsapp: form.get("whatsapp"), principal: true,
+      statusOperacional: "nao_identificado", origemCadastro: "novo", modoColetaFnrh: "preenchimento_completo",
+    };
+    const payload = [{
+      apartamento: form.get("apartamento"), hospedePrincipal: form.get("nome"),
+      checkInPrevisto: form.get("checkIn"), checkOutPrevisto: form.get("checkOut"),
+      pagamento: form.get("pagamento"), origemExterna: form.get("origem"),
+      externalReservationId: form.get("externalId") || null, veiculoPlaca: form.get("placa"),
+      veiculoCor: form.get("cor"), hospedes: [principal, ...additionalGuests],
+    }];
+    jsonInput.value = JSON.stringify(payload, null, 2);
+    showMessage("Reserva preparada. Revise o JSON avançado e clique em Salvar reserva(s).", "success");
+  });
+
+  btnImportar?.addEventListener("click", runImport);
+  updateSummary();
 })();

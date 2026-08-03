@@ -10,6 +10,16 @@
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
 
     <div id="content-panel" class="op-app hidden">
+      <aside class="yes-sidebar">
+        <div class="yes-brand"><strong>YES HOTEL</strong><span>Hospitalidade inteligente</span></div>
+        <nav aria-label="Navegação principal">
+          <a href="./importar-reservas-mvp.html">Nova reserva</a>
+          <a class="active" href="./checkin-operacional-mvp.html">Operação</a>
+          <a href="./comunicacao-mvp.html">Comunicação</a>
+        </nav>
+        <div class="yes-sidebar-foot">Ambiente operacional<br /><strong>Recepção Yes Hotel</strong></div>
+      </aside>
+      <div class="yes-workspace">
       <header class="op-header">
         <div class="op-header__left">
           <h1 class="op-header__title">Painel de Check-in Operacional</h1>
@@ -25,6 +35,13 @@
           Reserva reflete o <strong>PMS</strong>; o Yes cobre FNRH, senha e acesso operacional.
         </p>
       </header>
+
+      <section class="yes-kpis" aria-label="Indicadores do dia">
+        <article><span>Chegadas hoje</span><strong>12</strong><small>3 aguardando ação</small></article>
+        <article><span>Check-ins concluídos</span><strong>8</strong><small>67% das chegadas</small></article>
+        <article><span>FNRH pendentes</span><strong>4</strong><small>Requer atenção</small></article>
+        <article><span>Acessos liberados</span><strong>9</strong><small>Atualizado agora</small></article>
+      </section>
 
       <div class="op-controls" aria-label="Filtros e situação">
         <div class="op-toolbar" role="toolbar" aria-label="Ferramentas do painel">
@@ -127,6 +144,8 @@
             </div>
           </div>
         </aside>
+      </div>
+
       </div>
 
       <div class="modal-overlay hidden" id="modal-enviar-senha-overlay" aria-hidden="true">

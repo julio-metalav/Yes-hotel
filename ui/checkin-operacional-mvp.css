@@ -3,17 +3,17 @@
    ============================================================================= */
 
 :root {
-  --op-bg: #f3f4f6;
+  --op-bg: #f7f5f0;
   --op-surface: #ffffff;
-  --op-text: #0f172a;
-  --op-text-muted: #64748b;
-  --op-text-secondary: #475569;
-  --op-border: #e5e7eb;
-  --op-border-strong: #e2e8f0;
-  --op-input-border: #d1d5db;
-  --op-blue: #1d4ed8;
-  --op-blue-hover: #1e40af;
-  --op-focus: #2563eb;
+  --op-text: #172231;
+  --op-text-muted: #6d7580;
+  --op-text-secondary: #46515e;
+  --op-border: #dedbd3;
+  --op-border-strong: #d2cec4;
+  --op-input-border: #c9c7c1;
+  --op-blue: #10243e;
+  --op-blue-hover: #1a3555;
+  --op-focus: #b89455;
   --op-radius-lg: 12px;
   --op-radius: 8px;
   --op-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
@@ -74,6 +74,11 @@
     overflow: visible;
   }
 }
+
+/* ----- Yes Hotel shell ----- */
+.yes-sidebar{position:fixed;inset:0 auto 0 0;width:232px;background:#10243e;color:#fff;padding:28px 18px;display:flex;flex-direction:column;z-index:30}.yes-brand{padding:0 12px 26px;border-bottom:1px solid #ffffff24}.yes-brand strong{display:block;font-family:Georgia,serif;font-size:21px;letter-spacing:.08em}.yes-brand span{display:block;color:#c9ced5;font-size:10px;letter-spacing:.15em;text-transform:uppercase}.yes-sidebar nav{display:flex;flex-direction:column;gap:6px;padding:28px 0}.yes-sidebar a{color:#c9ced5;text-decoration:none;padding:12px 14px;border-radius:9px}.yes-sidebar a:hover,.yes-sidebar a.active{background:#ffffff12;color:#fff}.yes-sidebar a.active{border-left:3px solid #b89455}.yes-sidebar-foot{margin-top:auto;padding:14px 12px;border-top:1px solid #ffffff24;color:#c9ced5;font-size:12px}.op-app{width:100%;max-width:none;margin:0;padding:0 0 0 232px;height:100dvh}.yes-workspace{display:flex;flex-direction:column;min-width:0;height:100%;padding:22px 28px 16px;overflow:hidden}.op-header__title{font-family:Georgia,serif!important;color:#10243e!important}.yes-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:4px 0 16px}.yes-kpis article{background:#fff;border:1px solid #dedbd3;border-radius:12px;padding:15px 17px;box-shadow:0 4px 18px #10243e0a}.yes-kpis span,.yes-kpis small{display:block;color:#6d7580}.yes-kpis span{font-size:12px;font-weight:650}.yes-kpis strong{display:block;margin:3px 0;color:#10243e;font:700 25px Georgia,serif}.yes-kpis small{font-size:11px}.op-btn--primary{background:#10243e!important}.op-panel,.op-detail__surface{border-color:#dedbd3!important;box-shadow:0 6px 22px #10243e0b!important}
+@media(max-width:1050px){.yes-kpis{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:767px){.yes-sidebar{display:none}.op-app{padding:0;height:auto}.yes-workspace{height:auto;padding:16px 12px 76px;overflow:visible}.yes-kpis{grid-template-columns:repeat(2,1fr)}.yes-kpis article{padding:12px}.yes-sidebar+ .yes-workspace:after{content:"Reserva   ·   Operação   ·   Comunicação";position:fixed;left:0;right:0;bottom:0;background:#10243e;color:#fff;text-align:center;padding:16px;font-size:12px;word-spacing:14px;z-index:20}}
 
 /* ----- Access state ----- */
 .op-access {

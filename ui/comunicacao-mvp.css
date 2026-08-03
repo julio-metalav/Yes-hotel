@@ -2,12 +2,12 @@
 
 :root {
   color-scheme: light;
-  --bg: #f5f4ef;
+  --bg: #f7f5f0;
   --card: #ffffff;
-  --text: #1f2937;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --primary: #111827;
+  --text: #172231;
+  --muted: #6d7580;
+  --border: #dedbd3;
+  --primary: #10243e;
   --primary-text: #ffffff;
   --ok-bg: #dcfce7;
   --ok-text: #166534;
@@ -26,14 +26,16 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
 }
 
+.yes-sidebar{position:fixed;inset:0 auto 0 0;width:232px;background:#10243e;color:#fff;padding:28px 18px;display:flex;flex-direction:column;z-index:30}.yes-brand{padding:0 12px 26px;border-bottom:1px solid #ffffff24}.yes-brand strong{display:block;font-family:Georgia,serif;font-size:21px;letter-spacing:.08em}.yes-brand span{display:block;color:#c9ced5;font-size:10px;letter-spacing:.15em;text-transform:uppercase}.yes-sidebar nav{display:flex;flex-direction:column;gap:6px;padding:28px 0}.yes-sidebar a{color:#c9ced5;text-decoration:none;padding:12px 14px;border-radius:9px}.yes-sidebar a:hover,.yes-sidebar a.active{background:#ffffff12;color:#fff}.yes-sidebar a.active{border-left:3px solid #b89455}.yes-sidebar-foot{margin-top:auto;padding:14px 12px;border-top:1px solid #ffffff24;color:#c9ced5;font-size:12px}
+
 .app-shell.comunicacao-shell {
-  max-width: 1400px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 6px 12px 8px;
+  max-width: none;
+  width: calc(100% - 232px);
+  margin: 0 0 0 232px;
+  padding: 22px 28px 16px;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -57,7 +59,9 @@ body {
 
 .comunicacao-shell .page-header h1 {
   margin: 0 0 2px;
-  font-size: clamp(16px, 1.6vw, 19px);
+  font-family: Georgia, serif;
+  color: #10243e;
+  font-size: clamp(26px, 3vw, 34px);
   line-height: 1.15;
 }
 
@@ -647,9 +651,13 @@ body {
 }
 
 @media (max-width: 600px) {
+  .yes-sidebar { display: none; }
   .app-shell.comunicacao-shell {
-    padding: 6px;
+    width: 100%;
+    margin: 0;
+    padding: 14px 8px 70px;
   }
+  .app-shell.comunicacao-shell::after { content: "Reserva   ·   Operação   ·   Comunicação"; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: #10243e; color: #fff; text-align: center; padding: 16px; font-size: 12px; word-spacing: 12px; }
 
   .comunicacao-panel {
     padding: 5px;
