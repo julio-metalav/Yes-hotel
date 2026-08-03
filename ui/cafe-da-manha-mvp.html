@@ -3,38 +3,132 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Yes Hotel - Cafe da Manha MVP</title>
-    <link rel="stylesheet" href="./cafe-da-manha-mvp.css" />
+    <title>Yes Hotel — Café da manhã</title>
+    <link rel="stylesheet" href="./cafe-da-manha-mvp.css?v=2" />
   </head>
   <body>
-    <main class="app-shell">
-      <header class="page-header">
-        <p class="eyebrow">Yes Hotel</p>
-        <h1>Cafe da manha</h1>
-        <p class="page-description">
-          Controle simples por apartamento para a equipe operacional.
-        </p>
-      </header>
-
-      <section class="session-banner hidden" id="session-banner">
-        <div id="session-banner-user"></div>
-        <div class="session-banner-actions">
-          <a class="secondary-link hidden" id="users-link" href="./usuarios-login-mvp.html">
-            Usuarios
-          </a>
-          <button class="secondary-button" id="logout-button" type="button">
-            Sair
-          </button>
+    <div class="breakfast-shell">
+      <aside class="yes-sidebar">
+        <div class="yes-brand">
+          <strong>YES HOTEL</strong>
+          <span>Hospitalidade inteligente</span>
         </div>
-      </section>
+        <nav aria-label="Navegação principal">
+          <a href="./importar-reservas-mvp.html">Nova reserva</a>
+          <a href="./checkin-operacional-mvp.html">Operação</a>
+          <a href="./comunicacao-mvp.html">Comunicação</a>
+          <a class="active" href="./cafe-da-manha-mvp.html" aria-current="page">Café da manhã</a>
+        </nav>
+        <div class="yes-sidebar-foot">
+          Ambiente operacional<br />
+          <strong>Recepção Yes Hotel</strong>
+        </div>
+      </aside>
 
-      <section class="access-state hidden" id="access-state"></section>
-      <section class="cards-list" id="cards-list" aria-live="polite"></section>
-    </main>
+      <main class="breakfast-main">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">Operação diária</p>
+            <h1>Café da manhã</h1>
+            <p class="page-description">
+              Acompanhe o atendimento por apartamento durante o serviço.
+            </p>
+          </div>
+          <div class="service-date">
+            <span>Data do serviço</span>
+            <strong id="current-date">—</strong>
+          </div>
+        </header>
+
+        <section class="session-banner hidden" id="session-banner">
+          <div id="session-banner-user"></div>
+          <div class="session-banner-actions">
+            <a class="secondary-link hidden" id="users-link" href="./usuarios-login-mvp.html">
+              Usuários
+            </a>
+            <button class="secondary-button" id="logout-button" type="button">Sair</button>
+          </div>
+        </section>
+
+        <section class="access-state hidden" id="access-state"></section>
+
+        <div class="breakfast-content hidden" id="content-panel">
+          <section class="kpi-grid" aria-label="Indicadores do café da manhã">
+            <article class="kpi-card">
+              <span>Hóspedes previstos</span>
+              <strong id="kpi-expected">0</strong>
+              <small>Total programado para hoje</small>
+            </article>
+            <article class="kpi-card kpi-card--complete">
+              <span>Hóspedes atendidos</span>
+              <strong id="kpi-arrived">0</strong>
+              <small id="kpi-progress">0% do atendimento</small>
+            </article>
+            <article class="kpi-card kpi-card--pending">
+              <span>Hóspedes pendentes</span>
+              <strong id="kpi-missing">0</strong>
+              <small>Aguardando atendimento</small>
+            </article>
+            <article class="kpi-card">
+              <span>Apartamentos concluídos</span>
+              <strong id="kpi-complete-apartments">0</strong>
+              <small id="kpi-apartments-total">de 0 apartamentos</small>
+            </article>
+          </section>
+
+          <section class="operation-panel" aria-label="Controle do café da manhã">
+            <div class="toolbar">
+              <label class="search-field" for="breakfast-search">
+                <span class="sr-only">Buscar por apartamento ou hóspede</span>
+                <input
+                  id="breakfast-search"
+                  type="search"
+                  placeholder="Buscar apartamento ou hóspede..."
+                  autocomplete="off"
+                />
+              </label>
+              <button class="primary-button" id="mark-all-button" type="button">
+                Marcar todos como atendidos
+              </button>
+            </div>
+
+            <nav class="filter-tabs" id="breakfast-filters" aria-label="Filtrar apartamentos">
+              <button class="filter-tab active" type="button" data-filter="all" aria-pressed="true">Todos</button>
+              <button class="filter-tab" type="button" data-filter="pending" aria-pressed="false">Pendentes</button>
+              <button class="filter-tab" type="button" data-filter="complete" aria-pressed="false">Completos</button>
+              <button class="filter-tab" type="button" data-filter="paid" aria-pressed="false">Pagos</button>
+              <button class="filter-tab" type="button" data-filter="unpaid" aria-pressed="false">Não pagos</button>
+            </nav>
+
+            <div class="list-heading" aria-hidden="true">
+              <span>Apartamento e hóspede</span>
+              <span>Atendimento</span>
+              <span>Pagamento</span>
+              <span>Situação</span>
+              <span>Controle</span>
+            </div>
+
+            <section class="cards-list" id="cards-list" aria-live="polite"></section>
+            <section class="empty-state hidden" id="empty-state">
+              <span aria-hidden="true">YH</span>
+              <h2>Nenhum apartamento encontrado</h2>
+              <p>Ajuste a busca ou selecione outro filtro para continuar.</p>
+            </section>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <nav class="mobile-nav" aria-label="Navegação principal móvel">
+      <a href="./importar-reservas-mvp.html">Reserva</a>
+      <a href="./checkin-operacional-mvp.html">Operação</a>
+      <a href="./comunicacao-mvp.html">Comunicação</a>
+      <a class="active" href="./cafe-da-manha-mvp.html" aria-current="page">Café</a>
+    </nav>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
-    <script defer src="./cafe-da-manha-mvp.js"></script>
+    <script defer src="./cafe-da-manha-mvp.js?v=2"></script>
   </body>
 </html>
