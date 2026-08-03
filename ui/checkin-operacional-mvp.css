@@ -113,6 +113,56 @@
   font-size: 14px;
 }
 
+.op-local-mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-shrink: 0;
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border: 1px solid rgba(184, 148, 85, 0.45);
+  border-radius: var(--op-radius);
+  background: #fbf6e9;
+  color: #59451f;
+}
+
+.op-local-mode strong,
+.op-local-mode span {
+  display: block;
+}
+
+.op-local-mode strong {
+  color: var(--op-blue);
+  font-size: 12px;
+}
+
+.op-local-mode span {
+  font-size: 11px;
+}
+
+.op-local-mode__actions {
+  display: flex;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.op-local-mode__actions .op-btn {
+  height: 30px;
+  font-size: 11px;
+}
+
+@media (max-width: 767px) {
+  .op-local-mode {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .op-local-mode__actions .op-btn {
+    flex: 1;
+  }
+}
+
 /* ----- Header ----- */
 .op-header {
   display: grid;
@@ -2113,4 +2163,62 @@
 
 .modal-enviar-senha-msg.hidden {
   display: none !important;
+}
+
+.reservation-detail-local-summary {
+  border-color: rgba(184, 148, 85, 0.5);
+  background: #fbf8ef;
+}
+
+.detail-local-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 10px 0 12px;
+}
+
+.detail-local-grid div {
+  min-width: 0;
+}
+
+.detail-local-grid dt {
+  color: var(--op-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.detail-local-grid dd {
+  margin: 2px 0 0;
+  color: var(--op-text);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.detail-local-grid__full {
+  grid-column: 1 / -1;
+}
+
+.detail-copy-access-status {
+  margin: 8px 0 0;
+  color: #166534;
+  font-size: 11px;
+}
+
+.detail-copy-access-status.is-error {
+  color: #b91c1c;
+}
+
+@media (max-width: 480px) {
+  .detail-local-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-local-grid__full {
+    grid-column: auto;
+  }
+
+  .detail-copy-access-btn {
+    width: 100%;
+  }
 }

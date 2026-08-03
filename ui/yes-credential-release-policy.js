@@ -15,14 +15,6 @@
     return date;
   }
 
-  function sameLocalDate(a, b) {
-    return (
-      a.getFullYear() === b.getFullYear() &&
-      a.getMonth() === b.getMonth() &&
-      a.getDate() === b.getDate()
-    );
-  }
-
   function listarPendenciasCredenciais(pagamentoStatus, fnrhStatus) {
     var pendencias = [];
     if (pagamentoStatus !== "pago") pendencias.push("pagamento");
@@ -30,14 +22,40 @@
     return pendencias;
   }
 
-  function atingiuHorario13hCheckin(dataHoraCheckin, dataHoraAtual) {
+  // Mirror browser: timezone-aware 13h check
+  function atingiuHorario13hCheckin(dataHoraCheckin, dataHoraAtual, timeZone) {
+    var tz = timeZone || "America/Campo_Grande";
     var checkin = parseDateTime(dataHoraCheckin);
     var agora = parseDateTime(dataHoraAtual);
-    if (!sameLocalDate(checkin, agora)) return false;
-    return (
-      agora.getHours() > CHECKIN_AUTO_HOUR ||
-      (agora.getHours() === CHECKIN_AUTO_HOUR && agora.getMinutes() >= 0)
-    );
+    var formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    function parts(date) {
+      var p = formatter.formatToParts(date);
+      function get(type) {
+        var hit = p.find(function (item) {
+          return item.type === type;
+        });
+        return hit ? hit.value : "0";
+      }
+      return {
+        year: Number(get("year")),
+        month: Number(get("month")),
+        day: Number(get("day")),
+        hour: Number(get("hour")),
+        minute: Number(get("minute")),
+      };
+    }
+    var a = parts(checkin);
+    var b = parts(agora);
+    if (a.year !== b.year || a.month !== b.month || a.day !== b.day) return false;
+    return b.hour > CHECKIN_AUTO_HOUR || (b.hour === CHECKIN_AUTO_HOUR && b.minute >= 0);
   }
 
   function derivarAlertaOperacional(input) {
@@ -172,7 +190,13 @@
     }
 
     if (input.origem === "automatico_13h") {
-      if (atingiuHorario13hCheckin(input.dataHoraCheckin, input.dataHoraAtual)) {
+      if (
+        atingiuHorario13hCheckin(
+          input.dataHoraCheckin,
+          input.dataHoraAtual,
+          input.timeZone,
+        )
+      ) {
         return Object.assign({}, base, {
           deveGerar: true,
           deveEnviar: true,

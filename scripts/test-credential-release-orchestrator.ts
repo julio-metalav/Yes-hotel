@@ -152,6 +152,7 @@ async function main(): Promise<void> {
     const batch = await aplicarLiberacaoCredenciais13h(ports, {
       dataHoraAtual: clock,
       dateYmd: "2026-08-03",
+      timeZone: "UTC",
     });
     assert.equal(batch.enviadas, 1);
     assert.equal(batch.resultados[0]?.origemRegistro, "horario_13h");

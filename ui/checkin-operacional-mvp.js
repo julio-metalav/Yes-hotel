@@ -3002,6 +3002,129 @@ async function tentarLiberacaoPorRequisitos(reservaId) {
   });
 }
 
+function detectarUltimaFalhaCredencial(reserva) {
+  const input = buildCredentialReleaseInputFromReserva(reserva);
+  if (input.falhaGeracao) return "geracao";
+  if (input.falhaEnvio) return "envio";
+  return null;
+}
+
+/**
+ * Retry manual a partir do painel — uma tentativa; reutiliza senha se falha foi de envio.
+ */
+async function aplicarRetryCredenciaisNoPainel(reservaId) {
+  const reserva = getReservaById(reservaId);
+  if (!reserva) return { ok: false, error: "Reserva não encontrada." };
+  if (reserva.senhaEnviadaEm || obterUltimosEventosSenha(reserva).lastOkSenha) {
+    return { ok: true, skipped: true, motivo: "ja_enviada" };
+  }
+  if (isCheckinConcluido(reserva)) {
+    return { ok: true, skipped: true, motivo: "encerrada" };
+  }
+  const falha = detectarUltimaFalhaCredencial(reserva);
+  if (!falha) {
+    return { ok: true, skipped: true, motivo: "sem_falha_aberta" };
+  }
+
+  if (_liberacaoCredencialInFlight.has(String(reservaId))) {
+    return { ok: true, skipped: true, motivo: "envio_em_andamento" };
+  }
+
+  _liberacaoCredencialInFlight.add(String(reservaId));
+  try {
+    addHistoricoEvento(
+      reserva,
+      "retry_credenciais_iniciado",
+      "Nova tentativa de liberação de credenciais",
+      "origem=retry_manual · falha_anterior=" + falha,
+    );
+    if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+      await backendAddEvento(
+        reservaId,
+        "retry_credenciais_iniciado",
+        "Nova tentativa de liberação de credenciais",
+        JSON.stringify({
+          origem: "retry_manual",
+          falha_anterior: falha,
+        }),
+      );
+    }
+
+    const reutilizar = falha === "envio";
+    if (!reutilizar && !acessoLiberadoEfetivo(reserva)) {
+      const liberar = await backendLiberarAcesso(reservaId);
+      if (!liberar.ok) {
+        addHistoricoEvento(
+          reserva,
+          "falha_gerar_senha",
+          "Falha ao gerar senha",
+          liberar.error || null,
+        );
+        if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+          await backendAddEvento(
+            reservaId,
+            "falha_gerar_senha",
+            "Falha ao gerar senha",
+            liberar.error || null,
+          );
+        }
+        refresh();
+        return { ok: false, error: liberar.error || "Falha ao gerar senha" };
+      }
+    }
+
+    if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
+      const principal = Array.isArray(reserva.hospedes)
+        ? reserva.hospedes.find((h) => h.principal) || reserva.hospedes[0]
+        : null;
+      const result = await backendEnviarSenha(
+        reservaId,
+        principal?.email || "",
+        principal?.whatsapp || "",
+        { manual: true, origem: "retry_manual" },
+      );
+      if (!result.ok) {
+        const tipo =
+          falha === "geracao" ? "falha_gerar_senha" : "falha_enviar_credenciais";
+        await backendAddEvento(
+          reservaId,
+          tipo,
+          tipo === "falha_gerar_senha"
+            ? "Falha ao gerar senha"
+            : "Falha ao enviar credenciais",
+          result.error || null,
+        );
+        await refreshFromSource();
+        return { ok: false, error: result.error };
+      }
+      await backendAddEvento(
+        reservaId,
+        "retry_credenciais_sucesso",
+        "Retry de credenciais concluído",
+        JSON.stringify({
+          origem: "retry_manual",
+          reutilizar_credencial: reutilizar,
+          skipped: !!result.skipped,
+        }),
+      );
+      await refreshFromSource();
+      return { ok: true, skipped: !!result.skipped, enviado: !result.skipped };
+    }
+
+    reserva.senhaEnviadaEm = new Date().toISOString();
+    addHistoricoEvento(
+      reserva,
+      "retry_credenciais_sucesso",
+      "Retry de credenciais concluído",
+      "origem=retry_manual (simulação local)",
+    );
+    refresh();
+    return { ok: true, enviado: true };
+  } finally {
+    _liberacaoCredencialInFlight.delete(String(reservaId));
+  }
+}
+
 /**
  * Gatilho das 13h — chamável por scheduler (sem cron nesta etapa).
  * Expõe window.YesHotelAplicarLiberacaoCredenciais13h.
@@ -3084,7 +3207,9 @@ function derivarExcecaoOperacionalReserva(reserva) {
       alerta.indexOf("Acesso liberado manualmente") === 0;
     const isSenha = alerta === "Senha ainda não enviada";
     let ctaHint = "Ver reserva";
-    if (isSenha || alerta.indexOf("Falha") === 0) {
+    if (alerta.indexOf("Falha") === 0) {
+      ctaHint = "Tentar novamente";
+    } else if (isSenha) {
       ctaHint = input.senhaEnviada
         ? "Reenviar credenciais"
         : "Gerar e enviar credenciais";
@@ -3099,7 +3224,10 @@ function derivarExcecaoOperacionalReserva(reserva) {
       prioridade: isFalha ? 1 : isSenha ? 5 : 10,
       motivo: alerta,
       ctaHint,
-      codigo: "credencial_politica",
+      codigo:
+        alerta.indexOf("Falha") === 0
+          ? "credencial_falha_retry"
+          : "credencial_politica",
     };
   }
 
@@ -4046,12 +4174,18 @@ function renderDetail(reserva) {
   const senhaJaEnviada = !!(
     reserva.senhaEnviadaEm || obterUltimosEventosSenha(reserva).lastOkSenha
   );
+  const falhaCredencial = detectarUltimaFalhaCredencial(reserva);
   const enviarSenhaBtnHtml = temBotaoSenhaBackend
     ? `<button type="button" class="primary-button detail-top-acao-btn detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-acao-credencial="${senhaJaEnviada ? "reenviar" : "gerar_enviar"}">${escapeHtml(labelCredenciais)}</button>` +
       (senhaJaEnviada
         ? `<button type="button" class="secondary-button detail-top-acao-btn detail-gerar-nova-senha-btn" id="detail-gerar-nova-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}">Gerar nova senha</button>`
+        : "") +
+      (falhaCredencial && !senhaJaEnviada
+        ? `<button type="button" class="primary-button detail-top-acao-btn detail-retry-credenciais-btn" id="detail-retry-credenciais-btn" data-reserva-id="${escapeHtml(reserva.id)}">Tentar novamente</button>`
         : "")
-    : "";
+    : falhaCredencial && !senhaJaEnviada
+      ? `<button type="button" class="primary-button detail-top-acao-btn detail-retry-credenciais-btn" id="detail-retry-credenciais-btn" data-reserva-id="${escapeHtml(reserva.id)}">Tentar novamente</button>`
+      : "";
 
   let reenviarFnrhTopoBtnHtml = "";
   const podeReenviarFnrhTopo =
@@ -4352,6 +4486,28 @@ function bindDetailListeners(reserva) {
         "Confirmação do operador registrada antes do envio.",
       );
       openTopContatoPanel(rid, "senha_nova");
+    });
+  }
+
+  const retryCredenciaisBtn = detailBodyElement.querySelector(
+    "#detail-retry-credenciais-btn",
+  );
+  if (retryCredenciaisBtn) {
+    retryCredenciaisBtn.addEventListener("click", async () => {
+      const rid = retryCredenciaisBtn.dataset.reservaId;
+      if (!rid) return;
+      retryCredenciaisBtn.disabled = true;
+      const prev = retryCredenciaisBtn.textContent;
+      retryCredenciaisBtn.textContent = "Tentando…";
+      try {
+        const result = await aplicarRetryCredenciaisNoPainel(rid);
+        if (!result.ok) {
+          alert(result.error || "Não foi possível concluir a nova tentativa.");
+        }
+      } finally {
+        retryCredenciaisBtn.disabled = false;
+        retryCredenciaisBtn.textContent = prev || "Tentar novamente";
+      }
     });
   }
 

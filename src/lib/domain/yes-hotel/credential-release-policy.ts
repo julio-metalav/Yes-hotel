@@ -61,6 +61,8 @@ export interface AvaliarLiberacaoCredenciaisInput {
   acaoSolicitada?: AcaoSolicitadaCredencial;
   /** Trava de concorrência: outro gatilho já está processando o envio. */
   envioEmAndamento?: boolean;
+  /** Fuso para avaliação do gatilho 13h (padrão America/Campo_Grande). */
+  timeZone?: string;
 }
 
 export interface AvaliarLiberacaoCredenciaisResultado {
@@ -75,6 +77,7 @@ export interface AvaliarLiberacaoCredenciaisResultado {
 }
 
 const CHECKIN_AUTO_HOUR = 13;
+const DEFAULT_TIMEZONE = "America/Campo_Grande";
 
 function parseDateTime(value: Date | string): Date {
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
@@ -84,12 +87,32 @@ function parseDateTime(value: Date | string): Date {
   return date;
 }
 
-function sameLocalDate(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
+function getZonedPartsForPolicy(date: Date, timeZone: string = DEFAULT_TIMEZONE) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = formatter.formatToParts(date);
+  const get = (type: string) =>
+    parts.find((part) => part.type === type)?.value || "0";
+  return {
+    year: Number(get("year")),
+    month: Number(get("month")),
+    day: Number(get("day")),
+    hour: Number(get("hour")),
+    minute: Number(get("minute")),
+  };
+}
+
+function sameZonedDate(a: Date, b: Date, timeZone: string = DEFAULT_TIMEZONE): boolean {
+  const za = getZonedPartsForPolicy(a, timeZone);
+  const zb = getZonedPartsForPolicy(b, timeZone);
+  return za.year === zb.year && za.month === zb.month && za.day === zb.day;
 }
 
 export function listarPendenciasCredenciais(
@@ -105,12 +128,16 @@ export function listarPendenciasCredenciais(
 export function atingiuHorario13hCheckin(
   dataHoraCheckin: Date | string,
   dataHoraAtual: Date | string,
+  timeZone: string = DEFAULT_TIMEZONE,
 ): boolean {
   const checkin = parseDateTime(dataHoraCheckin);
   const agora = parseDateTime(dataHoraAtual);
-  if (!sameLocalDate(checkin, agora)) return false;
-  return agora.getHours() > CHECKIN_AUTO_HOUR
-    || (agora.getHours() === CHECKIN_AUTO_HOUR && agora.getMinutes() >= 0);
+  if (!sameZonedDate(checkin, agora, timeZone)) return false;
+  const zoned = getZonedPartsForPolicy(agora, timeZone);
+  return (
+    zoned.hour > CHECKIN_AUTO_HOUR ||
+    (zoned.hour === CHECKIN_AUTO_HOUR && zoned.minute >= 0)
+  );
 }
 
 export function derivarAlertaOperacional(input: {
@@ -280,7 +307,13 @@ export function avaliarLiberacaoCredenciais(
   }
 
   if (input.origem === "automatico_13h") {
-    if (atingiuHorario13hCheckin(input.dataHoraCheckin, input.dataHoraAtual)) {
+    if (
+      atingiuHorario13hCheckin(
+        input.dataHoraCheckin,
+        input.dataHoraAtual,
+        input.timeZone || DEFAULT_TIMEZONE,
+      )
+    ) {
       return {
         ...base,
         deveGerar: true,
