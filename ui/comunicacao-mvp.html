@@ -26,6 +26,8 @@
           </div>
         </div>
 
+        <div class="mock-banner" role="status"><strong>Ambiente de atendimento</strong><span>Mensagens reais são enviadas somente após confirmação.</span></div>
+
         <div class="comunicacao-layout">
           <!-- Coluna 1: Lista de conversas -->
           <aside class="comunicacao-col conversas-col" id="conversas-col">
@@ -50,9 +52,12 @@
             </div>
             <div class="chat-active hidden" id="chat-active">
               <header class="chat-header">
-                <div class="chat-header-info">
-                  <h2 class="chat-header-name" id="chat-header-name">—</h2>
-                  <p class="chat-header-meta" id="chat-header-meta">Apto — · —</p>
+                <div class="chat-person">
+                  <span class="chat-avatar" id="chat-header-avatar" aria-hidden="true">—</span>
+                  <div class="chat-header-info">
+                    <h2 class="chat-header-name" id="chat-header-name">—</h2>
+                    <p class="chat-header-meta" id="chat-header-meta">Apto — · —</p>
+                  </div>
                 </div>
                 <div class="chat-header-actions">
                   <button type="button" class="secondary-button chat-detalhes-btn" id="chat-detalhes-btn" aria-label="Ver detalhes da reserva">Detalhes</button>

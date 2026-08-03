@@ -168,6 +168,11 @@
     const checkIn = form.get("checkIn");
     const checkOut = form.get("checkOut");
     set("sum-period", checkIn && checkOut ? checkIn + " → " + checkOut : "—");
+    const checkInTime = form.get("checkInTime") || "14:00";
+    const checkOutTime = form.get("checkOutTime") || "12:00";
+    set("sum-times", checkInTime + " → " + checkOutTime);
+    const count = Number(form.get("guestCount") || 1);
+    set("sum-guests", count + (count === 1 ? " hóspede" : " hóspedes"));
   }
 
   function addGuest() {
@@ -185,6 +190,16 @@
   reservationForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = new FormData(reservationForm);
+    const checkIn = String(form.get("checkIn") || "");
+    const checkOut = String(form.get("checkOut") || "");
+    if (checkIn && checkOut && checkOut <= checkIn) {
+      const field = reservationForm.elements.checkOut;
+      field.setCustomValidity("O check-out deve ser posterior ao check-in.");
+      field.reportValidity();
+      field.focus();
+      return;
+    }
+    reservationForm.elements.checkOut.setCustomValidity("");
     const additionalGuests = Array.from(guestsContainer?.querySelectorAll(".guest") || []).map((row) => ({
       nome: row.querySelector('[data-guest="nome"]').value,
       email: row.querySelector('[data-guest="email"]').value,
@@ -201,6 +216,8 @@
     const payload = [{
       apartamento: form.get("apartamento"), hospedePrincipal: form.get("nome"),
       checkInPrevisto: form.get("checkIn"), checkOutPrevisto: form.get("checkOut"),
+      checkInHorario: form.get("checkInTime"), checkOutHorario: form.get("checkOutTime"),
+      quantidadeHospedes: Number(form.get("guestCount") || 1),
       pagamento: form.get("pagamento"), origemExterna: form.get("origem"),
       externalReservationId: form.get("externalId") || null, veiculoPlaca: form.get("placa"),
       veiculoCor: form.get("cor"), hospedes: [principal, ...additionalGuests],
