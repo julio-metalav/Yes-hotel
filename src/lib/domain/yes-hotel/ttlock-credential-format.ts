@@ -37,6 +37,19 @@ export function deriveTtlockPasscodeFromReservation(
 }
 
 /**
+ * Gera senha TTLock aleatória de 4 dígitos, distinta de `exclude` quando informado.
+ * Usada em "Gerar nova senha" (não reutiliza a derivação determinística da reserva).
+ */
+export function generateRandomTtlockPasscode(exclude?: string | null): string {
+  const blocked = exclude != null && String(exclude).trim() ? String(exclude).trim() : null;
+  for (let i = 0; i < 32; i++) {
+    const code = String(1000 + Math.floor(Math.random() * 9000));
+    if (!blocked || code !== blocked) return code;
+  }
+  return blocked === "9999" ? "1000" : "9999";
+}
+
+/**
  * Primeiro + segundo nome para exibição; null se não houver nome utilizável.
  */
 function guestFirstAndSecondOrNull(fullName: string | null | undefined): string | null {

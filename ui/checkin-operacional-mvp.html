@@ -4,12 +4,23 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Yes Hotel — Painel de Check-in Operacional</title>
-    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=30" />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=32" />
   </head>
   <body class="op-body">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
 
     <div id="content-panel" class="op-app hidden">
+      <aside class="yes-sidebar">
+        <div class="yes-brand"><strong>YES HOTEL</strong><span>Hospitalidade inteligente</span></div>
+        <nav aria-label="Navegação principal">
+          <a href="./importar-reservas-mvp.html">Nova reserva</a>
+          <a class="active" href="./checkin-operacional-mvp.html">Operação</a>
+          <a href="./comunicacao-mvp.html">Comunicação</a>
+          <a href="./cafe-da-manha-mvp.html">Café da manhã</a>
+        </nav>
+        <div class="yes-sidebar-foot">Ambiente operacional<br /><strong>Recepção Yes Hotel</strong></div>
+      </aside>
+      <div class="yes-workspace">
       <header class="op-header">
         <div class="op-header__left">
           <h1 class="op-header__title">Painel de Check-in Operacional</h1>
@@ -25,6 +36,24 @@
           Reserva reflete o <strong>PMS</strong>; o Yes cobre FNRH, senha e acesso operacional.
         </p>
       </header>
+
+      <section class="op-local-mode" aria-label="Modo de armazenamento">
+        <div>
+          <strong>Modo local / demonstração</strong>
+          <span>Dados isolados neste navegador. TTLock e comunicação permanecem simulados.</span>
+        </div>
+        <div class="op-local-mode__actions">
+          <button type="button" class="op-btn op-btn--secondary" id="op-clear-local-data">Limpar dados</button>
+          <button type="button" class="op-btn op-btn--secondary" id="op-restore-demo-data">Restaurar demonstração</button>
+        </div>
+      </section>
+
+      <section class="yes-kpis" aria-label="Indicadores do dia">
+        <article><span>Chegadas hoje</span><strong id="op-kpi-arrivals">0</strong><small id="op-kpi-arrivals-note">Nenhuma chegada</small></article>
+        <article><span>Check-ins concluídos</span><strong id="op-kpi-completed">0</strong><small id="op-kpi-completed-note">0% das chegadas</small></article>
+        <article><span>FNRH pendentes</span><strong id="op-kpi-fnrh">0</strong><small id="op-kpi-fnrh-note">Sem pendências</small></article>
+        <article><span>Acessos liberados</span><strong id="op-kpi-access">0</strong><small>Atualizado localmente</small></article>
+      </section>
 
       <div class="op-controls" aria-label="Filtros e situação">
         <div class="op-toolbar" role="toolbar" aria-label="Ferramentas do painel">
@@ -90,9 +119,10 @@
               </div>
               <div id="op-mobile-list" class="op-mobile-cards" aria-live="polite"></div>
               <div id="op-empty" class="op-empty hidden">
-                <div class="op-empty__icon" aria-hidden="true">📋</div>
-                <p class="op-empty__title">Nenhuma reserva encontrada</p>
-                <p class="op-empty__hint">Ajuste os filtros, o período ou importe novas reservas.</p>
+                <span class="op-empty__mark" aria-hidden="true">YH</span>
+                <p class="op-empty__title">Nenhuma reserva nesta visualização</p>
+                <p class="op-empty__hint">Ajuste filtros ou consulte as pendências prioritárias da operação.</p>
+                <div class="op-empty__priorities"><strong>Próximos passos</strong><span>1. Conferir chegadas do dia</span><span>2. Revisar FNRHs pendentes</span><span>3. Confirmar acessos liberados</span></div>
               </div>
             </div>
           </div>
@@ -129,6 +159,8 @@
         </aside>
       </div>
 
+      </div>
+
       <div class="modal-overlay hidden" id="modal-enviar-senha-overlay" aria-hidden="true">
         <div class="modal-enviar-senha" role="dialog" aria-labelledby="modal-enviar-senha-title">
           <h3 id="modal-enviar-senha-title">Gerar e enviar senha</h3>
@@ -150,9 +182,18 @@
       </div>
     </div>
 
+    <nav class="mobile-nav" aria-label="Navegação principal móvel">
+      <a href="./importar-reservas-mvp.html">Reserva</a>
+      <a class="active" href="./checkin-operacional-mvp.html" aria-current="page">Operação</a>
+      <a href="./comunicacao-mvp.html">Comunicação</a>
+      <a href="./cafe-da-manha-mvp.html">Café</a>
+    </nav>
+
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
-    <script defer src="./checkin-operacional-mvp.js?v=30"></script>
+    <script defer src="./yes-credential-release-policy.js"></script>
+    <script defer src="./yes-operacional-repository.js"></script>
+    <script defer src="./checkin-operacional-mvp.js?v=35"></script>
   </body>
 </html>

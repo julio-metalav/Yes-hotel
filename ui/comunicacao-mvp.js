@@ -135,11 +135,16 @@ function renderConversasList() {
         const isSelected = c.id === selectedConversaId;
         const isResolvida = c.status === "resolvida";
         const classes = [isSelected ? "selected" : "", isResolvida ? "status-resolvida" : ""].filter(Boolean).join(" ");
+        const nome = nomeExibicaoConversa(c);
+        const initials = nome.split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join("").toUpperCase() || "H";
         return `
     <li data-conversa-id="${escapeHtml(c.id)}" class="${classes}">
-      <div class="conv-preview-name">${escapeHtml(nomeExibicaoConversa(c))}</div>
-      <div class="conv-preview-meta">Apto ${escapeHtml(apartamentoConversa(c) || "—")} · <span class="conv-status">${escapeHtml(statusLabel(c.status))}</span></div>
-      <div class="conv-preview-msg">${escapeHtml(c.ultima_mensagem_preview || "")}</div>
+      <span class="conv-avatar" aria-hidden="true">${escapeHtml(initials)}</span>
+      <div class="conv-preview-body">
+        <div class="conv-preview-top"><span class="conv-preview-name">${escapeHtml(nome)}</span><time>${formatMsgTime(c.ultima_mensagem_em || c.updated_at || c.created_at)}</time></div>
+        <div class="conv-preview-meta">Apartamento ${escapeHtml(apartamentoConversa(c) || "—")} · <span class="conv-status">${escapeHtml(statusLabel(c.status))}</span></div>
+        <div class="conv-preview-msg">${escapeHtml(c.ultima_mensagem_preview || "Sem mensagens recentes")}</div>
+      </div>
     </li>`;
       }
     )
@@ -176,7 +181,10 @@ async function selectConversa(id) {
     if (conv) {
       chatEmptyEl?.classList.add("hidden");
       chatActiveEl?.classList.remove("hidden");
-      if (chatHeaderNameEl) chatHeaderNameEl.textContent = nomeExibicaoConversa(conv);
+      const displayName = nomeExibicaoConversa(conv);
+      if (chatHeaderNameEl) chatHeaderNameEl.textContent = displayName;
+      const chatAvatar = document.getElementById("chat-header-avatar");
+      if (chatAvatar) chatAvatar.textContent = displayName.split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join("").toUpperCase() || "H";
       if (chatHeaderMetaEl) {
         chatHeaderMetaEl.textContent = `Apto ${apartamentoConversa(conv) || "—"} · ${conv.telefone || "—"} · ${statusLabel(conv.status)}`;
         chatHeaderMetaEl.classList.toggle("status-resolvida", conv.status === "resolvida");
@@ -197,11 +205,17 @@ function renderMessages(msgs) {
   if (!chatMessagesEl) return;
   chatMessagesEl.innerHTML = (msgs || [])
     .map(
-      (m) => `
-    <div class="msg-bubble ${escapeHtml(m.direcao)}">
+      (m) => {
+        const type = m.tipo_mensagem === "automacao" || m.tipo_mensagem === "sistema" ? "system" : (m.direcao === "entrada" ? "guest" : "operator");
+        const label = type === "guest" ? "Hóspede" : type === "system" ? "Automação" : "Recepção";
+        const delivery = m.status_envio ? ` · ${escapeHtml(m.status_envio)}` : "";
+        return `
+    <div class="msg-bubble ${escapeHtml(m.direcao)} msg-${type}">
+      <div class="msg-label">${label}</div>
       <div>${escapeHtml(m.mensagem)}</div>
-      <div class="msg-meta">${formatMsgTime(m.created_at)}</div>
-    </div>`
+      <div class="msg-meta">${formatMsgTime(m.created_at)}${delivery}</div>
+    </div>`;
+      }
     )
     .join("");
   chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
@@ -260,10 +274,11 @@ function renderResumo(reserva, conv) {
     resumoActionsBtnsEl.innerHTML = `<p class="resumo-conversa-resolvida">Conversa marcada como resolvida.</p>`;
   } else {
     resumoActionsBtnsEl.innerHTML = `
-    <button type="button" class="secondary-button" data-action="reenviar_fnrh">Reenviar link FNRH</button>
-    <button type="button" class="secondary-button" data-action="reenviar_instrucoes">Reenviar instruções de acesso</button>
-    <button type="button" class="secondary-button" data-action="reenviar_senha">Reenviar senha</button>
-    <button type="button" class="secondary-button" data-action="marcar_resolvida">Marcar conversa como resolvida</button>
+    <button type="button" class="secondary-button" data-action="reenviar_senha">Enviar senha de acesso</button>
+    <button type="button" class="secondary-button" data-action="reenviar_fnrh">Enviar link FNRH</button>
+    <button type="button" class="secondary-button" data-action="reenviar_instrucoes">Enviar instruções de chegada</button>
+    <button type="button" class="secondary-button" data-action="copiar_acesso">Copiar dados de acesso</button>
+    <button type="button" class="secondary-button action-resolve" data-action="marcar_resolvida">Marcar como resolvida</button>
   `;
     resumoActionsBtnsEl.querySelectorAll("button").forEach((btn) => {
       btn.addEventListener("click", () => handleQuickAction(btn.dataset.action, conv));
@@ -272,6 +287,16 @@ function renderResumo(reserva, conv) {
 }
 
 async function handleQuickAction(action, conv) {
+  if (action === "copiar_acesso" && conv) {
+    const text = `Yes Hotel · Apartamento ${apartamentoConversa(conv) || "—"}\nDados de acesso disponíveis no atendimento.`;
+    try {
+      await navigator.clipboard.writeText(text);
+      if (window.alert) window.alert("Dados de acesso copiados.");
+    } catch (_) {
+      if (window.alert) window.alert("Não foi possível copiar automaticamente.");
+    }
+    return;
+  }
   if (action === "marcar_resolvida" && conv) {
     const supabase = getSupabase();
     if (supabase) {

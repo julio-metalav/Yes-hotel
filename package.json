@@ -4,10 +4,18 @@
   "private": true,
   "description": "Base minima do cliente HITS V1 para o projeto Yes Hotel.",
   "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 3000",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
+    "test:ui:local-repository": "node scripts/test-operacional-local-repository.cjs",
     "test:hits:auth": "tsx scripts/test-hits-auth.ts",
     "test:hits:reservations": "tsx scripts/test-hits-reservations.ts",
     "test:hits:reservation": "tsx scripts/test-hits-reservation-detail.ts",
+    "test:yes:credential-release": "tsx scripts/test-credential-release-policy.ts",
+    "test:yes:credential-release-orchestrator": "tsx scripts/test-credential-release-orchestrator.ts",
+    "test:yes:credential-release-13h-retry": "tsx scripts/test-credential-release-13h-retry.ts",
+    "test:yes:gerar-nova-senha-scheduler": "tsx scripts/test-gerar-nova-senha-e-scheduler.ts",
     "test:yes:access:normal": "tsx scripts/test-yes-access-normal.ts",
     "test:yes:access:early-checkin": "tsx scripts/test-yes-access-early-checkin.ts",
     "test:yes:access:late-checkout": "tsx scripts/test-yes-access-late-checkout.ts",
@@ -33,11 +41,20 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.0",
-    "dotenv": "^17.3.1"
+    "dotenv": "^17.3.1",
+    "lucide-react": "^1.28.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^25.5.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^8.2.0"
   }
 }

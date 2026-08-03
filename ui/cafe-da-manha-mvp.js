@@ -40,6 +40,25 @@ const sessionBannerElement = document.querySelector("#session-banner");
 const sessionBannerUserElement = document.querySelector("#session-banner-user");
 const usersLinkElement = document.querySelector("#users-link");
 const logoutButtonElement = document.querySelector("#logout-button");
+const contentPanelElement = document.querySelector("#content-panel");
+const currentDateElement = document.querySelector("#current-date");
+const searchElement = document.querySelector("#breakfast-search");
+const filtersElement = document.querySelector("#breakfast-filters");
+const markAllButtonElement = document.querySelector("#mark-all-button");
+const emptyStateElement = document.querySelector("#empty-state");
+const expectedKpiElement = document.querySelector("#kpi-expected");
+const arrivedKpiElement = document.querySelector("#kpi-arrived");
+const missingKpiElement = document.querySelector("#kpi-missing");
+const progressKpiElement = document.querySelector("#kpi-progress");
+const completeApartmentsKpiElement = document.querySelector(
+  "#kpi-complete-apartments",
+);
+const apartmentsTotalKpiElement = document.querySelector(
+  "#kpi-apartments-total",
+);
+
+let activeFilter = "all";
+let searchTerm = "";
 
 if (!(cardsListElement instanceof HTMLElement)) {
   throw new Error("Elemento principal da tela de cafe da manha nao encontrado.");
@@ -51,6 +70,8 @@ function showAccessState(title, message, actionLabel) {
   }
 
   cardsListElement.innerHTML = "";
+  contentPanelElement?.classList.add("hidden");
+  sessionBannerElement?.classList.add("hidden");
   accessStateElement.classList.remove("hidden");
   accessStateElement.innerHTML = `
     <h2 class="access-state-title">${title}</h2>
@@ -66,6 +87,7 @@ function hideAccessState() {
 
   accessStateElement.classList.add("hidden");
   accessStateElement.innerHTML = "";
+  contentPanelElement?.classList.remove("hidden");
 }
 
 function clampArrivedGuests(nextValue, expectedGuests) {
@@ -77,7 +99,7 @@ function getMissingGuests(card) {
 }
 
 function getPaymentLabel(card) {
-  return card.breakfastPaid ? "Pago" : "Nao pago";
+  return card.breakfastPaid ? "Pago" : "Não pago";
 }
 
 function updateArrivedGuests(cardIndex, delta) {
@@ -95,29 +117,91 @@ function updateArrivedGuests(cardIndex, delta) {
   renderCards();
 }
 
+function normalizeSearchValue(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function matchesActiveFilter(card) {
+  const isComplete = getMissingGuests(card) === 0;
+
+  if (activeFilter === "pending") {
+    return !isComplete;
+  }
+
+  if (activeFilter === "complete") {
+    return isComplete;
+  }
+
+  if (activeFilter === "paid") {
+    return card.breakfastPaid;
+  }
+
+  if (activeFilter === "unpaid") {
+    return !card.breakfastPaid;
+  }
+
+  return true;
+}
+
+function matchesSearch(card) {
+  if (!searchTerm) {
+    return true;
+  }
+
+  return normalizeSearchValue(
+    `${card.apartmentCode} ${card.guestMainName}`,
+  ).includes(searchTerm);
+}
+
+function getVisibleCards() {
+  return breakfastCards
+    .map((card, cardIndex) => ({ card, cardIndex }))
+    .filter(({ card }) => matchesActiveFilter(card) && matchesSearch(card));
+}
+
 function createCard(card, cardIndex) {
   const missingGuests = getMissingGuests(card);
   const isComplete = missingGuests === 0;
   const article = document.createElement("article");
-  article.className = `breakfast-card${isComplete ? " is-complete" : ""}`;
+  article.className = [
+    "breakfast-card",
+    isComplete ? "is-complete" : "is-pending",
+    card.breakfastPaid ? "is-paid" : "is-unpaid",
+  ].join(" ");
 
   article.innerHTML = `
-    <div class="card-top">
-      <div class="card-title">
-        <span class="apartment-code">Apto ${card.apartmentCode}</span>
-        <span class="guest-name">${card.guestMainName}</span>
+    <div class="guest-cell">
+      <span class="apartment-code">Apto ${card.apartmentCode}</span>
+      <span class="guest-name">${card.guestMainName}</span>
+    </div>
+    <div class="attendance-cell">
+      <div class="attendance-metrics">
+        <span><small>Previstos</small><strong>${card.expectedGuests}</strong></span>
+        <span><small>Atendidos</small><strong>${card.arrivedGuests}</strong></span>
+        <span class="${missingGuests > 0 ? "missing-count" : ""}">
+          <small>Faltantes</small><strong>${missingGuests}</strong>
+        </span>
       </div>
+      <div class="progress-track" aria-label="${card.arrivedGuests} de ${card.expectedGuests} hóspedes atendidos">
+        <span style="width: ${card.expectedGuests > 0 ? (card.arrivedGuests / card.expectedGuests) * 100 : 0}%"></span>
+      </div>
+    </div>
+    <div class="payment-cell">
       <span class="payment-badge ${card.breakfastPaid ? "is-paid" : "is-unpaid"}">
         ${getPaymentLabel(card)}
       </span>
     </div>
-    <div class="card-bottom">
-      <div class="counts-line">
-        Previsto: <strong>${card.expectedGuests}</strong> |
-        Vieram: <strong>${card.arrivedGuests}</strong> |
-        Faltam: <strong>${missingGuests}</strong>
-        ${isComplete ? '| <span class="is-complete-text">Completo</span>' : ""}
-      </div>
+    <div class="status-cell">
+      <span class="status-badge ${isComplete ? "is-complete" : "is-pending"}">
+        ${isComplete ? "Completo" : "Pendente"}
+      </span>
+    </div>
+    <div class="control-cell">
+      <span class="control-label">Atendidos</span>
       <div class="counter-controls">
         <button
           class="icon-button"
@@ -127,9 +211,9 @@ function createCard(card, cardIndex) {
           data-action="decrease"
           data-card-index="${cardIndex}"
         >
-          -
+          −
         </button>
-        <span class="arrived-pill">${card.arrivedGuests}</span>
+        <span class="arrived-pill" aria-live="polite">${card.arrivedGuests}</span>
         <button
           class="icon-button"
           type="button"
@@ -147,6 +231,47 @@ function createCard(card, cardIndex) {
   return article;
 }
 
+function renderIndicators() {
+  const expectedGuests = breakfastCards.reduce(
+    (total, card) => total + card.expectedGuests,
+    0,
+  );
+  const arrivedGuests = breakfastCards.reduce(
+    (total, card) => total + card.arrivedGuests,
+    0,
+  );
+  const missingGuests = Math.max(0, expectedGuests - arrivedGuests);
+  const completeApartments = breakfastCards.filter(
+    (card) => getMissingGuests(card) === 0,
+  ).length;
+  const progress = expectedGuests
+    ? Math.round((arrivedGuests / expectedGuests) * 100)
+    : 0;
+
+  if (expectedKpiElement instanceof HTMLElement) {
+    expectedKpiElement.textContent = String(expectedGuests);
+  }
+  if (arrivedKpiElement instanceof HTMLElement) {
+    arrivedKpiElement.textContent = String(arrivedGuests);
+  }
+  if (missingKpiElement instanceof HTMLElement) {
+    missingKpiElement.textContent = String(missingGuests);
+  }
+  if (progressKpiElement instanceof HTMLElement) {
+    progressKpiElement.textContent = `${progress}% do atendimento`;
+  }
+  if (completeApartmentsKpiElement instanceof HTMLElement) {
+    completeApartmentsKpiElement.textContent = String(completeApartments);
+  }
+  if (apartmentsTotalKpiElement instanceof HTMLElement) {
+    apartmentsTotalKpiElement.textContent =
+      `de ${breakfastCards.length} apartamentos`;
+  }
+  if (markAllButtonElement instanceof HTMLButtonElement) {
+    markAllButtonElement.disabled = missingGuests === 0;
+  }
+}
+
 async function renderSessionBannerAsync(currentUser) {
   if (
     !(sessionBannerElement instanceof HTMLElement) ||
@@ -161,7 +286,7 @@ async function renderSessionBannerAsync(currentUser) {
   }
 
   sessionBannerUserElement.textContent =
-    `${currentUser.name} | ${auth.getRoleLabel(currentUser.role)} | sessao de ${auth.getSessionDurationHours()} horas`;
+    `${currentUser.name} · ${auth.getRoleLabel(currentUser.role)} · sessão de ${auth.getSessionDurationHours()} horas`;
   sessionBannerElement.classList.remove("hidden");
 
   if (usersLinkElement instanceof HTMLElement) {
@@ -175,9 +300,14 @@ async function renderSessionBannerAsync(currentUser) {
 function renderCards() {
   cardsListElement.innerHTML = "";
 
-  breakfastCards.forEach((card, cardIndex) => {
+  const visibleCards = getVisibleCards();
+
+  visibleCards.forEach(({ card, cardIndex }) => {
     cardsListElement.appendChild(createCard(card, cardIndex));
   });
+
+  emptyStateElement?.classList.toggle("hidden", visibleCards.length > 0);
+  renderIndicators();
 
   cardsListElement.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -192,6 +322,51 @@ function renderCards() {
   });
 }
 
+function renderCurrentDate() {
+  if (!(currentDateElement instanceof HTMLElement)) {
+    return;
+  }
+
+  currentDateElement.textContent = new Intl.DateTimeFormat("pt-BR", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
+}
+
+searchElement?.addEventListener("input", () => {
+  if (!(searchElement instanceof HTMLInputElement)) {
+    return;
+  }
+
+  searchTerm = normalizeSearchValue(searchElement.value);
+  renderCards();
+});
+
+filtersElement?.addEventListener("click", (event) => {
+  const target = event.target;
+
+  if (!(target instanceof HTMLButtonElement) || !target.dataset.filter) {
+    return;
+  }
+
+  activeFilter = target.dataset.filter;
+  filtersElement.querySelectorAll("[data-filter]").forEach((button) => {
+    const isActive = button === target;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+  renderCards();
+});
+
+markAllButtonElement?.addEventListener("click", () => {
+  breakfastCards.forEach((card) => {
+    card.arrivedGuests = card.expectedGuests;
+  });
+  renderCards();
+});
+
 logoutButtonElement?.addEventListener("click", async () => {
   if (!auth) {
     return;
@@ -202,6 +377,8 @@ logoutButtonElement?.addEventListener("click", async () => {
 });
 
 async function initBreakfastPage() {
+  renderCurrentDate();
+
   if (!auth || !auth.isConfigured()) {
     showAccessState(
       "Autenticacao indisponivel",

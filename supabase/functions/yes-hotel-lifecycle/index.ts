@@ -1,6 +1,6 @@
 /**
  * Yes Hotel — Lifecycle TTLock (Fase 3.2).
- * Ações: lifecycle_provision, cancelamento, checkout, sync_summary, retry_sync.
+ * Ações: lifecycle_provision, lifecycle_gerar_nova_senha, cancelamento, checkout, sync_summary, retry_sync.
  * Autenticação: usuário interno (admin ou recepção) via Supabase Auth.
  */
 
@@ -9,6 +9,7 @@ import md5 from "npm:md5";
 import {
   deriveTtlockPasscodeFromReservation,
   formatTtlockKeyboardPwdName,
+  generateRandomTtlockPasscode,
 } from "../_shared/ttlock-credential-format.ts";
 
 const corsHeaders = {
@@ -1312,6 +1313,332 @@ async function handleCancelOrCheckout(
   });
 }
 
+const gerarNovaSenhaInFlight = new Set<string>();
+
+/**
+ * Gera nova senha TTLock: revoga a anterior, provisiona passcode novo e devolve o resultado.
+ * Se a revogação remota falhar, marca pendente_limpeza e NÃO cria/envia senha nova.
+ */
+async function handleGerarNovaSenha(request: Request, payload: Record<string, unknown>): Promise<Response> {
+  await ensureCallerAllowed(request);
+  const reservaId = requireReservaId(payload).trim().toLowerCase();
+  const usuarioId =
+    typeof payload.usuario_id === "string" && payload.usuario_id.trim()
+      ? payload.usuario_id.trim()
+      : null;
+  const motivo =
+    typeof payload.motivo === "string" && payload.motivo.trim()
+      ? payload.motivo.trim()
+      : "gerar_nova_senha";
+
+  if (gerarNovaSenhaInFlight.has(reservaId)) {
+    return jsonResponse(
+      {
+        ok: false,
+        error: "Geração de nova senha já em andamento para esta reserva.",
+        reservaId,
+        em_andamento: true,
+      },
+      409,
+    );
+  }
+
+  gerarNovaSenhaInFlight.add(reservaId);
+  try {
+    const credencial = await getCredencialForProvision(reservaId);
+    if (!credencial) {
+      return jsonResponse(
+        { ok: false, error: "Nenhuma credencial de acesso encontrada para esta reserva.", reservaId },
+        404,
+      );
+    }
+    if (credencial.status === "revogada") {
+      return jsonResponse(
+        { ok: false, error: "Não é possível gerar nova senha para credencial revogada.", reservaId },
+        400,
+      );
+    }
+    if (credencial.status === "provisionando") {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Provisionamento em andamento; tente novamente em instantes.",
+          reservaId,
+          em_andamento: true,
+        },
+        409,
+      );
+    }
+
+    const passcodeAnterior = credencial.codigo_credencial ?? null;
+    const credId = String(credencial.id).trim();
+    const now = NOW();
+    const erros: string[] = [];
+    let revogados = 0;
+    let limpezaPendente = 0;
+
+    await adminClient
+      .from("operacional_credenciais_acesso")
+      .update({ status: "provisionando" })
+      .eq("id", credId);
+
+    const { data: itensRaw } = await adminClient
+      .from("operacional_credencial_itens")
+      .select(
+        "id, credencial_id, lock_id_ttlock, status_provisionamento, codigo_logico_destino, remote_keyboard_pwd_id",
+      )
+      .eq("credencial_id", credId);
+    const itens = Array.isArray(itensRaw) ? (itensRaw as ItemRow[]) : [];
+
+    for (const item of itens) {
+      const status = item.status_provisionamento;
+      const hasRemote = item.remote_keyboard_pwd_id != null;
+
+      if (status === "pendente_limpeza" || (hasRemote && (status === "provisionado" || status === "falhou"))) {
+        if (!hasRemote) {
+          await adminClient
+            .from("operacional_credencial_itens")
+            .update({
+              status_provisionamento: "pendente",
+              remote_keyboard_pwd_id: null,
+              codigo_enviado: null,
+              ultimo_erro: null,
+              provisionado_em: null,
+              revogado_em: null,
+            })
+            .eq("id", item.id);
+          continue;
+        }
+        if (!isTtlockAvailable()) {
+          erros.push(`${item.codigo_logico_destino}: TTLock indisponível para revogar senha anterior.`);
+          await adminClient
+            .from("operacional_credencial_itens")
+            .update({
+              status_provisionamento: "pendente_limpeza",
+              ultimo_erro: "TTLock indisponível ao gerar nova senha.",
+            })
+            .eq("id", item.id);
+          limpezaPendente++;
+          continue;
+        }
+        try {
+          await ttlockDeleteKeyboardPassword(item.lock_id_ttlock, item.remote_keyboard_pwd_id!, {
+            reserva_id: reservaId,
+            credencial_id: credId,
+            credencial_item_id: item.id,
+            codigo_logico_destino: item.codigo_logico_destino,
+          });
+          await adminClient
+            .from("operacional_credencial_itens")
+            .update({
+              status_provisionamento: "pendente",
+              remote_keyboard_pwd_id: null,
+              codigo_enviado: null,
+              ultimo_erro: null,
+              provisionado_em: null,
+              revogado_em: null,
+            })
+            .eq("id", item.id);
+          revogados++;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          erros.push(`${item.codigo_logico_destino}: ${msg}`);
+          await adminClient
+            .from("operacional_credencial_itens")
+            .update({
+              status_provisionamento: "pendente_limpeza",
+              ultimo_erro: msg,
+            })
+            .eq("id", item.id);
+          limpezaPendente++;
+        }
+        continue;
+      }
+
+      if (
+        status === "provisionado" ||
+        status === "falhou" ||
+        status === "revogado" ||
+        status === "provisionando"
+      ) {
+        await adminClient
+          .from("operacional_credencial_itens")
+          .update({
+            status_provisionamento: "pendente",
+            remote_keyboard_pwd_id: null,
+            codigo_enviado: null,
+            ultimo_erro: null,
+            provisionado_em: null,
+          })
+          .eq("id", item.id);
+      }
+    }
+
+    if (limpezaPendente > 0) {
+      await adminClient
+        .from("operacional_credenciais_acesso")
+        .update({
+          status: passcodeAnterior ? "parcial" : "falhou",
+          sync_status: "partial",
+          last_sync_attempt_at: now,
+          last_sync_error: erros.slice(0, 3).join("; ") || "Limpeza remota pendente.",
+        })
+        .eq("id", credId);
+
+      await insertReservaEvento(
+        reservaId,
+        "gerar_nova_senha_falha_limpeza",
+        "Gerar nova senha bloqueada: limpeza remota pendente",
+        {
+          action: "lifecycle_gerar_nova_senha",
+          credencial_id: credId,
+          passcode_anterior_substituido: !!passcodeAnterior,
+          limpeza_pendente: limpezaPendente,
+          revogados,
+          usuario_id: usuarioId,
+          motivo,
+          erro_resumido: erros.slice(0, 3).join("; "),
+        },
+      );
+
+      return jsonResponse(
+        {
+          ok: false,
+          error:
+            "Não foi possível revogar a senha anterior em todas as fechaduras. Pendência de limpeza registrada; nova senha não foi gerada.",
+          reservaId,
+          credencialId: credId,
+          passcodeAnterior,
+          limpezaPendente,
+          revogados,
+          erros,
+          bloqueadoPorLimpeza: true,
+        },
+        409,
+      );
+    }
+
+    const novoPasscode = generateRandomTtlockPasscode(passcodeAnterior);
+    const upNew = await adminClient
+      .from("operacional_credenciais_acesso")
+      .update({
+        codigo_credencial: novoPasscode,
+        provider_tipo: "ttlock_passcode",
+        status: "pendente",
+        revogado_em: null,
+        motivo_revogacao: null,
+        sync_status: "pending",
+        last_sync_attempt_at: now,
+        last_sync_error: null,
+      })
+      .eq("id", credId);
+    if (upNew.error) {
+      throw new HttpError(
+        "Falha ao persistir nova senha na credencial: " + upNew.error.message,
+        500,
+      );
+    }
+
+    await insertReservaEvento(
+      reservaId,
+      "gerar_nova_senha_iniciado",
+      "Geração de nova senha TTLock iniciada",
+      {
+        action: "lifecycle_gerar_nova_senha",
+        credencial_id: credId,
+        passcode_anterior_substituido: !!passcodeAnterior,
+        revogados,
+        usuario_id: usuarioId,
+        motivo,
+        em: now,
+      },
+    );
+
+    const provisionRes = await handleLifecycleProvision(request, { reservaId });
+    const provisionBody = (await provisionRes.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    const provisionOk = provisionRes.ok && provisionBody.ok !== false;
+    const falhas = Number(provisionBody.falhas ?? 0);
+    const provisionados = Number(provisionBody.provisionados ?? 0);
+    const passcodeFinal =
+      typeof provisionBody.passcode === "string" && provisionBody.passcode
+        ? provisionBody.passcode
+        : novoPasscode;
+
+    if (!provisionOk || falhas > 0 || provisionados <= 0) {
+      await insertReservaEvento(
+        reservaId,
+        "gerar_nova_senha_falha",
+        "Falha ao provisionar nova senha TTLock",
+        {
+          action: "lifecycle_gerar_nova_senha",
+          credencial_id: credId,
+          passcode_anterior_substituido: !!passcodeAnterior,
+          revogados,
+          provisionados,
+          falhas,
+          usuario_id: usuarioId,
+          motivo,
+          erro_resumido:
+            (typeof provisionBody.error === "string" && provisionBody.error) ||
+            (Array.isArray(provisionBody.erros) ? provisionBody.erros.slice(0, 3).join("; ") : null),
+        },
+      );
+      return jsonResponse(
+        {
+          ok: false,
+          error:
+            (typeof provisionBody.error === "string" && provisionBody.error) ||
+            "Falha ao provisionar a nova senha nas fechaduras. Nenhuma mensagem foi enviada.",
+          reservaId,
+          credencialId: credId,
+          passcodeAnterior,
+          passcode: null,
+          revogados,
+          provisionados,
+          falhas,
+          erros: provisionBody.erros ?? erros,
+        },
+        400,
+      );
+    }
+
+    await insertReservaEvento(
+      reservaId,
+      "gerar_nova_senha_sucesso",
+      "Nova senha TTLock provisionada",
+      {
+        action: "lifecycle_gerar_nova_senha",
+        credencial_id: credId,
+        passcode_anterior_substituido: !!passcodeAnterior,
+        revogados,
+        provisionados,
+        usuario_id: usuarioId,
+        motivo,
+        em: new Date().toISOString(),
+      },
+    );
+
+    return jsonResponse({
+      ok: true,
+      message: "Nova senha gerada e provisionada.",
+      reservaId,
+      credencialId: credId,
+      passcode: passcodeFinal,
+      passcodeAnterior,
+      revogados,
+      provisionados,
+      falhas: 0,
+      limpezaPendente: 0,
+      status: provisionBody.status ?? "provisionada",
+    });
+  } finally {
+    gerarNovaSenhaInFlight.delete(reservaId);
+  }
+}
+
 /** Lista credenciais com itens pendentes de limpeza remota (revogado + ultimo_erro). Base para job/cron até 2h pós-checkout. */
 async function listPendingCleanup(request: Request): Promise<Response> {
   await ensureCallerAllowed(request);
@@ -1473,12 +1800,18 @@ Deno.serve(async (request: Request) => {
     if (action === "lifecycle_provision") {
       return await handleLifecycleProvision(request, payload);
     }
+    if (action === "lifecycle_gerar_nova_senha") {
+      return await handleGerarNovaSenha(request, payload);
+    }
     if (action === "list_pending_cleanup") {
       return await listPendingCleanup(request);
     }
 
     return jsonResponse(
-      { error: "Ação não suportada. Use: lifecycle_cancel, lifecycle_checkout, lifecycle_provision, sync_summary, retry_sync, list_pending_cleanup." },
+      {
+        error:
+          "Ação não suportada. Use: lifecycle_cancel, lifecycle_checkout, lifecycle_provision, lifecycle_gerar_nova_senha, sync_summary, retry_sync, list_pending_cleanup.",
+      },
       400,
     );
   } catch (error) {

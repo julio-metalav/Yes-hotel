@@ -1,8 +1,12 @@
 /**
  * Envio de senha TTLock + links FNRH (manual ou automático).
  * E-mail via Resend; WhatsApp via camada DigiSac (stub/real).
- * POST: { reserva_id, manual?: boolean, usuario_id?: string, email?: string, whatsapp?: string }.
- * Se manual e email/whatsapp informados, salva nos contatos do hóspede principal.
+ * POST: {
+ *   reserva_id, manual?: boolean, usuario_id?: string, email?: string, whatsapp?: string,
+ *   origem?: string, gerar_nova?: boolean, confirmacao_gerar_nova?: boolean
+ * }.
+ * Se gerar_nova=true: revoga/substitui a senha via lifecycle_gerar_nova_senha e só então envia.
+ * Reenvio (sem gerar_nova) reutiliza a credencial existente.
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { outboundWhatsappTransacional } from "../_shared/comunicacao-operacional/outbound-whatsapp.ts";
@@ -57,11 +61,23 @@ async function sendEmail(to: string, subject: string, html: string): Promise<{ o
   }
 }
 
+const gerarNovaInFlight = new Set<string>();
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ ok: false, error: "Método não permitido." }, 405);
 
-  let body: { reserva_id?: string; manual?: boolean; usuario_id?: string; email?: string; whatsapp?: string };
+  let body: {
+    reserva_id?: string;
+    manual?: boolean;
+    usuario_id?: string;
+    email?: string;
+    whatsapp?: string;
+    origem?: string;
+    gerar_nova?: boolean;
+    confirmacao_gerar_nova?: boolean;
+    acao?: string;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -75,6 +91,11 @@ Deno.serve(async (req: Request) => {
   const emailContato = (body.email ?? "").trim();
   const whatsappContato = (body.whatsapp ?? "").trim();
   const usuarioId = (body.usuario_id ?? "").trim();
+  const origemRegistro = (body as { origem?: string }).origem?.trim() || (isManual ? "manual" : "requisitos");
+  const gerarNova =
+    !!body.gerar_nova ||
+    String(body.acao || "").trim() === "gerar_nova";
+  const confirmacaoGerarNova = !!body.confirmacao_gerar_nova;
 
   const { data: reserva, error: errR } = await admin
     .from("operacional_reservas")
@@ -82,6 +103,25 @@ Deno.serve(async (req: Request) => {
     .eq("id", reservaId)
     .maybeSingle();
   if (errR || !reserva) return jsonResponse({ ok: false, error: "Reserva não encontrada." }, 404);
+
+  const alreadySentAtStart = (reserva as { senha_enviada_em?: string | null }).senha_enviada_em;
+  // Idempotência automática: nunca reenviar sozinho se já houve envio registrado.
+  if (!isManual && !gerarNova && alreadySentAtStart) {
+    return jsonResponse({
+      ok: true,
+      skipped: true,
+      reason: "ja_enviada",
+      message: "Senha já enviada anteriormente; envio automático ignorado.",
+      reserva_id: reservaId,
+    }, 200);
+  }
+
+  if (gerarNova && !confirmacaoGerarNova) {
+    return jsonResponse({
+      ok: false,
+      error: "Confirmação obrigatória para gerar nova senha.",
+    }, 400);
+  }
 
   const { data: credencial, error: errC } = await admin
     .from("operacional_credenciais_acesso")
@@ -98,9 +138,72 @@ Deno.serve(async (req: Request) => {
   }
 
   let passcode = (credencial as { codigo_credencial?: string | null }).codigo_credencial;
-  if (!passcode) {
-    const authHeader = req.headers.get("Authorization") ?? "";
-    const lifecycleUrl = `${supabaseUrl}/functions/v1/yes-hotel-lifecycle`;
+  let passcodeAnterior: string | null = null;
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const lifecycleUrl = `${supabaseUrl}/functions/v1/yes-hotel-lifecycle`;
+
+  if (gerarNova) {
+    if (gerarNovaInFlight.has(reservaId)) {
+      return jsonResponse({
+        ok: false,
+        error: "Geração de nova senha já em andamento para esta reserva.",
+        em_andamento: true,
+      }, 409);
+    }
+    gerarNovaInFlight.add(reservaId);
+    try {
+      const genRes = await fetch(lifecycleUrl, {
+        method: "POST",
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({
+          action: "lifecycle_gerar_nova_senha",
+          payload: {
+            reservaId,
+            usuario_id: usuarioId || null,
+            motivo: origemRegistro || "gerar_nova_senha",
+          },
+        }),
+      });
+      const genData = (await genRes.json().catch(() => ({}))) as {
+        ok?: boolean;
+        passcode?: string;
+        passcodeAnterior?: string | null;
+        error?: string;
+        limpezaPendente?: number;
+        bloqueadoPorLimpeza?: boolean;
+        em_andamento?: boolean;
+      };
+      if (!genRes.ok || !genData.ok || !genData.passcode) {
+        await admin.from("operacional_reserva_eventos").insert({
+          reserva_id: reservaId,
+          tipo: "gerar_nova_senha_envio_bloqueado",
+          titulo: "Gerar nova senha: envio não realizado",
+          detalhe: JSON.stringify({
+            usuario_id: usuarioId || null,
+            origem: origemRegistro,
+            erro: genData.error || null,
+            limpeza_pendente: genData.limpezaPendente ?? null,
+            bloqueado_por_limpeza: !!genData.bloqueadoPorLimpeza,
+            timestamp: new Date().toISOString(),
+          }),
+        });
+        return jsonResponse({
+          ok: false,
+          error: genData.error ?? "Falha ao gerar nova senha. Nenhuma mensagem foi enviada.",
+          limpeza_pendente: genData.limpezaPendente ?? null,
+          bloqueado_por_limpeza: !!genData.bloqueadoPorLimpeza,
+        }, genRes.status === 409 ? 409 : 400);
+      }
+      passcodeAnterior = genData.passcodeAnterior ?? passcode ?? null;
+      passcode = genData.passcode;
+    } finally {
+      gerarNovaInFlight.delete(reservaId);
+    }
+  } else if (!passcode) {
     const provisionRes = await fetch(lifecycleUrl, {
       method: "POST",
       headers: { ...corsHeaders, "Content-Type": "application/json", "Authorization": authHeader },
@@ -272,10 +375,21 @@ Deno.serve(async (req: Request) => {
 
   await admin.from("operacional_reserva_eventos").insert({
     reserva_id: reservaId,
-    tipo: isManual ? "envio_manual_senha" : "envio_auto_senha",
-    titulo: isManual ? "Envio manual de senha" : "Envio automático de senha",
+    tipo: gerarNova
+      ? "envio_nova_senha"
+      : isManual
+        ? "envio_manual_senha"
+        : "envio_auto_senha",
+    titulo: gerarNova
+      ? "Envio de nova senha"
+      : isManual
+        ? "Envio manual de senha"
+        : "Envio automático de senha",
     detalhe: JSON.stringify({
       usuario_id: usuarioId || null,
+      origem: origemRegistro,
+      gerar_nova: gerarNova,
+      passcode_anterior_substituido: gerarNova ? !!passcodeAnterior : false,
       canais: { email: enviadoEmail, whatsapp: enviadoWhatsapp },
       canal_operacional_whatsapp: enviadoWhatsapp ? "digisac" : null,
       qtd_fnrh_links: links.length,
@@ -283,9 +397,13 @@ Deno.serve(async (req: Request) => {
     }),
   });
 
-  const msgOk = enviadoWhatsapp
-    ? "Senha e links enviados por WhatsApp (DigiSac)."
-    : "Senha e links enviados por e-mail.";
+  const msgOk = gerarNova
+    ? (enviadoWhatsapp
+      ? "Nova senha gerada e enviada por WhatsApp (DigiSac)."
+      : "Nova senha gerada e enviada por e-mail.")
+    : enviadoWhatsapp
+      ? "Senha e links enviados por WhatsApp (DigiSac)."
+      : "Senha e links enviados por e-mail.";
 
   return jsonResponse(
     {
@@ -294,6 +412,7 @@ Deno.serve(async (req: Request) => {
       reserva_id: reservaId,
       enviado_email: enviadoEmail,
       enviado_whatsapp: enviadoWhatsapp,
+      gerar_nova: gerarNova,
     },
     200,
   );

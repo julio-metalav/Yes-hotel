@@ -1,0 +1,64 @@
+-- =============================================================================
+-- PENDENTE DE APLICAÇÃO / HOMOLOGAÇÃO
+-- NÃO EXECUTAR nesta etapa.
+-- NÃO é migration automática (fica fora de supabase/migrations/).
+-- =============================================================================
+-- Agenda diária do gatilho de liberação de credenciais às 13h (Campo Grande/MS).
+--
+-- Mecanismo: pg_cron + pg_net (padrão Supabase Cron) → Edge Function HTTP
+--   POST /functions/v1/senha-auto-envio
+--   body: {"mode":"13h"}
+--
+-- Pré-requisitos no projeto remoto:
+--   1. Extensões: pg_cron, pg_net (habilitadas no Dashboard se necessário)
+--   2. Edge Function `senha-auto-envio` já deployada
+--   3. Secrets (Dashboard → Edge Functions / Vault) — NÃO colocar valores no Git:
+--        SENHA_SCHEDULER_TOKEN   → header x-senha-scheduler-token
+--        SUPABASE_SERVICE_ROLE_KEY (já existe no runtime da function)
+--   4. Substituir os placeholders abaixo pelos valores do ambiente
+--
+-- Fuso: America/Campo_Grande = UTC-4 o ano todo.
+--   13:05 local ≈ 17:05 UTC → cron '5 17 * * *'
+-- A function também valida hora local ≥ 13h; reexecuções são idempotentes
+-- (reservas com senha_enviada_em são ignoradas; falha isolada por reserva).
+-- =============================================================================
+
+-- Exemplo de agendamento (ajustar URL e secrets via Vault / configurações do projeto):
+--
+-- select cron.unschedule('yes-hotel-senha-auto-envio-13h')
+-- where exists (select 1 from cron.job where jobname = 'yes-hotel-senha-auto-envio-13h');
+--
+-- select cron.schedule(
+--   'yes-hotel-senha-auto-envio-13h',
+--   '5 17 * * *',
+--   $$
+--   select net.http_post(
+--     url := '<SUPABASE_URL>/functions/v1/senha-auto-envio',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'Authorization', 'Bearer <SUPABASE_SERVICE_ROLE_KEY>',
+--       'x-senha-scheduler-token', '<SENHA_SCHEDULER_TOKEN>'
+--     ),
+--     body := '{"mode":"13h"}'::jsonb
+--   ) as request_id;
+--   $$
+-- );
+
+-- Job opcional de retry de falhas (ex.: a cada 30 min após as 13h):
+-- select cron.schedule(
+--   'yes-hotel-senha-auto-envio-retry',
+--   '*/30 17-23 * * *',
+--   $$
+--   select net.http_post(
+--     url := '<SUPABASE_URL>/functions/v1/senha-auto-envio',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'Authorization', 'Bearer <SUPABASE_SERVICE_ROLE_KEY>',
+--       'x-senha-scheduler-token', '<SENHA_SCHEDULER_TOKEN>'
+--     ),
+--     body := '{"mode":"retry"}'::jsonb
+--   ) as request_id;
+--   $$
+-- );
+
+select 'PENDENTE: configurar cron yes-hotel-senha-auto-envio-13h → senha-auto-envio mode=13h' as status;

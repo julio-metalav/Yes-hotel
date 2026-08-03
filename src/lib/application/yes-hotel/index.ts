@@ -1,5 +1,6 @@
 export * from "./credential-lifecycle";
 export * from "./credential-lifecycle-status";
+export * from "./credential-release-orchestrator";
 export * from "./format";
 export * from "./orchestrator";
 export * from "./provisioning";
