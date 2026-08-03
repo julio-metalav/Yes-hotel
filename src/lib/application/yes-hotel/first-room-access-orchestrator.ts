@@ -87,6 +87,12 @@ function resultFromExistingEvent(
   return { status, event_id: eventId, ...extra };
 }
 
+/** Opções efêmeras — nunca entram no evento persistido. */
+export type ProcessFirstRoomAccessOptions = {
+  /** Senha só em memória para correlação; descartar após o processamento. */
+  ephemeral_keyboard_pwd?: string;
+};
+
 /**
  * Processa um evento sanitizado de abertura.
  * Mensagens vão para outbox; nunca envia DigiSac/Resend aqui.
@@ -94,6 +100,7 @@ function resultFromExistingEvent(
 export async function processFirstRoomAccessEvent(
   input: ProcessFirstRoomAccessInput,
   ports: FirstRoomAccessPorts,
+  options?: ProcessFirstRoomAccessOptions,
 ): Promise<ProcessFirstRoomAccessResult> {
   assertNoPasswordLeak(input);
   if (input.raw_payload_sanitized) {
@@ -145,7 +152,12 @@ export async function processFirstRoomAccessEvent(
         keyboard_pwd_id: input.keyboard_pwd_id,
         occurred_at: input.occurred_at,
         record_type: input.record_type,
+        ephemeral_keyboard_pwd: options?.ephemeral_keyboard_pwd,
       });
+      // Descarta referência local o quanto antes (caller também deve zerar).
+      if (options) {
+        options.ephemeral_keyboard_pwd = undefined;
+      }
 
       await ports.events.attachCorrelation(event.id, {
         reservation_id: correlation.reservation_id ?? null,
@@ -154,6 +166,22 @@ export async function processFirstRoomAccessEvent(
         logical_destination: correlation.logical_destination ?? null,
         keyboard_pwd_id: correlation.keyboard_pwd_id ?? input.keyboard_pwd_id ?? null,
       });
+
+      if (correlation.ambiguous) {
+        await ports.events.markIgnored(event.id, "ambiguous", ports.clock.now().toISOString());
+        await ports.outbox.enqueueInternalAlert({
+          kind: "internal_alert",
+          code: "access_correlation_ambiguous",
+          message: "Correlação ambígua de primeiro acesso; tolerância não iniciada.",
+          details: { lock_id: input.lock_id, event_id: event.id },
+          idempotency_key: `alert:ambiguous:${event.id}`,
+        });
+        return {
+          status: "ignored",
+          event_id: event.id,
+          ignored_reason: "ambiguous",
+        };
+      }
 
       const existingTolerance = correlation.credential_id
         ? await ports.tolerances.findByCredentialId(correlation.credential_id)

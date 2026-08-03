@@ -84,6 +84,8 @@ export type AccessEventRecord = {
 
 export type CorrelatedRoomAccessResult = {
   correlated: boolean;
+  /** Mais de uma credencial candidata — não escolher arbitrariamente. */
+  ambiguous?: boolean;
   reservation_id?: string;
   credential_id?: string;
   credential_item_id?: string;

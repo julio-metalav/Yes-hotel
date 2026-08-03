@@ -21,6 +21,7 @@
     "test:yes:access-grace-messages": "tsx scripts/test-access-grace-messages.ts",
     "test:yes:access-suspension-strategy": "tsx scripts/test-access-suspension-strategy.ts",
     "test:yes:first-room-access-orchestrator": "tsx scripts/test-first-room-access-orchestrator.ts",
+    "test:yes:ttlock-access-ingest": "tsx scripts/test-ttlock-access-ingest.ts",
     "test:yes:credential-release-orchestrator": "tsx scripts/test-credential-release-orchestrator.ts",    "test:yes:credential-release-13h-retry": "tsx scripts/test-credential-release-13h-retry.ts",
     "test:yes:gerar-nova-senha-scheduler": "tsx scripts/test-gerar-nova-senha-e-scheduler.ts",
     "test:yes:access:normal": "tsx scripts/test-yes-access-normal.ts",

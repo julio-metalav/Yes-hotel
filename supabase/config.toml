@@ -32,3 +32,11 @@ verify_jwt = false
 # Pull PMS (Hospedin): service_role + opcional x-hospedin-sync-secret (ver docs).
 [functions.pms-hospedin-sync]
 verify_jwt = false
+
+# TTLock Lock Records Notify (PR3).
+# verify_jwt=false SOMENTE nesta Edge pública de callback (não altera outras).
+# Auth da aplicação: TTLOCK_ACCESS_WEBHOOK_SECRET (header preferencial; query=fallback).
+# Com flag desligada: ack "success" sem revelar validade do segredo e sem persistir.
+# NÃO configurar Callback URL na TTLock até homologação autorizada.
+[functions.ttlock-access-ingest]
+verify_jwt = false

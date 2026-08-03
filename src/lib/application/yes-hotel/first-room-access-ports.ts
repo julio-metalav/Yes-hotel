@@ -42,12 +42,14 @@ export interface CredentialCorrelationPort {
   /**
    * Correlaciona lock/evento a item/credencial/reserva.
    * Não deve retornar senha. Material sensível fica só dentro do adapter.
+   * ephemeral_keyboard_pwd: só memória; nunca persistir/logar; descartar após uso.
    */
   correlateRoomPasscodeEvent(input: {
     lock_id: number;
     keyboard_pwd_id?: number;
     occurred_at: string;
     record_type: number;
+    ephemeral_keyboard_pwd?: string;
   }): Promise<CorrelatedRoomAccessResult>;
 }
 
