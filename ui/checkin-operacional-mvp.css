@@ -113,56 +113,6 @@
   font-size: 14px;
 }
 
-.op-local-mode {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  flex-shrink: 0;
-  margin: 0 0 10px;
-  padding: 9px 12px;
-  border: 1px solid rgba(184, 148, 85, 0.45);
-  border-radius: var(--op-radius);
-  background: #fbf6e9;
-  color: #59451f;
-}
-
-.op-local-mode strong,
-.op-local-mode span {
-  display: block;
-}
-
-.op-local-mode strong {
-  color: var(--op-blue);
-  font-size: 12px;
-}
-
-.op-local-mode span {
-  font-size: 11px;
-}
-
-.op-local-mode__actions {
-  display: flex;
-  gap: 7px;
-  flex-shrink: 0;
-}
-
-.op-local-mode__actions .op-btn {
-  height: 30px;
-  font-size: 11px;
-}
-
-@media (max-width: 767px) {
-  .op-local-mode {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .op-local-mode__actions .op-btn {
-    flex: 1;
-  }
-}
-
 /* ----- Header ----- */
 .op-header {
   display: grid;

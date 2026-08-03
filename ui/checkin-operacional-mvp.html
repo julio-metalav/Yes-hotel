@@ -37,22 +37,11 @@
         </p>
       </header>
 
-      <section class="op-local-mode" aria-label="Modo de armazenamento">
-        <div>
-          <strong>Modo local / demonstração</strong>
-          <span>Dados isolados neste navegador. TTLock e comunicação permanecem simulados.</span>
-        </div>
-        <div class="op-local-mode__actions">
-          <button type="button" class="op-btn op-btn--secondary" id="op-clear-local-data">Limpar dados</button>
-          <button type="button" class="op-btn op-btn--secondary" id="op-restore-demo-data">Restaurar demonstração</button>
-        </div>
-      </section>
-
       <section class="yes-kpis" aria-label="Indicadores do dia">
         <article><span>Chegadas hoje</span><strong id="op-kpi-arrivals">0</strong><small id="op-kpi-arrivals-note">Nenhuma chegada</small></article>
         <article><span>Check-ins concluídos</span><strong id="op-kpi-completed">0</strong><small id="op-kpi-completed-note">0% das chegadas</small></article>
         <article><span>FNRH pendentes</span><strong id="op-kpi-fnrh">0</strong><small id="op-kpi-fnrh-note">Sem pendências</small></article>
-        <article><span>Acessos liberados</span><strong id="op-kpi-access">0</strong><small>Atualizado localmente</small></article>
+        <article><span>Acessos liberados</span><strong id="op-kpi-access">0</strong><small>Atualizado no painel</small></article>
       </section>
 
       <div class="op-controls" aria-label="Filtros e situação">
@@ -193,7 +182,6 @@
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
     <script defer src="./yes-credential-release-policy.js"></script>
-    <script defer src="./yes-operacional-repository.js"></script>
-    <script defer src="./checkin-operacional-mvp.js?v=35"></script>
+    <script defer src="./checkin-operacional-mvp.js?v=36"></script>
   </body>
 </html>

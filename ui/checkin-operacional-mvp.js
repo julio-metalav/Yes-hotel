@@ -13,7 +13,8 @@
 "use strict";
 
 const auth = window.YesHotelAuthApp;
-const operacionalRepository = window.YesHotelOperacionalRepository;
+const operacionalRepository =
+  typeof window !== "undefined" ? window.YesHotelOperacionalRepository : null;
 
 /* ---------- Refs DOM ---------- */
 const accessStateElement = document.querySelector("#access-state");
@@ -42,8 +43,6 @@ const opDetailEmpty = document.querySelector("#op-detail-empty");
 const opDetailFilled = document.querySelector("#op-detail-filled");
 const opDetailApto = document.querySelector("#op-detail-apto");
 const opDetailBadgeWrap = document.querySelector("#op-detail-badge-wrap");
-const opClearLocalDataButton = document.querySelector("#op-clear-local-data");
-const opRestoreDemoDataButton = document.querySelector("#op-restore-demo-data");
 const opKpiArrivals = document.querySelector("#op-kpi-arrivals");
 const opKpiArrivalsNote = document.querySelector("#op-kpi-arrivals-note");
 const opKpiCompleted = document.querySelector("#op-kpi-completed");
@@ -590,7 +589,7 @@ const PAINEL_DATA_SOURCE_JSON_LOCAL = "json-local";
 const PAINEL_DATA_SOURCE_HITS_ADAPTER = "hits-adapter";
 const PAINEL_DATA_SOURCE_BACKEND = "backend";
 const PAINEL_DATA_SOURCE_LOCAL_REPOSITORY = "local-repository";
-/** Origem padrão: backend real. Modo localStorage permanece só como demonstração explícita. */
+/** Origem operacional em produção: backend Supabase. */
 const PAINEL_DATA_SOURCE = PAINEL_DATA_SOURCE_BACKEND;
 const PAINEL_JSON_LOCAL_URL = "./data/checkin-operacional-reservas.json";
 
@@ -1104,7 +1103,7 @@ function getPainelDataSourceInfo() {
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY) {
     return {
       type: PAINEL_DATA_SOURCE_LOCAL_REPOSITORY,
-      description: "Modo local / demonstração",
+      description: "Repositório local (não usado em produção)",
       available: !!operacionalRepository,
     };
   }
@@ -4693,69 +4692,45 @@ function showAccessState(title, message, actionLabel) {
 /* ---------- Bindings / init ---------- */
 async function initCheckinOperacional() {
   let currentUser;
-  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY) {
-    if (!operacionalRepository) {
-      showAccessState(
-        "Repositório local indisponível",
-        "A camada temporária de dados não foi carregada.",
-        "Recarregar",
-      );
-      return;
-    }
-    currentUser = {
-      name: "Operação local",
-      role: "admin",
-    };
-  } else {
-    if (!auth || !auth.isConfigured()) {
-      showAccessState(
-        "Autenticacao indisponivel",
-        auth?.getConfigError?.() || "Configuracao de autenticacao indisponivel.",
-        "Ir para login",
-      );
-      return;
-    }
+  if (!auth || !auth.isConfigured()) {
+    showAccessState(
+      "Autenticacao indisponivel",
+      auth?.getConfigError?.() || "Configuracao de autenticacao indisponivel.",
+      "Ir para login",
+    );
+    return;
+  }
 
-    currentUser = await auth.getCurrentUser();
+  currentUser = await auth.getCurrentUser();
 
-    if (!currentUser) {
-      showAccessState(
-        "Login necessario",
-        "Entre com um usuario interno para acessar o painel de check-in operacional.",
-        "Fazer login",
-      );
-      return;
-    }
+  if (!currentUser) {
+    showAccessState(
+      "Login necessario",
+      "Entre com um usuario interno para acessar o painel de check-in operacional.",
+      "Fazer login",
+    );
+    return;
+  }
 
-    if (currentUser.role === "cafe") {
-      window.location.href = "./cafe-da-manha-mvp.html";
-      return;
-    }
+  if (currentUser.role === "cafe") {
+    window.location.href = "./cafe-da-manha-mvp.html";
+    return;
+  }
 
-    if (currentUser.role !== "admin" && currentUser.role !== "recepcao") {
-      showAccessState(
-        "Acesso nao permitido",
-        "Seu perfil nao tem acesso a esta tela.",
-        "Voltar para login",
-      );
-      return;
-    }
+  if (currentUser.role !== "admin" && currentUser.role !== "recepcao") {
+    showAccessState(
+      "Acesso nao permitido",
+      "Seu perfil nao tem acesso a esta tela.",
+      "Voltar para login",
+    );
+    return;
   }
 
   if (accessStateElement instanceof HTMLElement) accessStateElement.classList.add("hidden");
   if (contentPanelElement instanceof HTMLElement) contentPanelElement.classList.remove("hidden");
 
   if (sessionUserElement instanceof HTMLElement) {
-    sessionUserElement.textContent =
-      PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY
-        ? "Modo local / demonstração · sem conexão com Supabase, PMS, TTLock ou comunicação"
-        : `${currentUser.name} | ${auth.getRoleLabel(currentUser.role)} | sessao de ${auth.getSessionDurationHours()} horas`;
-  }
-  if (
-    logoutButtonElement instanceof HTMLButtonElement &&
-    PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY
-  ) {
-    logoutButtonElement.textContent = "Nova reserva";
+    sessionUserElement.textContent = `${currentUser.name} | ${auth.getRoleLabel(currentUser.role)} | sessao de ${auth.getSessionDurationHours()} horas`;
   }
 
   if (opImportLink instanceof HTMLElement) {
@@ -4891,29 +4866,8 @@ async function initCheckinOperacional() {
 }
 
 logoutButtonElement?.addEventListener("click", async () => {
-  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY) {
-    window.location.href = "./importar-reservas-mvp.html";
-    return;
-  }
   await auth.logout();
   window.location.href = "./usuarios-login-mvp.html";
-});
-
-opClearLocalDataButton?.addEventListener("click", async () => {
-  if (!operacionalRepository) return;
-  if (!window.confirm("Limpar todas as reservas salvas neste navegador?")) return;
-  operacionalRepository.clearData();
-  detailReservaId = null;
-  reservas = await loadReservasFromLocalRepository();
-  refresh();
-});
-
-opRestoreDemoDataButton?.addEventListener("click", async () => {
-  if (!operacionalRepository) return;
-  operacionalRepository.restoreDemoData();
-  detailReservaId = null;
-  reservas = await loadReservasFromLocalRepository();
-  refresh();
 });
 
 initCheckinOperacional().catch((error) => {
