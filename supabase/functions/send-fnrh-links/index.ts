@@ -7,6 +7,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { outboundWhatsappTransacional } from "../_shared/comunicacao-operacional/outbound-whatsapp.ts";
 import { maskEmailForLog, previewCorpo, registrarOperacionalComunicacaoEnvio } from "../_shared/comunicacao-operacional/registro-envio.ts";
+import { buildFnrhPreenchimentoUrl, maskFnrhLinkForLog } from "../_shared/fnrh-public-link.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -77,7 +78,7 @@ Deno.serve(async (req: Request) => {
   if (!reservaId) return jsonResponse({ ok: false, error: "reserva_id obrigatório." }, 400);
 
   const tipoEvento = (body.tipo_evento ?? "").trim() || "manual";
-  const baseUrl = (body.base_url ?? "").trim().replace(/\/+$/, "") || supabaseUrl.replace("/v1", "");
+  const fnrhPublicEnv = Deno.env.get("FNRH_PUBLIC_BASE_URL");
   const checkInPrevistoPayload = (body.check_in_previsto ?? "").trim();
   const jobDate = (body.job_date ?? "").trim();
 
@@ -132,7 +133,12 @@ Deno.serve(async (req: Request) => {
     const whatsapp = (hospede?.whatsapp ?? "").trim();
     const nome = (hospede?.nome ?? p.hospede_nome ?? "Hóspede").trim();
     // guest_id = fnrh_hospedes.id (formulário público + fnrh-get)
-    const link = `${baseUrl}/fnrh-preenchimento.html?v=2&guest_id=${encodeURIComponent(p.id)}&token=${encodeURIComponent(p.link_token)}`;
+    // Origem = frontend público (FNRH_PUBLIC_BASE_URL), nunca SUPABASE_URL.
+    const link = buildFnrhPreenchimentoUrl(p.id, p.link_token, {
+      baseUrl: body.base_url,
+      envValue: fnrhPublicEnv,
+      version: 2,
+    });
 
     let enviadoEsteHospede = false;
 
@@ -166,7 +172,7 @@ Deno.serve(async (req: Request) => {
           proposito: "fnrh_links",
           canal: "email",
           destinatario_mascara: maskEmailForLog(email),
-          corpo_preview: previewCorpo(`FNRH link: ${link}`),
+          corpo_preview: previewCorpo(`FNRH link: ${maskFnrhLinkForLog(link)}`),
           status: "enviada",
           provider: "resend",
           provider_message_id: null,

@@ -6,6 +6,7 @@
  * Reusa send-fnrh-links e evita duplicidade por reserva+gatilho+check-in.
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { resolveFnrhPublicBaseUrl } from "../_shared/fnrh-public-link.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -186,7 +187,10 @@ Deno.serve(async (req: Request) => {
   };
 
   const trigger = body.trigger ?? "all";
-  const baseUrl = (body.base_url ?? "").trim().replace(/\/+$/, "") || supabaseUrl.replace("/v1", "");
+  const baseUrl = resolveFnrhPublicBaseUrl({
+    override: body.base_url,
+    envValue: Deno.env.get("FNRH_PUBLIC_BASE_URL"),
+  });
   const results: Record<string, unknown>[] = [];
 
   if (trigger === "all" || trigger === "d-3") {

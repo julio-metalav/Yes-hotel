@@ -11,6 +11,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { outboundWhatsappTransacional } from "../_shared/comunicacao-operacional/outbound-whatsapp.ts";
 import { maskEmailForLog, previewCorpo, registrarOperacionalComunicacaoEnvio } from "../_shared/comunicacao-operacional/registro-envio.ts";
+import { buildFnrhPreenchimentoUrl, maskFnrhTokensInText } from "../_shared/fnrh-public-link.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -250,14 +251,17 @@ Deno.serve(async (req: Request) => {
     }, 400);
   }
 
-  const baseUrl = supabaseUrl.replace("/v1", "");
+  const fnrhPublicEnv = Deno.env.get("FNRH_PUBLIC_BASE_URL");
   const { data: fnrhList } = await admin
     .from("fnrh_hospedes")
     .select("id, link_token")
     .eq("reserva_id", reservaId);
   const links = (fnrhList ?? []).map(
     (r: { id: string; link_token: string }) =>
-      `${baseUrl}/fnrh-preenchimento.html?v=2&guest_id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(r.link_token)}`,
+      buildFnrhPreenchimentoUrl(r.id, r.link_token, {
+        envValue: fnrhPublicEnv,
+        version: 2,
+      }),
   );
   const linksText = links.length > 0
     ? links.map((url: string, i: number) => `${i + 1}. ${url}`).join("\n")
@@ -310,7 +314,7 @@ Deno.serve(async (req: Request) => {
         proposito: "senha_acesso",
         canal: "email",
         destinatario_mascara: maskEmailForLog(emailTo),
-        corpo_preview: previewCorpo(msg),
+        corpo_preview: previewCorpo(maskFnrhTokensInText(msg)),
         status: "enviada",
         provider: "resend",
         provider_message_id: null,
