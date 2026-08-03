@@ -4,6 +4,9 @@
   "private": true,
   "description": "Base minima do cliente HITS V1 para o projeto Yes Hotel.",
   "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 3000",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "test:hits:auth": "tsx scripts/test-hits-auth.ts",
     "test:hits:reservations": "tsx scripts/test-hits-reservations.ts",
@@ -33,11 +36,20 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.0",
-    "dotenv": "^17.3.1"
+    "dotenv": "^17.3.1",
+    "lucide-react": "^1.28.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^25.5.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^8.2.0"
   }
 }
