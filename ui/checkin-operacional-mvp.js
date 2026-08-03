@@ -1711,10 +1711,6 @@ function badgeClassFromStatusType(type) {
   return map[type] || "op-badge op-badge--neutral";
 }
 
-function isMobileDetailLayout() {
-  return typeof window !== "undefined" && window.matchMedia && window.matchMedia("(max-width: 767px)").matches;
-}
-
 function syncToolbarSelectFromFiltro() {
   if (opToolbarStatusSelect instanceof HTMLSelectElement) {
     const v = filtroAtivo;
@@ -2260,20 +2256,18 @@ function openDetail(reservaId) {
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && document.getElementById("detail-ttlock-section")) {
     loadAndRenderTtlockSection(reservaId);
   }
-  if (isMobileDetailLayout()) {
-    detailPanelElement?.classList.add("op-detail--open");
-    detailBackdropElement?.classList.remove("hidden");
-  }
+  // Em ≥768px o CSS esconde .op-detail até .op-detail--open (drawer overlay).
+  // Sem esta classe, Ver/⋯ atualizam o DOM mas o painel permanece invisível.
+  detailPanelElement?.classList.add("op-detail--open");
+  detailBackdropElement?.classList.remove("hidden");
   updateRowSelectionUi();
 }
 
 function closeDetail() {
   detailReservaId = null;
   syncDetailPanelChrome(null);
-  if (isMobileDetailLayout()) {
-    detailPanelElement?.classList.remove("op-detail--open");
-    detailBackdropElement?.classList.add("hidden");
-  }
+  detailPanelElement?.classList.remove("op-detail--open");
+  detailBackdropElement?.classList.add("hidden");
   updateRowSelectionUi();
 }
 
@@ -4766,24 +4760,17 @@ async function initCheckinOperacional() {
 
   window.addEventListener("resize", () => {
     if (!detailReservaId) {
-      if (!isMobileDetailLayout()) {
-        detailPanelElement?.classList.remove("op-detail--open");
-        detailBackdropElement?.classList.add("hidden");
-      }
-      return;
-    }
-    if (isMobileDetailLayout()) {
-      detailPanelElement?.classList.add("op-detail--open");
-      detailBackdropElement?.classList.remove("hidden");
-    } else {
       detailPanelElement?.classList.remove("op-detail--open");
       detailBackdropElement?.classList.add("hidden");
+      return;
     }
+    detailPanelElement?.classList.add("op-detail--open");
+    detailBackdropElement?.classList.remove("hidden");
   });
 
   document.addEventListener("keydown", (ev) => {
     if (ev.key !== "Escape" || !detailReservaId) return;
-    if (isMobileDetailLayout()) closeDetail();
+    closeDetail();
   });
 
   refresh();
