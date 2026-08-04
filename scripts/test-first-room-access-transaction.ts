@@ -26,7 +26,7 @@ const GRACE = "2026-08-08T18:00:00.000Z";
 const DUE = "2026-08-08T19:00:00.000Z";
 
 const SQL = readFileSync(
-  resolve("supabase/migrations/0025_first_room_access_transactional_rpc.sql"),
+  resolve("supabase/migrations/20260804000955_first_room_access_transactional_rpc.sql"),
   "utf8",
 );
 

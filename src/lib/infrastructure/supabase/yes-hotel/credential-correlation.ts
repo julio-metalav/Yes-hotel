@@ -17,7 +17,8 @@ type ItemJoinRow = {
     id: string;
     reserva_id: string;
     status: string;
-    codigo_credencial: string | null;
+    /** Pode não existir no schema atual; correlacionar via remote_keyboard_pwd_id. */
+    codigo_credencial?: string | null;
     valido_de: string | null;
     valido_ate: string | null;
   } | null;
@@ -53,7 +54,6 @@ export class SupabaseCredentialCorrelationPort implements CredentialCorrelationP
             id,
             reserva_id,
             status,
-            codigo_credencial,
             valido_de,
             valido_ate
           )
@@ -76,7 +76,7 @@ export class SupabaseCredentialCorrelationPort implements CredentialCorrelationP
           remote_keyboard_pwd_id: row.remote_keyboard_pwd_id,
           status_provisionamento: row.status_provisionamento,
           credential_status: row.credencial!.status,
-          codigo_credencial: row.credencial!.codigo_credencial,
+          codigo_credencial: row.credencial!.codigo_credencial ?? null,
           valido_de: row.credencial!.valido_de,
           valido_ate: row.credencial!.valido_ate,
         }));
