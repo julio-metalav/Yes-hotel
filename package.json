@@ -12,6 +12,7 @@
     "test:hits:auth": "tsx scripts/test-hits-auth.ts",
     "test:hits:reservations": "tsx scripts/test-hits-reservations.ts",
     "test:hits:reservation": "tsx scripts/test-hits-reservation-detail.ts",
+    "test:hits:integration-prep": "tsx scripts/test-hits-integration-prep.ts",
     "test:yes:credential-release": "tsx scripts/test-credential-release-policy.ts",
     "test:yes:fnrh-public-link": "tsx scripts/test-fnrh-public-link.ts",
     "test:yes:ttlock-timezone": "tsx scripts/test-ttlock-timezone-and-credentials.ts",
