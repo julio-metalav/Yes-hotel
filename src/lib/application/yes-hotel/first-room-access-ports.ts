@@ -59,6 +59,7 @@ export interface ReservationPendingStatePort {
 
 export interface AccessToleranceRepository {
   findByCredentialId(credentialId: string): Promise<AccessToleranceRecord | null>;
+  findById?(toleranceId: string): Promise<AccessToleranceRecord | null>;
   createTolerance(input: CreateToleranceInput): Promise<AccessToleranceRecord>;
   updateCurrentPendingState(
     toleranceId: string,
@@ -81,6 +82,42 @@ export interface AccessToleranceRepository {
     status: AccessGraceStatusPersisted,
     updatedAt: string,
   ): Promise<void>;
+  /** Candidatas a vencimento: active e suspension_due_at <= now. */
+  listDueForSuspension?(nowIso: string, limit?: number): Promise<AccessToleranceRecord[]>;
+  /** Candidatas a restauração: suspended | partial_failure. */
+  listCandidatesForRestore?(limit?: number): Promise<AccessToleranceRecord[]>;
+  /**
+   * Pendentes abandonados (suspension_pending|restore_pending) com updated_at <= cutoffIso.
+   * Usado como reclaim sem migration (lease implícito via updated_at).
+   */
+  listStalePending?(cutoffIso: string, limit?: number): Promise<AccessToleranceRecord[]>;
+  listItems?(toleranceId: string): Promise<import("./first-room-access-types").AccessToleranceItemRecord[]>;
+  /**
+   * Claim atômico por compare-and-swap de grace_status (sem migration nova).
+   * Retorna false se o status esperado não coincidir (outra execução ganhou).
+   */
+  tryTransitionStatus?(
+    toleranceId: string,
+    fromStatus: AccessGraceStatusPersisted | AccessGraceStatusPersisted[],
+    toStatus: AccessGraceStatusPersisted,
+    updatedAt: string,
+    extra?: Partial<AccessToleranceRecord>,
+  ): Promise<boolean>;
+  /**
+   * Reclaim atômico de suspension_pending|restore_pending com lease temporal.
+   * Predicado no mesmo UPDATE: grace_status esperado AND updated_at <= cutoffIso.
+   * Vencedor atualiza updated_at; concorrente falha.
+   */
+  tryClaimStaleTolerance?(
+    toleranceId: string,
+    expectedStatus: "suspension_pending" | "restore_pending",
+    cutoffIso: string,
+    claimedAtIso: string,
+  ): Promise<boolean>;
+  updateItemSuspension?(
+    itemId: string,
+    patch: Partial<import("./first-room-access-types").AccessToleranceItemRecord>,
+  ): Promise<void>;
 }
 
 export interface CredentialItemsPort {
@@ -96,9 +133,64 @@ export interface CommunicationOutboxPort {
   enqueueGuestRestoredMessage(
     message: Extract<OutboxMessage, { kind: "guest_access_restored" }>,
   ): Promise<void>;
+  enqueueGuestSuspendedMessage?(
+    message: Extract<OutboxMessage, { kind: "guest_access_suspended" }>,
+  ): Promise<void>;
+  enqueueGuestTechnicalFailureMessage?(
+    message: Extract<OutboxMessage, { kind: "guest_technical_failure" }>,
+  ): Promise<void>;
   enqueueInternalAlert(
     message: Extract<OutboxMessage, { kind: "internal_alert" }>,
   ): Promise<void>;
+  enqueueInternalFirstAccessMessage?(
+    message: Extract<OutboxMessage, { kind: "internal_first_access" }>,
+  ): Promise<void>;
+}
+
+/** Port de alteração de validade TTLock — nunca newKeyboardPwd. */
+export type TtlockValidityChangeRequest = {
+  lockId: number;
+  keyboardPwdId: number;
+  startDateMs: number;
+  endDateMs: number;
+};
+
+export type TtlockValidityChangeResult =
+  | { ok: true }
+  | { ok: false; error: string; retryable?: boolean };
+
+export interface TtlockValidityChangePort {
+  changeValidityOnly(req: TtlockValidityChangeRequest): Promise<TtlockValidityChangeResult>;
+}
+
+/** Fila operacional_acesso_outbox. */
+export interface AccessOutboxQueuePort {
+  listAvailable(nowIso: string, limit?: number): Promise<import("./first-room-access-types").AccessOutboxRecord[]>;
+  tryClaim(id: string, nowIso: string, leaseUntilIso: string): Promise<boolean>;
+  releaseClaim?(id: string, availableAt: string): Promise<void>;
+  markSent(id: string, processedAt: string): Promise<void>;
+  markFailed(
+    id: string,
+    error: string,
+    attempts: number,
+    availableAt: string,
+    processedAt?: string,
+  ): Promise<void>;
+  enqueue(record: Omit<import("./first-room-access-types").AccessOutboxRecord, "id" | "created_at"> & { id?: string }): Promise<string>;
+}
+
+export interface AccessCommunicationSenderPort {
+  sendWhatsapp(input: {
+    recipient_ref: string;
+    body: string;
+    idempotency_key: string;
+  }): Promise<{ ok: boolean; error?: string; retryable?: boolean }>;
+  sendEmail(input: {
+    recipient_ref: string;
+    subject: string;
+    body: string;
+    idempotency_key: string;
+  }): Promise<{ ok: boolean; error?: string; retryable?: boolean }>;
 }
 
 export interface ClockPort {
@@ -134,4 +226,17 @@ export type FirstRoomAccessPorts = {
   outbox: CommunicationOutboxPort;
   clock: ClockPort;
   uow: UnitOfWorkPort;
+  /**
+   * Opcional: fila operacional_acesso_outbox para mensagem interna DigiSac
+   * e canal e-mail complementar (pós-commit, idempotente).
+   */
+  accessOutboxQueue?: AccessOutboxQueuePort;
+  /** Contexto de exibição para mensagem interna (apto/nome/código). */
+  reservationDisplay?: {
+    getContext(reservationId: string): Promise<{
+      apartment_number: string;
+      reservation_code: string;
+      guest_main_name: string;
+    }>;
+  };
 };

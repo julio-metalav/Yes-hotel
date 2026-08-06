@@ -1,11 +1,12 @@
 /**
- * Adapters in-memory para testes do fluxo de primeiro acesso.
+ * Adapters in-memory para testes do fluxo de primeiro acesso / tolerância / outbox.
  * NÃO usar em produção. NÃO exportar pelo index da aplicação.
  */
 
 import { randomUUID } from "node:crypto";
 import type {
   AccessEventRepository,
+  AccessOutboxQueuePort,
   AccessToleranceRepository,
   ClockPort,
   CommunicationOutboxPort,
@@ -15,21 +16,11 @@ import type {
   ReservationPendingStatePort,
   UnitOfWorkPort,
 } from "../first-room-access-ports";
-import type {
-  AccessEventRecord,
-  AccessToleranceItemRecord,
-  AccessToleranceRecord,
-  CorrelatedRoomAccessResult,
-  CreateToleranceInput,
-  OutboxMessage,
-  ProcessFirstRoomAccessInput,
-  ProvisionedCredentialItem,
-} from "../first-room-access-types";
-import type { ReservationPendingStateInput } from "../../../domain/yes-hotel/reservation-pending-state";
-
 import type { FirstRoomAccessCommitCommand } from "../first-room-access-commit";
 import type {
   AccessEventRecord,
+  AccessGraceStatusPersisted,
+  AccessOutboxRecord,
   AccessToleranceItemRecord,
   AccessToleranceRecord,
   CorrelatedRoomAccessResult,
@@ -46,6 +37,7 @@ type MemoryState = {
   tolerances: AccessToleranceRecord[];
   toleranceItems: AccessToleranceItemRecord[];
   outbox: OutboxMessage[];
+  accessOutbox: AccessOutboxRecord[];
 };
 
 function cloneState(state: MemoryState): MemoryState {
@@ -81,6 +73,7 @@ export class InMemoryUnitOfWork implements UnitOfWorkPort {
         ...snapshot.toleranceItems,
       );
       this.state.outbox.splice(0, this.state.outbox.length, ...snapshot.outbox);
+      this.state.accessOutbox.splice(0, this.state.accessOutbox.length, ...snapshot.accessOutbox);
       throw e;
     }
   }
@@ -280,6 +273,28 @@ export class InMemoryUnitOfWork implements UnitOfWorkPort {
         body: String(payload.body ?? ""),
         idempotency_key: o.idempotency_key,
       });
+      const now = command.event.received_at;
+      if (!state.accessOutbox.some((r) => r.idempotency_key === o.idempotency_key)) {
+        state.accessOutbox.push({
+          id: randomUUID(),
+          event_type: o.event_type,
+          channel: "whatsapp",
+          reservation_id: o.reservation_id,
+          credential_id: o.credential_id ?? null,
+          access_event_id: eventId,
+          tolerance_id: toleranceId ?? null,
+          recipient_ref: null,
+          template: o.template ?? null,
+          payload: o.payload,
+          idempotency_key: o.idempotency_key,
+          status: "pending",
+          attempts: 0,
+          available_at: now,
+          processed_at: null,
+          last_error: null,
+          created_at: now,
+        });
+      }
       return;
     }
     state.outbox.push({
@@ -390,6 +405,10 @@ export class InMemoryAccessToleranceRepository implements AccessToleranceReposit
     return this.state.tolerances.find((t) => t.credential_id === credentialId) ?? null;
   }
 
+  async findById(toleranceId: string): Promise<AccessToleranceRecord | null> {
+    return this.state.tolerances.find((t) => t.id === toleranceId) ?? null;
+  }
+
   async createTolerance(input: CreateToleranceInput): Promise<AccessToleranceRecord> {
     if (input.items.length !== 3) {
       throw new Error("Tolerância exige exatamente 3 itens.");
@@ -464,7 +483,7 @@ export class InMemoryAccessToleranceRepository implements AccessToleranceReposit
   }
 
   async markCancelled(toleranceId: string, updatedAt: string): Promise<void> {
-    this.patch(toleranceId, { grace_status: "cancelled", updated_at: updatedAt });
+    this.patch(toleranceId, { grace_status: "cancelled", updated_at: updatedAt, last_error: null });
   }
   async markSuspensionPending(toleranceId: string, updatedAt: string): Promise<void> {
     this.patch(toleranceId, { grace_status: "suspension_pending", updated_at: updatedAt });
@@ -474,6 +493,7 @@ export class InMemoryAccessToleranceRepository implements AccessToleranceReposit
       grace_status: "suspended",
       suspended_at: suspendedAt,
       updated_at: suspendedAt,
+      last_error: null,
     });
   }
   async markPartialFailure(toleranceId: string, error: string, updatedAt: string): Promise<void> {
@@ -491,6 +511,7 @@ export class InMemoryAccessToleranceRepository implements AccessToleranceReposit
       grace_status: "restored",
       restored_at: restoredAt,
       updated_at: restoredAt,
+      last_error: null,
     });
   }
   async markError(toleranceId: string, error: string, updatedAt: string): Promise<void> {
@@ -499,6 +520,195 @@ export class InMemoryAccessToleranceRepository implements AccessToleranceReposit
       last_error: error,
       updated_at: updatedAt,
     });
+  }
+
+  async listDueForSuspension(nowIso: string, limit = 20): Promise<AccessToleranceRecord[]> {
+    return this.state.tolerances
+      .filter((t) => t.grace_status === "active" && t.suspension_due_at <= nowIso)
+      .slice(0, limit)
+      .map((t) => ({ ...t }));
+  }
+
+  async listCandidatesForRestore(limit = 20): Promise<AccessToleranceRecord[]> {
+    return this.state.tolerances
+      .filter((t) => t.grace_status === "suspended" || t.grace_status === "partial_failure")
+      .slice(0, limit)
+      .map((t) => ({ ...t }));
+  }
+
+  async listStalePending(cutoffIso: string, limit = 20): Promise<AccessToleranceRecord[]> {
+    return this.state.tolerances
+      .filter(
+        (t) =>
+          (t.grace_status === "suspension_pending" || t.grace_status === "restore_pending") &&
+          t.updated_at <= cutoffIso,
+      )
+      .slice(0, limit)
+      .map((t) => ({ ...t }));
+  }
+
+  async listItems(toleranceId: string): Promise<AccessToleranceItemRecord[]> {
+    return this.state.toleranceItems
+      .filter((i) => i.tolerance_id === toleranceId)
+      .map((i) => ({ ...i }));
+  }
+
+  async tryTransitionStatus(
+    toleranceId: string,
+    fromStatus: AccessGraceStatusPersisted | AccessGraceStatusPersisted[],
+    toStatus: AccessGraceStatusPersisted,
+    updatedAt: string,
+    extra?: Partial<AccessToleranceRecord>,
+  ): Promise<boolean> {
+    const idx = this.state.tolerances.findIndex((t) => t.id === toleranceId);
+    if (idx < 0) return false;
+    const allowed = Array.isArray(fromStatus) ? fromStatus : [fromStatus];
+    if (!allowed.includes(this.state.tolerances[idx].grace_status)) return false;
+    this.state.tolerances[idx] = {
+      ...this.state.tolerances[idx],
+      ...extra,
+      grace_status: toStatus,
+      updated_at: updatedAt,
+    };
+    return true;
+  }
+
+  async tryClaimStaleTolerance(
+    toleranceId: string,
+    expectedStatus: "suspension_pending" | "restore_pending",
+    cutoffIso: string,
+    claimedAtIso: string,
+  ): Promise<boolean> {
+    const idx = this.state.tolerances.findIndex((t) => t.id === toleranceId);
+    if (idx < 0) return false;
+    const row = this.state.tolerances[idx];
+    if (row.grace_status !== expectedStatus) return false;
+    if (row.updated_at > cutoffIso) return false;
+    this.state.tolerances[idx] = {
+      ...row,
+      updated_at: claimedAtIso,
+    };
+    return true;
+  }
+
+  async updateItemSuspension(
+    itemId: string,
+    patch: Partial<AccessToleranceItemRecord>,
+  ): Promise<void> {
+    const idx = this.state.toleranceItems.findIndex((i) => i.id === itemId);
+    if (idx < 0) throw new Error(`Item não encontrado: ${itemId}`);
+    this.state.toleranceItems[idx] = { ...this.state.toleranceItems[idx], ...patch };
+  }
+}
+
+export class InMemoryAccessOutboxQueue implements AccessOutboxQueuePort {
+  constructor(private readonly state: MemoryState) {}
+
+  async listAvailable(nowIso: string, limit = 20): Promise<AccessOutboxRecord[]> {
+    return this.state.accessOutbox
+      .filter((r) => {
+        if (r.status === "sent") return false;
+        if (r.processed_at && r.status === "failed") return false;
+        if (r.status === "pending" || r.status === "failed") {
+          return r.available_at <= nowIso && !r.processed_at;
+        }
+        // processing abandonado: lease em available_at
+        if (r.status === "processing") {
+          return r.available_at <= nowIso;
+        }
+        return false;
+      })
+      .slice(0, limit)
+      .map((r) => ({ ...r }));
+  }
+
+  async tryClaim(id: string, nowIso: string, leaseUntilIso: string): Promise<boolean> {
+    const idx = this.state.accessOutbox.findIndex((r) => r.id === id);
+    if (idx < 0) return false;
+    const row = this.state.accessOutbox[idx];
+    if (row.status !== "pending" && row.status !== "failed" && row.status !== "processing") {
+      return false;
+    }
+    // Lease implícito: available_at futuro = claim ativo (não reclaim).
+    if (row.available_at > nowIso) return false;
+    this.state.accessOutbox[idx] = {
+      ...row,
+      status: "processing",
+      available_at: leaseUntilIso,
+    };
+    return true;
+  }
+
+  async releaseClaim(id: string, availableAt: string): Promise<void> {
+    const idx = this.state.accessOutbox.findIndex((r) => r.id === id);
+    if (idx < 0) return;
+    if (this.state.accessOutbox[idx].status !== "processing") return;
+    this.state.accessOutbox[idx] = {
+      ...this.state.accessOutbox[idx],
+      status: "pending",
+      available_at: availableAt,
+    };
+  }
+
+  async markSent(id: string, processedAt: string): Promise<void> {
+    const idx = this.state.accessOutbox.findIndex((r) => r.id === id);
+    if (idx < 0) return;
+    this.state.accessOutbox[idx] = {
+      ...this.state.accessOutbox[idx],
+      status: "sent",
+      processed_at: processedAt,
+      last_error: null,
+    };
+  }
+
+  async markFailed(
+    id: string,
+    error: string,
+    attempts: number,
+    availableAt: string,
+    processedAt?: string,
+  ): Promise<void> {
+    const idx = this.state.accessOutbox.findIndex((r) => r.id === id);
+    if (idx < 0) return;
+    this.state.accessOutbox[idx] = {
+      ...this.state.accessOutbox[idx],
+      status: "failed",
+      attempts,
+      available_at: availableAt,
+      last_error: error.slice(0, 200),
+      processed_at: processedAt ?? this.state.accessOutbox[idx].processed_at,
+    };
+  }
+
+  async enqueue(
+    record: Omit<AccessOutboxRecord, "id" | "created_at"> & { id?: string },
+  ): Promise<string> {
+    const existing = this.state.accessOutbox.find(
+      (r) => r.idempotency_key === record.idempotency_key,
+    );
+    if (existing) return existing.id;
+    const id = record.id ?? randomUUID();
+    const now = record.available_at;
+    this.state.accessOutbox.push({
+      id,
+      event_type: record.event_type,
+      channel: record.channel,
+      reservation_id: record.reservation_id,
+      credential_id: record.credential_id,
+      access_event_id: record.access_event_id,
+      tolerance_id: record.tolerance_id,
+      recipient_ref: record.recipient_ref,
+      template: record.template,
+      payload: record.payload,
+      idempotency_key: record.idempotency_key,
+      status: record.status,
+      attempts: record.attempts,
+      available_at: record.available_at,
+      processed_at: record.processed_at,
+      last_error: record.last_error,
+      created_at: now,
+    });
+    return id;
   }
 }
 
@@ -563,9 +773,36 @@ export class InMemoryCommunicationOutbox implements CommunicationOutboxPort {
     this.state.outbox.push({ ...message });
   }
 
+  async enqueueGuestSuspendedMessage(
+    message: Extract<OutboxMessage, { kind: "guest_access_suspended" }>,
+  ): Promise<void> {
+    if (this.state.outbox.some((m) => m.idempotency_key === message.idempotency_key)) {
+      return;
+    }
+    this.state.outbox.push({ ...message });
+  }
+
+  async enqueueGuestTechnicalFailureMessage(
+    message: Extract<OutboxMessage, { kind: "guest_technical_failure" }>,
+  ): Promise<void> {
+    if (this.state.outbox.some((m) => m.idempotency_key === message.idempotency_key)) {
+      return;
+    }
+    this.state.outbox.push({ ...message });
+  }
+
   async enqueueInternalAlert(
     message: Extract<OutboxMessage, { kind: "internal_alert" }>,
   ): Promise<void> {
+    this.state.outbox.push({ ...message });
+  }
+
+  async enqueueInternalFirstAccessMessage(
+    message: Extract<OutboxMessage, { kind: "internal_first_access" }>,
+  ): Promise<void> {
+    if (this.state.outbox.some((m) => m.idempotency_key === message.idempotency_key)) {
+      return;
+    }
     this.state.outbox.push({ ...message });
   }
 }
@@ -577,6 +814,8 @@ export type FirstRoomAccessMemoryHarness = {
   pendingPort: InMemoryReservationPendingStatePort;
   itemsPort: InMemoryCredentialItemsPort;
   outbox: InMemoryCommunicationOutbox;
+  outboxQueue: InMemoryAccessOutboxQueue;
+  tolerances: InMemoryAccessToleranceRepository;
 };
 
 export function createFirstRoomAccessMemoryHarness(seed: {
@@ -591,6 +830,7 @@ export function createFirstRoomAccessMemoryHarness(seed: {
     tolerances: [],
     toleranceItems: [],
     outbox: [],
+    accessOutbox: [],
   };
   const clock = new FixedClock(seed.now ?? new Date("2026-08-08T18:05:00.000Z"));
   const pendingPort = new InMemoryReservationPendingStatePort(seed.pending);
@@ -598,17 +838,65 @@ export function createFirstRoomAccessMemoryHarness(seed: {
   const outbox = new InMemoryCommunicationOutbox(state, {
     failOnWelcome: seed.failOnWelcome,
   });
+  const tolerances = new InMemoryAccessToleranceRepository(state);
+  const outboxQueue = new InMemoryAccessOutboxQueue(state);
 
   const ports: FirstRoomAccessPorts = {
     events: new InMemoryAccessEventRepository(state),
     correlation: new InMemoryCredentialCorrelationPort(seed.correlation),
     pending: pendingPort,
-    tolerances: new InMemoryAccessToleranceRepository(state),
+    tolerances,
     items: itemsPort,
     outbox,
     clock,
     uow: new InMemoryUnitOfWork(state, { failOnWelcome: seed.failOnWelcome }),
+    accessOutboxQueue: outboxQueue,
   };
 
-  return { state, ports, clock, pendingPort, itemsPort, outbox };
+  return { state, ports, clock, pendingPort, itemsPort, outbox, outboxQueue, tolerances };
+}
+
+/** Seed direto de tolerância (sem passar pelo orquestrador de primeiro acesso). */
+export async function seedActiveTolerance(
+  harness: FirstRoomAccessMemoryHarness,
+  input: {
+    reservation_id: string;
+    credential_id: string;
+    suspension_due_at: string;
+    pending_payment: boolean;
+    pending_fnrh: boolean;
+    original_valid_from: string;
+    original_valid_until: string;
+    items: Array<{
+      credential_item_id: string;
+      logical_destination: string;
+      lock_id: number;
+      remote_keyboard_pwd_id: number;
+    }>;
+    grace_status?: AccessGraceStatusPersisted;
+  },
+): Promise<AccessToleranceRecord> {
+  const now = harness.clock.now().toISOString();
+  const tol = await harness.tolerances.createTolerance({
+    reservation_id: input.reservation_id,
+    credential_id: input.credential_id,
+    first_room_access_at: now,
+    grace_started_at: now,
+    suspension_due_at: input.suspension_due_at,
+    pending_payment_at_start: input.pending_payment,
+    pending_fnrh_at_start: input.pending_fnrh,
+    pending_snapshot: [
+      ...(input.pending_payment ? ["pagamento"] : []),
+      ...(input.pending_fnrh ? ["fnrh"] : []),
+    ],
+    original_valid_from: input.original_valid_from,
+    original_valid_until: input.original_valid_until,
+    welcome_message_event_id: "00000000-0000-4000-8000-000000000001",
+    items: input.items,
+  });
+  if (input.grace_status && input.grace_status !== "active") {
+    await harness.tolerances.tryTransitionStatus!(tol.id, "active", input.grace_status, now);
+    return (await harness.tolerances.findById!(tol.id))!;
+  }
+  return tol;
 }

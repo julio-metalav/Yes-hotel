@@ -114,7 +114,11 @@ export class SupabaseAccessToleranceRepository implements AccessToleranceReposit
   }
 
   async markCancelled(toleranceId: string, updatedAt: string): Promise<void> {
-    await this.setStatus(toleranceId, { grace_status: "cancelled", updated_at: updatedAt });
+    await this.setStatus(toleranceId, {
+      grace_status: "cancelled",
+      updated_at: updatedAt,
+      last_error: null,
+    });
   }
   async markSuspensionPending(toleranceId: string, updatedAt: string): Promise<void> {
     await this.setStatus(toleranceId, {
@@ -127,6 +131,7 @@ export class SupabaseAccessToleranceRepository implements AccessToleranceReposit
       grace_status: "suspended",
       suspended_at: suspendedAt,
       updated_at: suspendedAt,
+      last_error: null,
     });
   }
   async markPartialFailure(toleranceId: string, error: string, updatedAt: string): Promise<void> {
@@ -144,6 +149,7 @@ export class SupabaseAccessToleranceRepository implements AccessToleranceReposit
       grace_status: "restored",
       restored_at: restoredAt,
       updated_at: restoredAt,
+      last_error: null,
     });
   }
   async markError(toleranceId: string, error: string, updatedAt: string): Promise<void> {
@@ -152,5 +158,112 @@ export class SupabaseAccessToleranceRepository implements AccessToleranceReposit
       last_error: error,
       updated_at: updatedAt,
     });
+  }
+
+  async findById(toleranceId: string): Promise<AccessToleranceRecord | null> {
+    const { data, error } = await this.client
+      .from("operacional_acesso_tolerancias")
+      .select("*")
+      .eq("id", toleranceId)
+      .maybeSingle();
+    if (error) throw new Error(`findById: ${error.message}`);
+    return data ? mapTol(data as TolRow) : null;
+  }
+
+  async listDueForSuspension(nowIso: string, limit = 20): Promise<AccessToleranceRecord[]> {
+    const { data, error } = await this.client
+      .from("operacional_acesso_tolerancias")
+      .select("*")
+      .eq("grace_status", "active")
+      .lte("suspension_due_at", nowIso)
+      .order("suspension_due_at", { ascending: true })
+      .limit(limit);
+    if (error) throw new Error(`listDueForSuspension: ${error.message}`);
+    return (data ?? []).map((r) => mapTol(r as TolRow));
+  }
+
+  async listCandidatesForRestore(limit = 20): Promise<AccessToleranceRecord[]> {
+    const { data, error } = await this.client
+      .from("operacional_acesso_tolerancias")
+      .select("*")
+      .in("grace_status", ["suspended", "partial_failure"])
+      .order("updated_at", { ascending: true })
+      .limit(limit);
+    if (error) throw new Error(`listCandidatesForRestore: ${error.message}`);
+    return (data ?? []).map((r) => mapTol(r as TolRow));
+  }
+
+  async listStalePending(cutoffIso: string, limit = 20): Promise<AccessToleranceRecord[]> {
+    const { data, error } = await this.client
+      .from("operacional_acesso_tolerancias")
+      .select("*")
+      .in("grace_status", ["suspension_pending", "restore_pending"])
+      .lte("updated_at", cutoffIso)
+      .order("updated_at", { ascending: true })
+      .limit(limit);
+    if (error) throw new Error(`listStalePending: ${error.message}`);
+    return (data ?? []).map((r) => mapTol(r as TolRow));
+  }
+
+  async listItems(toleranceId: string) {
+    const { data, error } = await this.client
+      .from("operacional_acesso_tolerancia_itens")
+      .select("*")
+      .eq("tolerance_id", toleranceId);
+    if (error) throw new Error(`listItems: ${error.message}`);
+    return (data ?? []) as import("../../../application/yes-hotel/first-room-access-types").AccessToleranceItemRecord[];
+  }
+
+  async tryTransitionStatus(
+    toleranceId: string,
+    fromStatus: AccessGraceStatusPersisted | AccessGraceStatusPersisted[],
+    toStatus: AccessGraceStatusPersisted,
+    updatedAt: string,
+    extra?: Partial<AccessToleranceRecord>,
+  ): Promise<boolean> {
+    const allowed = Array.isArray(fromStatus) ? fromStatus : [fromStatus];
+    const patch: Record<string, unknown> = {
+      grace_status: toStatus,
+      updated_at: updatedAt,
+      ...extra,
+    };
+    const { data, error } = await this.client
+      .from("operacional_acesso_tolerancias")
+      .update(patch)
+      .eq("id", toleranceId)
+      .in("grace_status", allowed)
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error(`tryTransitionStatus: ${error.message}`);
+    return Boolean(data?.id);
+  }
+
+  async tryClaimStaleTolerance(
+    toleranceId: string,
+    expectedStatus: "suspension_pending" | "restore_pending",
+    cutoffIso: string,
+    claimedAtIso: string,
+  ): Promise<boolean> {
+    const { data, error } = await this.client
+      .from("operacional_acesso_tolerancias")
+      .update({ updated_at: claimedAtIso })
+      .eq("id", toleranceId)
+      .eq("grace_status", expectedStatus)
+      .lte("updated_at", cutoffIso)
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error(`tryClaimStaleTolerance: ${error.message}`);
+    return Boolean(data?.id);
+  }
+
+  async updateItemSuspension(
+    itemId: string,
+    patch: Partial<import("../../../application/yes-hotel/first-room-access-types").AccessToleranceItemRecord>,
+  ): Promise<void> {
+    const { error } = await this.client
+      .from("operacional_acesso_tolerancia_itens")
+      .update(patch)
+      .eq("id", itemId);
+    if (error) throw new Error(`updateItemSuspension: ${error.message}`);
   }
 }

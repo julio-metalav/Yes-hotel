@@ -5,6 +5,7 @@ import { SupabaseAccessToleranceRepository } from "./access-tolerance-repository
 import { SupabaseCommunicationOutboxPort } from "./communication-outbox";
 import { SupabaseCredentialCorrelationPort } from "./credential-correlation";
 import { SupabaseCredentialItemsPort } from "./credential-items";
+import { SupabaseAccessOutboxQueuePort } from "./access-outbox-queue";
 import {
   SupabaseFirstRoomAccessUnitOfWork,
   SystemClock,
@@ -23,10 +24,27 @@ export function createSupabaseFirstRoomAccessPorts(
     outbox: new SupabaseCommunicationOutboxPort(client),
     clock: new SystemClock(),
     uow: new SupabaseFirstRoomAccessUnitOfWork(client),
+    accessOutboxQueue: new SupabaseAccessOutboxQueuePort(client),
+    reservationDisplay: {
+      async getContext(reservationId: string) {
+        const { data: r } = await client
+          .from("operacional_reservas")
+          .select("apartamento, hospede_principal, external_reservation_id")
+          .eq("id", reservationId)
+          .maybeSingle();
+        const external = String(r?.external_reservation_id ?? "").trim();
+        return {
+          apartment_number: String(r?.apartamento ?? "—"),
+          reservation_code: external || "—",
+          guest_main_name: String(r?.hospede_principal ?? "hóspede"),
+        };
+      },
+    },
   };
 }
 
 export * from "./access-event-repository";
+export * from "./access-outbox-queue";
 export * from "./access-tolerance-repository";
 export * from "./credential-correlation";
 export * from "./credential-correlation-logic";
