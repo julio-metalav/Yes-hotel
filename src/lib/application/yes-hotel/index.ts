@@ -12,6 +12,8 @@ export * from "./format";
 export * from "./orchestrator";
 export * from "./provisioning";
 export * from "./provisioning-executor";
+export * from "./reservation-sync-repository";
+export * from "./reservation-sync-service";
 // simulated-reservation-pending-state: somente testes/dev explícito — não exportar no barrel de produção.
 export * from "./supabase-provisioning-repo";
 export * from "./types";

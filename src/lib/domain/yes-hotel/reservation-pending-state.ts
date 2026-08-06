@@ -1,6 +1,12 @@
 /**
  * Policy pura: pendências de pagamento e FNRH obrigatórias da reserva.
  * Sem I/O — facial/placa/contato de menor não geram pendência.
+ *
+ * Pagamento desconhecido NÃO é pendência confirmada:
+ * - payment_pending=false
+ * - payment_unknown=true
+ * - não inicia tolerância sozinho
+ * - não suspende (fail-safe no processador)
  */
 
 export type PaymentStatusPending =
@@ -47,6 +53,8 @@ export type ReservationPendingStateInput = {
 
 export type ReservationPendingStateResult = {
   payment_pending: boolean;
+  /** Pagamento não confirmado pela origem — fail-safe; não inicia tolerância sozinho. */
+  payment_unknown: boolean;
   fnrh_pending: boolean;
   pending_reasons: string[];
   all_clear: boolean;
@@ -57,33 +65,41 @@ export type ReservationPendingStateResult = {
   };
 };
 
-function isPaymentConfirmed(status: PaymentStatusPending): boolean {
-  return status === "pago";
-}
-
 function isFnrhCompletedForGuest(guest: ExpectedGuestFnrhInput): boolean {
   if (guest.fnrh_status !== "completed") {
     return false;
   }
 
   if (guest.role === "menor") {
-    // Menor: ficha obrigatória preenchida e confirmada pelo responsável.
-    // Telefone/e-mail/confirmação individual do menor NÃO entram na pendência.
     return guest.completed_by_guardian === true;
   }
 
-  // Adultos: ficha concluída (facial/placa opcionais ignorados).
   return true;
+}
+
+function mapPaymentFlags(status: PaymentStatusPending): {
+  payment_pending: boolean;
+  payment_unknown: boolean;
+} {
+  if (status === "pago") return { payment_pending: false, payment_unknown: false };
+  if (status === "pendente" || status === "parcial" || status === "emergencial") {
+    return { payment_pending: true, payment_unknown: false };
+  }
+  // desconhecido (e qualquer valor não confirmado tratado como fail-safe)
+  return { payment_pending: false, payment_unknown: true };
 }
 
 /**
  * Avalia pendências relevantes para o fluxo de primeiro acesso / tolerância.
  * Não consulta banco — recebe estado já montado.
+ *
+ * Tolerância inicia com: payment_pending || fnrh_pending
+ * (payment_unknown sozinho NÃO inicia).
  */
 export function evaluateReservationPendingState(
   input: ReservationPendingStateInput,
 ): ReservationPendingStateResult {
-  const payment_pending = !isPaymentConfirmed(input.payment_status);
+  const { payment_pending, payment_unknown } = mapPaymentFlags(input.payment_status);
   // emergency_access / manual_access_release não alteram payment_pending.
 
   const requiredGuests = input.guests;
@@ -104,9 +120,11 @@ export function evaluateReservationPendingState(
   const pending_reasons: string[] = [];
   if (payment_pending) {
     if (input.payment_status === "parcial") pending_reasons.push("pagamento_parcial");
-    else if (input.payment_status === "desconhecido") pending_reasons.push("pagamento_desconhecido");
     else if (input.payment_status === "emergencial") pending_reasons.push("pagamento_pendente");
     else pending_reasons.push("pagamento");
+  }
+  if (payment_unknown) {
+    pending_reasons.push("pagamento_desconhecido");
   }
   if (fnrh_pending) {
     pending_reasons.push("fnrh");
@@ -114,8 +132,10 @@ export function evaluateReservationPendingState(
 
   return {
     payment_pending,
+    payment_unknown,
     fnrh_pending,
     pending_reasons,
+    // all_clear: sem pendência confirmada de pagamento/FNRH (desconhecido não bloqueia).
     all_clear: !payment_pending && !fnrh_pending,
     fnrh_summary: {
       required,

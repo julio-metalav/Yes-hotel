@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Yes Hotel — Painel de Check-in Operacional</title>
-    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=33" />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=34" />
   </head>
   <body class="op-body">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -37,14 +37,79 @@
         </p>
       </header>
 
-      <section class="yes-kpis" aria-label="Indicadores do dia">
+      <section class="yes-kpis yes-kpis--five" aria-label="Indicadores do dia">
         <article><span>Chegadas hoje</span><strong id="op-kpi-arrivals">0</strong><small id="op-kpi-arrivals-note">Nenhuma chegada</small></article>
         <article><span>Check-ins concluídos</span><strong id="op-kpi-completed">0</strong><small id="op-kpi-completed-note">0% das chegadas</small></article>
         <article><span>FNRH pendentes</span><strong id="op-kpi-fnrh">0</strong><small id="op-kpi-fnrh-note">Sem pendências</small></article>
         <article><span>Acessos liberados</span><strong id="op-kpi-access">0</strong><small>Atualizado no painel</small></article>
+        <button type="button" class="yes-kpi-card yes-kpi-card--action" id="op-kpi-occupied-btn" aria-label="Ver hóspedes hospedados">
+          <span>Hóspedes hospedados</span>
+          <strong id="op-kpi-occupied-guests">0 hóspedes</strong>
+          <small id="op-kpi-occupied-apts">0 apartamentos ocupados</small>
+        </button>
       </section>
 
-      <div class="op-controls" aria-label="Filtros e situação">
+      <nav class="op-view-tabs" role="tablist" aria-label="Visão do painel">
+        <button type="button" class="op-view-tab active" role="tab" aria-selected="true" data-op-view="reservas" id="op-view-reservas">Reservas</button>
+        <button type="button" class="op-view-tab" role="tab" aria-selected="false" data-op-view="chegadas" id="op-view-chegadas">Chegadas</button>
+      </nav>
+
+      <section id="op-chegadas-panel" class="op-chegadas hidden" aria-label="Chegadas">
+        <div class="op-chegadas__filters" role="toolbar" aria-label="Filtros de chegadas">
+          <button type="button" class="op-chegadas__filter active" data-arrivals-filter="hoje">Hoje</button>
+          <button type="button" class="op-chegadas__filter" data-arrivals-filter="amanha">Amanhã</button>
+          <button type="button" class="op-chegadas__filter" data-arrivals-filter="proximos_7_dias">Próximos 7 dias</button>
+          <button type="button" class="op-chegadas__filter" data-arrivals-filter="todas_futuras">Todas as futuras</button>
+          <button type="button" class="op-chegadas__filter" data-arrivals-filter="so_problemas">Só com problemas</button>
+        </div>
+        <div class="op-panel op-chegadas__panel">
+          <div class="op-panel__head">
+            <span class="op-panel__title">Chegadas</span>
+            <span id="op-chegadas-count" class="op-panel__count"></span>
+          </div>
+          <div class="op-panel__body">
+            <div class="op-table-wrap">
+              <table class="op-table" aria-label="Lista de chegadas">
+                <thead>
+                  <tr>
+                    <th>Chegada</th>
+                    <th>Reserva</th>
+                    <th>Apto</th>
+                    <th>Hóspede</th>
+                    <th>Hóspedes</th>
+                    <th>Alertas</th>
+                  </tr>
+                </thead>
+                <tbody id="op-chegadas-body"></tbody>
+              </table>
+            </div>
+            <div id="op-chegadas-empty" class="op-empty hidden">
+              <p class="op-empty__title">Nenhuma chegada neste filtro</p>
+            </div>
+            <p id="op-chegadas-truncated" class="op-chegadas__truncated hidden" role="status">
+              Exibindo até 500 reservas. Refine o período para consultar mais resultados.
+            </p>
+            <div id="op-chegadas-pager" class="op-chegadas__pager hidden">
+              <button type="button" class="op-btn op-btn--secondary" id="op-chegadas-prev">Anterior</button>
+              <span id="op-chegadas-page-label"></span>
+              <button type="button" class="op-btn op-btn--secondary" id="op-chegadas-next">Próxima</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div id="op-occupied-drawer" class="op-occupied-drawer hidden" aria-hidden="true">
+        <div class="op-occupied-drawer__backdrop" id="op-occupied-backdrop"></div>
+        <aside class="op-occupied-drawer__panel" role="dialog" aria-labelledby="op-occupied-title">
+          <header class="op-occupied-drawer__head">
+            <h2 id="op-occupied-title">Hospedagens atuais</h2>
+            <button type="button" class="op-detail__close" id="op-occupied-close" aria-label="Fechar">Fechar</button>
+          </header>
+          <ul id="op-occupied-list" class="op-occupied-drawer__list"></ul>
+        </aside>
+      </div>
+
+      <div id="op-reservas-controls" class="op-controls" aria-label="Filtros e situação">
         <div class="op-toolbar" role="toolbar" aria-label="Ferramentas do painel">
           <input
             type="search"
@@ -77,7 +142,7 @@
 
       <section id="operacional-excecoes" class="op-excecoes hidden" aria-label="Exceções operacionais"></section>
 
-      <div class="op-main">
+      <div id="op-reservas-main" class="op-main">
         <div class="op-master">
           <div class="op-panel">
             <div class="op-panel__head">
@@ -183,6 +248,7 @@
     <script defer src="./yes-supabase-auth.js"></script>
     <script defer src="./yes-credential-release-policy.js"></script>
     <script defer src="./yes-access-tolerance-policy.js?v=1"></script>
-    <script defer src="./checkin-operacional-mvp.js?v=38"></script>
+    <script defer src="./yes-arrivals-policy.js?v=1"></script>
+    <script defer src="./checkin-operacional-mvp.js?v=39"></script>
   </body>
 </html>
