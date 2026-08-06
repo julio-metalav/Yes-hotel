@@ -56,16 +56,41 @@ function minor(overrides: Partial<ExpectedGuestFnrhInput> = {}): ExpectedGuestFn
   assert.equal(r.fnrh_summary.pending, 0);
 }
 
-// 12/21/22 pagamento pendente / desconhecido / parcial
+// 12/21/22 pagamento pendente / parcial / emergencial → payment_pending
 {
-  for (const status of ["pendente", "desconhecido", "parcial", "emergencial"] as const) {
+  for (const status of ["pendente", "parcial", "emergencial"] as const) {
     const r = evaluateReservationPendingState({
       payment_status: status,
       guests: [adultPrincipal()],
     });
     assert.equal(r.payment_pending, true, status);
+    assert.equal(r.payment_unknown, false, status);
     assert.equal(r.all_clear, false, status);
   }
+}
+
+// desconhecido: NÃO é pendência confirmada; fail-safe
+{
+  const r = evaluateReservationPendingState({
+    payment_status: "desconhecido",
+    guests: [adultPrincipal()],
+  });
+  assert.equal(r.payment_pending, false);
+  assert.equal(r.payment_unknown, true);
+  assert.equal(r.all_clear, true);
+  assert.ok(r.pending_reasons.includes("pagamento_desconhecido"));
+}
+
+// desconhecido + FNRH pendente → tolerância pode iniciar pela FNRH
+{
+  const r = evaluateReservationPendingState({
+    payment_status: "desconhecido",
+    guests: [adultPrincipal({ fnrh_status: "pending" })],
+  });
+  assert.equal(r.payment_pending, false);
+  assert.equal(r.payment_unknown, true);
+  assert.equal(r.fnrh_pending, true);
+  assert.equal(r.all_clear, false);
 }
 
 // 13) FNRH principal pendente

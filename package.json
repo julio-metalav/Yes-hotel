@@ -44,6 +44,8 @@
     "test:hits-mock:normal": "tsx scripts/test-hits-mock-to-yes-normal.ts",
     "test:hits-mock:room-change": "tsx scripts/test-hits-mock-to-yes-room-change.ts",
     "test:hits-mock:cancel": "tsx scripts/test-hits-mock-to-yes-cancel.ts",
+    "test:hits-reservation-sync-chegadas": "tsx scripts/test-hits-reservation-sync-chegadas.ts",
+    "test:ui-static-js": "node --check ui/checkin-operacional-mvp.js && node --check ui/yes-arrivals-policy.js && node --check ui/yes-access-tolerance-policy.js",
     "test:hits-real:json": "tsx scripts/test-hits-real-json-to-yes.ts",
     "debug:provisioning": "tsx scripts/debug-provisioning-plan.ts",
     "debug:ttlock-auth": "tsx scripts/debug-ttlock-auth.ts",

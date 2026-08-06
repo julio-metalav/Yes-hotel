@@ -53,3 +53,5 @@ export * from "./reservation-pending-mapper";
 export * from "./credential-items";
 export * from "./communication-outbox";
 export * from "./first-room-access-unit-of-work";
+export * from "./supabase-reservation-sync-repository";
+export * from "./fake-reservation-sync-client";

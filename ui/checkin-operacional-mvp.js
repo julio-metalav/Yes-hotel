@@ -50,6 +50,19 @@ const opKpiCompletedNote = document.querySelector("#op-kpi-completed-note");
 const opKpiFnrh = document.querySelector("#op-kpi-fnrh");
 const opKpiFnrhNote = document.querySelector("#op-kpi-fnrh-note");
 const opKpiAccess = document.querySelector("#op-kpi-access");
+const opKpiOccupiedBtn = document.querySelector("#op-kpi-occupied-btn");
+const opKpiOccupiedGuests = document.querySelector("#op-kpi-occupied-guests");
+const opKpiOccupiedApts = document.querySelector("#op-kpi-occupied-apts");
+const opChegadasPanel = document.querySelector("#op-chegadas-panel");
+const opChegadasBody = document.querySelector("#op-chegadas-body");
+const opChegadasCount = document.querySelector("#op-chegadas-count");
+const opChegadasEmpty = document.querySelector("#op-chegadas-empty");
+const opChegadasPager = document.querySelector("#op-chegadas-pager");
+const opChegadasPageLabel = document.querySelector("#op-chegadas-page-label");
+const opReservasControls = document.querySelector("#op-reservas-controls");
+const opReservasMain = document.querySelector("#op-reservas-main");
+const opOccupiedDrawer = document.querySelector("#op-occupied-drawer");
+const opOccupiedList = document.querySelector("#op-occupied-list");
 
 /* ---------- Utils (data/hora, formatação) ---------- */
 function todayStr() {
@@ -553,7 +566,18 @@ function mapHitsReservationToExternalPayload(hitsReservation) {
     hospedePrincipal: sanitizeString(r.hospedePrincipal ?? r.primaryGuest ?? r.primary_guest ?? (hospedes[0] && hospedes[0].nome) ? hospedes[0].nome : ""),
     checkInPrevisto: sanitizeString(r.checkInPrevisto ?? r.checkIn ?? r.check_in ?? r.arrivalDate ?? ""),
     checkOutPrevisto: sanitizeString(r.checkOutPrevisto ?? r.checkOut ?? r.check_out ?? r.departureDate ?? ""),
-    pagamento: r.pagamento === "pago" || r.paymentStatus === "paid" ? "pago" : "pendente",
+    pagamento:
+      r.pagamento === "pago" || r.paymentStatus === "paid" || r.paymentStatus === "pago"
+        ? "pago"
+        : r.pagamento === "parcial" || r.paymentStatus === "parcial"
+          ? "parcial"
+          : r.pagamento === "desconhecido" || r.paymentStatus === "desconhecido" || r.paymentStatus === "unknown"
+            ? "desconhecido"
+            : r.pagamento === "pendente" || r.paymentStatus === "pending" || r.paymentStatus === "pendente"
+              ? "pendente"
+              : "desconhecido",
+    statusReserva: r.statusReserva === "cancelada" || r.status === 2 || r.status === "cancelada" ? "cancelada" : "ativa",
+    externalReservationId: sanitizeString(r.externalReservationId ?? r.external_reservation_id ?? r.idReservation ?? "") || null,
     acessoLiberado: !!(r.acessoLiberado ?? r.accessGranted ?? r.access_granted),
     entrouNoApto: !!(r.entrouNoApto ?? r.checkedIn ?? r.checked_in),
     veiculoPlaca: sanitizeString(r.veiculoPlaca ?? r.vehiclePlate ?? r.vehicle_plate ?? ""),
@@ -654,6 +678,13 @@ function mapDbComunicacaoEnviosToInternal(rows) {
   });
 }
 
+function mapPagamentoStatusFromDb(value) {
+  const s = String(value || "").trim().toLowerCase();
+  if (s === "pago" || s === "pendente" || s === "parcial" || s === "desconhecido") return s;
+  // Sem sinal confiável: desconhecido (nunca colapsar para pendente).
+  return "desconhecido";
+}
+
 function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows, enviosRows) {
   const checkIn = r.check_in_previsto;
   const checkOut = r.check_out_previsto;
@@ -665,14 +696,16 @@ function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows, enviosRo
     return mapDbHospedeToInternal(row, fnrhMap[row.id]);
   }).filter(Boolean);
   const historico = (eventosRows || []).map(mapDbEventoToHistorico).filter(Boolean);
+  const extId = (r.external_reservation_id || "").trim() || null;
   return {
     id: r.id,
     apartamento: (r.apartamento || "").trim(),
     hospedePrincipal: (r.hospede_principal || "").trim(),
-    externalReservationId: (r.external_reservation_id || "").trim() || null,
+    externalReservationId: extId,
     checkInPrevisto: checkIn ? (typeof checkIn === "string" ? checkIn.slice(0, 10) : checkIn) : "",
     checkOutPrevisto: checkOut ? (typeof checkOut === "string" ? checkOut.slice(0, 10) : checkOut) : "",
-    pagamento: r.pagamento_status === "pago" ? "pago" : "pendente",
+    pagamento: mapPagamentoStatusFromDb(r.pagamento_status),
+    statusReserva: r.status_reserva === "cancelada" ? "cancelada" : "ativa",
     acessoLiberado: !!r.acesso_liberado,
     entrouNoApto: !!r.entrou_no_apto,
     veiculoPlaca: (r.veiculo_placa || "").trim(),
@@ -1511,7 +1544,7 @@ function getFaltamContato(reserva) {
 }
 
 function derivarStatusOperacional(reserva) {
-  if (reserva.pagamento === "pendente") {
+  if (isPagamentoPendenteOperacional(reserva)) {
     return { label: "Pendente pagamento", type: "pendente-pagamento" };
   }
   if (hasFnrhPendente(reserva)) {
@@ -1539,7 +1572,7 @@ function filtrarReservas(lista, filtroAtivo) {
     return lista.filter((r) => r.checkInPrevisto === hoje);
   }
   if (filtroAtivo === FILTER_PENDENTE_PAGAMENTO) {
-    return lista.filter((r) => r.pagamento === "pendente");
+    return lista.filter((r) => isPagamentoPendenteOperacional(r));
   }
   if (filtroAtivo === FILTER_PENDENTE_FNRH) {
     return lista.filter((r) => hasFnrhPendente(r));
@@ -1604,6 +1637,7 @@ function renderOperationalMetrics() {
       fnrhPending > 0 ? "Requer atenção" : "Sem pendências";
   }
   if (opKpiAccess) opKpiAccess.textContent = String(accessGranted);
+  renderOccupiedGuestsCard();
 }
 
 const MAPA_FILTRO_ETAPA = {
@@ -2108,6 +2142,373 @@ function syncDetailPanelChrome(reserva) {
   }
 }
 
+/* ---------- Chegadas + card hospedados ---------- */
+let painelView = "reservas";
+let arrivalsFilter = "hoje";
+let arrivalsPage = 0;
+const ARRIVALS_PAGE_SIZE = 20;
+let arrivalsDatasetCache = null;
+let occupiedSummaryCache = null;
+
+function isPagamentoPendenteOperacional(reserva) {
+  return reserva.pagamento === "pendente" || reserva.pagamento === "parcial";
+}
+
+function recentChangeLabelsFromHistorico(historico) {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const labels = [];
+  (historico || []).forEach(function (ev) {
+    const tipo = String(ev.tipo || "");
+    if (tipo.indexOf("hits_") !== 0) return;
+    const iso = ev.criadoEmIso || null;
+    if (iso) {
+      const t = Date.parse(iso);
+      if (!Number.isFinite(t) || t < cutoff) return;
+    }
+    const detalhe = String(ev.detalhe || ev.titulo || "").trim();
+    if (!detalhe) return;
+    // Resumos curtos para a lista
+    if (tipo === "hits_apartamento_alterado") {
+      const m = detalhe.match(/:\s*(.+)$/);
+      labels.push(m ? "Apto. " + m[1] : "Apartamento alterado");
+    } else if (tipo === "hits_quantidade_hospedes_alterada") {
+      const m = detalhe.match(/:\s*(.+)$/);
+      labels.push(m ? "Hóspedes " + m[1] : "Quantidade alterada");
+    } else if (tipo === "hits_reserva_cancelada") {
+      labels.push("Reserva cancelada");
+    } else if (
+      tipo === "hits_checkin_alterado" ||
+      tipo === "hits_checkout_alterado" ||
+      tipo === "hits_chegada_alterada" ||
+      tipo === "hits_saida_alterada"
+    ) {
+      labels.push("Datas alteradas");
+    } else if (tipo === "hits_pagamento_alterado") {
+      labels.push("Pagamento alterado");
+    }
+  });
+  return labels.slice(0, 3);
+}
+
+function buildArrivalsInputFromInternal(r) {
+  const guests = Array.isArray(r.hospedes) ? r.hospedes.filter(function (h) {
+    return !h.removed_from_reservation && !h.removedFromReservation;
+  }) : [];
+  const tol = r.acessoTolerancia || {};
+  return {
+    id: r.id,
+    external_reservation_id: r.externalReservationId || null,
+    apartamento: r.apartamento || "",
+    hospede_principal: r.hospedePrincipal || "",
+    check_in_previsto: r.checkInPrevisto || "",
+    check_out_previsto: r.checkOutPrevisto || "",
+    status_reserva: r.statusReserva || "ativa",
+    pagamento_status: r.pagamento || "desconhecido",
+    entrou_no_apto: !!r.entrouNoApto,
+    acesso_liberado: !!r.acessoLiberado,
+    total_hospedes: Math.max(guests.length, 1),
+    fnrh_pendente: hasFnrhPendente(r),
+    recent_change_labels: recentChangeLabelsFromHistorico(r.historicoOperacional),
+    recent_cancel_event: (r.historicoOperacional || []).some(function (ev) {
+      return String(ev.tipo || "") === "hits_reserva_cancelada";
+    }),
+    tolerancia_ativa: tol.grace_status === "active",
+    senha_suspensa: tol.grace_status === "suspended",
+    comunicacao_falha: !!tol.communication_failed,
+    credencial_ausente: !r.acessoLiberado && !r.ttlockPrincipalTodosProvisionados,
+  };
+}
+
+/**
+ * Consulta em lote para Chegadas (sem N+1 por reserva).
+ * Fallback defensivo se status_reserva ainda não existir (migration não aplicada).
+ */
+async function loadArrivalsDatasetFromBackend() {
+  const supabase = getSupabase();
+  if (!supabase) return [];
+  const colsBase =
+    "id, apartamento, hospede_principal, check_in_previsto, check_out_previsto, pagamento_status, entrou_no_apto, acesso_liberado, external_reservation_id, fnrh_status_agregado, origem_externa";
+  let rows = null;
+  let error = null;
+  let truncated = false;
+  ({ data: rows, error } = await supabase
+    .from("operacional_reservas")
+    .select(colsBase + ", status_reserva, synced_at")
+    .order("check_in_previsto", { ascending: true })
+    .order("apartamento", { ascending: true })
+    .limit(500));
+  if (error) {
+    ({ data: rows, error } = await supabase
+      .from("operacional_reservas")
+      .select(colsBase)
+      .order("check_in_previsto", { ascending: true })
+      .limit(500));
+  }
+  if (error || !Array.isArray(rows)) return { items: [], truncated: false };
+  truncated = rows.length >= 500;
+
+  const ids = rows.map(function (r) { return r.id; }).filter(Boolean);
+  const guestsByReserva = {};
+  const eventsByReserva = {};
+  const tolByReserva = {};
+  const outboxFail = {};
+
+  if (ids.length > 0) {
+    const { data: guestRows } = await supabase
+      .from("operacional_hospedes")
+      .select("id, reserva_id, nome, principal, removed_from_reservation")
+      .in("reserva_id", ids);
+    (guestRows || []).forEach(function (g) {
+      if (g.removed_from_reservation) return;
+      const rid = g.reserva_id;
+      if (!guestsByReserva[rid]) guestsByReserva[rid] = [];
+      guestsByReserva[rid].push(g);
+    });
+
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data: eventRows } = await supabase
+      .from("operacional_reserva_eventos")
+      .select("reserva_id, tipo, titulo, detalhe, criado_em")
+      .in("reserva_id", ids)
+      .gte("criado_em", cutoff)
+      .like("tipo", "hits_%")
+      .order("criado_em", { ascending: false });
+    (eventRows || []).forEach(function (ev) {
+      const rid = ev.reserva_id;
+      if (!eventsByReserva[rid]) eventsByReserva[rid] = [];
+      eventsByReserva[rid].push({
+        tipo: ev.tipo,
+        titulo: ev.titulo,
+        detalhe: ev.detalhe,
+        criadoEmIso: ev.criado_em,
+      });
+    });
+
+    const { data: tolRows } = await supabase
+      .from("operacional_acesso_tolerancias")
+      .select("reservation_id, grace_status")
+      .in("reservation_id", ids);
+    (tolRows || []).forEach(function (t) {
+      tolByReserva[t.reservation_id] = t;
+    });
+
+    const { data: failRows } = await supabase
+      .from("operacional_acesso_outbox")
+      .select("reservation_id")
+      .in("reservation_id", ids)
+      .eq("status", "failed")
+      .is("processed_at", null);
+    (failRows || []).forEach(function (f) {
+      outboxFail[f.reservation_id] = true;
+    });
+  }
+
+  const items = rows.map(function (r) {
+    const guests = guestsByReserva[r.id] || [];
+    const hist = eventsByReserva[r.id] || [];
+    const tol = tolByReserva[r.id] || {};
+    const hasRecentCancel = hist.some(function (ev) {
+      return ev.tipo === "hits_reserva_cancelada";
+    });
+    return {
+      id: r.id,
+      external_reservation_id: (r.external_reservation_id || "").trim() || null,
+      apartamento: (r.apartamento || "").trim(),
+      hospede_principal: (r.hospede_principal || "").trim(),
+      check_in_previsto: String(r.check_in_previsto || "").slice(0, 10),
+      check_out_previsto: String(r.check_out_previsto || "").slice(0, 10),
+      status_reserva: r.status_reserva === "cancelada" ? "cancelada" : "ativa",
+      pagamento_status: mapPagamentoStatusFromDb(r.pagamento_status),
+      entrou_no_apto: !!r.entrou_no_apto,
+      acesso_liberado: !!r.acesso_liberado,
+      total_hospedes: Math.max(guests.length, 1),
+      fnrh_pendente: (r.fnrh_status_agregado || "") !== "fnrh_completa",
+      recent_change_labels: recentChangeLabelsFromHistorico(hist),
+      recent_cancel_event: hasRecentCancel,
+      tolerancia_ativa: tol.grace_status === "active",
+      senha_suspensa: tol.grace_status === "suspended",
+      comunicacao_falha: !!outboxFail[r.id],
+      credencial_ausente: !r.acesso_liberado,
+    };
+  });
+  return { items: items, truncated: truncated };
+}
+
+function getArrivalsPolicy() {
+  return typeof window !== "undefined" ? window.YesHotelArrivalsPolicy : null;
+}
+
+let arrivalsTruncatedWarning = false;
+
+async function ensureArrivalsDataset() {
+  if (arrivalsDatasetCache) return arrivalsDatasetCache;
+  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && getSupabase()) {
+    const loaded = await loadArrivalsDatasetFromBackend();
+    arrivalsDatasetCache = loaded.items || [];
+    arrivalsTruncatedWarning = !!loaded.truncated;
+  } else {
+    arrivalsDatasetCache = (reservas || []).map(buildArrivalsInputFromInternal);
+    arrivalsTruncatedWarning = false;
+  }
+  return arrivalsDatasetCache;
+}
+
+function invalidateArrivalsCache() {
+  arrivalsDatasetCache = null;
+  occupiedSummaryCache = null;
+  arrivalsTruncatedWarning = false;
+}
+
+function renderOccupiedGuestsCard() {
+  const policy = getArrivalsPolicy();
+  const raw = arrivalsDatasetCache || (reservas || []).map(buildArrivalsInputFromInternal);
+  const items = Array.isArray(raw) ? raw : [];
+  occupiedSummaryCache = policy
+    ? policy.summarizeOccupiedGuests(items)
+    : { total_guests: 0, occupied_apartments: 0, stays: [] };
+  if (opKpiOccupiedGuests) {
+    const n = occupiedSummaryCache.total_guests;
+    opKpiOccupiedGuests.textContent = n + (n === 1 ? " hóspede" : " hóspedes");
+  }
+  if (opKpiOccupiedApts) {
+    const a = occupiedSummaryCache.occupied_apartments;
+    opKpiOccupiedApts.textContent =
+      a + (a === 1 ? " apartamento ocupado" : " apartamentos ocupados");
+  }
+}
+
+function setPainelView(view) {
+  painelView = view === "chegadas" ? "chegadas" : "reservas";
+  document.querySelectorAll(".op-view-tab").forEach(function (btn) {
+    const active = btn.getAttribute("data-op-view") === painelView;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  const showReservas = painelView === "reservas";
+  opReservasControls?.classList.toggle("hidden", !showReservas);
+  opReservasMain?.classList.toggle("hidden", !showReservas);
+  document.querySelector("#operacional-excecoes")?.classList.toggle("hidden", !showReservas);
+  opChegadasPanel?.classList.toggle("hidden", showReservas);
+  if (!showReservas) renderChegadasPanel();
+}
+
+async function renderChegadasPanel() {
+  const policy = getArrivalsPolicy();
+  if (!policy || !opChegadasBody) return;
+  const dataset = await ensureArrivalsDataset();
+  const truncatedEl = document.querySelector("#op-chegadas-truncated");
+  if (truncatedEl) truncatedEl.classList.toggle("hidden", !arrivalsTruncatedWarning);
+  const rows = policy.filterArrivals(dataset, arrivalsFilter);
+  let pageRows = rows;
+  let pageInfo = null;
+  if (arrivalsFilter === "todas_futuras") {
+    pageInfo = policy.paginateRows(rows, arrivalsPage, ARRIVALS_PAGE_SIZE);
+    pageRows = pageInfo.items;
+  }
+  if (opChegadasCount) {
+    opChegadasCount.textContent =
+      rows.length === 1 ? "1 reserva" : rows.length + " reservas";
+  }
+  opChegadasEmpty?.classList.toggle("hidden", pageRows.length > 0);
+  opChegadasBody.innerHTML = pageRows
+    .map(function (row) {
+      const alerts = (row.alerts || [])
+        .slice(0, 3)
+        .map(function (a) {
+          return '<span class="op-chegadas__alert">' + escapeHtml(a.label) + "</span>";
+        })
+        .join("");
+      return (
+        "<tr data-reserva-id=\"" +
+        escapeHtml(row.id) +
+        "\">" +
+        "<td>" +
+        escapeHtml(formatDataBR(row.check_in)) +
+        "</td>" +
+        "<td>" +
+        escapeHtml(row.external_reservation_id) +
+        "</td>" +
+        "<td>" +
+        escapeHtml(row.apartamento) +
+        "</td>" +
+        "<td>" +
+        escapeHtml(row.hospede_principal) +
+        "</td>" +
+        "<td>" +
+        escapeHtml(String(row.total_hospedes)) +
+        "</td>" +
+        "<td class=\"op-chegadas__alerts\">" +
+        (alerts || "—") +
+        "</td>" +
+        "</tr>"
+      );
+    })
+    .join("");
+
+  if (opChegadasPager && pageInfo) {
+    opChegadasPager.classList.toggle("hidden", pageInfo.total <= ARRIVALS_PAGE_SIZE);
+    if (opChegadasPageLabel) {
+      opChegadasPageLabel.textContent =
+        "Página " + (pageInfo.page + 1) + " · " + pageInfo.total + " no total";
+    }
+    const prev = document.querySelector("#op-chegadas-prev");
+    const next = document.querySelector("#op-chegadas-next");
+    if (prev) prev.disabled = pageInfo.page <= 0;
+    if (next) next.disabled = !pageInfo.hasMore;
+  } else {
+    opChegadasPager?.classList.add("hidden");
+  }
+
+  opChegadasBody.querySelectorAll("tr[data-reserva-id]").forEach(function (tr) {
+    tr.addEventListener("click", function () {
+      const id = tr.getAttribute("data-reserva-id");
+      if (id && getReservaById(id)) openDetail(id);
+    });
+  });
+}
+
+function openOccupiedDrawer() {
+  if (!occupiedSummaryCache) renderOccupiedGuestsCard();
+  const stays = (occupiedSummaryCache && occupiedSummaryCache.stays) || [];
+  if (opOccupiedList) {
+    opOccupiedList.innerHTML = stays.length
+      ? stays
+          .map(function (s) {
+            const alerts = (s.alerts || [])
+              .slice(0, 2)
+              .map(function (a) {
+                return escapeHtml(a.label);
+              })
+              .join(" · ");
+            return (
+              "<li>" +
+              "<strong>Apto " +
+              escapeHtml(s.apartamento) +
+              "</strong>" +
+              "<span>" +
+              escapeHtml(s.hospede_principal) +
+              " · " +
+              escapeHtml(String(s.total_hospedes)) +
+              " hóspede(s)</span>" +
+              "<span>Saída " +
+              escapeHtml(formatDataBR(s.check_out)) +
+              "</span>" +
+              (alerts ? "<em>" + alerts + "</em>" : "") +
+              "</li>"
+            );
+          })
+          .join("")
+      : "<li class=\"op-occupied-drawer__empty\">Nenhuma hospedagem atual</li>";
+  }
+  opOccupiedDrawer?.classList.remove("hidden");
+  opOccupiedDrawer?.setAttribute("aria-hidden", "false");
+}
+
+function closeOccupiedDrawer() {
+  opOccupiedDrawer?.classList.add("hidden");
+  opOccupiedDrawer?.setAttribute("aria-hidden", "true");
+}
+
 function persistLocalPanelState() {
   if (
     PAINEL_DATA_SOURCE !== PAINEL_DATA_SOURCE_LOCAL_REPOSITORY ||
@@ -2126,6 +2527,9 @@ function refresh() {
   renderExcecoesOperacionais();
   renderStatusTabs();
   renderOperacionalLista();
+  if (painelView === "chegadas") {
+    renderChegadasPanel();
+  }
   if (detailReservaId) {
     const r = getReservaById(detailReservaId);
     if (r) {
@@ -2143,6 +2547,7 @@ function refresh() {
 }
 
 async function refreshFromSource() {
+  invalidateArrivalsCache();
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY) {
     reservas = await loadReservasFromLocalRepository();
   } else if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
@@ -4830,6 +5235,35 @@ async function initCheckinOperacional() {
   }
 
   reservas = await loadReservasOperacionaisFromProvider();
+  invalidateArrivalsCache();
+  await ensureArrivalsDataset();
+
+  document.querySelectorAll(".op-view-tab").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      setPainelView(btn.getAttribute("data-op-view") || "reservas");
+    });
+  });
+  document.querySelectorAll("[data-arrivals-filter]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      arrivalsFilter = btn.getAttribute("data-arrivals-filter") || "hoje";
+      arrivalsPage = 0;
+      document.querySelectorAll("[data-arrivals-filter]").forEach(function (b) {
+        b.classList.toggle("active", b === btn);
+      });
+      renderChegadasPanel();
+    });
+  });
+  document.querySelector("#op-chegadas-prev")?.addEventListener("click", function () {
+    arrivalsPage = Math.max(0, arrivalsPage - 1);
+    renderChegadasPanel();
+  });
+  document.querySelector("#op-chegadas-next")?.addEventListener("click", function () {
+    arrivalsPage += 1;
+    renderChegadasPanel();
+  });
+  opKpiOccupiedBtn?.addEventListener("click", openOccupiedDrawer);
+  document.querySelector("#op-occupied-close")?.addEventListener("click", closeOccupiedDrawer);
+  document.querySelector("#op-occupied-backdrop")?.addEventListener("click", closeOccupiedDrawer);
 
   if (opSearchInput instanceof HTMLInputElement) {
     opSearchInput.addEventListener("input", () => {
