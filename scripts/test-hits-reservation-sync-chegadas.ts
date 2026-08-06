@@ -933,6 +933,48 @@ console.log("\n== Policy browser real (ui/yes-arrivals-policy.js) ==");
   ok("policy browser real + equivalência TS");
 }
 
+console.log("\n== FNRH agregada na montagem Chegadas (checkin-operacional-mvp.js) ==");
+{
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const vm = await import("node:vm");
+  const file = path.join(process.cwd(), "ui", "checkin-operacional-mvp.js");
+  const code = fs.readFileSync(file, "utf8");
+
+  const fnMatch = code.match(
+    /function isFnrhAggregatePending\(value\) \{\s*return String\(value \|\| ""\)\.trim\(\) !== "fnrh_completo";\s*\}/,
+  );
+  assert.ok(fnMatch, "isFnrhAggregatePending presente com grafia fnrh_completo");
+
+  const sandbox: { isFnrhAggregatePending?: (value: unknown) => boolean } = {};
+  vm.runInNewContext(`${fnMatch[0]}; this.isFnrhAggregatePending = isFnrhAggregatePending;`, sandbox);
+  const isPending = sandbox.isFnrhAggregatePending!;
+  assert.equal(typeof isPending, "function");
+
+  assert.equal(isPending("fnrh_completo"), false);
+  assert.equal(isPending("fnrh_pendente"), true);
+  assert.equal(isPending("fnrh_parcial"), true);
+  assert.equal(isPending(""), true);
+  assert.equal(isPending(null), true);
+  assert.equal(isPending(undefined), true);
+  assert.equal(isPending("fnrh_completa"), true, "grafia inválida permanece pendente");
+  ok("isFnrhAggregatePending: completo/pendente/parcial/vazio/nulo");
+
+  const mappingSnippet = code.slice(
+    code.indexOf("async function loadArrivalsDatasetFromBackend"),
+    code.indexOf("function getArrivalsPolicy"),
+  );
+  assert.ok(
+    /fnrh_pendente:\s*isFnrhAggregatePending\(\s*r\.fnrh_status_agregado\s*\)/.test(mappingSnippet),
+    "montagem Chegadas usa isFnrhAggregatePending(fnrh_status_agregado)",
+  );
+  assert.ok(
+    !/fnrh_pendente:\s*\([^)]*fnrh_completa/.test(mappingSnippet),
+    "montagem Chegadas não compara com fnrh_completa",
+  );
+  ok("proteção contra reintrodução de fnrh_completa no dataset Chegadas");
+}
+
 console.log(`\nPASS hits-reservation-sync-chegadas (${cases} casos)\n`);
 }
 
