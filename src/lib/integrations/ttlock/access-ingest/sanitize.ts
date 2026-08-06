@@ -1,3 +1,8 @@
+/**
+ * Sanitização de payloads TTLock / outbox.
+ * Detecta chaves sensíveis (com ":"), não substrings soltas como a palavra "senha" em texto.
+ */
+
 import type {
   TtlockAccessNotifyParsed,
   TtlockAccessNotifySanitized,
@@ -5,8 +10,8 @@ import type {
   TtlockAccessRecordSanitized,
 } from "./types";
 
-const SENSITIVE_KEY_RE =
-  /keyboardPwd|password|senha|passwd|secret|token|authorization|apikey|api_key/i;
+const SENSITIVE_KEY_PATTERN_RE =
+  /["']?(?:keyboardPwd|newKeyboardPwd|password|passwd|senha|secret|token|authorization|apikey|api_key|accessToken|clientSecret)["']?\s*:/i;
 
 export function maskLockMac(mac: string | undefined): string | undefined {
   if (!mac) return undefined;
@@ -45,15 +50,14 @@ export function sanitizeNotifyPayload(parsed: TtlockAccessNotifyParsed): TtlockA
   };
 }
 
-/** Serializa e garante que nenhuma senha/secret aparece no JSON. */
+/** Serializa e garante que nenhuma chave sensível aparece no JSON. */
 export function assertSanitizedPayloadSafe(value: unknown): void {
   const json = JSON.stringify(value);
   if (!json) return;
-  if (SENSITIVE_KEY_RE.test(json)) {
+  if (SENSITIVE_KEY_PATTERN_RE.test(json)) {
     throw new Error("Payload sanitizado contém chave sensível proibida.");
   }
-  // Valor típico de senha numérica TTLock não deve aparecer como string solta se veio do raw.
-  if (/"keyboardPwd"\s*:/i.test(json)) {
+  if (/"keyboardPwd"\s*:/i.test(json) || /"newKeyboardPwd"\s*:/i.test(json)) {
     throw new Error("keyboardPwd presente no payload sanitizado.");
   }
 }

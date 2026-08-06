@@ -26,6 +26,10 @@
   const COMUNICACAO_DISPATCH_FUNCTION_URL = config.url
     ? `${config.url}/functions/v1/${COMUNICACAO_DISPATCH_FUNCTION_NAME}`
     : "";
+  const ACCESS_TOLERANCE_FUNCTION_NAME = "access-tolerance-processor";
+  const ACCESS_TOLERANCE_FUNCTION_URL = config.url
+    ? `${config.url}/functions/v1/${ACCESS_TOLERANCE_FUNCTION_NAME}`
+    : "";
 
   function getConfigError() {
     if (!globalScope.supabase?.createClient) {
@@ -212,7 +216,16 @@
   }
 
   /**
-   * Envio WhatsApp operacional (DigiSac stub/real) — central de comunicação.
+   * Ações manuais de tolerância/suspensão desabilitadas neste PR
+   * (sem trilha de auditoria append-only dedicada).
+   */
+  async function invokeAccessToleranceManual() {
+    throw new Error(
+      "Ações manuais de tolerância desabilitadas até existir auditoria persistente.",
+    );
+  }
+
+  /**   * Envio WhatsApp operacional (DigiSac stub/real) — central de comunicação.
    * Body: { conversa_id, text, proposito?: "chat_operador" | "generico" }
    */
   async function invokeOperacionalComunicacaoDispatch(payload) {
@@ -504,6 +517,7 @@
     getSupabaseClient,
     getEdgeFunctionFetchHeaders,
     invokeLifecycleAction,
+    invokeAccessToleranceManual,
     invokeOperacionalComunicacaoDispatch,
   };
 })(window);

@@ -1,6 +1,9 @@
+export * from "./access-outbox-dispatcher";
+export * from "./access-tolerance-processor";
 export * from "./credential-lifecycle";
 export * from "./credential-lifecycle-status";
 export * from "./credential-release-orchestrator";
+export * from "./enqueue-internal-first-access";
 export * from "./first-room-access-commit";
 export * from "./first-room-access-orchestrator";
 export * from "./first-room-access-ports";
@@ -9,5 +12,6 @@ export * from "./format";
 export * from "./orchestrator";
 export * from "./provisioning";
 export * from "./provisioning-executor";
+// simulated-reservation-pending-state: somente testes/dev explícito — não exportar no barrel de produção.
 export * from "./supabase-provisioning-repo";
 export * from "./types";

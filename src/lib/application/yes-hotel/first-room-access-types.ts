@@ -192,6 +192,24 @@ export type OutboxGuestRestoredMessage = {
   idempotency_key: string;
 };
 
+export type OutboxGuestSuspendedMessage = {
+  kind: "guest_access_suspended";
+  reservation_id: string;
+  credential_id: string;
+  tolerance_id: string;
+  body: string;
+  idempotency_key: string;
+};
+
+export type OutboxGuestTechnicalFailureMessage = {
+  kind: "guest_technical_failure";
+  reservation_id: string;
+  credential_id: string;
+  tolerance_id: string;
+  body: string;
+  idempotency_key: string;
+};
+
 export type OutboxInternalAlert = {
   kind: "internal_alert";
   reservation_id?: string;
@@ -202,10 +220,98 @@ export type OutboxInternalAlert = {
   idempotency_key: string;
 };
 
+export type OutboxInternalFirstAccessMessage = {
+  kind: "internal_first_access";
+  reservation_id: string;
+  credential_id?: string;
+  tolerance_id?: string;
+  body: string;
+  idempotency_key: string;
+};
+
 export type OutboxMessage =
   | OutboxGuestWelcomeMessage
   | OutboxGuestRestoredMessage
-  | OutboxInternalAlert;
+  | OutboxGuestSuspendedMessage
+  | OutboxGuestTechnicalFailureMessage
+  | OutboxInternalAlert
+  | OutboxInternalFirstAccessMessage;
+
+/** Registro de fila alinhado a operacional_acesso_outbox (sem migration nova). */
+export type AccessOutboxStatus =
+  | "pending"
+  | "processing"
+  | "sent"
+  | "failed"
+  | "cancelled";
+
+export type AccessOutboxChannel = "whatsapp" | "email";
+
+export type AccessOutboxRecord = {
+  id: string;
+  event_type: string;
+  channel: AccessOutboxChannel;
+  reservation_id: string;
+  credential_id: string | null;
+  access_event_id: string | null;
+  tolerance_id: string | null;
+  recipient_ref: string | null;
+  template: string | null;
+  /** Payload sanitizado (sem senha/token). */
+  payload: Record<string, unknown>;
+  idempotency_key: string;
+  status: AccessOutboxStatus;
+  attempts: number;
+  available_at: string;
+  processed_at: string | null;
+  last_error: string | null;
+  created_at: string;
+};
+
+export type ProcessToleranceAction =
+  | "skipped_not_due"
+  | "cancelled_all_clear"
+  | "suspension_pending"
+  | "suspended"
+  | "partial_failure"
+  | "restore_pending"
+  | "restored"
+  | "noop"
+  | "error"
+  | "skipped_flag_off"
+  | "skipped_homolog_filter"
+  | "skipped_ttlock_disabled"
+  | "would_suspend"
+  | "would_restore"
+  | "deferred_payment_unknown"
+  | "deferred_payment_unavailable"
+  | "already_processing";
+
+export type ProcessToleranceResult = {
+  tolerance_id: string;
+  action: ProcessToleranceAction;
+  payment_pending?: boolean;
+  fnrh_pending?: boolean;
+  items_succeeded?: number;
+  items_failed?: number;
+  items_skipped?: number;
+  error?: string;
+  /** true quando a decisão não alterou estado persistido (dry-run / disabled). */
+  simulation_only?: boolean;
+};
+
+export type ManualToleranceAction =
+  | "revalidate"
+  | "retry_suspension"
+  | "retry_restore";
+
+export type ManualToleranceActionInput = {
+  tolerance_id: string;
+  action: ManualToleranceAction;
+  actor_user_id: string;
+  reason: string;
+  at: string;
+};
 
 export type ProcessFirstRoomAccessResult = {
   status:

@@ -5,6 +5,9 @@ import assert from "node:assert/strict";
 import {
   assertMessageHasNoTechnicalJargon,
   buildAccessRestoredMessage,
+  buildAccessSuspendedMessage,
+  buildInternalFirstAccessMessage,
+  buildTechnicalFailureMessage,
   buildWelcomePendingMessage,
 } from "../src/lib/domain/yes-hotel/access-grace-messages";
 
@@ -57,6 +60,25 @@ import {
   );
 }
 
+// suspensão / falha técnica / interna
+{
+  const s = buildAccessSuspendedMessage();
+  assert.equal(s.kind, "access_suspended");
+  assertMessageHasNoTechnicalJargon(s.body);
+  const t = buildTechnicalFailureMessage();
+  assert.equal(t.kind, "technical_failure");
+  const i = buildInternalFirstAccessMessage({
+    apartment_number: "02",
+    reservation_code: "12345",
+    guest_main_name: "João",
+    payment_pending: true,
+    fnrh_pending: false,
+    grace_started: true,
+  });
+  assert.match(i.body, /Tolerância de 1 hora/);
+  assertMessageHasNoTechnicalJargon(i.body);
+}
+
 // 28) nenhuma mensagem contém TTLock
 {
   const all = [
@@ -64,6 +86,16 @@ import {
     buildWelcomePendingMessage({ payment_pending: false, fnrh_pending: true })!.body,
     buildWelcomePendingMessage({ payment_pending: true, fnrh_pending: true })!.body,
     buildAccessRestoredMessage().body,
+    buildAccessSuspendedMessage().body,
+    buildTechnicalFailureMessage().body,
+    buildInternalFirstAccessMessage({
+      apartment_number: "02",
+      reservation_code: "1",
+      guest_main_name: "A",
+      payment_pending: false,
+      fnrh_pending: false,
+      grace_started: false,
+    }).body,
   ];
   for (const body of all) {
     assert.equal(/ttlock/i.test(body), false);

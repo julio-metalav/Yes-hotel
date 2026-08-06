@@ -476,6 +476,39 @@ async function main(): Promise<void> {
     );
   }
 
+  // Reconciliação outbox: enqueue falha após commit → replay repara sem duplicar
+  {
+    const h = createFirstRoomAccessMemoryHarness({
+      correlation: okCorrelation(),
+      pending: paymentPending(),
+      items: threeItems(),
+    });
+    const a = await processFirstRoomAccessEvent(
+      baseInput({ idempotency_key: "idem-reconcile-outbox" }),
+      h.ports,
+    );
+    assert.equal(a.status, "grace_started");
+    assert.ok(h.state.accessOutbox.length >= 1);
+    const beforeKeys = h.state.accessOutbox.map((r) => r.idempotency_key).sort();
+    // Simula perda pós-commit: outbox operacional vazia
+    h.state.accessOutbox.splice(0, h.state.accessOutbox.length);
+    const b = await processFirstRoomAccessEvent(
+      baseInput({ idempotency_key: "idem-reconcile-outbox" }),
+      h.ports,
+    );
+    assert.equal(b.status, "already_started");
+    assert.ok(h.state.accessOutbox.length >= 1);
+    const repairedKeys = h.state.accessOutbox.map((r) => r.idempotency_key).sort();
+    assert.deepEqual(repairedKeys, beforeKeys);
+    const countAfterRepair = h.state.accessOutbox.length;
+    const c = await processFirstRoomAccessEvent(
+      baseInput({ idempotency_key: "idem-reconcile-outbox" }),
+      h.ports,
+    );
+    assert.equal(c.status, "already_started");
+    assert.equal(h.state.accessOutbox.length, countAfterRepair);
+  }
+
   console.log("OK test-first-room-access-orchestrator");
 }
 

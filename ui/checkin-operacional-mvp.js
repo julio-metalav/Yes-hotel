@@ -669,6 +669,7 @@ function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows, enviosRo
     id: r.id,
     apartamento: (r.apartamento || "").trim(),
     hospedePrincipal: (r.hospede_principal || "").trim(),
+    externalReservationId: (r.external_reservation_id || "").trim() || null,
     checkInPrevisto: checkIn ? (typeof checkIn === "string" ? checkIn.slice(0, 10) : checkIn) : "",
     checkOutPrevisto: checkOut ? (typeof checkOut === "string" ? checkOut.slice(0, 10) : checkOut) : "",
     pagamento: r.pagamento_status === "pago" ? "pago" : "pendente",
@@ -805,10 +806,39 @@ async function loadReservasFromBackend() {
       .eq("reserva_id", r.id)
       .order("created_at", { ascending: false })
       .limit(80);
+    const { data: tolRows } = await supabase
+      .from("operacional_acesso_tolerancias")
+      .select(
+        "id, grace_status, suspension_due_at, current_payment_pending, current_fnrh_pending, last_error",
+      )
+      .eq("reservation_id", r.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const { data: outboxFail } = await supabase
+      .from("operacional_acesso_outbox")
+      .select("id")
+      .eq("reservation_id", r.id)
+      .eq("status", "failed")
+      .is("processed_at", null)
+      .limit(1);
     const internal = mapDbReservaToInternal(r, hospedesRows || [], eventosRows || [], fnrhRows || [], enviosRows || []);
     const ridKey = String(r.id);
     internal.ttlockBloqueiaLiberado = ttlockCritico.has(ridKey);
     internal.ttlockPrincipalTodosProvisionados = principalTtlockOk.has(ridKey);
+    if (Array.isArray(tolRows) && tolRows[0]) {
+      internal.acessoTolerancia = {
+        id: tolRows[0].id,
+        grace_status: tolRows[0].grace_status,
+        suspension_due_at: tolRows[0].suspension_due_at,
+        current_payment_pending: !!tolRows[0].current_payment_pending,
+        current_fnrh_pending: !!tolRows[0].current_fnrh_pending,
+        last_error: tolRows[0].last_error || null,
+        payment_unconfirmed:
+          String(tolRows[0].last_error || "").indexOf("payment_unknown") >= 0 ||
+          String(tolRows[0].last_error || "").indexOf("desconhecido") >= 0,
+        communication_failed: Array.isArray(outboxFail) && outboxFail.length > 0,
+      };
+    }
     out.push(internal);
   }
   return out;
@@ -3200,8 +3230,59 @@ if (typeof window !== "undefined") {
     aplicarLiberacaoCredenciais13hNoPainel;
 }
 
+function derivarExcecaoToleranciaAcesso(reserva) {
+  const tolPolicy = window.YesHotelAccessTolerancePolicy;
+  if (!tolPolicy || !reserva || !reserva.acessoTolerancia) return null;
+  const t = reserva.acessoTolerancia;
+  const alert = tolPolicy.summarizeAccessToleranceAlert({
+    reservation_id: reserva.id,
+    apartment_number: reserva.apartamento || "",
+    guest_main_name: reserva.hospedePrincipal || "",
+    external_reservation_id: reserva.externalReservationId || null,
+    grace_status: t.grace_status,
+    suspension_due_at: t.suspension_due_at,
+    current_payment_pending: !!t.current_payment_pending && !t.payment_unconfirmed,
+    payment_unconfirmed: !!t.payment_unconfirmed,
+    current_fnrh_pending: !!t.current_fnrh_pending,
+    last_error: t.last_error || null,
+    communication_failed: !!t.communication_failed,
+  });
+  if (!alert) return null;
+  const items = tolPolicy.deriveAccessToleranceExceptions({
+    reservation_id: reserva.id,
+    apartment_number: reserva.apartamento || "",
+    guest_main_name: reserva.hospedePrincipal || "",
+    grace_status: t.grace_status,
+    suspension_due_at: t.suspension_due_at,
+    current_payment_pending: !!t.current_payment_pending && !t.payment_unconfirmed,
+    payment_unconfirmed: !!t.payment_unconfirmed,
+    current_fnrh_pending: !!t.current_fnrh_pending,
+    communication_failed: !!t.communication_failed,
+  });
+  const critica = items.some(function (i) {
+    return i.severity === "critica";
+  });
+  var motivo = items
+    .slice(0, 3)
+    .map(function (i) {
+      return i.label;
+    })
+    .join(" · ");
+  return {
+    severidade: critica ? "critica" : "moderada",
+    prioridade: critica ? 2 : 8,
+    motivo: motivo || alert,
+    ctaHint: "Ver reserva",
+    codigo: items[0] ? items[0].code : "tolerancia",
+    toleranciaId: t.id || null,
+  };
+}
+
 function derivarExcecaoOperacionalReserva(reserva) {
   if (!reserva || isCheckinConcluido(reserva)) return null;
+
+  const tolEx = derivarExcecaoToleranciaAcesso(reserva);
+  if (tolEx) return tolEx;
 
   const policy = window.YesHotelCredentialReleasePolicy;
   if (policy && typeof policy.derivarAlertaOperacional === "function") {
@@ -3286,6 +3367,10 @@ function renderExcecoesOperacionais() {
   var rows = slice
     .map(function (row) {
       var apt = (row.reserva.apartamento || "—").trim() || "—";
+      var guest = (row.reserva.hospedePrincipal || "—").trim() || "—";
+      var resNum =
+        (row.reserva.externalReservationId && String(row.reserva.externalReservationId).trim()) ||
+        "—";
       var sev = row.ex.severidade === "critica" ? "critica" : "moderada";
       var rid = row.reserva.id;
       return (
@@ -3299,10 +3384,19 @@ function renderExcecoesOperacionais() {
         '"></span>' +
         '<div class="operacional-excecao-main">' +
         '<div class="operacional-excecao-line">' +
+        '<span class="operacional-excecao-reserva">Reserva <strong>' +
+        escapeHtml(resNum) +
+        "</strong></span>" +
+        '<span class="operacional-excecao-sep" aria-hidden="true"> · </span>' +
         '<span class="operacional-excecao-apt">Apto <strong>' +
         escapeHtml(apt) +
         "</strong></span>" +
-        '<span class="operacional-excecao-sep" aria-hidden="true"> — </span>' +
+        '<span class="operacional-excecao-sep" aria-hidden="true"> · </span>' +
+        '<span class="operacional-excecao-guest">' +
+        escapeHtml(guest) +
+        "</span>" +
+        "</div>" +
+        '<div class="operacional-excecao-line">' +
         '<span class="operacional-excecao-motivo">' +
         escapeHtml(row.ex.motivo) +
         "</span>" +
@@ -4212,6 +4306,9 @@ function renderDetail(reserva) {
     reenviarFnrhTopoBtnHtml = `<button type="button" class="primary-button detail-top-acao-btn detail-reenviar-fnrh-topo-btn" id="detail-reenviar-fnrh-topo-btn" data-reserva-id="${escapeHtml(reserva.id)}">Reenviar link FNRH</button>`;
   }
 
+  // Ações manuais de tolerância removidas neste PR (sem auditoria append-only).
+  const toleranciaAcoesHtml = "";
+
   const ctxRecomendacao = buildRecomendacaoOperacionalCtx(reserva);
   const situacaoAcaoTopoHtml = buildSituacaoAcaoTopoHtml(
     reserva,
@@ -4283,6 +4380,7 @@ function renderDetail(reserva) {
 
   detailBodyElement.innerHTML = `
     ${situacaoAcaoTopoHtml}
+    ${toleranciaAcoesHtml}
     ${localModeDetailHtml}
     ${ttlockSectionHtml}
     ${eventosSimuladosHtml}

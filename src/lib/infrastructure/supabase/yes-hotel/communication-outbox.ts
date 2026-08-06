@@ -49,8 +49,26 @@ export class SupabaseCommunicationOutboxPort implements CommunicationOutboxPort 
     await this.enqueue(message);
   }
 
+  async enqueueGuestSuspendedMessage(
+    message: Extract<OutboxMessage, { kind: "guest_access_suspended" }>,
+  ): Promise<void> {
+    await this.enqueue(message);
+  }
+
+  async enqueueGuestTechnicalFailureMessage(
+    message: Extract<OutboxMessage, { kind: "guest_technical_failure" }>,
+  ): Promise<void> {
+    await this.enqueue(message);
+  }
+
   async enqueueInternalAlert(
     message: Extract<OutboxMessage, { kind: "internal_alert" }>,
+  ): Promise<void> {
+    await this.enqueue(message);
+  }
+
+  async enqueueInternalFirstAccessMessage(
+    message: Extract<OutboxMessage, { kind: "internal_first_access" }>,
   ): Promise<void> {
     await this.enqueue(message);
   }
