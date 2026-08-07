@@ -6,15 +6,15 @@
 
 import type {
   SyncedReservation,
-} from "../../../domain/yes-hotel/synced-reservation";
+} from "../../../domain/yes-hotel/synced-reservation.ts";
 import type {
   ReservationChangeEvent,
   SyncedReservationSnapshot,
-} from "../../../domain/yes-hotel/reservation-sync-diff";
+} from "../../../domain/yes-hotel/reservation-sync-diff.ts";
 import type {
   ReservationSyncRepository,
   PersistedSyncRun,
-} from "../../../application/yes-hotel/reservation-sync-repository";
+} from "../../../application/yes-hotel/reservation-sync-repository.ts";
 
 /** Subset do SupabaseClient usado pelo repository (real ou fake de teste). */
 export type ReservationSyncSupabaseClient = {

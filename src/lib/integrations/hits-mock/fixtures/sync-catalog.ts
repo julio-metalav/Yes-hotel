@@ -3,10 +3,10 @@
  * Ampliam os cenários sem alterar o mapper de autenticação.
  */
 
-import type { HitsMockReservationDetail } from "../types";
-import { hitsMockNormalReservationDetail } from "./normal";
-import { hitsMockCanceledReservationDetail } from "./cancel";
-import { hitsMockRoomChangeNextDetail } from "./room-change";
+import type { HitsMockReservationDetail } from "../types.ts";
+import { hitsMockNormalReservationDetail } from "./normal.ts";
+import { hitsMockCanceledReservationDetail } from "./cancel.ts";
+import { hitsMockRoomChangeNextDetail } from "./room-change.ts";
 
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;

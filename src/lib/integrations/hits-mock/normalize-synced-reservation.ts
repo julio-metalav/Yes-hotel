@@ -8,8 +8,8 @@ import type {
   SyncedPaymentStatus,
   SyncedReservation,
   SyncedReservationStatus,
-} from "../../domain/yes-hotel/synced-reservation";
-import type { HitsMockReservationDetail } from "./types";
+} from "../../domain/yes-hotel/synced-reservation.ts";
+import type { HitsMockReservationDetail } from "./types.ts";
 
 function trimOrNull(v: unknown): string | null {
   if (v == null) return null;
