@@ -2220,6 +2220,14 @@ function buildArrivalsInputFromInternal(r) {
 }
 
 /**
+ * Pendência de FNRH agregada para a aba Chegadas.
+ * Só `fnrh_completo` encerra a pendência (grafia do schema; nunca `fnrh_completa`).
+ */
+function isFnrhAggregatePending(value) {
+  return String(value || "").trim() !== "fnrh_completo";
+}
+
+/**
  * Consulta em lote para Chegadas (sem N+1 por reserva).
  * Fallback defensivo se status_reserva ainda não existir (migration não aplicada).
  */
@@ -2322,7 +2330,7 @@ async function loadArrivalsDatasetFromBackend() {
       entrou_no_apto: !!r.entrou_no_apto,
       acesso_liberado: !!r.acesso_liberado,
       total_hospedes: Math.max(guests.length, 1),
-      fnrh_pendente: (r.fnrh_status_agregado || "") !== "fnrh_completa",
+      fnrh_pendente: isFnrhAggregatePending(r.fnrh_status_agregado),
       recent_change_labels: recentChangeLabelsFromHistorico(hist),
       recent_cancel_event: hasRecentCancel,
       tolerancia_ativa: tol.grace_status === "active",
