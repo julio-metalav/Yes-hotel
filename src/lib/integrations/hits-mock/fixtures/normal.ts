@@ -1,4 +1,4 @@
-import type { HitsMockReservationDetail } from "../types";
+import type { HitsMockReservationDetail } from "../types.ts";
 
 export const hitsMockNormalReservationDetail: HitsMockReservationDetail = {
   idReservation: "9001001",

@@ -3,7 +3,7 @@
  * Detalhes sem telefone/e-mail completos.
  */
 
-import type { SyncedReservation } from "./synced-reservation";
+import type { SyncedReservation } from "./synced-reservation.ts";
 
 export type ReservationChangeEvent = {
   tipo: string;

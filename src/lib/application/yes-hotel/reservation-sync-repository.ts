@@ -7,11 +7,11 @@ import type {
   SyncedPaymentStatus,
   SyncedReservation,
   SyncedReservationStatus,
-} from "../../domain/yes-hotel/synced-reservation";
+} from "../../domain/yes-hotel/synced-reservation.ts";
 import type {
   ReservationChangeEvent,
   SyncedReservationSnapshot,
-} from "../../domain/yes-hotel/reservation-sync-diff";
+} from "../../domain/yes-hotel/reservation-sync-diff.ts";
 
 export type PersistedOperacionalReserva = {
   id: string;

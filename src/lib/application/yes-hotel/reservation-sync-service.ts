@@ -4,12 +4,12 @@
  * Modo real bloqueado enquanto HITS_INTEGRATION_ENABLED != true.
  */
 
-import { detectReservationChanges } from "../../domain/yes-hotel/reservation-sync-diff";
+import { detectReservationChanges } from "../../domain/yes-hotel/reservation-sync-diff.ts";
 import type {
   ReservationSourcePort,
   SyncedReservation,
-} from "../../domain/yes-hotel/synced-reservation";
-import type { ReservationSyncRepository } from "./reservation-sync-repository";
+} from "../../domain/yes-hotel/synced-reservation.ts";
+import type { ReservationSyncRepository } from "./reservation-sync-repository.ts";
 
 export type ReservationSyncFlags = {
   syncEnabled: boolean;

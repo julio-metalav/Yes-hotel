@@ -8,14 +8,14 @@ import type {
   ReservationSourcePage,
   ReservationSourcePort,
   SyncedReservation,
-} from "../../domain/yes-hotel/synced-reservation";
+} from "../../domain/yes-hotel/synced-reservation.ts";
 import {
   applyHitsMockSyncScenario,
   buildHitsMockSyncCatalog,
   type HitsMockSyncScenario,
-} from "./fixtures/sync-catalog";
-import { normalizeHitsMockDetailToSynced } from "./normalize-synced-reservation";
-import type { HitsMockReservationDetail } from "./types";
+} from "./fixtures/sync-catalog.ts";
+import { normalizeHitsMockDetailToSynced } from "./normalize-synced-reservation.ts";
+import type { HitsMockReservationDetail } from "./types.ts";
 
 export type HitsMockReservationSourceOptions = {
   pageSize?: number;
