@@ -58,6 +58,18 @@ body {
   display: none !important;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .notice,
 .panel,
 .user-card {
@@ -289,6 +301,223 @@ body {
   font-size: 13px;
   color: var(--muted);
   line-height: 1.4;
+}
+
+body.auth-view {
+  min-height: 100vh;
+  min-height: 100svh;
+  background:
+    radial-gradient(circle at top, rgba(177, 148, 58, 0.1), transparent 34rem),
+    #f4f6f5;
+  color: #17343a;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+.auth-view .app-shell {
+  display: grid;
+  align-content: center;
+  width: min(100%, 440px);
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: 32px 20px;
+}
+
+.auth-view .page-header {
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.hotel-logo {
+  display: block;
+  width: min(253px, 72vw);
+  height: auto;
+  margin: 0 auto 12px;
+}
+
+.auth-view .page-header h1 {
+  margin: 0 0 8px;
+  color: #173f48;
+  font-size: clamp(26px, 7vw, 32px);
+  line-height: 1.2;
+}
+
+.auth-view .page-description {
+  color: #607176;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.auth-view .notice,
+.auth-view .panel {
+  border-color: rgba(23, 63, 72, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(23, 52, 58, 0.1);
+}
+
+.auth-view .notice {
+  padding: 13px 15px;
+  margin-bottom: 14px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.auth-view .notice.is-error {
+  background: #fff7f6;
+  color: #9b2c2c;
+  border-color: #f2cbc7;
+  box-shadow: none;
+}
+
+.auth-view .notice.is-success {
+  background: #f0f9f5;
+  color: #17603d;
+  border-color: #c6e7d5;
+  box-shadow: none;
+}
+
+.auth-view .panel {
+  padding: 28px;
+  margin-bottom: 0;
+  border-top: 3px solid #b1943a;
+}
+
+.auth-view .panel h2:not(.sr-only) {
+  margin: 0 0 8px;
+  color: #173f48;
+  font-size: 21px;
+}
+
+.auth-view .stack-form {
+  gap: 10px;
+}
+
+.auth-view .stack-form label {
+  color: #27484f;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.auth-view #login-form label:not(:first-of-type) {
+  margin-top: 4px;
+}
+
+.auth-view .stack-form input,
+.auth-view .stack-form select {
+  min-height: 46px;
+  padding: 11px 12px;
+  background: #ffffff;
+  color: #17343a;
+  border-color: #cbd5d6;
+  border-radius: 9px;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.auth-view .stack-form input:focus-visible,
+.auth-view .stack-form select:focus-visible,
+.auth-view .primary-button:focus-visible,
+.auth-view .password-toggle:focus-visible {
+  outline: 3px solid rgba(177, 148, 58, 0.34);
+  outline-offset: 2px;
+}
+
+.auth-view .stack-form input:focus {
+  border-color: #176070;
+  box-shadow: 0 0 0 3px rgba(23, 96, 112, 0.12);
+}
+
+.password-field {
+  position: relative;
+}
+
+.auth-view .password-field input {
+  padding-right: 82px;
+}
+
+.auth-view .remember-email {
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+.auth-view .remember-email input,
+.auth-view .remember-email input:focus {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  accent-color: #176070;
+  box-shadow: none;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #176070;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.password-toggle:hover {
+  background: #edf4f5;
+}
+
+.auth-view .primary-button {
+  min-height: 46px;
+  margin-top: 8px;
+  background: #176070;
+  font-weight: 700;
+  box-shadow: 0 8px 18px rgba(23, 96, 112, 0.2);
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.auth-view .primary-button:hover:not(:disabled) {
+  background: #124d5a;
+  box-shadow: 0 10px 22px rgba(23, 96, 112, 0.24);
+  transform: translateY(-1px);
+}
+
+.auth-view .primary-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+  box-shadow: none;
+}
+
+body.app-view .auth-header {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .auth-view .app-shell {
+    padding: 24px 16px;
+  }
+
+  .hotel-logo {
+    width: min(230px, 68vw);
+    margin-bottom: 8px;
+  }
+
+  .auth-view .page-header {
+    margin-bottom: 20px;
+  }
+
+  .auth-view .panel {
+    padding: 22px 20px;
+  }
 }
 
 @media (max-width: 640px) {

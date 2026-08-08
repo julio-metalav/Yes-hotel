@@ -3,20 +3,26 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Yes Hotel - Usuarios e Login MVP</title>
-    <link rel="stylesheet" href="./usuarios-login-mvp.css?v=4" />
+    <title>Yes Hotel - Login</title>
+    <link rel="stylesheet" href="./usuarios-login-mvp.css?v=6" />
   </head>
-  <body>
+  <body class="auth-view">
     <main class="app-shell">
-      <header class="page-header">
-        <p class="eyebrow">Yes Hotel</p>
-        <h1>Usuarios internos</h1>
-        <p class="page-description">
-          Login simples com sessao de 4 horas e perfis basicos para operacao.
-        </p>
+      <header class="page-header auth-header">
+        <img
+          class="hotel-logo"
+          src="./assets/yes-hotel-logo.png"
+          alt="Yes Hotel"
+        />
+        <h1>Bem-vindo ao sistema do Yes Hotel</h1>
       </header>
 
-      <section class="notice hidden" id="notice"></section>
+      <section
+        class="notice hidden"
+        id="notice"
+        role="status"
+        aria-live="polite"
+      ></section>
 
       <section class="panel hidden" id="bootstrap-panel">
         <h2>Primeiro acesso</h2>
@@ -41,15 +47,37 @@
       </section>
 
       <section class="panel hidden" id="login-panel">
-        <h2>Login</h2>
+        <h2 class="sr-only">Login</h2>
         <form class="stack-form" id="login-form">
-          <label>
-            Email
-            <input type="email" name="email" required />
-          </label>
-          <label>
-            Senha
-            <input type="password" name="password" required />
+          <label for="login-email">Email</label>
+          <input
+            id="login-email"
+            type="email"
+            name="email"
+            autocomplete="username"
+            required
+          />
+          <label for="login-password">Senha</label>
+          <div class="password-field">
+            <input
+              id="login-password"
+              type="password"
+              name="password"
+              autocomplete="current-password"
+              required
+            />
+            <button
+              class="password-toggle"
+              type="button"
+              aria-controls="login-password"
+              aria-pressed="false"
+            >
+              Mostrar
+            </button>
+          </div>
+          <label class="checkbox-line remember-email" for="remember-email">
+            <input id="remember-email" type="checkbox" />
+            Lembrar meu e-mail
           </label>
           <button class="primary-button" type="submit">Entrar</button>
         </form>
@@ -162,6 +190,6 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js?v=3"></script>
     <script defer src="./yes-supabase-auth.js?v=3"></script>
-    <script defer src="./usuarios-login-mvp.js?v=3"></script>
+    <script defer src="./usuarios-login-mvp.js?v=5"></script>
   </body>
 </html>
