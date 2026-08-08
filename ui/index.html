@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Yes Hotel - Login</title>
-    <link rel="stylesheet" href="./usuarios-login-mvp.css?v=6" />
+    <link rel="stylesheet" href="./usuarios-login-mvp.css?v=7" />
   </head>
   <body class="auth-view">
     <main class="app-shell">
@@ -84,50 +84,111 @@
       </section>
 
       <section class="panel hidden" id="app-panel">
-        <div class="session-bar">
-          <div id="session-user"></div>
-          <div class="session-actions">
-            <button class="secondary-button" id="logout-button" type="button">
-              Sair
-            </button>
+        <header class="dashboard-header">
+          <img
+            class="dashboard-logo"
+            src="./assets/yes-hotel-logo.png"
+            alt="Yes Hotel"
+          />
+          <div class="dashboard-user">
+            <span class="dashboard-user-caption">Usuário conectado</span>
+            <div class="dashboard-user-details" id="session-user">
+              <strong id="session-user-name"></strong>
+              <span class="dashboard-role-badge" id="session-user-role"></span>
+            </div>
           </div>
-        </div>
+          <button class="secondary-button dashboard-logout" id="logout-button" type="button">
+            Sair
+          </button>
+        </header>
+
+        <section class="dashboard-welcome" aria-labelledby="dashboard-welcome-title">
+          <h1 id="dashboard-welcome-title">Olá</h1>
+          <p>Escolha uma área para continuar.</p>
+        </section>
 
         <nav class="operacional-nav" aria-label="Áreas operacionais">
           <h2 class="operacional-nav-title">Áreas operacionais</h2>
           <p class="helper-text operacional-nav-intro">
-            Escolha uma tela para continuar o trabalho do dia.
+            Acesse as rotinas disponíveis para a operação do hotel.
           </p>
           <div class="operacional-nav-grid">
             <a class="operacional-nav-card" href="./checkin-operacional-mvp.html">
-              <span class="operacional-nav-card-label">Check-in operacional</span>
-              <span class="operacional-nav-card-desc">Reservas, hóspedes, FNRH, TTLock e liberação de acesso</span>
+              <span class="operacional-nav-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                  <path d="M7 3v3M17 3v3M4 9h16" />
+                  <rect x="4" y="5" width="16" height="15" rx="2" />
+                  <path d="m9 14 2 2 4-4" />
+                </svg>
+              </span>
+              <span class="operacional-nav-card-content">
+                <span class="operacional-nav-card-label">Check-in operacional</span>
+                <span class="operacional-nav-card-desc">Reservas, hóspedes, FNRH, TTLock e liberação de acesso</span>
+              </span>
+              <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
             </a>
             <a class="operacional-nav-card" href="./cafe-da-manha-mvp.html">
-              <span class="operacional-nav-card-label">Café da manhã</span>
-              <span class="operacional-nav-card-desc">Lista e controle do serviço de café</span>
+              <span class="operacional-nav-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                  <path d="M5 8h11v7a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V8Z" />
+                  <path d="M16 10h1.5a2.5 2.5 0 0 1 0 5H16M7 4v1M11 4v1M15 4v1" />
+                </svg>
+              </span>
+              <span class="operacional-nav-card-content">
+                <span class="operacional-nav-card-label">Café da manhã</span>
+                <span class="operacional-nav-card-desc">Lista e controle do serviço de café</span>
+              </span>
+              <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
             </a>
             <a class="operacional-nav-card" href="./comunicacao-mvp.html">
-              <span class="operacional-nav-card-label">Central de comunicação</span>
-              <span class="operacional-nav-card-desc">WhatsApp e mensagens operacionais</span>
+              <span class="operacional-nav-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                  <path d="M20 15a3 3 0 0 1-3 3H9l-5 3v-6a3 3 0 0 1-1-2V7a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3v8Z" />
+                  <path d="M7 9h10M7 13h6" />
+                </svg>
+              </span>
+              <span class="operacional-nav-card-content">
+                <span class="operacional-nav-card-label">Central de comunicação</span>
+                <span class="operacional-nav-card-desc">WhatsApp e mensagens operacionais</span>
+              </span>
+              <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
             </a>
             <a class="operacional-nav-card" href="./importar-reservas-mvp.html">
-              <span class="operacional-nav-card-label">Importar reservas</span>
-              <span class="operacional-nav-card-desc">Carga de reservas a partir de JSON (admin)</span>
+              <span class="operacional-nav-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                  <path d="M12 16V4M8 8l4-4 4 4" />
+                  <path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" />
+                </svg>
+              </span>
+              <span class="operacional-nav-card-content">
+                <span class="operacional-nav-card-label">Importar reservas</span>
+                <span class="operacional-nav-card-desc">Carga de reservas a partir de JSON (admin)</span>
+              </span>
+              <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
             </a>
             <a class="operacional-nav-card operacional-nav-card--anchor" href="#gestao-usuarios-section">
-              <span class="operacional-nav-card-label">Usuários internos</span>
-              <span class="operacional-nav-card-desc">Cadastro e perfis nesta página, abaixo</span>
+              <span class="operacional-nav-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                  <path d="M16 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" />
+                  <circle cx="9.5" cy="7" r="4" />
+                  <path d="M17 11v6M14 14h6" />
+                </svg>
+              </span>
+              <span class="operacional-nav-card-content">
+                <span class="operacional-nav-card-label">Usuários internos</span>
+                <span class="operacional-nav-card-desc">Cadastro e perfis nesta página, abaixo</span>
+              </span>
+              <span class="operacional-nav-card-arrow" aria-hidden="true">↓</span>
             </a>
           </div>
         </nav>
 
-        <section class="users-section" id="gestao-usuarios-section">
+        <section class="users-section dashboard-section" id="gestao-usuarios-section">
           <div class="section-header">
             <div>
-              <h2>Usuarios cadastrados</h2>
+              <h2>Usuários cadastrados</h2>
               <p class="helper-text">
-                Admin gerencia usuarios. Recepcao e cafe usam apenas as telas
+                Admin gerencia usuários. Recepção e café usam apenas as telas
                 operacionais.
               </p>
             </div>
@@ -136,12 +197,12 @@
           <div class="users-list" id="users-list"></div>
         </section>
 
-        <section class="users-section">
+        <section class="users-section dashboard-section">
           <div class="section-header">
             <div>
-              <h2 id="user-form-title">Novo usuario</h2>
+              <h2 id="user-form-title">Novo usuário</h2>
               <p class="helper-text">
-                Cadastre ou edite usuarios internos com perfil simples.
+                Cadastre ou edite usuários internos com perfil simples.
               </p>
             </div>
           </div>
@@ -190,6 +251,6 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js?v=3"></script>
     <script defer src="./yes-supabase-auth.js?v=3"></script>
-    <script defer src="./usuarios-login-mvp.js?v=5"></script>
+    <script defer src="./usuarios-login-mvp.js?v=6"></script>
   </body>
 </html>
