@@ -3,232 +3,410 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Yes Hotel — Painel de Check-in Operacional</title>
-    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=34" />
+    <title>Yes Hotel — Check-in Operacional</title>
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=44" />
   </head>
-  <body class="op-body">
+  <body class="op-body checkin-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
 
     <div id="content-panel" class="op-app hidden">
-      <aside class="yes-sidebar">
-        <div class="yes-brand"><strong>YES HOTEL</strong><span>Hospitalidade inteligente</span></div>
+      <aside class="yes-sidebar" id="op-sidebar" aria-label="Áreas operacionais">
+        <div class="yes-sidebar-brand">
+          <img src="./assets/yes-hotel-logo.png" alt="Yes Hotel" width="153" height="89" />
+          <button
+            type="button"
+            class="op-icon-button yes-sidebar-close"
+            id="op-sidebar-close"
+            aria-label="Fechar menu"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
         <nav aria-label="Navegação principal">
-          <a href="./importar-reservas-mvp.html">Nova reserva</a>
-          <a class="active" href="./checkin-operacional-mvp.html">Operação</a>
-          <a href="./comunicacao-mvp.html">Comunicação</a>
-          <a href="./cafe-da-manha-mvp.html">Café da manhã</a>
+          <span class="yes-sidebar-label">Áreas operacionais</span>
+          <a href="./importar-reservas-mvp.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            <span>Nova reserva</span>
+          </a>
+          <a class="active" href="./checkin-operacional-mvp.html" aria-current="page">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
+            </svg>
+            <span>Operação</span>
+          </a>
+          <a href="./comunicacao-mvp.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
+            </svg>
+            <span>Comunicação</span>
+          </a>
+          <a href="./cafe-da-manha-mvp.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17 8h1a3 3 0 1 1 0 6h-1M3 8h14v7a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Zm3-6v3M10 2v3M14 2v3" />
+            </svg>
+            <span>Café da manhã</span>
+          </a>
         </nav>
-        <div class="yes-sidebar-foot">Ambiente operacional<br /><strong>Recepção Yes Hotel</strong></div>
+        <div class="yes-sidebar-foot">
+          Ambiente operacional<br />
+          <strong>Recepção Yes Hotel</strong>
+        </div>
       </aside>
+
+      <button
+        type="button"
+        class="op-sidebar-backdrop"
+        id="op-sidebar-backdrop"
+        aria-label="Fechar navegação"
+        tabindex="-1"
+      ></button>
+
       <div class="yes-workspace">
-      <header class="op-header">
-        <div class="op-header__left">
-          <h1 class="op-header__title">Painel de Check-in Operacional</h1>
-          <p id="session-user" class="op-header__user" aria-live="polite"></p>
-        </div>
-        <div class="op-header__right">
-          <p class="op-header__support op-header__support--desktop">
-            Dados mestres da reserva (apto, pagamento, datas) vêm do <strong>PMS</strong>. O Yes opera FNRH, senha, acesso e trilha operacional.
-          </p>
-          <button type="button" class="op-btn op-btn--ghost" id="op-logout-btn">Sair</button>
-        </div>
-        <p class="op-header__support op-header__support--mobile">
-          Reserva reflete o <strong>PMS</strong>; o Yes cobre FNRH, senha e acesso operacional.
-        </p>
-      </header>
-
-      <section class="yes-kpis yes-kpis--five" aria-label="Indicadores do dia">
-        <article><span>Chegadas hoje</span><strong id="op-kpi-arrivals">0</strong><small id="op-kpi-arrivals-note">Nenhuma chegada</small></article>
-        <article><span>Check-ins concluídos</span><strong id="op-kpi-completed">0</strong><small id="op-kpi-completed-note">0% das chegadas</small></article>
-        <article><span>FNRH pendentes</span><strong id="op-kpi-fnrh">0</strong><small id="op-kpi-fnrh-note">Sem pendências</small></article>
-        <article><span>Acessos liberados</span><strong id="op-kpi-access">0</strong><small>Atualizado no painel</small></article>
-        <button type="button" class="yes-kpi-card yes-kpi-card--action" id="op-kpi-occupied-btn" aria-label="Ver hóspedes hospedados">
-          <span>Hóspedes hospedados</span>
-          <strong id="op-kpi-occupied-guests">0 hóspedes</strong>
-          <small id="op-kpi-occupied-apts">0 apartamentos ocupados</small>
-        </button>
-      </section>
-
-      <nav class="op-view-tabs" role="tablist" aria-label="Visão do painel">
-        <button type="button" class="op-view-tab active" role="tab" aria-selected="true" data-op-view="reservas" id="op-view-reservas">Reservas</button>
-        <button type="button" class="op-view-tab" role="tab" aria-selected="false" data-op-view="chegadas" id="op-view-chegadas">Chegadas</button>
-      </nav>
-
-      <section id="op-chegadas-panel" class="op-chegadas hidden" aria-label="Chegadas">
-        <div class="op-chegadas__filters" role="toolbar" aria-label="Filtros de chegadas">
-          <button type="button" class="op-chegadas__filter active" data-arrivals-filter="hoje">Hoje</button>
-          <button type="button" class="op-chegadas__filter" data-arrivals-filter="amanha">Amanhã</button>
-          <button type="button" class="op-chegadas__filter" data-arrivals-filter="proximos_7_dias">Próximos 7 dias</button>
-          <button type="button" class="op-chegadas__filter" data-arrivals-filter="todas_futuras">Todas as futuras</button>
-          <button type="button" class="op-chegadas__filter" data-arrivals-filter="so_problemas">Só com problemas</button>
-        </div>
-        <div class="op-panel op-chegadas__panel">
-          <div class="op-panel__head">
-            <span class="op-panel__title">Chegadas</span>
-            <span id="op-chegadas-count" class="op-panel__count"></span>
+        <header class="op-header">
+          <div class="op-header__left">
+            <button
+              type="button"
+              class="op-icon-button op-menu-toggle"
+              id="op-menu-toggle"
+              aria-label="Abrir menu"
+              aria-controls="op-sidebar"
+              aria-expanded="false"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <img
+              class="op-header-logo"
+              src="./assets/yes-hotel-logo.png"
+              alt="Yes Hotel"
+              width="153"
+              height="89"
+            />
+            <div class="op-header__heading">
+              <span class="op-header__eyebrow">Operação</span>
+              <h1 class="op-header__title">Check-in Operacional</h1>
+            </div>
           </div>
-          <div class="op-panel__body">
-            <div class="op-table-wrap">
-              <table class="op-table" aria-label="Lista de chegadas">
-                <thead>
-                  <tr>
-                    <th>Chegada</th>
-                    <th>Reserva</th>
-                    <th>Apto</th>
-                    <th>Hóspede</th>
-                    <th>Hóspedes</th>
-                    <th>Alertas</th>
-                  </tr>
-                </thead>
-                <tbody id="op-chegadas-body"></tbody>
-              </table>
-            </div>
-            <div id="op-chegadas-empty" class="op-empty hidden">
-              <p class="op-empty__title">Nenhuma chegada neste filtro</p>
-            </div>
-            <p id="op-chegadas-truncated" class="op-chegadas__truncated hidden" role="status">
-              Exibindo até 500 reservas. Refine o período para consultar mais resultados.
+          <div class="op-header__right">
+            <p id="session-user" class="op-header__user" aria-live="polite">
+              <strong id="op-session-user-name"></strong>
+              <span id="op-session-user-role" class="op-header__role"></span>
             </p>
-            <div id="op-chegadas-pager" class="op-chegadas__pager hidden">
-              <button type="button" class="op-btn op-btn--secondary" id="op-chegadas-prev">Anterior</button>
-              <span id="op-chegadas-page-label"></span>
-              <button type="button" class="op-btn op-btn--secondary" id="op-chegadas-next">Próxima</button>
-            </div>
+            <button type="button" class="op-btn op-btn--ghost" id="op-logout-btn">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+              </svg>
+              <span>Sair</span>
+            </button>
           </div>
-        </div>
-      </section>
+        </header>
 
-      <div id="op-occupied-drawer" class="op-occupied-drawer hidden" aria-hidden="true">
-        <div class="op-occupied-drawer__backdrop" id="op-occupied-backdrop"></div>
-        <aside class="op-occupied-drawer__panel" role="dialog" aria-labelledby="op-occupied-title">
-          <header class="op-occupied-drawer__head">
-            <h2 id="op-occupied-title">Hospedagens atuais</h2>
-            <button type="button" class="op-detail__close" id="op-occupied-close" aria-label="Fechar">Fechar</button>
-          </header>
-          <ul id="op-occupied-list" class="op-occupied-drawer__list"></ul>
-        </aside>
-      </div>
+        <main class="op-content">
+          <section class="yes-kpis yes-kpis--five metric-strip" aria-label="Indicadores do dia">
+            <article>
+              <span>Chegadas hoje</span>
+              <strong id="op-kpi-arrivals">0</strong>
+              <small id="op-kpi-arrivals-note">Nenhuma chegada</small>
+            </article>
+            <article>
+              <span>Check-ins concluídos</span>
+              <strong id="op-kpi-completed">0</strong>
+              <small id="op-kpi-completed-note">0% das chegadas</small>
+            </article>
+            <article>
+              <span>FNRH pendentes</span>
+              <strong id="op-kpi-fnrh">0</strong>
+              <small id="op-kpi-fnrh-note">Sem pendências</small>
+            </article>
+            <article>
+              <span>Acessos liberados</span>
+              <strong id="op-kpi-access">0</strong>
+              <small>Atualizado no painel</small>
+            </article>
+            <button
+              type="button"
+              class="yes-kpi-card yes-kpi-card--action"
+              id="op-kpi-occupied-btn"
+              aria-label="Ver hóspedes hospedados"
+            >
+              <span>Hóspedes hospedados</span>
+              <strong id="op-kpi-occupied-guests">0 hóspedes</strong>
+              <small id="op-kpi-occupied-apts">0 apartamentos ocupados</small>
+            </button>
+          </section>
 
-      <div id="op-reservas-controls" class="op-controls" aria-label="Filtros e situação">
-        <div class="op-toolbar" role="toolbar" aria-label="Ferramentas do painel">
-          <input
-            type="search"
-            id="op-search"
-            class="op-field op-toolbar__search"
-            placeholder="Buscar apto, hóspede ou reserva…"
-            aria-label="Buscar reservas"
-            autocomplete="off"
-          />
-          <select id="op-toolbar-status" class="op-field op-toolbar__status" aria-label="Filtrar por situação (atalho)">
-            <option value="all">Todos</option>
-            <option value="chegando_hoje">Chegando hoje</option>
-            <option value="pendente_pagamento">Pendente pagamento</option>
-            <option value="pendente_fnrh">Pendente FNRH</option>
-            <option value="acesso_liberado">Acesso liberado</option>
-            <option value="nao_entrou">Não entrou</option>
-            <option value="entrou">Concluído</option>
-          </select>
-          <select id="op-period" class="op-field op-toolbar__period" aria-label="Período do check-in">
-            <option value="all">Todo o período</option>
-            <option value="checkin_today">Check-in hoje</option>
-            <option value="checkin_week">Próximos 7 dias</option>
-            <option value="checkin_month">Mês atual</option>
-          </select>
-          <a href="./importar-reservas-mvp.html" id="op-import-link" class="op-btn op-btn--primary op-toolbar__import hidden">Importar reservas</a>
-          <button type="button" class="op-btn op-btn--secondary" id="op-refresh-btn">Atualizar</button>
-        </div>
-        <nav id="op-status-tabs" class="op-tabs" role="tablist" aria-label="Situação da reserva"></nav>
-      </div>
-
-      <section id="operacional-excecoes" class="op-excecoes hidden" aria-label="Exceções operacionais"></section>
-
-      <div id="op-reservas-main" class="op-main">
-        <div class="op-master">
-          <div class="op-panel">
-            <div class="op-panel__head">
-              <span class="op-panel__title">Reservas</span>
-              <span id="op-table-count" class="op-panel__count"></span>
+          <section class="op-controls-shell" aria-label="Controles do painel">
+            <nav class="op-view-tabs" role="tablist" aria-label="Visão do painel">
+              <button
+                type="button"
+                class="op-view-tab active"
+                role="tab"
+                aria-selected="true"
+                data-op-view="reservas"
+                id="op-view-reservas"
+              >
+                Reservas
+              </button>
+              <button
+                type="button"
+                class="op-view-tab"
+                role="tab"
+                aria-selected="false"
+                data-op-view="chegadas"
+                id="op-view-chegadas"
+              >
+                Chegadas
+              </button>
+            </nav>
+            <div id="op-reservas-controls" class="op-controls" aria-label="Filtros e situação">
+              <div class="op-toolbar" role="toolbar" aria-label="Ferramentas do painel">
+                <label class="op-search-field">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m21 21-4.3-4.3M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z" />
+                  </svg>
+                  <span class="sr-only">Buscar reservas</span>
+                  <input
+                    type="search"
+                    id="op-search"
+                    class="op-field op-toolbar__search"
+                    placeholder="Buscar apto, hóspede ou reserva"
+                    aria-label="Buscar reservas"
+                    autocomplete="off"
+                  />
+                </label>
+                <select
+                  id="op-toolbar-status"
+                  class="op-field op-toolbar__status"
+                  aria-label="Filtrar por situação (atalho)"
+                >
+                  <option value="all">Todos</option>
+                  <option value="chegando_hoje">Chegando hoje</option>
+                  <option value="pendente_pagamento">Pendente pagamento</option>
+                  <option value="pendente_fnrh">Pendente FNRH</option>
+                  <option value="acesso_liberado">Acesso liberado</option>
+                  <option value="nao_entrou">Não entrou</option>
+                  <option value="entrou">Concluído</option>
+                </select>
+                <select id="op-period" class="op-field op-toolbar__period" aria-label="Período do check-in">
+                  <option value="all">Todo o período</option>
+                  <option value="checkin_today">Check-in hoje</option>
+                  <option value="checkin_week">Próximos 7 dias</option>
+                  <option value="checkin_month">Mês atual</option>
+                </select>
+                <a
+                  href="./importar-reservas-mvp.html"
+                  id="op-import-link"
+                  class="op-btn op-btn--primary op-toolbar__import hidden"
+                >
+                  Importar
+                </a>
+                <button type="button" class="op-btn op-btn--secondary" id="op-refresh-btn" aria-label="Atualizar">
+                  Atualizar
+                </button>
+              </div>
+              <nav id="op-status-tabs" class="op-tabs" role="tablist" aria-label="Situação da reserva"></nav>
             </div>
-            <div class="op-panel__body">
-              <div id="op-loading" class="op-skeleton hidden" aria-hidden="true">
-                <div class="op-skeleton__row"></div>
-                <div class="op-skeleton__row"></div>
-                <div class="op-skeleton__row"></div>
-              </div>
-              <div class="op-table-wrap">
-                <table class="op-table op-table--desktop" aria-label="Lista de reservas">
-                  <thead>
-                    <tr>
-                      <th class="op-th op-th--apt">Apto</th>
-                      <th class="op-th op-th--guest">Hóspede</th>
-                      <th class="op-th op-th--period">Período</th>
-                      <th class="op-th op-th--flux">Fluxo</th>
-                      <th class="op-th op-th--status">Status</th>
-                      <th class="op-th op-th--next">Próxima ação</th>
-                      <th class="op-th op-th--actions">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody id="op-table-body"></tbody>
-                </table>
-              </div>
-              <div id="op-mobile-list" class="op-mobile-cards" aria-live="polite"></div>
-              <div id="op-empty" class="op-empty hidden">
-                <span class="op-empty__mark" aria-hidden="true">YH</span>
-                <p class="op-empty__title">Nenhuma reserva nesta visualização</p>
-                <p class="op-empty__hint">Ajuste filtros ou consulte as pendências prioritárias da operação.</p>
-                <div class="op-empty__priorities"><strong>Próximos passos</strong><span>1. Conferir chegadas do dia</span><span>2. Revisar FNRHs pendentes</span><span>3. Confirmar acessos liberados</span></div>
-              </div>
-            </div>
-          </div>
-        </div>
+          </section>
 
-        <aside
-          id="reservation-detail-panel"
-          class="op-detail"
-          aria-label="Detalhe da reserva"
-        >
-          <div id="reservation-detail-backdrop" class="op-detail__backdrop hidden" aria-hidden="true"></div>
-          <div class="op-detail__surface">
-            <div class="op-detail__top">
-              <button type="button" class="op-detail__close" id="reservation-detail-close" aria-label="Fechar detalhes">
-                Fechar
+          <section id="op-chegadas-panel" class="op-chegadas hidden" aria-label="Chegadas">
+            <div class="op-chegadas__filters" role="toolbar" aria-label="Filtros de chegadas">
+              <button type="button" class="op-chegadas__filter active" data-arrivals-filter="hoje">Hoje</button>
+              <button type="button" class="op-chegadas__filter" data-arrivals-filter="amanha">Amanhã</button>
+              <button type="button" class="op-chegadas__filter" data-arrivals-filter="proximos_7_dias">
+                Próximos 7 dias
+              </button>
+              <button type="button" class="op-chegadas__filter" data-arrivals-filter="todas_futuras">
+                Todas as futuras
+              </button>
+              <button type="button" class="op-chegadas__filter" data-arrivals-filter="so_problemas">
+                Só com problemas
               </button>
             </div>
-            <div id="op-detail-empty" class="op-detail__placeholder">
-              <p class="op-detail__placeholder-title">Selecione uma reserva</p>
-              <p class="op-detail__placeholder-text">Clique em uma linha ou em <strong>Ver</strong> para detalhes, hóspedes e ações operacionais. Dados principais da reserva vêm do PMS; aqui você acompanha FNRH, acesso e comunicação.</p>
-            </div>
-            <div id="op-detail-filled" class="op-detail__filled hidden">
-              <header class="op-detail__header">
-                <div class="op-detail__header-row">
-                  <span id="op-detail-apto" class="op-detail__apto" aria-hidden="true">—</span>
-                  <span id="op-detail-badge-wrap"></span>
+            <div class="op-panel op-chegadas__panel">
+              <div class="op-panel__head">
+                <span class="op-panel__title">Chegadas</span>
+                <span id="op-chegadas-count" class="op-panel__count"></span>
+              </div>
+              <div class="op-panel__body">
+                <div class="op-table-wrap">
+                  <table class="op-table" aria-label="Lista de chegadas">
+                    <thead>
+                      <tr>
+                        <th>Chegada</th>
+                        <th>Reserva</th>
+                        <th>Apto</th>
+                        <th>Hóspede</th>
+                        <th>Hóspedes</th>
+                        <th>Alertas</th>
+                      </tr>
+                    </thead>
+                    <tbody id="op-chegadas-body"></tbody>
+                  </table>
                 </div>
-                <h2 id="reservation-detail-title" class="op-detail__guestname">Reserva</h2>
-                <p id="reservation-detail-subtitle" class="op-detail__sub"></p>
-              </header>
-              <div id="reservation-detail-body" class="op-detail__scroll"></div>
+                <div id="op-chegadas-empty" class="op-empty hidden">
+                  <p class="op-empty__title">Nenhuma chegada neste filtro</p>
+                </div>
+                <p id="op-chegadas-truncated" class="op-chegadas__truncated hidden" role="status">
+                  Exibindo até 500 reservas. Refine o período para consultar mais resultados.
+                </p>
+                <div id="op-chegadas-pager" class="op-chegadas__pager hidden">
+                  <button type="button" class="op-btn op-btn--secondary" id="op-chegadas-prev">Anterior</button>
+                  <span id="op-chegadas-page-label"></span>
+                  <button type="button" class="op-btn op-btn--secondary" id="op-chegadas-next">Próxima</button>
+                </div>
+              </div>
             </div>
-          </div>
-        </aside>
-      </div>
+          </section>
 
+          <div id="op-occupied-drawer" class="op-occupied-drawer hidden" aria-hidden="true">
+            <div class="op-occupied-drawer__backdrop" id="op-occupied-backdrop"></div>
+            <aside class="op-occupied-drawer__panel" role="dialog" aria-labelledby="op-occupied-title">
+              <header class="op-occupied-drawer__head">
+                <h2 id="op-occupied-title">Hospedagens atuais</h2>
+                <button type="button" class="op-detail__close" id="op-occupied-close" aria-label="Fechar">
+                  Fechar
+                </button>
+              </header>
+              <ul id="op-occupied-list" class="op-occupied-drawer__list"></ul>
+            </aside>
+          </div>
+
+          <section id="operacional-excecoes" class="op-excecoes hidden" aria-label="Exceções operacionais"></section>
+
+          <div id="op-reservas-main" class="op-main">
+            <div class="op-master">
+              <div class="op-panel">
+                <div class="op-panel__head">
+                  <span class="op-panel__title">Reservas</span>
+                  <span id="op-table-count" class="op-panel__count"></span>
+                </div>
+                <div class="op-panel__body">
+                  <div id="op-loading" class="op-skeleton hidden" aria-hidden="true">
+                    <div class="op-skeleton__row"></div>
+                    <div class="op-skeleton__row"></div>
+                    <div class="op-skeleton__row"></div>
+                  </div>
+                  <div class="op-table-wrap">
+                    <table class="op-table op-table--desktop" aria-label="Lista de reservas">
+                      <colgroup>
+                        <col class="op-col-apt" />
+                        <col class="op-col-guest" />
+                        <col class="op-col-period" />
+                        <col class="op-col-flux" />
+                        <col class="op-col-status" />
+                        <col class="op-col-next" />
+                        <col class="op-col-actions" />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th class="op-th op-th--apt">Apto</th>
+                          <th class="op-th op-th--guest">Hóspede</th>
+                          <th class="op-th op-th--period">Período</th>
+                          <th class="op-th op-th--flux">Fluxo</th>
+                          <th class="op-th op-th--status">Status</th>
+                          <th class="op-th op-th--next">Próxima ação</th>
+                          <th class="op-th op-th--actions">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody id="op-table-body"></tbody>
+                    </table>
+                  </div>
+                  <div id="op-mobile-list" class="op-mobile-cards" aria-live="polite"></div>
+                  <div id="op-empty" class="op-empty hidden">
+                    <span class="op-empty__mark" aria-hidden="true">YH</span>
+                    <p class="op-empty__title">Nenhuma reserva nesta visualização</p>
+                    <p class="op-empty__hint">
+                      Ajuste filtros ou consulte as pendências prioritárias da operação.
+                    </p>
+                    <div class="op-empty__priorities">
+                      <strong>Próximos passos</strong>
+                      <span>1. Conferir chegadas do dia</span>
+                      <span>2. Revisar FNRHs pendentes</span>
+                      <span>3. Confirmar acessos liberados</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <aside id="reservation-detail-panel" class="op-detail" aria-label="Detalhe da reserva">
+              <div id="reservation-detail-backdrop" class="op-detail__backdrop hidden" aria-hidden="true"></div>
+              <div class="op-detail__surface">
+                <div class="op-detail__top">
+                  <button
+                    type="button"
+                    class="op-detail__close"
+                    id="reservation-detail-close"
+                    aria-label="Fechar detalhes"
+                  >
+                    Fechar
+                  </button>
+                </div>
+                <div id="op-detail-empty" class="op-detail__placeholder">
+                  <p class="op-detail__placeholder-title">Selecione uma reserva</p>
+                  <p class="op-detail__placeholder-text">
+                    Clique em uma linha ou em <strong>Ver</strong> para detalhes, hóspedes e ações
+                    operacionais. Dados principais da reserva vêm do PMS; aqui você acompanha FNRH,
+                    acesso e comunicação.
+                  </p>
+                </div>
+                <div id="op-detail-filled" class="op-detail__filled hidden">
+                  <header class="op-detail__header">
+                    <div class="op-detail__header-row">
+                      <span id="op-detail-apto" class="op-detail__apto" aria-hidden="true">—</span>
+                      <span id="op-detail-badge-wrap"></span>
+                    </div>
+                    <h2 id="reservation-detail-title" class="op-detail__guestname">Reserva</h2>
+                    <p id="reservation-detail-subtitle" class="op-detail__sub"></p>
+                  </header>
+                  <div id="reservation-detail-body" class="op-detail__scroll"></div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </main>
       </div>
 
       <div class="modal-overlay hidden" id="modal-enviar-senha-overlay" aria-hidden="true">
         <div class="modal-enviar-senha" role="dialog" aria-labelledby="modal-enviar-senha-title">
           <h3 id="modal-enviar-senha-title">Gerar e enviar senha</h3>
           <p class="modal-enviar-senha-desc">
-            Uso excepcional: pode enviar fora da régua automática de FNRH. Se a reserva já tiver senha, apenas reenviamos; se ainda não tiver, geramos e enviamos. Informe pelo menos e-mail ou WhatsApp.
+            Uso excepcional: pode enviar fora da régua automática de FNRH. Se a reserva já tiver
+            senha, apenas reenviamos; se ainda não tiver, geramos e enviamos. Informe pelo menos
+            e-mail ou WhatsApp.
           </p>
           <form id="modal-enviar-senha-form">
             <label for="modal-enviar-senha-email">E-mail</label>
-            <input type="email" id="modal-enviar-senha-email" name="email" placeholder="exemplo@email.com" />
+            <input
+              type="email"
+              id="modal-enviar-senha-email"
+              name="email"
+              placeholder="exemplo@email.com"
+            />
             <label for="modal-enviar-senha-whatsapp">WhatsApp</label>
-            <input type="tel" id="modal-enviar-senha-whatsapp" name="whatsapp" placeholder="(00) 00000-0000" />
+            <input
+              type="tel"
+              id="modal-enviar-senha-whatsapp"
+              name="whatsapp"
+              placeholder="(00) 00000-0000"
+            />
             <div class="modal-enviar-senha-actions">
-              <button type="button" class="op-btn op-btn--secondary" id="modal-enviar-senha-cancel">Cancelar</button>
-              <button type="submit" class="op-btn op-btn--primary" id="modal-enviar-senha-submit">Gerar e enviar</button>
+              <button type="button" class="op-btn op-btn--secondary" id="modal-enviar-senha-cancel">
+                Cancelar
+              </button>
+              <button type="submit" class="op-btn op-btn--primary" id="modal-enviar-senha-submit">
+                Gerar e enviar
+              </button>
             </div>
           </form>
           <p class="modal-enviar-senha-msg hidden" id="modal-enviar-senha-msg"></p>
@@ -236,7 +414,7 @@
       </div>
     </div>
 
-    <nav class="mobile-nav" aria-label="Navegação principal móvel">
+    <nav class="mobile-nav" aria-label="Navegação principal móvel" hidden>
       <a href="./importar-reservas-mvp.html">Reserva</a>
       <a class="active" href="./checkin-operacional-mvp.html" aria-current="page">Operação</a>
       <a href="./comunicacao-mvp.html">Comunicação</a>
@@ -249,6 +427,6 @@
     <script defer src="./yes-credential-release-policy.js"></script>
     <script defer src="./yes-access-tolerance-policy.js?v=1"></script>
     <script defer src="./yes-arrivals-policy.js?v=1"></script>
-    <script defer src="./checkin-operacional-mvp.js?v=39"></script>
+    <script defer src="./checkin-operacional-mvp.js?v=41"></script>
   </body>
 </html>
