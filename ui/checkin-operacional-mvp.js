@@ -20,6 +20,8 @@ const operacionalRepository =
 const accessStateElement = document.querySelector("#access-state");
 const contentPanelElement = document.querySelector("#content-panel");
 const sessionUserElement = document.querySelector("#session-user");
+const sessionUserNameElement = document.querySelector("#op-session-user-name");
+const sessionUserRoleElement = document.querySelector("#op-session-user-role");
 const logoutButtonElement = document.querySelector("#op-logout-btn");
 const opStatusTabsElement = document.querySelector("#op-status-tabs");
 const opSearchInput = document.querySelector("#op-search");
@@ -3825,23 +3827,47 @@ function renderExcecoesOperacionais() {
     omitidos > 0
       ? '<p class="operacional-excecoes-mais">' + escapeHtml("E mais " + omitidos + " reserva(s) na lista abaixo.") + "</p>"
       : "";
+  // Apresentação: <details> compacto (padrão v0). Lógica e itens intactos.
+  // Não forçar open: faixa compacta libera altura para a tabela (7+ linhas em 1440×900).
+  var wasOpen = !!(
+    excecoesStripElement.querySelector("details.operacional-excecoes-inner") &&
+    excecoesStripElement.querySelector("details.operacional-excecoes-inner").open
+  );
+  var firstMotivo = slice[0] && slice[0].ex && slice[0].ex.motivo ? String(slice[0].ex.motivo) : "";
+  var firstApt =
+    slice[0] && slice[0].reserva && slice[0].reserva.apartamento
+      ? String(slice[0].reserva.apartamento).trim()
+      : "";
+  var summaryHint = firstApt
+    ? " · Apto " + firstApt + (firstMotivo ? " — " + firstMotivo : "")
+    : firstMotivo
+      ? " · " + firstMotivo
+      : "";
   excecoesStripElement.classList.remove("hidden");
   excecoesStripElement.innerHTML =
-    '<div class="operacional-excecoes-inner">' +
-    '<div class="operacional-excecoes-head">' +
-    '<span class="operacional-excecoes-title">Exceções operacionais</span>' +
+    '<details class="operacional-excecoes-inner"' +
+    (wasOpen ? " open" : "") +
+    ">" +
+    '<summary class="operacional-excecoes-head">' +
+    '<span class="operacional-excecoes-title"><strong>' +
+    escapeHtml(String(total)) +
+    (total === 1 ? " exceção" : " exceções") +
+    "</strong>" +
+    escapeHtml(summaryHint) +
+    "</span>" +
     '<span class="operacional-excecoes-counts">' +
     escapeHtml(String(crit)) +
     (crit === 1 ? " crítica" : " críticas") +
     " · " +
     escapeHtml(String(mod)) +
     (mod === 1 ? " moderada" : " moderadas") +
-    "</span></div>" +
+    " · Ver todas</span></summary>" +
+    '<div class="operacional-excecoes-body">' +
     '<ul class="operacional-excecoes-list">' +
     rows +
     "</ul>" +
     maisTxt +
-    "</div>";
+    "</div></details>";
 
   excecoesStripElement.querySelectorAll(".operacional-excecao-item").forEach(function (el) {
     function abrir() {
@@ -5234,8 +5260,13 @@ async function initCheckinOperacional() {
   if (accessStateElement instanceof HTMLElement) accessStateElement.classList.add("hidden");
   if (contentPanelElement instanceof HTMLElement) contentPanelElement.classList.remove("hidden");
 
-  if (sessionUserElement instanceof HTMLElement) {
-    sessionUserElement.textContent = `${currentUser.name} | ${auth.getRoleLabel(currentUser.role)} | sessao de ${auth.getSessionDurationHours()} horas`;
+  if (
+    sessionUserElement instanceof HTMLElement &&
+    sessionUserNameElement instanceof HTMLElement &&
+    sessionUserRoleElement instanceof HTMLElement
+  ) {
+    sessionUserNameElement.textContent = currentUser.name;
+    sessionUserRoleElement.textContent = auth.getRoleLabel(currentUser.role);
   }
 
   if (opImportLink instanceof HTMLElement) {
@@ -5298,7 +5329,24 @@ async function initCheckinOperacional() {
     refreshFromSource().catch(() => refresh());
   });
 
+  // Apresentação: menu lateral em overlay no tablet/celular (padrão v0).
+  function setSidebarOpen(open) {
+    document.body.classList.toggle("op-sidebar-open", !!open);
+    const toggle = document.querySelector("#op-menu-toggle");
+    if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  document.querySelector("#op-menu-toggle")?.addEventListener("click", () => {
+    setSidebarOpen(true);
+  });
+  document.querySelector("#op-sidebar-close")?.addEventListener("click", () => {
+    setSidebarOpen(false);
+  });
+  document.querySelector("#op-sidebar-backdrop")?.addEventListener("click", () => {
+    setSidebarOpen(false);
+  });
+
   window.addEventListener("resize", () => {
+    if (window.innerWidth >= 1024) setSidebarOpen(false);
     if (!detailReservaId) {
       detailPanelElement?.classList.remove("op-detail--open");
       detailBackdropElement?.classList.add("hidden");
@@ -5309,6 +5357,10 @@ async function initCheckinOperacional() {
   });
 
   document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && document.body.classList.contains("op-sidebar-open")) {
+      setSidebarOpen(false);
+      return;
+    }
     if (ev.key !== "Escape" || !detailReservaId) return;
     closeDetail();
   });
