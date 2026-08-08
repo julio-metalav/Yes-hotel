@@ -12,6 +12,12 @@ const usersListElement = document.querySelector("#users-list");
 const sessionUserElement = document.querySelector("#session-user");
 const logoutButtonElement = document.querySelector("#logout-button");
 const cancelEditButtonElement = document.querySelector("#cancel-edit-button");
+const loginEmailElement = document.querySelector("#login-email");
+const loginPasswordElement = document.querySelector("#login-password");
+const rememberEmailElement = document.querySelector("#remember-email");
+const passwordToggleElement = document.querySelector(".password-toggle");
+const loginSubmitButtonElement = loginFormElement?.querySelector('[type="submit"]');
+const REMEMBERED_EMAIL_STORAGE_KEY = "yesHotel.rememberedEmail";
 let usersCache = [];
 
 function redirectUserByRole(user) {
@@ -40,6 +46,7 @@ function showNotice(message, variant = "success") {
 
   noticeElement.textContent = message;
   noticeElement.className = `notice is-${variant}`;
+  noticeElement.setAttribute("role", variant === "error" ? "alert" : "status");
   noticeElement.classList.remove("hidden");
 }
 
@@ -63,6 +70,10 @@ function hideErrorNoticeOnly() {
 }
 
 function showOnlyPanel(panelElement) {
+  const isAppView = panelElement === appPanelElement;
+  document.body.classList.toggle("auth-view", !isAppView);
+  document.body.classList.toggle("app-view", isAppView);
+
   [bootstrapPanelElement, loginPanelElement, appPanelElement].forEach((element) => {
     if (element instanceof HTMLElement) {
       element.classList.add("hidden");
@@ -75,6 +86,9 @@ function showOnlyPanel(panelElement) {
 }
 
 function hideAllPanels() {
+  document.body.classList.add("auth-view");
+  document.body.classList.remove("app-view");
+
   [bootstrapPanelElement, loginPanelElement, appPanelElement].forEach((element) => {
     if (element instanceof HTMLElement) {
       element.classList.add("hidden");
@@ -241,6 +255,62 @@ bootstrapFormElement?.addEventListener("submit", async (event) => {
   }
 });
 
+function updateRememberedEmailStorage() {
+  if (
+    !(loginEmailElement instanceof HTMLInputElement) ||
+    !(rememberEmailElement instanceof HTMLInputElement)
+  ) {
+    return;
+  }
+
+  try {
+    const email = loginEmailElement.value.trim();
+
+    if (rememberEmailElement.checked && email) {
+      localStorage.setItem(REMEMBERED_EMAIL_STORAGE_KEY, email);
+      return;
+    }
+
+    localStorage.removeItem(REMEMBERED_EMAIL_STORAGE_KEY);
+  } catch (error) {
+    console.warn("Não foi possível atualizar o e-mail lembrado.", error);
+  }
+}
+
+if (
+  loginEmailElement instanceof HTMLInputElement &&
+  rememberEmailElement instanceof HTMLInputElement
+) {
+  try {
+    const rememberedEmail = localStorage.getItem(REMEMBERED_EMAIL_STORAGE_KEY);
+
+    if (rememberedEmail) {
+      loginEmailElement.value = rememberedEmail;
+      rememberEmailElement.checked = true;
+    }
+  } catch (error) {
+    console.warn("Não foi possível carregar o e-mail lembrado.", error);
+  }
+
+  rememberEmailElement.addEventListener("change", updateRememberedEmailStorage);
+  loginEmailElement.addEventListener("change", updateRememberedEmailStorage);
+}
+
+passwordToggleElement?.addEventListener("click", () => {
+  if (
+    !(passwordToggleElement instanceof HTMLButtonElement) ||
+    !(loginPasswordElement instanceof HTMLInputElement)
+  ) {
+    return;
+  }
+
+  const shouldShowPassword = loginPasswordElement.type === "password";
+  loginPasswordElement.type = shouldShowPassword ? "text" : "password";
+  passwordToggleElement.textContent = shouldShowPassword ? "Ocultar" : "Mostrar";
+  passwordToggleElement.setAttribute("aria-pressed", String(shouldShowPassword));
+  loginPasswordElement.focus();
+});
+
 loginFormElement?.addEventListener("submit", async (event) => {
   event.preventDefault();
   hideNotice();
@@ -249,6 +319,19 @@ loginFormElement?.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (
+    loginSubmitButtonElement instanceof HTMLButtonElement &&
+    loginSubmitButtonElement.disabled
+  ) {
+    return;
+  }
+
+  if (loginSubmitButtonElement instanceof HTMLButtonElement) {
+    loginSubmitButtonElement.disabled = true;
+    loginSubmitButtonElement.setAttribute("aria-busy", "true");
+  }
+
+  updateRememberedEmailStorage();
   const formData = new FormData(loginFormElement);
 
   try {
@@ -262,6 +345,11 @@ loginFormElement?.addEventListener("submit", async (event) => {
     redirectUserByRole(user);
   } catch (error) {
     showNotice(error instanceof Error ? error.message : "Falha no login.", "error");
+  } finally {
+    if (loginSubmitButtonElement instanceof HTMLButtonElement) {
+      loginSubmitButtonElement.disabled = false;
+      loginSubmitButtonElement.removeAttribute("aria-busy");
+    }
   }
 });
 
