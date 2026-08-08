@@ -142,28 +142,41 @@ async function renderUsersList() {
   }
 
   usersCache = await auth.listUsers();
-  usersListElement.innerHTML = "";
+  usersListElement.replaceChildren();
 
   usersCache.forEach((user) => {
     const card = document.createElement("article");
     card.className = "user-card";
-    card.innerHTML = `
-      <div class="user-card-main">
-        <p class="user-card-title">${user.name}</p>
-        <div class="user-card-meta">
-          <span class="user-card-email">${user.email}</span>
-          <span class="user-card-role">${auth.getRoleLabel(user.role)}</span>
-        </div>
-      </div>
-      <div class="user-card-side">
-        <span class="badge ${user.active ? "is-active" : "is-inactive"}">
-          ${user.active ? "Ativo" : "Inativo"}
-        </span>
-        <button class="secondary-button" type="button" data-edit-user-id="${user.id}">
-          Editar
-        </button>
-      </div>
-    `;
+
+    const main = document.createElement("div");
+    main.className = "user-card-main";
+    const title = document.createElement("p");
+    title.className = "user-card-title";
+    title.textContent = user.name;
+    const meta = document.createElement("div");
+    meta.className = "user-card-meta";
+    const email = document.createElement("span");
+    email.className = "user-card-email";
+    email.textContent = user.email;
+    const role = document.createElement("span");
+    role.className = "user-card-role";
+    role.textContent = auth.getRoleLabel(user.role);
+    meta.append(email, role);
+    main.append(title, meta);
+
+    const side = document.createElement("div");
+    side.className = "user-card-side";
+    const badge = document.createElement("span");
+    badge.className = `badge ${user.active ? "is-active" : "is-inactive"}`;
+    badge.textContent = user.active ? "Ativo" : "Inativo";
+    const editButton = document.createElement("button");
+    editButton.className = "secondary-button";
+    editButton.type = "button";
+    editButton.dataset.editUserId = user.id;
+    editButton.textContent = "Editar";
+    side.append(badge, editButton);
+
+    card.append(main, side);
     usersListElement.appendChild(card);
   });
 
