@@ -501,6 +501,462 @@ body.app-view .auth-header {
   display: none;
 }
 
+body.app-view {
+  min-height: 100vh;
+  min-height: 100svh;
+  background:
+    linear-gradient(180deg, rgba(177, 148, 58, 0.08), transparent 18rem),
+    #f3f6f5;
+  color: #17343a;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+.app-view .app-shell {
+  width: min(100%, 1120px);
+  padding: 24px 24px 48px;
+}
+
+.app-view #app-panel {
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.app-view .notice {
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+.app-view .notice.is-success {
+  background: #f0f9f5;
+  color: #17603d;
+  border-color: #c6e7d5;
+}
+
+.app-view .notice.is-error {
+  background: #fff7f6;
+  color: #9b2c2c;
+  border-color: #f2cbc7;
+}
+
+.app-view .dashboard-header {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 18px 22px;
+  background: #ffffff;
+  border: 1px solid rgba(23, 63, 72, 0.12);
+  border-radius: 18px;
+  box-shadow: 0 12px 32px rgba(23, 52, 58, 0.08);
+}
+
+.app-view .dashboard-logo {
+  display: block;
+  width: 150px;
+  height: auto;
+}
+
+.app-view .dashboard-user {
+  min-width: 0;
+}
+
+.app-view .dashboard-user-caption {
+  display: block;
+  margin-bottom: 4px;
+  color: #708186;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.app-view .dashboard-user-details {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.app-view .dashboard-user-details strong {
+  overflow: hidden;
+  color: #173f48;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-view .dashboard-role-badge {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  background: #edf4f5;
+  color: #176070;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.app-view .dashboard-logout {
+  min-width: 82px;
+  border-color: rgba(23, 96, 112, 0.3);
+  color: #176070;
+  font-weight: 700;
+}
+
+.app-view .dashboard-logout:hover {
+  background: #edf4f5;
+  border-color: #176070;
+}
+
+.app-view .dashboard-welcome {
+  padding: 30px 4px 22px;
+}
+
+.app-view .dashboard-welcome h1 {
+  margin: 0 0 6px;
+  color: #173f48;
+  font-size: clamp(28px, 4vw, 36px);
+  line-height: 1.2;
+}
+
+.app-view .dashboard-welcome p {
+  margin: 0;
+  color: #607176;
+  font-size: 16px;
+}
+
+.app-view .operacional-nav {
+  padding: 24px;
+  margin-bottom: 22px;
+  background: #ffffff;
+  border-color: rgba(23, 63, 72, 0.12);
+  border-radius: 18px;
+  box-shadow: 0 12px 32px rgba(23, 52, 58, 0.07);
+}
+
+.app-view .operacional-nav-title,
+.app-view .dashboard-section h2 {
+  margin: 0 0 5px;
+  color: #173f48;
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.app-view .operacional-nav-intro,
+.app-view .dashboard-section .helper-text {
+  margin-bottom: 18px;
+  color: #708186;
+  line-height: 1.5;
+}
+
+.app-view .operacional-nav-grid {
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.app-view .operacional-nav-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  min-height: 134px;
+  padding: 20px;
+  background: #fbfcfc;
+  border-color: #dce4e4;
+  border-radius: 14px;
+  color: #17343a;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+
+.app-view .operacional-nav-card:hover {
+  border-color: rgba(23, 96, 112, 0.55);
+  box-shadow: 0 10px 24px rgba(23, 52, 58, 0.09);
+  transform: translateY(-2px);
+}
+
+.app-view .operacional-nav-card:focus-visible,
+.app-view .primary-button:focus-visible,
+.app-view .secondary-button:focus-visible,
+.app-view .stack-form input:focus-visible,
+.app-view .stack-form select:focus-visible {
+  outline: 3px solid rgba(177, 148, 58, 0.42);
+  outline-offset: 3px;
+}
+
+.app-view .operacional-nav-card-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  background: #edf4f5;
+  color: #176070;
+  border-radius: 12px;
+}
+
+.app-view .operacional-nav-card-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.app-view .operacional-nav-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.app-view .operacional-nav-card-label {
+  color: #173f48;
+  font-size: 16px;
+}
+
+.app-view .operacional-nav-card-desc {
+  color: #687a7f;
+  font-size: 13px;
+}
+
+.app-view .operacional-nav-card-arrow {
+  color: #8b9a9d;
+  font-size: 20px;
+  line-height: 44px;
+}
+
+.app-view .operacional-nav-card--anchor {
+  background: #fffdf7;
+  border-color: rgba(177, 148, 58, 0.38);
+}
+
+.app-view .operacional-nav-card--anchor .operacional-nav-card-icon {
+  background: #f7f1dd;
+  color: #8b742c;
+}
+
+.app-view .dashboard-section {
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid rgba(23, 63, 72, 0.12);
+  border-radius: 18px;
+  box-shadow: 0 12px 32px rgba(23, 52, 58, 0.07);
+}
+
+.app-view #gestao-usuarios-section {
+  scroll-margin-top: 20px;
+}
+
+.app-view .users-section + .users-section {
+  margin-top: 22px;
+}
+
+.app-view .section-header {
+  align-items: flex-start;
+}
+
+.app-view .users-list {
+  gap: 12px;
+}
+
+.app-view .user-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 18px;
+  border-color: #e0e7e7;
+  border-radius: 13px;
+  box-shadow: none;
+}
+
+.app-view .user-card-title {
+  margin-bottom: 7px;
+  color: #173f48;
+  font-size: 16px;
+}
+
+.app-view .user-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.app-view .user-card-email {
+  overflow-wrap: anywhere;
+}
+
+.app-view .user-card-role {
+  padding: 3px 8px;
+  background: #f0f3f3;
+  color: #53676c;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.app-view .badge {
+  padding: 5px 9px;
+}
+
+.app-view .badge.is-active {
+  background: #e7f6ed;
+  color: #17603d;
+}
+
+.app-view .badge.is-inactive {
+  background: #fff0ee;
+  color: #9b2c2c;
+}
+
+.app-view .user-card-side .secondary-button {
+  min-height: 38px;
+  padding: 8px 12px;
+  border-color: #cbd8d9;
+  color: #176070;
+  font-weight: 700;
+}
+
+.app-view #user-form {
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.app-view #user-form label {
+  color: #27484f;
+  font-weight: 650;
+}
+
+.app-view #user-form input,
+.app-view #user-form select {
+  min-height: 46px;
+  background: #ffffff;
+  color: #17343a;
+  border-color: #cbd5d6;
+  border-radius: 9px;
+}
+
+.app-view #user-form input:focus,
+.app-view #user-form select:focus {
+  border-color: #176070;
+  box-shadow: 0 0 0 3px rgba(23, 96, 112, 0.12);
+}
+
+.app-view #user-form .checkbox-line,
+.app-view #user-form .form-actions {
+  grid-column: 1 / -1;
+}
+
+.app-view #user-form .checkbox-line input {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  accent-color: #176070;
+  box-shadow: none;
+}
+
+.app-view .form-actions {
+  justify-content: flex-start;
+  margin-top: 4px;
+}
+
+.app-view .primary-button {
+  background: #176070;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.app-view .primary-button:hover {
+  background: #124d5a;
+}
+
+.app-view .form-actions .primary-button,
+.app-view .form-actions .secondary-button {
+  min-width: 112px;
+}
+
+@media (min-width: 980px) {
+  .app-view .operacional-nav-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .app-view .app-shell {
+    padding: 12px 12px 32px;
+  }
+
+  .app-view .dashboard-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .app-view .dashboard-logo {
+    grid-column: 1 / -1;
+    width: 138px;
+  }
+
+  .app-view .dashboard-user-details {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .app-view .dashboard-user-details strong {
+    max-width: 100%;
+  }
+
+  .app-view .dashboard-welcome {
+    padding: 24px 4px 18px;
+  }
+
+  .app-view .dashboard-welcome h1 {
+    font-size: 27px;
+  }
+
+  .app-view .operacional-nav,
+  .app-view .dashboard-section {
+    padding: 18px 16px;
+  }
+
+  .app-view .operacional-nav-grid,
+  .app-view #user-form {
+    grid-template-columns: 1fr;
+  }
+
+  .app-view .operacional-nav-card {
+    min-height: 122px;
+    padding: 17px;
+  }
+
+  .app-view .user-card {
+    grid-template-columns: 1fr;
+    gap: 13px;
+    padding: 15px;
+  }
+
+  .app-view .user-card-side {
+    justify-content: space-between;
+  }
+
+  .app-view #user-form .checkbox-line,
+  .app-view #user-form .form-actions {
+    grid-column: auto;
+  }
+
+  .app-view .form-actions .primary-button,
+  .app-view .form-actions .secondary-button {
+    width: 100%;
+  }
+}
+
 @media (max-width: 480px) {
   .auth-view .app-shell {
     padding: 24px 16px;

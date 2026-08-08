@@ -10,6 +10,9 @@ const userFormElement = document.querySelector("#user-form");
 const userFormTitleElement = document.querySelector("#user-form-title");
 const usersListElement = document.querySelector("#users-list");
 const sessionUserElement = document.querySelector("#session-user");
+const sessionUserNameElement = document.querySelector("#session-user-name");
+const sessionUserRoleElement = document.querySelector("#session-user-role");
+const dashboardWelcomeTitleElement = document.querySelector("#dashboard-welcome-title");
 const logoutButtonElement = document.querySelector("#logout-button");
 const cancelEditButtonElement = document.querySelector("#cancel-edit-button");
 const loginEmailElement = document.querySelector("#login-email");
@@ -107,7 +110,7 @@ function resetUserForm() {
   userFormElement.elements.active.checked = true;
 
   if (userFormTitleElement instanceof HTMLElement) {
-    userFormTitleElement.textContent = "Novo usuario";
+    userFormTitleElement.textContent = "Novo usuário";
   }
 }
 
@@ -124,7 +127,7 @@ function populateUserForm(user) {
   userFormElement.elements.active.checked = Boolean(user.active);
 
   if (userFormTitleElement instanceof HTMLElement) {
-    userFormTitleElement.textContent = "Editar usuario";
+    userFormTitleElement.textContent = "Editar usuário";
   }
 }
 
@@ -147,7 +150,10 @@ async function renderUsersList() {
     card.innerHTML = `
       <div class="user-card-main">
         <p class="user-card-title">${user.name}</p>
-        <p class="user-card-meta">${user.email} | ${auth.getRoleLabel(user.role)}</p>
+        <div class="user-card-meta">
+          <span class="user-card-email">${user.email}</span>
+          <span class="user-card-role">${auth.getRoleLabel(user.role)}</span>
+        </div>
       </div>
       <div class="user-card-side">
         <span class="badge ${user.active ? "is-active" : "is-inactive"}">
@@ -195,9 +201,17 @@ async function renderAdminPanel() {
   await renderUsersList();
   hideErrorNoticeOnly();
 
-  if (sessionUserElement instanceof HTMLElement) {
-    sessionUserElement.textContent =
-      `${currentUser.name} | ${auth.getRoleLabel(currentUser.role)} | sessao de ${auth.getSessionDurationHours()} horas`;
+  if (
+    sessionUserElement instanceof HTMLElement &&
+    sessionUserNameElement instanceof HTMLElement &&
+    sessionUserRoleElement instanceof HTMLElement
+  ) {
+    sessionUserNameElement.textContent = currentUser.name;
+    sessionUserRoleElement.textContent = auth.getRoleLabel(currentUser.role);
+  }
+
+  if (dashboardWelcomeTitleElement instanceof HTMLElement) {
+    dashboardWelcomeTitleElement.textContent = `Olá, ${currentUser.name}`;
   }
 }
 
