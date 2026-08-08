@@ -3,42 +3,126 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Yes Hotel - Recepcao MVP</title>
-    <link rel="stylesheet" href="./recepcao-mvp.css" />
+    <title>Yes Hotel — Recepção</title>
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=44" />
+    <link rel="stylesheet" href="./recepcao-mvp.css?v=3" />
   </head>
-  <body>
-    <main class="app-shell">
-      <header class="page-header">
-        <p class="eyebrow">Yes Hotel</p>
-        <h1>Recepcao</h1>
-        <p class="page-description">Area operacional provisoria da recepcao.</p>
-      </header>
+  <body class="op-body checkin-view recepcao-view">
+    <div id="access-state" class="op-access hidden" aria-live="polite"></div>
 
-      <section class="access-state hidden" id="access-state"></section>
-
-      <section class="panel hidden" id="content-panel">
-        <div class="session-bar">
-          <div id="session-user"></div>
-          <div class="session-actions">
-            <button class="secondary-button" id="logout-button" type="button">Sair</button>
-          </div>
+    <div id="content-panel" class="op-app hidden">
+      <aside class="yes-sidebar" id="recepcao-sidebar" aria-label="Áreas operacionais">
+        <div class="yes-sidebar-brand">
+          <img src="./assets/yes-hotel-logo.png" alt="Yes Hotel" width="153" height="89" />
+          <button
+            type="button"
+            class="op-icon-button yes-sidebar-close"
+            id="recepcao-sidebar-close"
+            aria-label="Fechar menu"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
         </div>
+        <nav aria-label="Navegação principal">
+          <span class="yes-sidebar-label">Áreas operacionais</span>
+          <a href="./checkin-operacional-mvp.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
+            </svg>
+            <span>Operação</span>
+          </a>
+          <a href="./cafe-da-manha-mvp.html" data-nav="cafe">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17 8h1a3 3 0 1 1 0 6h-1M3 8h14v7a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Zm3-6v3M10 2v3M14 2v3" />
+            </svg>
+            <span>Café da manhã</span>
+          </a>
+        </nav>
+        <div class="yes-sidebar-foot">
+          Ambiente operacional<br />
+          <strong>Recepção Yes Hotel</strong>
+        </div>
+      </aside>
 
-        <section class="panel-body panel-home">
-          <h2>Home operacional</h2>
-          <p class="helper-text">Escolha a tela que deseja acessar.</p>
-          <div class="home-actions">
-            <a class="primary-link" href="./comunicacao-mvp.html">Central de Comunicação</a>
-            <a class="primary-link" href="./checkin-operacional-mvp.html">Ir para Painel de Check-in Operacional</a>
-            <a class="secondary-link" href="./cafe-da-manha-mvp.html">Ir para cafe da manha</a>
+      <button
+        type="button"
+        class="op-sidebar-backdrop"
+        id="recepcao-sidebar-backdrop"
+        aria-label="Fechar navegação"
+        tabindex="-1"
+      ></button>
+
+      <div class="yes-workspace">
+        <header class="op-header">
+          <div class="op-header__left">
+            <button
+              type="button"
+              class="op-icon-button op-menu-toggle"
+              id="recepcao-menu-toggle"
+              aria-label="Abrir menu"
+              aria-controls="recepcao-sidebar"
+              aria-expanded="false"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <img
+              class="op-header-logo"
+              src="./assets/yes-hotel-logo.png"
+              alt="Yes Hotel"
+              width="153"
+              height="89"
+            />
+            <div class="op-header__heading">
+              <span class="op-header__eyebrow">Operação</span>
+              <h1 class="op-header__title">Recepção</h1>
+            </div>
           </div>
-        </section>
-      </section>
-    </main>
+          <div class="op-header__right">
+            <p id="session-user" class="op-header__user" aria-live="polite">
+              <strong id="recepcao-session-user-name"></strong>
+              <span id="recepcao-session-user-role" class="op-header__role"></span>
+            </p>
+            <button type="button" class="op-btn op-btn--ghost" id="logout-button">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+              </svg>
+              <span>Sair</span>
+            </button>
+          </div>
+        </header>
+
+        <main class="op-content recepcao-content">
+          <section class="recepcao-intro" aria-labelledby="recepcao-home-title">
+            <h2 id="recepcao-home-title">Home operacional</h2>
+            <p>Escolha a rotina disponível para o seu perfil.</p>
+          </section>
+
+          <nav class="recepcao-home-grid" aria-label="Atalhos operacionais">
+            <a class="recepcao-home-card" href="./checkin-operacional-mvp.html">
+              <span class="recepcao-home-card__label">Check-in Operacional</span>
+              <span class="recepcao-home-card__desc">Reservas, FNRH, senhas e liberação de acesso</span>
+            </a>
+            <a class="recepcao-home-card" href="./cafe-da-manha-mvp.html" data-nav="cafe">
+              <span class="recepcao-home-card__label">Café da manhã</span>
+              <span class="recepcao-home-card__desc">Atendimento do serviço diário</span>
+            </a>
+          </nav>
+        </main>
+      </div>
+    </div>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
-    <script defer src="./recepcao-mvp.js"></script>
+    <script defer src="./recepcao-mvp.js?v=3"></script>
   </body>
 </html>

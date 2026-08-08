@@ -9,14 +9,25 @@
 
 const auth = window.YesHotelAuthApp;
 
-/** @type {BreakfastApartmentCard[]} */
+/**
+ * Fonte atual: mocks estáticos locais (não HITS / não produção).
+ * Ponto de entrada dos mocks: constante `breakfastCards` abaixo.
+ * @type {BreakfastApartmentCard[]}
+ */
 const breakfastCards = [
   {
-    apartmentCode: "12",
-    guestMainName: "Julio Cesar",
+    apartmentCode: "24",
+    guestMainName: "Joao Pedro",
     breakfastPaid: true,
-    expectedGuests: 4,
-    arrivedGuests: 2,
+    expectedGuests: 3,
+    arrivedGuests: 3,
+  },
+  {
+    apartmentCode: "07",
+    guestMainName: "Maria Souza",
+    breakfastPaid: true,
+    expectedGuests: 2,
+    arrivedGuests: 1,
   },
   {
     apartmentCode: "18",
@@ -26,11 +37,18 @@ const breakfastCards = [
     arrivedGuests: 0,
   },
   {
-    apartmentCode: "24",
-    guestMainName: "Joao Pedro",
+    apartmentCode: "12",
+    guestMainName: "Julio Cesar",
     breakfastPaid: true,
-    expectedGuests: 3,
-    arrivedGuests: 3,
+    expectedGuests: 4,
+    arrivedGuests: 2,
+  },
+  {
+    apartmentCode: "10",
+    guestMainName: "Carlos Lima",
+    breakfastPaid: false,
+    expectedGuests: 1,
+    arrivedGuests: 0,
   },
 ];
 
@@ -38,6 +56,8 @@ const cardsListElement = document.querySelector("#cards-list");
 const accessStateElement = document.querySelector("#access-state");
 const sessionBannerElement = document.querySelector("#session-banner");
 const sessionBannerUserElement = document.querySelector("#session-banner-user");
+const sessionUserNameElement = document.querySelector("#cafe-session-user-name");
+const sessionUserRoleElement = document.querySelector("#cafe-session-user-role");
 const usersLinkElement = document.querySelector("#users-link");
 const logoutButtonElement = document.querySelector("#logout-button");
 const contentPanelElement = document.querySelector("#content-panel");
@@ -69,15 +89,23 @@ function showAccessState(title, message, actionLabel) {
     return;
   }
 
-  cardsListElement.innerHTML = "";
+  cardsListElement.replaceChildren();
   contentPanelElement?.classList.add("hidden");
   sessionBannerElement?.classList.add("hidden");
   accessStateElement.classList.remove("hidden");
-  accessStateElement.innerHTML = `
-    <h2 class="access-state-title">${title}</h2>
-    <p class="access-state-text">${message}</p>
-    <a class="secondary-link" href="./usuarios-login-mvp.html">${actionLabel}</a>
-  `;
+  accessStateElement.replaceChildren();
+
+  const heading = document.createElement("h2");
+  heading.className = "access-state-title";
+  heading.textContent = title;
+  const paragraph = document.createElement("p");
+  paragraph.className = "access-state-text";
+  paragraph.textContent = message;
+  const action = document.createElement("a");
+  action.className = "secondary-link";
+  action.href = "./usuarios-login-mvp.html";
+  action.textContent = actionLabel;
+  accessStateElement.append(heading, paragraph, action);
 }
 
 function hideAccessState() {
@@ -86,7 +114,7 @@ function hideAccessState() {
   }
 
   accessStateElement.classList.add("hidden");
-  accessStateElement.innerHTML = "";
+  accessStateElement.replaceChildren();
   contentPanelElement?.classList.remove("hidden");
 }
 
@@ -157,10 +185,44 @@ function matchesSearch(card) {
   ).includes(searchTerm);
 }
 
+/** Extrai o número real do apartamento para ordenação 7 < 10 < 12 (não lexicográfica). */
+function apartmentNumberValue(code) {
+  const match = String(code ?? "").trim().match(/(\d+)/);
+  if (!match) return Number.POSITIVE_INFINITY;
+  const value = Number.parseInt(match[1], 10);
+  return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+}
+
+function compareApartmentCodes(a, b) {
+  const na = apartmentNumberValue(a);
+  const nb = apartmentNumberValue(b);
+  if (na !== nb) return na - nb;
+  return String(a ?? "")
+    .trim()
+    .localeCompare(String(b ?? "").trim(), "pt-BR", {
+      numeric: true,
+      sensitivity: "base",
+    });
+}
+
 function getVisibleCards() {
   return breakfastCards
     .map((card, cardIndex) => ({ card, cardIndex }))
-    .filter(({ card }) => matchesActiveFilter(card) && matchesSearch(card));
+    .filter(({ card }) => matchesActiveFilter(card) && matchesSearch(card))
+    .sort((left, right) =>
+      compareApartmentCodes(left.card.apartmentCode, right.card.apartmentCode),
+    );
+}
+
+function createMetric(label, value, extraClass) {
+  const wrap = document.createElement("span");
+  if (extraClass) wrap.className = extraClass;
+  const small = document.createElement("small");
+  small.textContent = label;
+  const strong = document.createElement("strong");
+  strong.textContent = String(value);
+  wrap.append(small, strong);
+  return wrap;
 }
 
 function createCard(card, cardIndex) {
@@ -173,61 +235,97 @@ function createCard(card, cardIndex) {
     card.breakfastPaid ? "is-paid" : "is-unpaid",
   ].join(" ");
 
-  article.innerHTML = `
-    <div class="guest-cell">
-      <span class="apartment-code">Apto ${card.apartmentCode}</span>
-      <span class="guest-name">${card.guestMainName}</span>
-    </div>
-    <div class="attendance-cell">
-      <div class="attendance-metrics">
-        <span><small>Previstos</small><strong>${card.expectedGuests}</strong></span>
-        <span><small>Atendidos</small><strong>${card.arrivedGuests}</strong></span>
-        <span class="${missingGuests > 0 ? "missing-count" : ""}">
-          <small>Faltantes</small><strong>${missingGuests}</strong>
-        </span>
-      </div>
-      <div class="progress-track" aria-label="${card.arrivedGuests} de ${card.expectedGuests} hóspedes atendidos">
-        <span style="width: ${card.expectedGuests > 0 ? (card.arrivedGuests / card.expectedGuests) * 100 : 0}%"></span>
-      </div>
-    </div>
-    <div class="payment-cell">
-      <span class="payment-badge ${card.breakfastPaid ? "is-paid" : "is-unpaid"}">
-        ${getPaymentLabel(card)}
-      </span>
-    </div>
-    <div class="status-cell">
-      <span class="status-badge ${isComplete ? "is-complete" : "is-pending"}">
-        ${isComplete ? "Completo" : "Pendente"}
-      </span>
-    </div>
-    <div class="control-cell">
-      <span class="control-label">Atendidos</span>
-      <div class="counter-controls">
-        <button
-          class="icon-button"
-          type="button"
-          aria-label="Diminuir quantidade que veio do apto ${card.apartmentCode}"
-          ${card.arrivedGuests === 0 ? "disabled" : ""}
-          data-action="decrease"
-          data-card-index="${cardIndex}"
-        >
-          −
-        </button>
-        <span class="arrived-pill" aria-live="polite">${card.arrivedGuests}</span>
-        <button
-          class="icon-button"
-          type="button"
-          aria-label="Aumentar quantidade que veio do apto ${card.apartmentCode}"
-          ${card.arrivedGuests === card.expectedGuests ? "disabled" : ""}
-          data-action="increase"
-          data-card-index="${cardIndex}"
-        >
-          +
-        </button>
-      </div>
-    </div>
-  `;
+  const guestCell = document.createElement("div");
+  guestCell.className = "guest-cell";
+  const apt = document.createElement("span");
+  apt.className = "apartment-code";
+  apt.textContent = `Apto ${card.apartmentCode}`;
+  const guest = document.createElement("span");
+  guest.className = "guest-name";
+  guest.textContent = card.guestMainName;
+  guestCell.append(apt, guest);
 
+  const attendanceCell = document.createElement("div");
+  attendanceCell.className = "attendance-cell";
+  const metrics = document.createElement("div");
+  metrics.className = "attendance-metrics";
+  metrics.append(
+    createMetric("Previstos", card.expectedGuests),
+    createMetric("Atendidos", card.arrivedGuests),
+    createMetric("Faltantes", missingGuests, missingGuests > 0 ? "missing-count" : ""),
+  );
+  const progress = document.createElement("div");
+  progress.className = "progress-track";
+  progress.setAttribute(
+    "aria-label",
+    `${card.arrivedGuests} de ${card.expectedGuests} hóspedes atendidos`,
+  );
+  const bar = document.createElement("span");
+  bar.style.width = `${
+    card.expectedGuests > 0 ? (card.arrivedGuests / card.expectedGuests) * 100 : 0
+  }%`;
+  progress.appendChild(bar);
+  attendanceCell.append(metrics, progress);
+
+  const badgesCell = document.createElement("div");
+  badgesCell.className = "badges-cell";
+
+  const paymentCell = document.createElement("div");
+  paymentCell.className = "payment-cell";
+  const paymentBadge = document.createElement("span");
+  paymentBadge.className = `payment-badge ${card.breakfastPaid ? "is-paid" : "is-unpaid"}`;
+  paymentBadge.textContent = getPaymentLabel(card);
+  paymentCell.appendChild(paymentBadge);
+
+  const statusCell = document.createElement("div");
+  statusCell.className = "status-cell";
+  const statusBadge = document.createElement("span");
+  statusBadge.className = `status-badge ${isComplete ? "is-complete" : "is-pending"}`;
+  statusBadge.textContent = isComplete ? "Completo" : "Pendente";
+  statusCell.appendChild(statusBadge);
+  badgesCell.append(paymentCell, statusCell);
+
+  const controlCell = document.createElement("div");
+  controlCell.className = "control-cell";
+  const controlLabel = document.createElement("span");
+  controlLabel.className = "control-label";
+  controlLabel.textContent = "Atendidos";
+  const controls = document.createElement("div");
+  controls.className = "counter-controls";
+
+  const decrease = document.createElement("button");
+  decrease.className = "icon-button";
+  decrease.type = "button";
+  decrease.setAttribute(
+    "aria-label",
+    `Diminuir quantidade que veio do apto ${card.apartmentCode}`,
+  );
+  decrease.disabled = card.arrivedGuests === 0;
+  decrease.dataset.action = "decrease";
+  decrease.dataset.cardIndex = String(cardIndex);
+  decrease.textContent = "−";
+
+  const arrived = document.createElement("span");
+  arrived.className = "arrived-pill";
+  arrived.setAttribute("aria-live", "polite");
+  arrived.textContent = String(card.arrivedGuests);
+
+  const increase = document.createElement("button");
+  increase.className = "icon-button";
+  increase.type = "button";
+  increase.setAttribute(
+    "aria-label",
+    `Aumentar quantidade que veio do apto ${card.apartmentCode}`,
+  );
+  increase.disabled = card.arrivedGuests === card.expectedGuests;
+  increase.dataset.action = "increase";
+  increase.dataset.cardIndex = String(cardIndex);
+  increase.textContent = "+";
+
+  controls.append(decrease, arrived, increase);
+  controlCell.append(controlLabel, controls);
+
+  article.append(guestCell, attendanceCell, badgesCell, controlCell);
   return article;
 }
 
@@ -273,21 +371,22 @@ function renderIndicators() {
 }
 
 async function renderSessionBannerAsync(currentUser) {
-  if (
-    !(sessionBannerElement instanceof HTMLElement) ||
-    !(sessionBannerUserElement instanceof HTMLElement)
-  ) {
-    return;
-  }
-
   if (!currentUser) {
-    sessionBannerElement.classList.add("hidden");
+    sessionBannerElement?.classList.add("hidden");
     return;
   }
 
-  sessionBannerUserElement.textContent =
-    `${currentUser.name} · ${auth.getRoleLabel(currentUser.role)} · sessão de ${auth.getSessionDurationHours()} horas`;
-  sessionBannerElement.classList.remove("hidden");
+  // Cabeçalho oficial: nome + perfil (sem texto de duração de sessão).
+  if (
+    sessionUserNameElement instanceof HTMLElement &&
+    sessionUserRoleElement instanceof HTMLElement
+  ) {
+    sessionUserNameElement.textContent = currentUser.name;
+    sessionUserRoleElement.textContent = auth.getRoleLabel(currentUser.role);
+  } else if (sessionBannerUserElement instanceof HTMLElement) {
+    sessionBannerUserElement.textContent =
+      `${currentUser.name} · ${auth.getRoleLabel(currentUser.role)}`;
+  }
 
   if (usersLinkElement instanceof HTMLElement) {
     usersLinkElement.classList.toggle(
@@ -295,10 +394,15 @@ async function renderSessionBannerAsync(currentUser) {
       !auth.canAccessUserManagement(currentUser),
     );
   }
+
+  // Perfil Café: somente Café na sidebar (sem atalho de Operação).
+  document.querySelectorAll('[data-nav="operacao"]').forEach((node) => {
+    node.classList.toggle("hidden", currentUser.role === "cafe");
+  });
 }
 
 function renderCards() {
-  cardsListElement.innerHTML = "";
+  cardsListElement.replaceChildren();
 
   const visibleCards = getVisibleCards();
 
@@ -333,6 +437,32 @@ function renderCurrentDate() {
     month: "long",
     year: "numeric",
   }).format(new Date());
+}
+
+function setSidebarOpen(open) {
+  document.body.classList.toggle("op-sidebar-open", !!open);
+  const toggle = document.querySelector("#cafe-menu-toggle");
+  if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function bindSidebarControls() {
+  document.querySelector("#cafe-menu-toggle")?.addEventListener("click", () => {
+    setSidebarOpen(true);
+  });
+  document.querySelector("#cafe-sidebar-close")?.addEventListener("click", () => {
+    setSidebarOpen(false);
+  });
+  document.querySelector("#cafe-sidebar-backdrop")?.addEventListener("click", () => {
+    setSidebarOpen(false);
+  });
+  window.addEventListener("resize", () => {
+    if (window.innerWidth >= 1101) setSidebarOpen(false);
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && document.body.classList.contains("op-sidebar-open")) {
+      setSidebarOpen(false);
+    }
+  });
 }
 
 searchElement?.addEventListener("input", () => {
@@ -377,6 +507,7 @@ logoutButtonElement?.addEventListener("click", async () => {
 });
 
 async function initBreakfastPage() {
+  bindSidebarControls();
   renderCurrentDate();
 
   if (!auth || !auth.isConfigured()) {

@@ -185,19 +185,29 @@ function senhaOperacionalPendenteLista(reserva) {
   return true;
 }
 
+function apartmentNumberValue(code) {
+  const match = String(code ?? "").trim().match(/(\d+)/);
+  if (!match) return Number.POSITIVE_INFINITY;
+  const value = Number.parseInt(match[1], 10);
+  return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+}
+
 function compareApartamentoCrescente(a, b) {
   const sa = String(a.apartamento != null ? a.apartamento : "").trim();
   const sb = String(b.apartamento != null ? b.apartamento : "").trim();
+  const na = apartmentNumberValue(sa);
+  const nb = apartmentNumberValue(sb);
+  if (na !== nb) return na - nb;
   return sa.localeCompare(sb, "pt-BR", { numeric: true, sensitivity: "base" });
 }
 
 function sortReservasPorPrioridade(lista) {
   return [...lista].sort((a, b) => {
+    const apt = compareApartamentoCrescente(a, b);
+    if (apt !== 0) return apt;
     const ra = getFilaOperacionalRank(a);
     const rb = getFilaOperacionalRank(b);
     if (ra !== rb) return ra - rb;
-    const apt = compareApartamentoCrescente(a, b);
-    if (apt !== 0) return apt;
     return String(a.id || "").localeCompare(String(b.id || ""), "pt-BR");
   });
 }
@@ -5269,8 +5279,9 @@ async function initCheckinOperacional() {
     sessionUserRoleElement.textContent = auth.getRoleLabel(currentUser.role);
   }
 
+  // Reservas manuais descontinuadas: HITS é a única fonte. Mantém o nó por contrato, sempre oculto.
   if (opImportLink instanceof HTMLElement) {
-    opImportLink.classList.toggle("hidden", currentUser.role !== "admin");
+    opImportLink.classList.add("hidden");
   }
 
   reservas = await loadReservasOperacionaisFromProvider();
