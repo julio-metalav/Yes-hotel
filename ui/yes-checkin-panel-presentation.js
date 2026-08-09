@@ -229,9 +229,15 @@
       });
   }
 
+  /**
+   * Destino operacional para identidade de agrupamento.
+   * Prefere fechadura lógica/ttlock; inclui credencial_id quando disponível
+   * para não misturar senhas distintas. Campos irrelevantes (action, timestamp,
+   * usuario_id, contagens) ficam de fora da chave.
+   */
   function lockKeyFromPayload(p) {
     if (!p || typeof p !== "object") return "";
-    var key =
+    var lock =
       p.codigo_logico_destino != null
         ? p.codigo_logico_destino
         : p.lock_id_ttlock != null
@@ -241,7 +247,13 @@
             : p.fechadura_id != null
               ? p.fechadura_id
               : "";
-    return key === "" || key == null ? "" : String(key).trim();
+    var lockStr = lock === "" || lock == null ? "" : String(lock).trim();
+    var cred =
+      p.credencial_id != null && String(p.credencial_id).trim()
+        ? String(p.credencial_id).trim()
+        : "";
+    if (lockStr && cred) return lockStr + "#" + cred;
+    return lockStr || cred;
   }
 
   function channelFromFnrhDetalhe(p) {
@@ -291,11 +303,12 @@
     }
     var minMs = Math.min.apply(null, times);
     var maxMs = Math.max.apply(null, times);
-    if (minMs === maxMs || times.length === 1) {
-      return formatDateTimeCampoGrande(new Date(minMs));
-    }
     var minLabel = formatDateTimeCampoGrande(new Date(minMs));
     var maxLabel = formatDateTimeCampoGrande(new Date(maxMs));
+    // Compara o texto exibido (minuto), não só o timestamp bruto.
+    if (!minLabel || minLabel === maxLabel || times.length === 1) {
+      return minLabel || maxLabel || "";
+    }
     return "Entre " + minLabel + " e " + maxLabel;
   }
 
@@ -323,13 +336,16 @@
     var tone = "neutral";
 
     function base() {
+      // Sucesso: ignora erro_resumido/diagnóstico residual na chave (ex.:
+      // ttlock_provision_sem_pendente_com_itens já provisionada).
+      var groupErrorKey = status === "success" ? "" : errorKey;
       return {
         category: category,
         status: status,
         channel: channel,
-        errorKey: errorKey,
+        errorKey: groupErrorKey,
         lockKey: lockKey,
-        groupKey: buildGroupKey(category, status, channel, errorKey, lockKey),
+        groupKey: buildGroupKey(category, status, channel, groupErrorKey, lockKey),
         title: title,
         description: description,
         tone: tone,
@@ -637,7 +653,9 @@
   }
 
   /**
-   * Agrupa tentativas repetidas equivalentes (mesma categoria/status/canal/erro/fechadura, próximas no tempo).
+   * Agrupa confirmações equivalentes (mesma categoria/status/canal/erro/destino,
+   * gap ≤ 15 min). Não exige contiguidade: criação e envio intercalados não
+   * impedem agrupar dois sucessos da mesma operação.
    * Ordena por createdAtMs DESC antes de agrupar — não confia na ordem de entrada.
    */
   function groupHistoricoEvents(events, opts) {
@@ -645,23 +663,35 @@
     var maxGap = opts.maxGapMs != null ? opts.maxGapMs : GROUP_MAX_GAP_MS;
     var sorted = sortEventsNewestFirst(events);
     var presented = sorted.map(presentHistoricoEvent);
+    var used = [];
+    var ui;
+    for (ui = 0; ui < presented.length; ui++) used[ui] = false;
     var groups = [];
     var i = 0;
 
     while (i < presented.length) {
+      if (used[i]) {
+        i += 1;
+        continue;
+      }
       var cur = presented[i];
       var members = [cur];
-      var j = i + 1;
-      while (j < presented.length) {
-        var next = presented[j];
-        if (cur.groupKey !== next.groupKey) break;
-        if (cur.category === "desconhecido") break;
-        var last = members[members.length - 1];
-        var tLast = last.createdAtMs;
-        var tNext = next.createdAtMs;
-        if (!isNaN(tLast) && !isNaN(tNext) && Math.abs(tLast - tNext) > maxGap) break;
-        members.push(next);
-        j++;
+      used[i] = true;
+
+      if (cur.category !== "desconhecido") {
+        var lastMs = cur.createdAtMs;
+        var j;
+        for (j = i + 1; j < presented.length; j++) {
+          if (used[j]) continue;
+          var next = presented[j];
+          if (next.groupKey !== cur.groupKey) continue;
+          if (!isNaN(lastMs) && !isNaN(next.createdAtMs) && Math.abs(lastMs - next.createdAtMs) > maxGap) {
+            break;
+          }
+          members.push(next);
+          used[j] = true;
+          lastMs = next.createdAtMs;
+        }
       }
 
       var count = members.length;
@@ -672,10 +702,13 @@
 
       if (count > 1 && newest.status === "fail") {
         title = newest.title + " — " + count + " tentativas";
-        description = intervalDesc;
+        description =
+          intervalDesc && intervalDesc.indexOf("Entre ") === 0 ? intervalDesc : newest.description || "";
       } else if (count > 1 && newest.status === "success") {
         if (newest.category === "ttlock_senha") {
           title = "Senha criada com sucesso — " + count + " confirmações";
+        } else if (newest.category === "ttlock_senha_envio") {
+          title = "Senha enviada ao hóspede — " + count + " envios";
         } else if (newest.category === "fnrh_envio") {
           title = "Link da FNRH enviado — " + count + " confirmações";
         } else {
@@ -707,7 +740,7 @@
           return m.technical;
         }),
       });
-      i = j;
+      i += 1;
     }
 
     for (var g = 0; g < groups.length; g++) {
