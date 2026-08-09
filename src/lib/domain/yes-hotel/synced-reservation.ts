@@ -30,6 +30,11 @@ export type SyncedReservation = {
   adults: number | null;
   minors: number | null;
   totalGuests: number;
+  /**
+   * Texto bruto HITS `rooms[].mealPlanDesc`.
+   * Não interpretar como incluído/avulso sem homologação explícita.
+   */
+  mealPlanDesc: string | null;
   paymentStatus: SyncedPaymentStatus;
   phone: string | null;
   email: string | null;

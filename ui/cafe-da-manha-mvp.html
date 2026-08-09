@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=44" />
-    <link rel="stylesheet" href="./cafe-da-manha-mvp.css?v=4" />
+    <link rel="stylesheet" href="./cafe-da-manha-mvp.css?v=5" />
   </head>
   <body class="op-body checkin-view cafe-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -106,30 +106,51 @@
 
         <main class="op-content cafe-content">
           <div class="cafe-service-date">
-            <span>Data do serviço</span>
-            <strong id="current-date">—</strong>
+            <div class="cafe-service-date__main">
+              <span>Data do serviço</span>
+              <strong id="current-date">—</strong>
+              <span id="cafe-readonly-badge" class="cafe-readonly-badge hidden">Somente consulta</span>
+            </div>
+            <div class="cafe-service-date__controls">
+              <label class="cafe-date-field" for="cafe-date-input">
+                <span class="sr-only">Selecionar data do café</span>
+                <input id="cafe-date-input" class="op-field" type="date" />
+              </label>
+              <button
+                type="button"
+                class="op-btn op-btn--secondary hidden"
+                id="cafe-date-reset"
+              >
+                Voltar para a data operacional
+              </button>
+            </div>
           </div>
+
+          <div id="cafe-load-state" class="cafe-load-state hidden" role="status" aria-live="polite"></div>
+          <button type="button" class="op-btn op-btn--secondary cafe-retry hidden" id="cafe-retry-button">
+            Tentar novamente
+          </button>
 
           <section class="yes-kpis yes-kpis--four cafe-kpis" aria-label="Indicadores do café da manhã">
             <article>
               <span>Hóspedes previstos</span>
               <strong id="kpi-expected">0</strong>
-              <small>Total programado para hoje</small>
+              <small>Incluídos ou avulsos pagos</small>
             </article>
             <article>
-              <span>Hóspedes atendidos</span>
+              <span>Cafés atendidos</span>
               <strong id="kpi-arrived">0</strong>
               <small id="kpi-progress">0% do atendimento</small>
             </article>
             <article>
-              <span>Hóspedes pendentes</span>
+              <span>Faltantes</span>
               <strong id="kpi-missing">0</strong>
               <small>Aguardando atendimento</small>
             </article>
             <article>
-              <span>Apartamentos concluídos</span>
+              <span>Apartamentos</span>
               <strong id="kpi-complete-apartments">0</strong>
-              <small id="kpi-apartments-total">de 0 apartamentos</small>
+              <small id="kpi-apartments-total">na data selecionada</small>
             </article>
           </section>
 
@@ -174,8 +195,8 @@
               <section class="cards-list" id="cards-list" aria-live="polite"></section>
               <section class="empty-state hidden" id="empty-state">
                 <span aria-hidden="true">YH</span>
-                <h2>Nenhum apartamento encontrado</h2>
-                <p>Ajuste a busca ou selecione outro filtro para continuar.</p>
+                <h2 id="empty-state-title">Nenhum café previsto para esta data.</h2>
+                <p id="empty-state-text">Não há reservas sincronizadas elegíveis para o café nesta data.</p>
               </section>
             </div>
           </section>
@@ -186,6 +207,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
-    <script defer src="./cafe-da-manha-mvp.js?v=4"></script>
+    <script defer src="./yes-cafe-policy.js?v=1"></script>
+    <script defer src="./cafe-da-manha-mvp.js?v=5"></script>
   </body>
 </html>

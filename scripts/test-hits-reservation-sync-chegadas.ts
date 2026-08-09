@@ -63,6 +63,7 @@ function baseReservation(patch: Partial<SyncedReservation> = {}): SyncedReservat
     adults: null,
     minors: null,
     totalGuests: 2,
+    mealPlanDesc: null,
     paymentStatus: "pago",
     phone: "+55 67 99999-0001",
     email: "marina@example.com",

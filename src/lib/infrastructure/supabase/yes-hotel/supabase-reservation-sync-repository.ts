@@ -292,6 +292,8 @@ export class SupabaseReservationSyncRepository implements ReservationSyncReposit
       synced_at: nowIso,
       origem_externa: ORIGEM,
       external_reservation_id: reservation.externalReservationId,
+      total_hospedes_hits: reservation.totalGuests,
+      meal_plan_desc: reservation.mealPlanDesc ?? null,
       updated_at: nowIso,
     };
 

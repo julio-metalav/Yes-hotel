@@ -8,9 +8,10 @@
 .cafe-view .cafe-service-date {
   display: flex;
   flex-shrink: 0;
-  align-items: baseline;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px 12px;
   padding: 10px 14px;
   border: 1px solid var(--op-border);
   border-radius: var(--op-radius-lg);
@@ -18,7 +19,15 @@
   box-shadow: var(--op-shadow);
 }
 
-.cafe-view .cafe-service-date span {
+.cafe-view .cafe-service-date__main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 10px;
+  min-width: 0;
+}
+
+.cafe-view .cafe-service-date__main > span:first-child {
   color: var(--op-text-muted);
   font-size: 12px;
   font-weight: 600;
@@ -28,7 +37,68 @@
   color: var(--op-text);
   font-size: 14px;
   font-weight: 700;
-  text-transform: capitalize;
+}
+
+.cafe-view .cafe-readonly-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--op-border);
+  background: var(--op-muted);
+  color: var(--op-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cafe-view .cafe-service-date__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cafe-view .cafe-date-field .op-field {
+  min-height: 40px;
+}
+
+.cafe-view .cafe-load-state {
+  padding: 10px 12px;
+  border-radius: var(--op-radius-lg);
+  border: 1px solid var(--op-border);
+  background: var(--op-surface);
+  color: var(--op-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cafe-view .cafe-load-state.is-error {
+  border-color: rgba(180, 60, 60, 0.35);
+  background: rgba(180, 60, 60, 0.08);
+  color: #8a2a2a;
+}
+
+.cafe-view .cafe-load-state.hidden,
+.cafe-view .cafe-retry.hidden,
+.cafe-view .cafe-readonly-badge.hidden {
+  display: none !important;
+}
+
+.cafe-view .guest-line {
+  display: block;
+  color: var(--op-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.cafe-view .breakfast-card.is-kind-sem_cafe .payment-badge,
+.cafe-view .breakfast-card.is-kind-nao_mapeado .payment-badge {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  line-height: 1.25;
 }
 
 .cafe-view .cafe-kpis article {
@@ -456,6 +526,22 @@
     flex-wrap: wrap;
     align-items: baseline;
     gap: 0;
+  }
+
+  .cafe-view .guest-line {
+    flex: 1 0 100%;
+    font-size: 11px;
+  }
+
+  .cafe-view .cafe-service-date__controls {
+    width: 100%;
+  }
+
+  .cafe-view .cafe-date-field,
+  .cafe-view .cafe-date-field .op-field,
+  .cafe-view #cafe-date-reset {
+    width: 100%;
+    max-width: 100%;
   }
 
   .cafe-view .apartment-code {
