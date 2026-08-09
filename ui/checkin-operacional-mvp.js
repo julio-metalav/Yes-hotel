@@ -1631,9 +1631,6 @@ function renderOperationalMetrics() {
   const fnrhPending = list.filter((reservation) =>
     hasFnrhPendente(reservation),
   ).length;
-  const accessGranted = list.filter((reservation) =>
-    acessoLiberadoEfetivo(reservation),
-  ).length;
   const completionPercent = summary.chegadasHoje
     ? Math.round((completedToday / summary.chegadasHoje) * 100)
     : 0;
@@ -1656,7 +1653,15 @@ function renderOperationalMetrics() {
     opKpiFnrhNote.textContent =
       fnrhPending > 0 ? "Requer atenção" : "Sem pendências";
   }
-  if (opKpiAccess) opKpiAccess.textContent = String(accessGranted);
+  // Mesmo universo da aba "Acesso liberado": lista operacional (busca/período + ocultação pós-corte).
+  // Antes o KPI usava todas as reservas carregadas e podia divergir (ex.: 5 no KPI × 4 na aba).
+  const Pcount = getPanelPresentation();
+  const baseLista = listaBaseContagens();
+  const accessGrantedOperacional =
+    Pcount && typeof Pcount.countAcessosLiberados === "function"
+      ? Pcount.countAcessosLiberados(baseLista)
+      : baseLista.filter((r) => acessoLiberadoEfetivo(r)).length;
+  if (opKpiAccess) opKpiAccess.textContent = String(accessGrantedOperacional);
   renderOccupiedGuestsCard();
 }
 
@@ -2233,13 +2238,12 @@ function syncDetailPanelChrome(reserva) {
     if (detailSubtitleElement instanceof HTMLElement) detailSubtitleElement.textContent = "";
     return;
   }
-  const st = derivarStatusOperacional(reserva);
-  const badgeHtml = `<span class="${badgeClassFromStatusType(st.type)}">${escapeHtml(st.label)}</span>`;
+  // Cabeçalho: identidade (apto + hóspede). Situação operacional fica no card Situação.
+  if (opDetailBadgeWrap instanceof HTMLElement) {
+    opDetailBadgeWrap.innerHTML = "";
+  }
   if (opDetailApto instanceof HTMLElement) {
     opDetailApto.textContent = String(reserva.apartamento || "—");
-  }
-  if (opDetailBadgeWrap instanceof HTMLElement) {
-    opDetailBadgeWrap.innerHTML = badgeHtml;
   }
   if (detailTitleElement instanceof HTMLElement) {
     detailTitleElement.textContent = (reserva.hospedePrincipal || "").trim() || "—";
@@ -4222,13 +4226,18 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
     };
   }
 
+  var senhaJaRegistrada = !!(
+    reserva.senhaEnviadaEm ||
+    lastOk ||
+    reserva.ttlockPrincipalTodosProvisionados
+  );
+
   var precisaSenhaBackend =
     PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND &&
     temBotaoSenhaBackend &&
     (reserva.fnrhStatusAgregado || "") === "fnrh_completo" &&
     acessoLiberadoEfetivo(reserva) &&
-    !reserva.senhaEnviadaEm &&
-    !lastOk;
+    !senhaJaRegistrada;
 
   if (precisaSenhaBackend) {
     return {
@@ -4239,7 +4248,7 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
     };
   }
 
-  if (failRecente && lastFail && lastFail.p) {
+  if (failRecente && lastFail && lastFail.p && !senhaJaRegistrada) {
     var tb = lastFail.p.tipo_bloqueio;
     if (tb === "sem_contato" || tb === "falha_canais") {
       return {
@@ -4271,11 +4280,10 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
   }
 
   if (acessoLiberadoEfetivo(reserva) && !reserva.entrouNoApto) {
-    var senhaOk = !!(reserva.senhaEnviadaEm || lastOk);
-    if (senhaOk) {
+    if (senhaJaRegistrada) {
       return {
         variant: "success",
-        texto: "Senha já enviada com sucesso (registrada). Aguarde a chegada do hóspede.",
+        texto: "Reserva pronta. Aguarde a chegada do hóspede.",
         listaLabel: "Aguardar chegada",
         cta: null,
       };
@@ -4354,29 +4362,35 @@ function buildSituacaoAcaoTopoHtml(
 
   var primaryRow = "";
   var usedSenhaAsPrimary = false;
+  var aguardarChegada = !!(rec && rec.listaLabel === "Aguardar chegada" && !rec.cta);
 
-  if (enviarLinksBtnHtml && String(enviarLinksBtnHtml).indexOf("detail-enviar-links-btn") !== -1) {
-    primaryRow = enviarLinksBtnHtml;
-  } else if (reenviarFnrhTopoBtnHtml && String(reenviarFnrhTopoBtnHtml).indexOf("detail-reenviar-fnrh-topo-btn") !== -1) {
-    primaryRow = reenviarFnrhTopoBtnHtml;
-  } else if (rec.cta && rec.cta.kind === "gerar_senha" && temBotaoSenhaBackend && enviarSenhaBtnHtml) {
-    primaryRow = enviarSenhaBtnHtml;
-    usedSenhaAsPrimary = true;
-  } else if (rec.cta && rec.cta.kind && rec.cta.kind !== "ir_hospedes" && rec.cta.label) {
-    primaryRow =
-      '<button type="button" class="primary-button detail-recomendacao-cta-btn" data-recomendacao-cta="' +
-      escapeHtml(rec.cta.kind) +
-      '">' +
-      escapeHtml(rec.cta.label) +
-      "</button>";
-  } else if (temBotaoSenhaBackend && enviarSenhaBtnHtml) {
-    primaryRow = enviarSenhaBtnHtml;
-    usedSenhaAsPrimary = true;
+  if (!aguardarChegada) {
+    if (enviarLinksBtnHtml && String(enviarLinksBtnHtml).indexOf("detail-enviar-links-btn") !== -1) {
+      primaryRow = enviarLinksBtnHtml;
+    } else if (reenviarFnrhTopoBtnHtml && String(reenviarFnrhTopoBtnHtml).indexOf("detail-reenviar-fnrh-topo-btn") !== -1) {
+      primaryRow = reenviarFnrhTopoBtnHtml;
+    } else if (rec.cta && rec.cta.kind === "gerar_senha" && temBotaoSenhaBackend && enviarSenhaBtnHtml) {
+      primaryRow = enviarSenhaBtnHtml;
+      usedSenhaAsPrimary = true;
+    } else if (rec.cta && rec.cta.kind && rec.cta.kind !== "ir_hospedes" && rec.cta.label) {
+      primaryRow =
+        '<button type="button" class="primary-button detail-recomendacao-cta-btn" data-recomendacao-cta="' +
+        escapeHtml(rec.cta.kind) +
+        '">' +
+        escapeHtml(rec.cta.label) +
+        "</button>";
+    }
   }
 
   var secondaryRow = "";
   if (temBotaoSenhaBackend && enviarSenhaBtnHtml && !usedSenhaAsPrimary) {
-    secondaryRow = enviarSenhaBtnHtml;
+    // Reenviar/gerar senha é excepcional quando a próxima ação é aguardar chegada.
+    secondaryRow =
+      '<details class="detail-mais-acoes">' +
+      '<summary class="detail-mais-acoes-sum">Mais ações</summary>' +
+      '<div class="detail-mais-acoes-body">' +
+      enviarSenhaBtnHtml +
+      "</div></details>";
   }
 
   var situacaoLinha = escapeHtml(st.label);
@@ -4782,6 +4796,15 @@ function renderDetail(reserva) {
   const prontos = getProntosParaEnvio(reserva);
 
   const Ppres = getPanelPresentation();
+  const guestMgmt =
+    Ppres && typeof Ppres.presentGuestManagementEntry === "function"
+      ? Ppres.presentGuestManagementEntry(hospedes.length)
+      : {
+          mode: hospedes.length <= 1 ? "add" : "manage",
+          label: hospedes.length <= 1 ? "Adicionar acompanhante" : "Gerenciar hóspedes (" + hospedes.length + ")",
+          showHeaderAdd: hospedes.length <= 1,
+          showPerGuestManage: hospedes.length > 1,
+        };
   const guestsHtml = hospedes
     .map((h, index) => {
       syncGuestOriginAndCollectionMode(h);
@@ -4791,11 +4814,12 @@ function renderDetail(reserva) {
           : null;
       const confirmed = h.statusOperacional === GUEST_STATUS.CONFIRMADO;
       const statusClass = guestStatusClass(h.statusOperacional);
-      const statusLabel = confirmed
+      const cadastroOk = confirmed
         ? presented && presented.cadastroOkLabel
           ? presented.cadastroOkLabel
           : "Cadastro do hóspede: OK"
-        : guestStatusLabel(h.statusOperacional);
+        : "";
+      const statusLabelPending = confirmed ? "" : guestStatusLabel(h.statusOperacional);
       const origemLabel = getOrigemCadastroLabel(h.origemCadastro);
       const modoLabel = getModoColetaLabel(h.modoColetaFnrh);
       const operationalMsg = confirmed
@@ -4803,9 +4827,6 @@ function renderDetail(reserva) {
         : presented && presented.pendencyText
           ? presented.pendencyText
           : getGuestOperationalMessage(h);
-      const principalBadge = h.principal
-        ? '<span class="guest-detail-badge-principal">Hóspede principal</span>'
-        : "";
       const vehicleHtml =
         h.principal && reserva.veiculoPlaca && reserva.veiculoPlaca.trim()
           ? `<div class="guest-detail-vehicle">Veículo: ${escapeHtml(reserva.veiculoPlaca.trim())}${reserva.veiculoCor ? " • " + escapeHtml(reserva.veiculoCor.trim()) : ""}</div>`
@@ -4840,23 +4861,20 @@ function renderDetail(reserva) {
         `${fnrhLinkApoioHtml}` +
         `</details>`;
 
-      const companionsCount = hospedes.length;
-      const showGerenciar =
-        companionsCount > 1 || !h.principal || setPrincipalBtn || confirmarBtn;
-      const maisOpcoesHtml = showGerenciar
-        ? `<details class="guest-detail-extra-collapsible"${companionsCount > 1 ? "" : ""}>` +
-          `<summary class="guest-detail-meta-sum">Gerenciar hóspedes</summary>` +
-          `${compositionActions}` +
-          `${confirmarBtn ? `<div class="guest-detail-actions">${confirmarBtn}</div>` : ""}` +
-          `</details>`
-        : `<details class="guest-detail-extra-collapsible guest-detail-extra-collapsible--compact">` +
-          `<summary class="guest-detail-meta-sum">Gerenciar hóspedes</summary>` +
-          `${compositionActions}` +
-          `</details>`;
-
       const nomeVal = escapeHtml((h.nome || "").trim());
       const emailVal = escapeHtml((h.email || "").trim());
       const waRaw = (h.whatsapp || "").trim();
+
+      // Ações de composição ficam no bloco único da seção (evita duplicar "Gerenciar hóspedes").
+      const maisOpcoesHtml = confirmarBtn
+        ? `<div class="guest-detail-actions">${confirmarBtn}</div>`
+        : "";
+      const manageRowHtml = guestMgmt.showPerGuestManage
+        ? `<div class="guest-manage-row" data-guest-manage="${index}">` +
+          `<span class="guest-manage-name">${nomeVal || "Hóspede"}</span>` +
+          compositionActions +
+          `</div>`
+        : "";
       const waDisplay = escapeHtml(
         presented && presented.whatsappDisplay
           ? presented.whatsappDisplay
@@ -4865,13 +4883,21 @@ function renderDetail(reserva) {
             : waRaw,
       );
       const readOnly = !!(presented && presented.preferReadOnly) || confirmed;
+      const roleLine = h.principal
+        ? '<p class="guest-detail-role">Hóspede principal</p>'
+        : '<p class="guest-detail-role">Acompanhante</p>';
+      const nameLine = `<p class="guest-detail-nome">${nomeVal || "—"}</p>`;
+      const badgeLine = confirmed
+        ? `<p class="guest-detail-badge-ok" role="status">${escapeHtml(cadastroOk)}</p>`
+        : statusLabelPending
+          ? `<p class="guest-detail-status ${statusClass}">${escapeHtml(statusLabelPending)}</p>`
+          : "";
       const readBlock = `
           <dl class="guest-detail-readout">
-            <div><dt>Nome</dt><dd>${nomeVal || "—"}</dd></div>
             <div><dt>E-mail</dt><dd>${emailVal || "—"}</dd></div>
             <div><dt>WhatsApp</dt><dd>${waDisplay || "—"}</dd></div>
           </dl>
-          <button type="button" class="guest-link-btn guest-edit-toggle-btn" data-guest-index="${index}">Editar dados</button>`;
+          <button type="button" class="secondary-button guest-edit-toggle-btn" data-guest-index="${index}">Editar dados</button>`;
       const editBlock = `
           <div class="guest-detail-edit-fields${readOnly ? " hidden" : ""}" data-guest-edit="${index}">
             <div class="guest-detail-contact-row guest-detail-name-edit">
@@ -4888,21 +4914,29 @@ function renderDetail(reserva) {
             </div>
           </div>`;
 
-      return `
+      return {
+        cardHtml: `
         <div class="guest-detail-card${confirmed ? " guest-detail-card--ok" : ""}" data-guest-index="${index}">
-          <div class="guest-detail-name-row">
-            ${principalBadge}
-            <span class="guest-detail-status ${statusClass}${confirmed ? " guest-status-confirmado" : ""}">${escapeHtml(statusLabel)}</span>
-          </div>
+          ${roleLine}
+          ${nameLine}
+          ${badgeLine}
           ${operationalMsg ? `<p class="guest-detail-pendency">${escapeHtml(operationalMsg)}</p>` : ""}
           ${readOnly ? readBlock : ""}
           ${editBlock}
           ${metaDetalhesHtml}
           ${maisOpcoesHtml}
         </div>
-      `;
-    })
-    .join("");
+      `,
+        manageRowHtml: manageRowHtml,
+      };
+    });
+  const guestsCardsHtml = guestsHtml.map((g) => g.cardHtml).join("");
+  const manageBlockHtml = guestMgmt.showPerGuestManage
+    ? `<details class="guest-detail-extra-collapsible" id="detail-manage-guests">` +
+      `<summary class="guest-detail-meta-sum">${escapeHtml(guestMgmt.label)}</summary>` +
+      `<div class="guest-manage-list">${guestsHtml.map((g) => g.manageRowHtml).join("")}</div>` +
+      `</details>`
+    : "";
 
   let enviarAlertsOnly = "";
   let enviarLinksBtnHtml = "";
@@ -4936,9 +4970,8 @@ function renderDetail(reserva) {
   } else if (prontosCount > 0) {
     enviarLinksBtnHtml = `<button type="button" class="primary-button detail-top-acao-btn detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}" title="${escapeHtml(getEnviarButtonLabel())}">${escapeHtml(getEnviarLinkTopoLabel())}</button>`;
   } else if (confirmadosCount === totalH) {
-    enviarAlertsOnly = acessoLiberadoEfetivo(reserva)
-      ? '<div class="detail-enviar-links-alert is-ok">Todas as FNRHs confirmadas. Acesso liberado; aguardando chegada do hóspede.</div>'
-      : '<div class="detail-enviar-links-alert is-ok">Todas as FNRHs estão confirmadas. Reserva pronta para liberar acesso.</div>';
+    // Evita repetir o mesmo estado do card Situação / próxima ação.
+    enviarAlertsOnly = "";
   } else if (enviadosCount > 0) {
     enviarAlertsOnly = `<div class="detail-enviar-links-alert is-ok">Link(s) enviado(s) para ${enviadosCount} hóspede(s). Aguardando confirmação.</div>`;
   }
@@ -5025,13 +5058,20 @@ function renderDetail(reserva) {
   const resumoComunicacao = formatResumoComunicacao(reserva);
   const localModeDetailHtml = buildLocalModeDetailHtml(reserva);
 
-  const historicoNewestFirst = (reserva.historicoOperacional || []).slice().reverse();
+  // groupHistoricoEvents ordena por timestamp real (mais recente primeiro); não confiar na ordem do array.
+  const historicoRaw = (reserva.historicoOperacional || []).slice();
   let historicoHtml = `<p class="timeline-empty">Nenhum evento registrado ainda.</p>`;
-  if (historicoNewestFirst.length > 0) {
+  if (historicoRaw.length > 0) {
     if (Ppres && typeof Ppres.groupHistoricoEvents === "function" && typeof Ppres.renderHistoricoGroupsHtml === "function") {
-      historicoHtml = Ppres.renderHistoricoGroupsHtml(Ppres.groupHistoricoEvents(historicoNewestFirst));
+      historicoHtml = Ppres.renderHistoricoGroupsHtml(Ppres.groupHistoricoEvents(historicoRaw));
     } else {
-      historicoHtml = historicoNewestFirst
+      historicoHtml = historicoRaw
+        .slice()
+        .sort(function (a, b) {
+          const ta = a && a.criadoEmIso ? new Date(a.criadoEmIso).getTime() : 0;
+          const tb = b && b.criadoEmIso ? new Date(b.criadoEmIso).getTime() : 0;
+          return tb - ta;
+        })
         .map(
           (ev) =>
             `<div class="timeline-item"><span class="timeline-time">${escapeHtml(ev.em)}</span> — <span class="timeline-title">${escapeHtml(ev.titulo)}</span>${ev.detalhe ? `<br><span class="timeline-detalhe">${escapeHtml(ev.detalhe)}</span>` : ""}</div>`,
@@ -5046,9 +5086,11 @@ function renderDetail(reserva) {
     <div class="timeline-list hist-list">${historicoHtml}</div>
   </div></details>`;
 
-  const addGuestLabel = hospedes.length <= 1 ? "Adicionar acompanhante" : "Adicionar";
   const resumoComHtml = resumoComunicacao
     ? `<p class="hospedes-block-comunicacao-line" title="Resumo de canais de envio por hóspede">${escapeHtml(resumoComunicacao)}</p>`
+    : "";
+  const guestHeaderAction = guestMgmt.showHeaderAdd
+    ? `<button type="button" class="secondary-button detail-add-guest-btn" id="detail-add-guest-btn" data-reserva-id="${escapeHtml(reserva.id)}">${escapeHtml(guestMgmt.label)}</button>`
     : "";
 
   detailBodyElement.innerHTML = `
@@ -5060,10 +5102,11 @@ function renderDetail(reserva) {
     <div class="reservation-detail-section reservation-detail-hospedes-block reservation-detail-hospedes-apoio" id="detail-hospedes-section">
       <div class="reservation-detail-section-header-row reservation-detail-hospedes-header">
         <p class="reservation-detail-section-title reservation-detail-hospedes-title">Hóspedes e contatos</p>
-        <button type="button" class="guest-link-btn guest-link-btn--subtle detail-add-guest-btn" id="detail-add-guest-btn" data-reserva-id="${escapeHtml(reserva.id)}">${escapeHtml(addGuestLabel)}</button>
+        ${guestHeaderAction}
       </div>
       ${resumoComHtml}
-      ${guestsHtml}
+      ${guestsCardsHtml}
+      ${manageBlockHtml}
     </div>
     ${timelineSectionHtml}
   `;

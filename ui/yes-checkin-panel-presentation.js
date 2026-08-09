@@ -81,13 +81,87 @@
   }
 
   /**
+   * Remove conteúdo técnico (env vars, URLs, stack traces, mensagens SDK)
+   * e devolve frases operacionais curtas em português para a recepção.
+   */
+  function sanitizeOperationalText(text) {
+    if (text == null || text === "") return "";
+    var s = String(text).trim();
+    if (!s) return "";
+
+    if (/\bat\s+\S+\s*\(/.test(s) || /^\s*Error:/i.test(s) || /stack trace/i.test(s)) {
+      return "";
+    }
+
+    if (/HITS_FNRH_WEBHOOK|FNRH.*WEBHOOK/i.test(s)) {
+      return "Não foi possível enviar a FNRH ao HITS";
+    }
+
+    if (/[A-Z][A-Z0-9_]*(_URL|WEBHOOK)/.test(s)) {
+      if (/FNRH|fnrh|HITS/i.test(s)) return "Não foi possível enviar a FNRH ao HITS";
+      if (/TTLOCK|ttlock|senha|password|keyboard|lock/i.test(s)) {
+        return "Não foi possível concluir a criação da senha";
+      }
+      return "Falha técnica no envio";
+    }
+
+    if (/https?:\/\//i.test(s)) {
+      if (/fnrh|hits/i.test(s)) return "Não foi possível enviar a FNRH ao HITS";
+      if (/ttlock|senha|password|lock/i.test(s)) return "Não foi possível concluir a criação da senha";
+      return "Falha técnica no envio";
+    }
+
+    var looksEnglish =
+      !/[áàâãéêíóôõúçÁÀÂÃÉÊÍÓÔÕÚÇ]/.test(s) &&
+      /[a-zA-Z]{4,}/.test(s) &&
+      /(?:error|failed|timeout|exception|invalid|null|undefined|request|response|sdk|api|ttlock|keyboard|password|provision)/i.test(
+        s,
+      );
+
+    if (looksEnglish) {
+      if (/send|envio|communicat|deliver|smtp|whatsapp/i.test(s)) {
+        return "Falha técnica no envio";
+      }
+      if (/ttlock|password|keyboard|lock|provision|senha/i.test(s)) {
+        return "Não foi possível concluir a criação da senha";
+      }
+      if (/fnrh|hits/i.test(s)) {
+        return "Não foi possível enviar a FNRH ao HITS";
+      }
+      return "";
+    }
+
+    if (/[A-Z]{2,}_[A-Z0-9_]{2,}/.test(s)) {
+      if (/FNRH|HITS/i.test(s)) return "Não foi possível enviar a FNRH ao HITS";
+      if (/TTLOCK|LOCK|SENHA/i.test(s)) return "Não foi possível concluir a criação da senha";
+      return "";
+    }
+
+    s = s
+      .replace(/https?:\/\/\S+/gi, "")
+      .replace(/\b[A-Z][A-Z0-9_]{3,}\b/g, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
+    if (!s || /^[\s.,;:·\-–—]+$/.test(s)) return "";
+
+    if (s.length > 180) return "";
+
+    return s;
+  }
+
+  /**
    * Apresentação do card de hóspede (estado atual).
    * FNRH confirmada: Cadastro OK; não exibe ruído de “ainda não enviado”.
    */
   function presentGuestCardState(guest) {
     var status = guest && guest.statusOperacional != null ? String(guest.statusOperacional) : "";
     var confirmed = status === "confirmado";
-    var pendingSend = status === "enviado" || status === "pronto_para_envio" || status === "aguardando_contato" || status === "nao_identificado";
+    var pendingSend =
+      status === "enviado" ||
+      status === "pronto_para_envio" ||
+      status === "aguardando_contato" ||
+      status === "nao_identificado";
     var email = guest && guest.email != null ? String(guest.email).trim() : "";
     var whatsappRaw = guest && guest.whatsapp != null ? String(guest.whatsapp).trim() : "";
     var nome = guest && guest.nome != null ? String(guest.nome).trim() : "";
@@ -131,6 +205,7 @@
   /** Resumo de comunicação da reserva: omite “ainda não enviado” quando FNRH já está confirmada. */
   function formatResumoComunicacaoApresentacao(counts, opts) {
     opts = opts || {};
+    if (opts.allFnrhConfirmed) return "";
     var parts = [];
     var r = counts || {};
     if (r.porWhatsapp > 0) parts.push(r.porWhatsapp + " com envio por WhatsApp");
@@ -140,7 +215,6 @@
     if (!hideNaoEnviado && r.naoEnviado > 0) {
       parts.push(r.naoEnviado + " ainda não enviado");
     }
-    if (opts.allFnrhConfirmed) return "";
     return parts.length ? parts.join("; ") : "";
   }
 
@@ -153,6 +227,21 @@
       .replace(/\b\w/g, function (c) {
         return c.toUpperCase();
       });
+  }
+
+  function lockKeyFromPayload(p) {
+    if (!p || typeof p !== "object") return "";
+    var key =
+      p.codigo_logico_destino != null
+        ? p.codigo_logico_destino
+        : p.lock_id_ttlock != null
+          ? p.lock_id_ttlock
+          : p.lock_id != null
+            ? p.lock_id
+            : p.fechadura_id != null
+              ? p.fechadura_id
+              : "";
+    return key === "" || key == null ? "" : String(key).trim();
   }
 
   function channelFromFnrhDetalhe(p) {
@@ -188,9 +277,32 @@
     return "";
   }
 
+  function buildGroupKey(category, status, channel, errorKey, lockKey) {
+    return [category, status, channel || "", errorKey || "", lockKey || ""].join("|");
+  }
+
+  function intervalDescriptionFromMembers(members) {
+    var times = [];
+    members.forEach(function (m) {
+      if (m && !isNaN(m.createdAtMs)) times.push(m.createdAtMs);
+    });
+    if (!times.length) {
+      return members[0] && members[0].whenLabel ? members[0].whenLabel : "";
+    }
+    var minMs = Math.min.apply(null, times);
+    var maxMs = Math.max.apply(null, times);
+    if (minMs === maxMs || times.length === 1) {
+      return formatDateTimeCampoGrande(new Date(minMs));
+    }
+    var minLabel = formatDateTimeCampoGrande(new Date(minMs));
+    var maxLabel = formatDateTimeCampoGrande(new Date(maxMs));
+    return "Entre " + minLabel + " e " + maxLabel;
+  }
+
   /**
    * Tradução visual de um evento do histórico.
    * Nunca inventa sucesso: fallback neutro para tipos desconhecidos.
+   * Descrições operacionais — sem env vars, URLs ou mensagens SDK cruas.
    */
   function presentHistoricoEvent(ev) {
     var tipo = ev && ev.tipo != null ? String(ev.tipo) : "";
@@ -198,11 +310,9 @@
     var detalheOrig = ev && ev.detalhe != null ? ev.detalhe : null;
     var iso = (ev && (ev.criadoEmIso || ev.criado_em)) || null;
     var payload = parseJsonSafe(detalheOrig);
-    var whenLabel = iso
-      ? formatDateTimeCampoGrande(iso)
-      : ev && ev.em
-        ? String(ev.em)
-        : "";
+    var lockKey = lockKeyFromPayload(payload);
+    var whenLabel = iso ? formatDateTimeCampoGrande(iso) : ev && ev.em ? String(ev.em) : "";
+    var createdAtMs = iso ? new Date(iso).getTime() : NaN;
 
     var category = "outro";
     var status = "info";
@@ -218,11 +328,13 @@
         status: status,
         channel: channel,
         errorKey: errorKey,
+        lockKey: lockKey,
+        groupKey: buildGroupKey(category, status, channel, errorKey, lockKey),
         title: title,
         description: description,
         tone: tone,
         whenLabel: whenLabel,
-        createdAtMs: iso ? new Date(iso).getTime() : NaN,
+        createdAtMs: createdAtMs,
         technical: {
           tipo: tipo,
           titulo: tituloOrig,
@@ -249,7 +361,8 @@
         tone = "danger";
         title = "FNRH não enviada";
         errorKey = errorKeyFromPayload(payload) || "erros";
-        description = errorKeyFromPayload(payload) || "Falha no envio do link.";
+        description =
+          sanitizeOperationalText(errorKeyFromPayload(payload)) || "Falha no envio do link.";
       } else if (erros > 0 && enviados > 0) {
         status = "fail";
         tone = "warn";
@@ -287,18 +400,18 @@
         tone = "warn";
         title = "Envio ao HITS pendente";
         errorKey = errorKeyFromPayload(payload) || st;
-        description = payload && payload.erro ? String(payload.erro) : "";
+        description = "Não foi possível enviar a FNRH ao HITS";
       } else if (st === "erro" || st === "failed" || st === "falhou") {
         status = "fail";
         tone = "danger";
         title = "Envio ao HITS falhou";
         errorKey = errorKeyFromPayload(payload) || st;
-        description = payload && payload.erro ? String(payload.erro) : "";
+        description = "Não foi possível enviar a FNRH ao HITS";
       } else {
         status = "info";
         tone = "neutral";
         title = "Sincronização FNRH com HITS";
-        description = st ? "Status: " + st : "";
+        description = st ? sanitizeOperationalText("Status: " + st) : "";
         errorKey = errorKeyFromPayload(payload);
       }
       return base();
@@ -324,17 +437,19 @@
         status = "success";
         tone = "success";
         title = "Senha criada com sucesso";
-        description = tipo === "ttlock_provision_ja_concluido" ? "Já estava pronta nas fechaduras." : "";
+        description =
+          tipo === "ttlock_provision_ja_concluido" ? "Já estava pronta nas fechaduras." : "";
       } else if (tipo === "ttlock_provision_falhou" || tipo === "falha_gerar_senha") {
         status = "fail";
         tone = "danger";
         title = "Falha ao criar a senha";
-        description = errorKey || "";
+        description = "Não foi possível concluir a criação da senha";
       } else if (tipo === "falha_enviar_credenciais") {
         status = "fail";
         tone = "danger";
         title = "Falha no envio da senha";
-        description = errorKey || "";
+        description =
+          sanitizeOperationalText(payload && payload.motivo_bloqueio) || "Falha técnica no envio";
         channel = channelFromSenhaDetalhe(payload);
       } else if (tipo === "ttlock_credencial_nao_encontrada") {
         status = "fail";
@@ -342,7 +457,6 @@
         title = "Senha ainda não disponível";
         description = "Credencial não encontrada para provisionar.";
       } else {
-        // sem_pendente_com_itens: não inventar sucesso
         var sf = payload && payload.status_final != null ? String(payload.status_final) : "";
         if (sf === "provisionada") {
           status = "success";
@@ -353,6 +467,7 @@
           tone = "warn";
           title = "Senha pendente em parte dos acessos";
           errorKey = errorKey || "parcial";
+          description = "Não foi possível concluir a criação da senha";
         } else {
           status = "pending";
           tone = "warn";
@@ -363,6 +478,7 @@
         status = "fail";
         tone = "warn";
         title = "Senha pendente em parte dos acessos";
+        description = "Não foi possível concluir a criação da senha";
       }
       return base();
     }
@@ -376,15 +492,21 @@
       channel = channelFromSenhaDetalhe(payload);
       errorKey = errorKeyFromPayload(payload);
       var bloqueio = payload && payload.tipo_bloqueio ? String(payload.tipo_bloqueio) : "";
-      var okFlag = payload && (payload.ok === true || payload.sucesso === true || payload.status === "ok");
+      var okFlag =
+        payload && (payload.ok === true || payload.sucesso === true || payload.status === "ok");
       var failFlag =
         !!bloqueio ||
-        payload && (payload.ok === false || payload.sucesso === false || payload.status === "erro" || payload.status === "failed");
+        (payload &&
+          (payload.ok === false ||
+            payload.sucesso === false ||
+            payload.status === "erro" ||
+            payload.status === "failed"));
       if (failFlag && !okFlag) {
         status = "fail";
         tone = "danger";
         title = "Falha no envio da senha";
-        description = (payload && payload.motivo_bloqueio) || errorKey || "";
+        description =
+          sanitizeOperationalText(payload && payload.motivo_bloqueio) || "Falha técnica no envio";
       } else if (tipo === "gerar_nova_senha_solicitada") {
         status = "pending";
         tone = "warn";
@@ -458,7 +580,9 @@
       if (tipo === "hospede_adicionado") title = "Hóspede adicionado";
       else if (tipo === "hospede_removido") title = "Hóspede removido";
       else title = "Dados do hóspede atualizados";
-      description = detalheOrig && !parseJsonSafe(detalheOrig) ? String(detalheOrig) : "";
+      var detalheTexto =
+        detalheOrig && !parseJsonSafe(detalheOrig) ? sanitizeOperationalText(String(detalheOrig)) : "";
+      description = detalheTexto;
       return base();
     }
 
@@ -487,7 +611,6 @@
       return base();
     }
 
-    // Fallback seguro: não oculta, não inventa sucesso
     category = "desconhecido";
     status = "info";
     tone = "neutral";
@@ -500,54 +623,72 @@
     return base();
   }
 
-  function groupKey(p) {
-    return [p.category, p.status, p.channel || "", p.errorKey || ""].join("|");
+  function sortEventsNewestFirst(events) {
+    return (events || []).slice().sort(function (a, b) {
+      var isoA = (a && (a.criadoEmIso || a.criado_em)) || null;
+      var isoB = (b && (b.criadoEmIso || b.criado_em)) || null;
+      var tA = isoA ? new Date(isoA).getTime() : NaN;
+      var tB = isoB ? new Date(isoB).getTime() : NaN;
+      if (isNaN(tA) && isNaN(tB)) return 0;
+      if (isNaN(tA)) return 1;
+      if (isNaN(tB)) return -1;
+      return tB - tA;
+    });
   }
 
   /**
-   * Agrupa tentativas repetidas equivalentes (mesma categoria/status/canal/erro, próximas no tempo).
-   * Entrada: eventos na ordem em que serão exibidos (mais recentes primeiro).
+   * Agrupa tentativas repetidas equivalentes (mesma categoria/status/canal/erro/fechadura, próximas no tempo).
+   * Ordena por createdAtMs DESC antes de agrupar — não confia na ordem de entrada.
    */
   function groupHistoricoEvents(events, opts) {
     opts = opts || {};
     var maxGap = opts.maxGapMs != null ? opts.maxGapMs : GROUP_MAX_GAP_MS;
-    var presented = (events || []).map(presentHistoricoEvent);
+    var sorted = sortEventsNewestFirst(events);
+    var presented = sorted.map(presentHistoricoEvent);
     var groups = [];
     var i = 0;
+
     while (i < presented.length) {
       var cur = presented[i];
       var members = [cur];
       var j = i + 1;
       while (j < presented.length) {
         var next = presented[j];
-        if (groupKey(cur) !== groupKey(next)) break;
+        if (cur.groupKey !== next.groupKey) break;
         if (cur.category === "desconhecido") break;
-        var t0 = cur.createdAtMs;
-        var t1 = next.createdAtMs;
-        if (!isNaN(t0) && !isNaN(t1) && Math.abs(t0 - t1) > maxGap) break;
-        // Não agrupar se o intervalo com o último membro do grupo for grande
         var last = members[members.length - 1];
-        if (!isNaN(last.createdAtMs) && !isNaN(t1) && Math.abs(last.createdAtMs - t1) > maxGap) break;
+        var tLast = last.createdAtMs;
+        var tNext = next.createdAtMs;
+        if (!isNaN(tLast) && !isNaN(tNext) && Math.abs(tLast - tNext) > maxGap) break;
         members.push(next);
         j++;
       }
 
       var count = members.length;
       var newest = members[0];
-      var oldest = members[members.length - 1];
       var title = newest.title;
       var description = newest.description || "";
+      var intervalDesc = intervalDescriptionFromMembers(members);
+
       if (count > 1 && newest.status === "fail") {
         title = newest.title + " — " + count + " tentativas";
-        description =
-          "Entre " +
-          (oldest.whenLabel || "—") +
-          " e " +
-          (newest.whenLabel || "—");
+        description = intervalDesc;
       } else if (count > 1 && newest.status === "success") {
-        description = (description ? description + " " : "") + "(" + count + " registros)";
+        if (newest.category === "ttlock_senha") {
+          title = "Senha criada com sucesso — " + count + " confirmações";
+        } else if (newest.category === "fnrh_envio") {
+          title = "Link da FNRH enviado — " + count + " confirmações";
+        } else {
+          title = newest.title + " — " + count + " registros";
+        }
+        if (intervalDesc && intervalDesc.indexOf("Entre ") === 0) {
+          description = description ? description + " " + intervalDesc : intervalDesc;
+        }
       } else if (count > 1) {
         title = newest.title + " — " + count + " ocorrências";
+        if (intervalDesc && intervalDesc.indexOf("Entre ") === 0) {
+          description = description ? description + " " + intervalDesc : intervalDesc;
+        }
       }
 
       groups.push({
@@ -559,6 +700,8 @@
         category: newest.category,
         status: newest.status,
         channel: newest.channel,
+        lockKey: newest.lockKey,
+        groupKey: newest.groupKey,
         members: members,
         technicalItems: members.map(function (m) {
           return m.technical;
@@ -567,7 +710,6 @@
       i = j;
     }
 
-    // Anotar sucesso após falhas recentes da mesma categoria operacional
     for (var g = 0; g < groups.length; g++) {
       var grp = groups[g];
       if (grp.status !== "success") continue;
@@ -575,12 +717,14 @@
       for (var k = g + 1; k < groups.length; k++) {
         var prev = groups[k];
         if (prev.category !== grp.category) break;
-        if (prev.status === "fail") failCount += prev.count;
-        else break;
+        if (prev.status === "fail") {
+          failCount += prev.count;
+          prev.tone = "muted";
+          prev.superseded = true;
+        } else break;
       }
       if (failCount > 0) {
-        var note = "após " + failCount + " tentativa" + (failCount > 1 ? "s" : "");
-        grp.description = grp.description ? grp.description + " · " + note : note;
+        grp.description = "Concluído após " + failCount + " tentativa" + (failCount > 1 ? "s" : "");
         grp.afterFailures = failCount;
       }
     }
@@ -619,6 +763,8 @@
     return groups
       .map(function (g, idx) {
         var tone = g.tone || "neutral";
+        var itemClass = "hist-item hist-item--" + escapeHtmlText(tone);
+        if (g.superseded) itemClass += " hist-item--superseded";
         var desc = g.description
           ? '<p class="hist-item-desc">' + escapeHtmlText(g.description) + "</p>"
           : "";
@@ -649,8 +795,8 @@
           })
           .join("");
         return (
-          '<article class="hist-item hist-item--' +
-          escapeHtmlText(tone) +
+          '<article class="' +
+          itemClass +
           '">' +
           '<div class="hist-item-head">' +
           '<span class="hist-item-time">' +
@@ -679,16 +825,15 @@
   function presentTtlockPasswordStatus(data) {
     var status = data && data.status != null ? String(data.status) : null;
     var syncStatus = data && data.syncStatus != null ? String(data.syncStatus) : null;
-    var resumoRaw = data && data.resumo != null ? String(data.resumo) : "";
 
     if (status === "provisionada") {
       return { statusClass: "sync-ok", statusLabel: "Senha pronta", resumoText: "" };
     }
     if (status === "falhou" || syncStatus === "failed") {
-      return { statusClass: "sync-failed", statusLabel: "Falha no envio", resumoText: resumoRaw };
+      return { statusClass: "sync-failed", statusLabel: "Falha no envio", resumoText: "" };
     }
     if (status === "parcial" || syncStatus === "partial") {
-      return { statusClass: "sync-partial", statusLabel: "Envio pendente", resumoText: resumoRaw };
+      return { statusClass: "sync-partial", statusLabel: "Envio pendente", resumoText: "" };
     }
     if (
       status === "pendente" ||
@@ -700,13 +845,13 @@
     }
     if (status === "revogada") {
       if (syncStatus === "failed") {
-        return { statusClass: "sync-failed", statusLabel: "Falha no envio", resumoText: resumoRaw };
+        return { statusClass: "sync-failed", statusLabel: "Falha no envio", resumoText: "" };
       }
       if (syncStatus === "pending" || syncStatus === "partial") {
         return {
           statusClass: syncStatus === "partial" ? "sync-partial" : "sync-pending",
           statusLabel: "Envio pendente",
-          resumoText: resumoRaw,
+          resumoText: "",
         };
       }
       return { statusClass: "sync-ok", statusLabel: "Revogada", resumoText: "" };
@@ -715,16 +860,88 @@
       return { statusClass: "sync-pending", statusLabel: "Status não informado", resumoText: "" };
     }
     if (syncStatus === "ok") {
-      return { statusClass: "sync-ok", statusLabel: "Status não informado", resumoText: resumoRaw };
+      return { statusClass: "sync-ok", statusLabel: "Status não informado", resumoText: "" };
     }
-    return { statusClass: "sync-pending", statusLabel: "Status não informado", resumoText: resumoRaw };
+    return { statusClass: "sync-pending", statusLabel: "Status não informado", resumoText: "" };
+  }
+
+  function presentGuestManagementEntry(guestCount) {
+    var n = Number(guestCount) || 0;
+    if (n <= 1) {
+      return {
+        mode: "add",
+        label: "Adicionar acompanhante",
+        showHeaderAdd: true,
+        showPerGuestManage: false,
+      };
+    }
+    return {
+      mode: "manage",
+      label: "Gerenciar hóspedes (" + n + ")",
+      showHeaderAdd: false,
+      showPerGuestManage: true,
+    };
+  }
+
+  /**
+   * Próxima ação principal na lista operacional (regras de prioridade para testes/UI).
+   */
+  function presentPrimaryNextAction(input) {
+    input = input || {};
+    if (input.entrouNoApto) {
+      return { listaLabel: "Check-in concluído", cta: null };
+    }
+    if (!input.pagamentoOk) {
+      return { listaLabel: "Não pago (PMS)", cta: null };
+    }
+    if (input.faltamContato) {
+      return { listaLabel: "Corrigir contatos", cta: null, ctaKind: "ir_hospedes" };
+    }
+    if (input.falhaSenhaAtiva) {
+      return { listaLabel: "Conferir TTLock", cta: null, ctaKind: "ir_ttlock" };
+    }
+    if (input.senhaPendente || input.credencialNaoEnviada) {
+      return { listaLabel: "Gerar e enviar credenciais", cta: null, ctaKind: "gerar_senha" };
+    }
+    if (
+      input.pagamentoOk &&
+      input.fnrhCompleta &&
+      input.acessoLiberado &&
+      input.senhaRegistrada &&
+      !input.entrouNoApto &&
+      !input.falhaSenhaAtiva
+    ) {
+      return { listaLabel: "Aguardar chegada", cta: null, variant: "success" };
+    }
+    return { listaLabel: "—", cta: null };
+  }
+
+  /**
+   * Contagem de reservas com acesso liberado efetivo.
+   * KPI global usava todas as reservas carregadas; a aba operacional filtra pós-cutoff
+   * via opts.scope === "lista_operacional" + isVisibleInListaOperacional.
+   * Mesmo predicado: acessoLiberado || ttlockPrincipalTodosProvisionados.
+   */
+  function countAcessosLiberados(reservas, opts) {
+    opts = opts || {};
+    var list = Array.isArray(reservas) ? reservas : [];
+    if (opts.scope === "lista_operacional" && typeof opts.isVisibleInListaOperacional === "function") {
+      list = list.filter(opts.isVisibleInListaOperacional);
+    }
+    return list.filter(function (r) {
+      return !!(r && (r.acessoLiberado || r.ttlockPrincipalTodosProvisionados));
+    }).length;
   }
 
   global.YesHotelCheckinPanelPresentation = {
     TZ: TZ,
+    GROUP_MAX_GAP_MS: GROUP_MAX_GAP_MS,
     formatDateTimeCampoGrande: formatDateTimeCampoGrande,
     formatPhoneBrDisplay: formatPhoneBrDisplay,
+    sanitizeOperationalText: sanitizeOperationalText,
     presentGuestCardState: presentGuestCardState,
+    presentGuestManagementEntry: presentGuestManagementEntry,
+    presentPrimaryNextAction: presentPrimaryNextAction,
     formatResumoComunicacaoApresentacao: formatResumoComunicacaoApresentacao,
     presentHistoricoEvent: presentHistoricoEvent,
     groupHistoricoEvents: groupHistoricoEvents,
@@ -732,5 +949,6 @@
     formatTechnicalPayload: formatTechnicalPayload,
     escapeHtmlText: escapeHtmlText,
     presentTtlockPasswordStatus: presentTtlockPasswordStatus,
+    countAcessosLiberados: countAcessosLiberados,
   };
 })(typeof window !== "undefined" ? window : globalThis);
