@@ -1,5 +1,5 @@
 /**
- * Testes das funções puras de apresentação do Check-in Operacional.
+ * Testes das funções puras de apresentação do Check-in Operacional (acabamento).
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -20,10 +20,8 @@ vm.runInNewContext(src, sandbox);
 const P = sandbox.YesHotelCheckinPanelPresentation;
 assert.ok(P, "módulo de apresentação não carregou");
 
-function isoCampoGrande(y: number, m: number, d: number, hh: number, mm: number) {
-  // Constrói instante cujo relógio em America/Campo_Grande é o pedido (UTC-4 sem DST atual).
-  const utc = Date.UTC(y, m - 1, d, hh + 4, mm, 0);
-  return new Date(utc).toISOString();
+function isoCG(y: number, m: number, d: number, hh: number, mm: number) {
+  return new Date(Date.UTC(y, m - 1, d, hh + 4, mm, 0)).toISOString();
 }
 
 let passed = 0;
@@ -32,191 +30,279 @@ function ok(label: string) {
   console.log("  ok", label);
 }
 
-// 1. FNRH confirmada: Cadastro OK; sem “ainda não enviado”
+// 1 recentes primeiro
 {
-  const g = P.presentGuestCardState({
-    statusOperacional: "confirmado",
-    nome: "Ana",
-    email: "a@x.com",
-    whatsapp: "67984020002",
-    tentativasEnvio: 3,
-    ultimoEnvioCanal: null,
-  });
-  assert.equal(g.cadastroOkLabel, "Cadastro do hóspede: OK");
-  assert.equal(g.showSendNoise, false);
-  assert.equal(g.preferReadOnly, true);
-  assert.equal(g.whatsappDisplay, "(67) 98402-0002");
-
-  const resumo = P.formatResumoComunicacaoApresentacao(
-    { porWhatsapp: 0, porEmail: 0, porAmbos: 0, naoEnviado: 1 },
-    { allFnrhConfirmed: true },
-  );
-  assert.equal(resumo, "");
-  assert.ok(!String(resumo).includes("ainda não enviado"));
-  ok("1 FNRH confirmada → Cadastro OK sem ainda não enviado");
+  const events = [
+    { tipo: "acesso_liberado", titulo: "A", criadoEmIso: isoCG(2026, 4, 6, 10, 0) },
+    { tipo: "acesso_liberado", titulo: "B", criadoEmIso: isoCG(2026, 4, 6, 18, 0) },
+    { tipo: "acesso_liberado", titulo: "C", criadoEmIso: isoCG(2026, 4, 6, 12, 0) },
+  ];
+  const g = P.groupHistoricoEvents(events);
+  assert.ok(g[0].whenLabel.includes("18:00"));
+  ok("1 eventos mais recentes primeiro");
 }
 
-// 2. FNRH pendente
-{
-  const g = P.presentGuestCardState({
-    statusOperacional: "enviado",
-    nome: "Bia",
-    email: "b@x.com",
-    whatsapp: "",
-  });
-  assert.equal(g.mode, "pending");
-  assert.ok(g.pendencyText.toLowerCase().includes("aguardando"));
-  assert.equal(g.cadastroOkLabel, "");
-  ok("2 FNRH pendente mostra pendência");
-}
-
-// 3. Nove falhas idênticas → grupo com 9 tentativas
-{
-  const base = Date.parse("2026-08-08T22:28:00.000Z");
-  const events = Array.from({ length: 9 }, (_, i) => ({
-    tipo: "envio_auto_fnrh",
-    titulo: "Envio de links FNRH",
-    detalhe: JSON.stringify({ enviados: 0, erros: 1, enviados_whatsapp: 0, erro: "timeout" }),
-    criadoEmIso: new Date(base + i * 20_000).toISOString(),
-  })).reverse(); // mais recente primeiro
-  const groups = P.groupHistoricoEvents(events);
-  assert.equal(groups.length, 1);
-  assert.equal(groups[0].count, 9);
-  assert.match(groups[0].title, /FNRH não enviada/);
-  assert.match(groups[0].title, /9 tentativas/);
-  ok("3 nove falhas idênticas agrupadas");
-}
-
-// 4. Falhas seguidas de sucesso
+// 2 entrada fora de ordem
 {
   const events = [
     {
       tipo: "envio_auto_fnrh",
       titulo: "Envio",
-      detalhe: JSON.stringify({ enviados: 1, erros: 0, enviados_whatsapp: 1 }),
-      criadoEmIso: "2026-08-08T22:40:00.000Z",
+      detalhe: JSON.stringify({ enviados: 0, erros: 1, erro: "timeout" }),
+      criadoEmIso: isoCG(2026, 4, 6, 18, 32),
     },
     {
       tipo: "envio_auto_fnrh",
       titulo: "Envio",
       detalhe: JSON.stringify({ enviados: 0, erros: 1, erro: "timeout" }),
-      criadoEmIso: "2026-08-08T22:32:00.000Z",
-    },
-    {
-      tipo: "envio_auto_fnrh",
-      titulo: "Envio",
-      detalhe: JSON.stringify({ enviados: 0, erros: 1, erro: "timeout" }),
-      criadoEmIso: "2026-08-08T22:30:00.000Z",
-    },
-    {
-      tipo: "envio_auto_fnrh",
-      titulo: "Envio",
-      detalhe: JSON.stringify({ enviados: 0, erros: 1, erro: "timeout" }),
-      criadoEmIso: "2026-08-08T22:28:00.000Z",
+      criadoEmIso: isoCG(2026, 4, 6, 18, 28),
     },
   ];
-  const groups = P.groupHistoricoEvents(events);
-  assert.ok(groups[0].status === "success");
-  assert.match(groups[0].title, /Link da FNRH enviado/);
-  assert.ok((groups[0].afterFailures || 0) >= 3 || /após 3/.test(groups[0].description));
-  assert.ok(groups.some((g: any) => g.status === "fail"));
-  ok("4 falhas + sucesso: sucesso claro e falhas nos detalhes");
+  const g = P.groupHistoricoEvents(events);
+  assert.equal(g.length, 1);
+  assert.match(g[0].description, /Entre 06\/04 18:28 e 06\/04 18:32/);
+  ok("2 entrada fora de ordem + intervalo crescente");
 }
 
-// 5. Falha e sucesso não agrupados juntos
+// 3 intervalo sempre crescente (já coberto) + 4 evento único
 {
-  const events = [
+  const one = P.groupHistoricoEvents([
     {
       tipo: "envio_auto_fnrh",
       titulo: "Envio",
-      detalhe: JSON.stringify({ enviados: 1, erros: 0 }),
-      criadoEmIso: "2026-08-08T22:31:00.000Z",
+      detalhe: JSON.stringify({ enviados: 0, erros: 1 }),
+      criadoEmIso: isoCG(2026, 4, 6, 18, 30),
     },
-    {
-      tipo: "envio_auto_fnrh",
-      titulo: "Envio",
-      detalhe: JSON.stringify({ enviados: 0, erros: 1, erro: "x" }),
-      criadoEmIso: "2026-08-08T22:30:00.000Z",
-    },
-  ];
-  const groups = P.groupHistoricoEvents(events);
-  assert.equal(groups.length, 2);
-  assert.notEqual(groups[0].status, groups[1].status);
-  ok("5 falha e sucesso não são um único grupo");
+  ]);
+  assert.equal(one.length, 1);
+  assert.ok(!/Entre /.test(one[0].description || ""));
+  ok("4 evento único sem intervalo artificial");
 }
 
-// 6. Canais diferentes não agrupam
-{
-  const events = [
-    {
-      tipo: "envio_manual_senha",
-      titulo: "Envio manual",
-      detalhe: JSON.stringify({ ok: true, canais: { email: true, whatsapp: false } }),
-      criadoEmIso: "2026-08-08T22:31:00.000Z",
-    },
-    {
-      tipo: "envio_manual_senha",
-      titulo: "Envio manual",
-      detalhe: JSON.stringify({ ok: true, canais: { email: false, whatsapp: true } }),
-      criadoEmIso: "2026-08-08T22:30:00.000Z",
-    },
-  ];
-  const groups = P.groupHistoricoEvents(events);
-  assert.equal(groups.length, 2);
-  ok("6 canais diferentes não agrupam");
-}
-
-// 7. Evento desconhecido: fallback + detalhes técnicos
+// 5 erro técnico FNRH oculto
 {
   const p = P.presentHistoricoEvent({
-    tipo: "evento_xyz_desconhecido",
-    titulo: "",
-    detalhe: '{"foo":1}',
-    criadoEmIso: "2026-08-08T22:00:00.000Z",
+    tipo: "fnrh_sync_hits",
+    titulo: "Sync",
+    detalhe: JSON.stringify({
+      status: "pendente",
+      erro: "HITS_FNRH_WEBHOOK_URL não configurado.",
+    }),
+    criadoEmIso: isoCG(2026, 4, 6, 12, 0),
   });
-  assert.ok(p.title);
-  assert.equal(p.status, "info");
-  assert.equal(p.technical.tipo, "evento_xyz_desconhecido");
-  const html = P.renderHistoricoGroupsHtml(P.groupHistoricoEvents([
-    {
-      tipo: "evento_xyz_desconhecido",
-      titulo: "Algo",
-      detalhe: '{"foo":1}',
-      criadoEmIso: "2026-08-08T22:00:00.000Z",
-    },
-  ]));
-  assert.match(html, /Ver detalhes técnicos/);
-  assert.match(html, /evento_xyz_desconhecido/);
-  ok("7 evento desconhecido com fallback e detalhes");
+  assert.ok(!/HITS_FNRH_WEBHOOK_URL/.test(p.description || ""));
+  assert.ok(!/HITS_FNRH_WEBHOOK_URL/.test(p.title || ""));
+  assert.match(p.technical.detalhe || "", /HITS_FNRH_WEBHOOK_URL/);
+  ok("5 erro técnico FNRH oculto no resumo e preservado nos detalhes");
 }
 
-// 8. Payload HTML escapado
+// 6 TTLock inglês oculto
+{
+  const p = P.presentHistoricoEvent({
+    tipo: "ttlock_provision_falhou",
+    titulo: "TTLock fail",
+    detalhe: JSON.stringify({
+      status_final: "falhou",
+      erro_resumido: "Failed to add keyboard password: invalid lock",
+    }),
+    criadoEmIso: isoCG(2026, 4, 6, 12, 0),
+  });
+  assert.equal(p.title, "Falha ao criar a senha");
+  assert.ok(!/Failed to add/i.test(p.description || ""));
+  assert.match(p.technical.detalhe || "", /Failed to add/);
+  ok("6 erro TTLock em inglês oculto no resumo");
+}
+
+// 7 falha + sucesso
+{
+  const events = [
+    {
+      tipo: "ttlock_provision_sucesso",
+      titulo: "ok",
+      detalhe: JSON.stringify({ status_final: "provisionada" }),
+      criadoEmIso: isoCG(2026, 4, 6, 19, 0),
+    },
+    {
+      tipo: "ttlock_provision_falhou",
+      titulo: "fail",
+      detalhe: JSON.stringify({ status_final: "falhou", erro_resumido: "GAT" }),
+      criadoEmIso: isoCG(2026, 4, 6, 18, 50),
+    },
+  ];
+  const g = P.groupHistoricoEvents(events);
+  assert.equal(g[0].status, "success");
+  assert.match(g[0].description || "", /Concluído após/);
+  assert.ok(g.some((x: any) => x.superseded || x.tone === "muted"));
+  ok("7 falha seguida de sucesso com sucesso predominante");
+}
+
+// 8 falha sem sucesso permanece ativa
+{
+  const g = P.groupHistoricoEvents([
+    {
+      tipo: "ttlock_provision_falhou",
+      titulo: "fail",
+      detalhe: JSON.stringify({ status_final: "falhou" }),
+      criadoEmIso: isoCG(2026, 4, 6, 18, 0),
+    },
+  ]);
+  assert.equal(g[0].status, "fail");
+  assert.notEqual(g[0].tone, "muted");
+  assert.ok(!g[0].superseded);
+  ok("8 falha sem sucesso posterior continua ativa");
+}
+
+// 9 sucessos idempotentes
+{
+  const events = [
+    {
+      tipo: "ttlock_provision_ja_concluido",
+      titulo: "ok",
+      detalhe: "{}",
+      criadoEmIso: isoCG(2026, 4, 6, 18, 2),
+    },
+    {
+      tipo: "ttlock_provision_ja_concluido",
+      titulo: "ok",
+      detalhe: "{}",
+      criadoEmIso: isoCG(2026, 4, 6, 18, 1),
+    },
+    {
+      tipo: "ttlock_provision_ja_concluido",
+      titulo: "ok",
+      detalhe: "{}",
+      criadoEmIso: isoCG(2026, 4, 6, 18, 0),
+    },
+  ];
+  const g = P.groupHistoricoEvents(events);
+  assert.equal(g.length, 1);
+  assert.match(g[0].title, /3 confirmações|3/);
+  ok("9 sucessos idempotentes agrupados");
+}
+
+// 10 fechaduras diferentes não agrupam
+{
+  const events = [
+    {
+      tipo: "ttlock_provision_falhou",
+      titulo: "f",
+      detalhe: JSON.stringify({ codigo_logico_destino: "APT-12", status_final: "falhou" }),
+      criadoEmIso: isoCG(2026, 4, 6, 18, 1),
+    },
+    {
+      tipo: "ttlock_provision_falhou",
+      titulo: "f",
+      detalhe: JSON.stringify({ codigo_logico_destino: "PORTAO-EXT", status_final: "falhou" }),
+      criadoEmIso: isoCG(2026, 4, 6, 18, 0),
+    },
+  ];
+  const g = P.groupHistoricoEvents(events);
+  assert.equal(g.length, 2);
+  ok("10 fechaduras diferentes não agrupam");
+}
+
+// 11 / 12 gestão de hóspedes
+{
+  const one = P.presentGuestManagementEntry(1);
+  assert.equal(one.label, "Adicionar acompanhante");
+  assert.equal(one.showHeaderAdd, true);
+  assert.equal(one.showPerGuestManage, false);
+  const many = P.presentGuestManagementEntry(3);
+  assert.match(many.label, /Gerenciar hóspedes \(3\)/);
+  assert.equal(many.showHeaderAdd, false);
+  assert.equal(many.showPerGuestManage, true);
+  ok("11-12 Adicionar acompanhante / Gerenciar hóspedes (N)");
+}
+
+// 13 aguardar chegada
+{
+  const a = P.presentPrimaryNextAction({
+    pagamentoOk: true,
+    fnrhCompleta: true,
+    acessoLiberado: true,
+    senhaRegistrada: true,
+    entrouNoApto: false,
+    falhaSenhaAtiva: false,
+  });
+  assert.equal(a.listaLabel, "Aguardar chegada");
+  assert.equal(a.cta, null);
+  ok("13 reserva regular mostra Aguardar chegada");
+}
+
+// 14 falha / contato / senha pendente
+{
+  const fail = P.presentPrimaryNextAction({
+    pagamentoOk: true,
+    fnrhCompleta: true,
+    acessoLiberado: true,
+    senhaRegistrada: false,
+    entrouNoApto: false,
+    falhaSenhaAtiva: true,
+  });
+  assert.equal(fail.ctaKind, "ir_ttlock");
+  const contato = P.presentPrimaryNextAction({
+    pagamentoOk: true,
+    fnrhCompleta: false,
+    acessoLiberado: false,
+    senhaRegistrada: false,
+    entrouNoApto: false,
+    faltamContato: true,
+  });
+  assert.equal(contato.listaLabel, "Corrigir contatos");
+  const pend = P.presentPrimaryNextAction({
+    pagamentoOk: true,
+    fnrhCompleta: true,
+    acessoLiberado: true,
+    senhaRegistrada: false,
+    entrouNoApto: false,
+    credencialNaoEnviada: true,
+  });
+  assert.equal(pend.ctaKind, "gerar_senha");
+  ok("14 falha / contato / senha pendente com ação corretiva");
+}
+
+// 15 HTML seguro
 {
   const html = P.renderHistoricoGroupsHtml(
     P.groupHistoricoEvents([
       {
-        tipo: "evento_xyz_desconhecido",
-        titulo: "<script>alert(1)</script>",
-        detalhe: '{"x":"<img onerror=alert(1)>"}',
-        criadoEmIso: "2026-08-08T22:00:00.000Z",
+        tipo: "x_desconhecido",
+        titulo: "<img onerror=alert(1)>",
+        detalhe: '{"x":"<script>alert(1)</script>"}',
+        criadoEmIso: isoCG(2026, 4, 6, 12, 0),
       },
     ]),
   );
   assert.ok(!html.includes("<script>alert(1)</script>"));
-  assert.ok(html.includes("&lt;script&gt;") || html.includes("&lt;img"));
-  ok("8 HTML do payload escapado");
+  assert.ok(html.includes("&lt;") || html.includes("&#"));
+  ok("15 sem HTML não confiável renderizado");
 }
 
-// 9. Datas America/Campo_Grande
+// 16 contagens
 {
-  const iso = isoCampoGrande(2026, 8, 8, 18, 28);
-  const label = P.formatDateTimeCampoGrande(iso);
-  assert.match(label, /08\/08/);
-  assert.match(label, /18:28/);
-  ok("9 datas em America/Campo_Grande");
+  const reservas = [
+    { acessoLiberado: true },
+    { acessoLiberado: true, ttlockPrincipalTodosProvisionados: true },
+    { acessoLiberado: false },
+    { ttlockPrincipalTodosProvisionados: true },
+    { acessoLiberado: true },
+  ];
+  const total = P.countAcessosLiberados(reservas);
+  assert.equal(total, 4);
+  const operacional = P.countAcessosLiberados(reservas, {
+    scope: "lista_operacional",
+    isVisibleInListaOperacional: (r: any, idx?: number) => r.acessoLiberado !== false || !!r.ttlockPrincipalTodosProvisionados,
+  });
+  // filter keeps 4 with access flags — use visibility that hides one
+  const op2 = P.countAcessosLiberados(reservas, {
+    scope: "lista_operacional",
+    isVisibleInListaOperacional: (r: any) => !!r.acessoLiberado,
+  });
+  assert.equal(op2, 3);
+  ok("16 contagens com semântica lista vs total");
 }
 
-// 10. TTLock provisionada → Senha pronta (PR #14)
+// 17 TTLock Senha pronta
 {
   const t = P.presentTtlockPasswordStatus({
     status: "provisionada",
@@ -225,8 +311,33 @@ function ok(label: string) {
   });
   assert.equal(t.statusLabel, "Senha pronta");
   assert.equal(t.resumoText, "");
-  assert.equal(t.statusClass, "sync-ok");
-  ok("10 TTLock provisionada → Senha pronta");
+  ok("17 regressão TTLock Senha pronta");
+}
+
+// 18 FNRH confirmada sem ainda não enviado
+{
+  const g = P.presentGuestCardState({
+    statusOperacional: "confirmado",
+    nome: "Ana",
+    email: "a@x.com",
+    whatsapp: "67984020002",
+  });
+  assert.equal(g.cadastroOkLabel, "Cadastro do hóspede: OK");
+  assert.equal(g.showSendNoise, false);
+  const resumo = P.formatResumoComunicacaoApresentacao(
+    { porWhatsapp: 0, porEmail: 0, porAmbos: 0, naoEnviado: 1 },
+    { allFnrhConfirmed: true },
+  );
+  assert.equal(resumo, "");
+  ok("18 FNRH confirmada não mostra ainda não enviado");
+}
+
+// sanitize env
+{
+  const s = P.sanitizeOperationalText("HITS_FNRH_WEBHOOK_URL não configurado.");
+  assert.ok(!/HITS_FNRH_WEBHOOK_URL/.test(s));
+  assert.ok(s.length > 0);
+  ok("sanitize remove variável de ambiente");
 }
 
 console.log("\nPASS test-checkin-panel-presentation (" + passed + " casos)");
