@@ -258,7 +258,7 @@
       return n === 1 ? "1 café avulso pago" : n + " cafés avulsos pagos";
     }
     if (entitlement.kind === "sem_cafe") return "Café não incluído — cobrar antes de servir";
-    return "Classificação de café pendente (HITS)";
+    return "Café ainda não identificado";
   }
 
   function cafeGuestLine(entitlement) {
@@ -267,7 +267,7 @@
     if (entitlement.kind === "sem_cafe") return base + " — reserva sem café";
     if (entitlement.kind === "incluido") return base + " — café incluído";
     if (entitlement.kind === "avulso_pago") return base + " — " + cafeStatusLabel(entitlement);
-    return base + " — classificação pendente";
+    return base + " — não mapeado";
   }
 
   var api = {

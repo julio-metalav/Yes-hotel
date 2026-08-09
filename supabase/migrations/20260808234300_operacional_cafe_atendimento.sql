@@ -1,5 +1,6 @@
 -- Café da manhã operacional: atendimento por reserva sincronizada + auditoria.
--- NÃO aplicar em produção nesta rodada (somente arquivo de migration no repositório).
+-- Homologação autorizada: projeto Yes_Hotel_automação (ref minmmecajnmjqlgacfoz).
+-- NÃO aplicar em Meta Lav nem em deploy de produção Vercel nesta rodada.
 -- FK em operacional_reservas (não no legado public.reservas / cafe_presencas).
 
 -- ---------------------------------------------------------------------------

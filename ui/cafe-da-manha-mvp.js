@@ -239,7 +239,11 @@ function createCard(card) {
   statusBadge.className = `status-badge ${isComplete ? "is-complete" : "is-pending"}`;
   if (card.entitlement.entitledQty <= 0) {
     statusBadge.textContent =
-      card.entitlement.kind === "sem_cafe" ? "Sem direito" : "Pendente mapeamento";
+      card.entitlement.kind === "sem_cafe"
+        ? "Sem direito"
+        : card.entitlement.kind === "nao_mapeado"
+          ? "Não mapeado"
+          : "Sem direito";
   } else {
     statusBadge.textContent = isComplete ? "Completo" : "Pendente";
   }

@@ -113,7 +113,7 @@ export function cafeStatusLabel(entitlement: CafeBreakfastEntitlement): string {
     return n === 1 ? "1 café avulso pago" : `${n} cafés avulsos pagos`;
   }
   if (entitlement.kind === "sem_cafe") return "Café não incluído — cobrar antes de servir";
-  return "Classificação de café pendente (HITS)";
+  return "Café ainda não identificado";
 }
 
 export function cafeGuestLine(entitlement: CafeBreakfastEntitlement): string {
@@ -124,5 +124,5 @@ export function cafeGuestLine(entitlement: CafeBreakfastEntitlement): string {
   if (entitlement.kind === "avulso_pago") {
     return `${base} — ${cafeStatusLabel(entitlement)}`;
   }
-  return `${base} — classificação pendente`;
+  return `${base} — não mapeado`;
 }
