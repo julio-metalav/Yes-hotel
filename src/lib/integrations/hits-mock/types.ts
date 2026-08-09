@@ -21,6 +21,7 @@ export interface HitsMockReservationRoom {
   amount?: number | null;
   status?: number | string | null;
   pax?: number | null;
+  mealPlanDesc?: string | null;
   reservationRoomId?: number | string | null;
 }
 

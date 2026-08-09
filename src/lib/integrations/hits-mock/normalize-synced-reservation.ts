@@ -92,6 +92,9 @@ export function normalizeHitsMockDetailToSynced(
     ? Number(room.pax)
     : null;
   const totalGuests = totalFromPax ?? Math.max(guests.length, 1);
+  const mealPlanDesc = trimOrNull(
+    (room as { mealPlanDesc?: string | null } | undefined)?.mealPlanDesc,
+  );
 
   return {
     provider: "hits",
@@ -107,6 +110,7 @@ export function normalizeHitsMockDetailToSynced(
     adults: null,
     minors: null,
     totalGuests,
+    mealPlanDesc,
     paymentStatus: mapPayment(detail),
     phone: principal.phone ?? trimOrNull(detail.contact2),
     email: principal.email ?? trimOrNull(detail.contact1),
