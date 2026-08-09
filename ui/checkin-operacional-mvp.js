@@ -2587,6 +2587,62 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
+/**
+ * Tradução visual do status de provisionamento TTLock para a recepção.
+ * Não altera valores internos: usa status da credencial e syncStatus já retornados.
+ * "Senha pronta" somente quando status === "provisionada" (conclusão integral já confirmada pelo backend).
+ */
+function presentTtlockPasswordStatus(data) {
+  const status = data && data.status != null ? String(data.status) : null;
+  const syncStatus = data && data.syncStatus != null ? String(data.syncStatus) : null;
+  const resumoRaw = data && data.resumo != null ? String(data.resumo) : "";
+
+  if (status === "provisionada") {
+    return { statusClass: "sync-ok", statusLabel: "Senha pronta", resumoText: "" };
+  }
+
+  if (status === "falhou" || syncStatus === "failed") {
+    return { statusClass: "sync-failed", statusLabel: "Falha no envio", resumoText: resumoRaw };
+  }
+
+  if (status === "parcial" || syncStatus === "partial") {
+    return { statusClass: "sync-partial", statusLabel: "Envio pendente", resumoText: resumoRaw };
+  }
+
+  if (
+    status === "pendente" ||
+    status === "pronta" ||
+    status === "provisionando" ||
+    syncStatus === "pending"
+  ) {
+    return { statusClass: "sync-pending", statusLabel: "Envio pendente", resumoText: "" };
+  }
+
+  if (status === "revogada") {
+    if (syncStatus === "failed") {
+      return { statusClass: "sync-failed", statusLabel: "Falha no envio", resumoText: resumoRaw };
+    }
+    if (syncStatus === "pending" || syncStatus === "partial") {
+      return {
+        statusClass: syncStatus === "partial" ? "sync-partial" : "sync-pending",
+        statusLabel: "Envio pendente",
+        resumoText: resumoRaw,
+      };
+    }
+    return { statusClass: "sync-ok", statusLabel: "Revogada", resumoText: "" };
+  }
+
+  if (!status && !syncStatus) {
+    return { statusClass: "sync-pending", statusLabel: "Status não informado", resumoText: "" };
+  }
+
+  if (syncStatus === "ok") {
+    return { statusClass: "sync-ok", statusLabel: "Status não informado", resumoText: resumoRaw };
+  }
+
+  return { statusClass: "sync-pending", statusLabel: "Status não informado", resumoText: resumoRaw };
+}
+
 async function loadAndRenderTtlockSection(reservaId) {
   const loadingEl = document.getElementById("detail-ttlock-loading");
   const contentEl = document.getElementById("detail-ttlock-content");
@@ -2597,14 +2653,16 @@ async function loadAndRenderTtlockSection(reservaId) {
   if (!loadingEl || !contentEl || !hasInvoke) return;
   try {
     const data = await auth.invokeLifecycleAction("sync_summary", { reservaId });
-    const syncStatus = data.syncStatus ?? null;
-    const statusClass = syncStatus === "ok" ? "sync-ok" : syncStatus === "pending" ? "sync-pending" : syncStatus === "partial" ? "sync-partial" : "sync-failed";
-    const statusLabel = syncStatus === "ok" ? "Sync OK" : syncStatus === "pending" ? "Sync pendente" : syncStatus === "partial" ? "Sync parcial" : syncStatus === "failed" ? "Sync falhou" : "—";
+    const presented = presentTtlockPasswordStatus(data);
+    const statusClass = presented.statusClass;
+    const statusLabel = presented.statusLabel;
     let html = `<div class="ttlock-panel-stack">`;
     html += `<div class="ttlock-card-status-block ttlock-card-status-block--${statusClass}">`;
-    html += `<p class="ttlock-card-status-label">Status TTLock</p>`;
+    html += `<p class="ttlock-card-status-label">Status da senha</p>`;
     html += `<div class="ttlock-status-row"><span class="ttlock-sync-badge ${statusClass}" role="status">${escapeHtml(statusLabel)}</span></div>`;
-    html += `<p class="reservation-detail-ttlock-resumo">${escapeHtml(data.resumo || "")}</p>`;
+    if (presented.resumoText) {
+      html += `<p class="reservation-detail-ttlock-resumo">${escapeHtml(presented.resumoText)}</p>`;
+    }
     html += `</div>`;
     if (data.lastSyncAttemptAt) {
       html += `<p class="reservation-detail-ttlock-meta">Última tentativa: ${escapeHtml(data.lastSyncAttemptAt)}</p>`;
