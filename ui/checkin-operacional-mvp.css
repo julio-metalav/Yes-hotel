@@ -2779,6 +2779,8 @@ html {
 
 .op-detail__scroll .hist-tech {
   margin-top: 8px;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .op-detail__scroll .hist-tech-sum {
@@ -2789,18 +2791,42 @@ html {
   list-style: none;
 }
 
+.op-detail__scroll .hist-tech-sum:focus {
+  outline: 2px solid #0f766e;
+  outline-offset: 2px;
+}
+
+.op-detail__scroll .hist-tech-sum:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.op-detail__scroll .hist-tech-sum:focus-visible {
+  outline: 2px solid #0f766e;
+  outline-offset: 2px;
+}
+
 .op-detail__scroll .hist-tech-sum::-webkit-details-marker { display: none; }
 
 .op-detail__scroll .hist-tech-body {
   margin-top: 8px;
   max-width: 100%;
-  overflow-x: auto;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+}
+
+.op-detail__scroll .hist-tech-block {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .op-detail__scroll .hist-tech-pre {
   margin: 6px 0 0;
   padding: 8px;
   max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   overflow-x: auto;
   border-radius: 6px;
   background: #0f172a;
@@ -2808,6 +2834,7 @@ html {
   font-size: 11px;
   line-height: 1.4;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
@@ -2815,6 +2842,8 @@ html {
   margin: 0 0 4px;
   font-size: 11px;
   color: #475569;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .op-detail__scroll .guest-detail-card--ok {
