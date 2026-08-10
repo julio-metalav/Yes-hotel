@@ -46,6 +46,7 @@ export function createSupabaseFirstRoomAccessPorts(
 export * from "./access-event-repository";
 export * from "./access-outbox-queue";
 export * from "./access-tolerance-repository";
+export * from "./cobranca-pagarme-repository";
 export * from "./credential-correlation";
 export * from "./credential-correlation-logic";
 export * from "./reservation-pending-state";

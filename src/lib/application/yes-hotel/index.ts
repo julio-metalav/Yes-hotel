@@ -1,5 +1,6 @@
 export * from "./access-outbox-dispatcher";
 export * from "./access-tolerance-processor";
+export * from "./cobranca-pagarme-service";
 export * from "./credential-lifecycle";
 export * from "./credential-lifecycle-status";
 export * from "./credential-release-orchestrator";
