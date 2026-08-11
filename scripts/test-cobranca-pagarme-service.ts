@@ -11,6 +11,9 @@ import { createMemoryCobrancaRepo } from "../src/lib/application/yes-hotel/testi
 import {
   PAGARME_FIXTURE_CHARGE_ID,
   PAGARME_FIXTURE_COBRANCA_ID,
+  PAGARME_FIXTURE_LINK_URL,
+  PAGARME_FIXTURE_ORDER_ID,
+  PAGARME_FIXTURE_PAYMENT_LINK_ID,
   PAGARME_CHECKOUT_TEST_API_BASE_URL,
   PAGARME_CORE_API_BASE_URL,
   PAGARME_FIXTURE_SECRET,
@@ -905,6 +908,294 @@ async function main() {
     const dumped = JSON.stringify(r);
     assert.equal(dumped.includes(PAGARME_FIXTURE_SECRET), false);
     ok("secret nao aparece no resultado do servico");
+  }
+
+  // --- Prefilter Bee2Pay / unrelated: zero INSERT, zero GET, zero mutação ---
+  const UNRELATED_EVENTS = [
+    "charge.paid",
+    "charge.payment_failed",
+    "charge.pending",
+    "charge.processing",
+    "charge.refunded",
+    "chargeback.received",
+    "charge.chargedback",
+    "charge.underpaid",
+    "charge.overpaid",
+    "charge.partial_canceled",
+  ] as const;
+
+  for (const tipo of UNRELATED_EVENTS) {
+    const { repo, state } = seedRepo();
+    const reservaAntes = structuredClone(state.reservas.get(RESERVA_OK)!);
+    let getCalls = 0;
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: (u, m) => {
+              if (m === "GET") {
+                getCalls += 1;
+                return true;
+              }
+              return false;
+            },
+            body: fixturePaidChargeResponse,
+          },
+        ]) as never,
+      ),
+    });
+    const r = await svc.processWebhook({
+      id: `evt_bee2pay_${tipo.replace(/\./g, "_")}`,
+      type: tipo,
+      data: {
+        id: "ch_bee2pay_ota_unrelated_001",
+        status: "paid",
+        amount: 99900,
+        order_id: "or_bee2pay_ota_unrelated_001",
+        code: "BEE2PAY-OTA-ORDER-XYZ",
+        payment_link_id: "pl_bee2pay_ota_unrelated_001",
+      },
+    });
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.data.unrelated_ignored, true);
+      assert.equal(r.data.payment_registered, false);
+      assert.equal(r.data.cobranca_id, null);
+    }
+    assert.equal(state.webhooks.size, 0);
+    assert.equal(getCalls, 0);
+    assert.equal(state.pagamentos.size, 0);
+    assert.equal(state.cobrancas.size, 0);
+    assert.deepEqual(state.reservas.get(RESERVA_OK), reservaAntes);
+    ok(`unrelated ${tipo}: ignored sem INSERT/GET/mutacao`);
+  }
+
+  // charge.payment_failed local — fluxo preservado (espelho sem paid)
+  {
+    const { repo, state } = seedRepo();
+    state.cobrancas.set(PAGARME_FIXTURE_COBRANCA_ID, {
+      id: PAGARME_FIXTURE_COBRANCA_ID,
+      reserva_id: RESERVA_OK,
+      external_reservation_id: null,
+      metodo: "pix",
+      valor_centavos: 170_000,
+      moeda: "BRL",
+      idempotency_key: "x",
+      status: "pending",
+      pagarme_payment_link_id: null,
+      pagarme_payment_link_url: null,
+      pagarme_order_id: fixturePixOrderResponse.id,
+      pagarme_charge_id: PAGARME_FIXTURE_CHARGE_ID,
+      pix_qr_code: null,
+      pix_qr_code_url: null,
+      expira_em: null,
+      pagarme_status_raw: "pending",
+      requer_revisao_operacional: false,
+      requer_revisao_motivo: null,
+      requer_revisao_detectado_em: null,
+      criado_por_user_id: OPERATOR,
+    });
+    let getCalls = 0;
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: (u, m) => {
+              if (m === "GET" && u.includes(`/charges/${PAGARME_FIXTURE_CHARGE_ID}`)) {
+                getCalls += 1;
+                return true;
+              }
+              return false;
+            },
+            body: {
+              ...fixturePaidChargeResponse,
+              status: "failed",
+              paid_amount: null,
+              paid_at: null,
+            },
+          },
+        ]) as never,
+      ),
+    });
+    const r = await svc.processWebhook({
+      id: "evt_local_payment_failed",
+      type: "charge.payment_failed",
+      data: {
+        id: PAGARME_FIXTURE_CHARGE_ID,
+        status: "failed",
+        order_id: fixturePixOrderResponse.id,
+        code: PAGARME_FIXTURE_COBRANCA_ID,
+      },
+    });
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.data.unrelated_ignored, undefined);
+      assert.equal(r.data.payment_registered, false);
+    }
+    assert.equal(state.webhooks.size, 1);
+    assert.equal(getCalls, 1);
+    assert.equal(state.pagamentos.size, 0);
+    const cob = [...state.cobrancas.values()][0]!;
+    // Semântica atual: pending não promove via webhook failed; só espelha raw.
+    assert.equal(cob.status, "pending");
+    assert.equal(cob.pagarme_status_raw, "failed");
+    ok("charge.payment_failed local: INSERT+GET; sem pagamento (espelho raw)");
+  }
+
+  // charge.paid local — revalida INSERT=1 GET=1 pagamento
+  {
+    const { repo, state } = seedRepo();
+    state.cobrancas.set(PAGARME_FIXTURE_COBRANCA_ID, {
+      id: PAGARME_FIXTURE_COBRANCA_ID,
+      reserva_id: RESERVA_OK,
+      external_reservation_id: null,
+      metodo: "pix",
+      valor_centavos: 170_000,
+      moeda: "BRL",
+      idempotency_key: "x",
+      status: "pending",
+      pagarme_payment_link_id: null,
+      pagarme_payment_link_url: null,
+      pagarme_order_id: fixturePixOrderResponse.id,
+      pagarme_charge_id: PAGARME_FIXTURE_CHARGE_ID,
+      pix_qr_code: null,
+      pix_qr_code_url: null,
+      expira_em: null,
+      pagarme_status_raw: "pending",
+      requer_revisao_operacional: false,
+      requer_revisao_motivo: null,
+      requer_revisao_detectado_em: null,
+      criado_por_user_id: OPERATOR,
+    });
+    let getCalls = 0;
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: (u, m) => {
+              if (m === "GET" && u.includes(`/charges/${PAGARME_FIXTURE_CHARGE_ID}`)) {
+                getCalls += 1;
+                return true;
+              }
+              return false;
+            },
+            body: fixturePaidChargeResponse,
+          },
+        ]) as never,
+      ),
+    });
+    const r = await svc.processWebhook(fixtureWebhookChargePaid);
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.data.payment_registered, true);
+      assert.equal(r.data.unrelated_ignored, undefined);
+    }
+    assert.equal(state.webhooks.size, 1);
+    assert.equal(getCalls, 1);
+    assert.equal(state.pagamentos.size, 1);
+    assert.equal([...state.cobrancas.values()][0]!.status, "paid");
+    ok("charge.paid local apos prefilter: INSERT=1 GET=1 pagamento");
+  }
+
+  // Combinado: Payment Link cartão SEM order_id/charge_id locais + primeiro charge.paid
+  // Hint de candidato = data.code (UUID local), como buildPaymentLinkRequestBody.order_code.
+  {
+    const { repo, state } = seedRepo();
+    const reservaAntes = structuredClone(state.reservas.get(RESERVA_OK)!);
+    state.cobrancas.set(PAGARME_FIXTURE_COBRANCA_ID, {
+      id: PAGARME_FIXTURE_COBRANCA_ID,
+      reserva_id: RESERVA_OK,
+      external_reservation_id: "HITS-1",
+      metodo: "cartao",
+      valor_centavos: 170_000,
+      moeda: "BRL",
+      idempotency_key: "yh-cobranca-pl-preids",
+      status: "pending",
+      pagarme_payment_link_id: PAGARME_FIXTURE_PAYMENT_LINK_ID,
+      pagarme_payment_link_url: PAGARME_FIXTURE_LINK_URL,
+      pagarme_order_id: null,
+      pagarme_charge_id: null,
+      pix_qr_code: null,
+      pix_qr_code_url: null,
+      expira_em: null,
+      pagarme_status_raw: "pending",
+      requer_revisao_operacional: false,
+      requer_revisao_motivo: null,
+      requer_revisao_detectado_em: null,
+      criado_por_user_id: OPERATOR,
+    });
+
+    let getCalls = 0;
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: (u, m) => {
+              if (m === "GET" && u.includes(`/charges/${PAGARME_FIXTURE_CHARGE_ID}`)) {
+                getCalls += 1;
+                return true;
+              }
+              return false;
+            },
+            body: {
+              ...fixturePaidChargeResponse,
+              payment_method: "credit_card",
+            },
+          },
+        ]) as never,
+      ),
+    });
+
+    // Fixture homologada: data.code = UUID local (order_code do Payment Link).
+    assert.equal(fixtureWebhookChargePaid.data.code, PAGARME_FIXTURE_COBRANCA_ID);
+    assert.equal(
+      [...state.cobrancas.values()][0]!.pagarme_order_id,
+      null,
+    );
+    assert.equal(
+      [...state.cobrancas.values()][0]!.pagarme_charge_id,
+      null,
+    );
+
+    const first = await svc.processWebhook(fixtureWebhookChargePaid);
+    assert.equal(first.ok, true);
+    if (first.ok) {
+      assert.equal(first.data.unrelated_ignored, undefined);
+      assert.equal(first.data.payment_registered, true);
+      assert.equal(first.data.cobranca_id, PAGARME_FIXTURE_COBRANCA_ID);
+      assert.equal(first.data.duplicate_event, false);
+    }
+    assert.equal(state.webhooks.size, 1);
+    assert.equal(getCalls, 1);
+
+    const cob = state.cobrancas.get(PAGARME_FIXTURE_COBRANCA_ID)!;
+    assert.equal(cob.status, "paid");
+    assert.equal(cob.pagarme_order_id, PAGARME_FIXTURE_ORDER_ID);
+    assert.equal(cob.pagarme_charge_id, PAGARME_FIXTURE_CHARGE_ID);
+    assert.equal(state.pagamentos.size, 1);
+    const pag = [...state.pagamentos.values()][0]!;
+    assert.equal(pag.cobranca_id, PAGARME_FIXTURE_COBRANCA_ID);
+    assert.equal(pag.sincronizacao_hits_status, "aguardando_registro_hits");
+    assert.equal(pag.valor_centavos_recebido, 170_000);
+    assert.deepEqual(state.reservas.get(RESERVA_OK), reservaAntes);
+    assert.equal(state.reservas.get(RESERVA_OK)!.pagamento_status, "pendente");
+    ok("PL cartao pre-IDs: candidate via data.code; paid+IDs+1 pagamento; HITS pendente");
+
+    const dup = await svc.processWebhook(fixtureWebhookChargePaid);
+    assert.equal(dup.ok, true);
+    if (dup.ok) {
+      assert.equal(dup.data.duplicate_event, true);
+      assert.equal(dup.data.payment_registered, false);
+    }
+    assert.equal(state.webhooks.size, 1);
+    assert.equal(getCalls, 1);
+    assert.equal(state.pagamentos.size, 1);
+    assert.equal(state.cobrancas.get(PAGARME_FIXTURE_COBRANCA_ID)!.status, "paid");
+    ok("PL cartao pre-IDs: reprocesso idempotente (1 webhook, 1 pagamento, GET nao repete)");
   }
 
   console.log(`\n[test-cobranca-pagarme-service] ${passed} assertions OK\n`);

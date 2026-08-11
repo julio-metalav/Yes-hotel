@@ -2,7 +2,8 @@
  * Webhook Pagar.me — notificação apenas (NÃO prova de pagamento).
  * verify_jwt = false SOMENTE nesta função.
  *
- * Fluxo: idempotência event_id → extrai IDs → GET server-to-server → valida → grava.
+ * Fluxo: extrai hints → prefilter candidato local → (se local) idempotência
+ * event_id → GET server-to-server → valida → grava. Sem candidato: 200 silencioso.
  *
  * NÃO deployar / NÃO configurar webhook real em produção neste checkpoint.
  */
