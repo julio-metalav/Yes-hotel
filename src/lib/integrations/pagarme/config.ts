@@ -1,13 +1,19 @@
 /**
- * Configuração server-side Pagar.me — fail-closed (checkpoint HOMOLOGAÇÃO).
+ * Configuração server-side Pagar.me — fail-closed.
  *
- * CORE (orders/charges): https://api.pagar.me/core/v5
- * CHECKOUT TEST (paymentlinks): https://sdx-api.pagar.me/core/v5
+ * TEST:
+ * - PAGARME_ENV=test
+ * - secret somente sk_test_
+ * - Core: https://api.pagar.me/core/v5
+ * - Checkout: https://sdx-api.pagar.me/core/v5
  *
- * Neste checkpoint:
- * - PAGARME_ENV deve ser exatamente "test" (production NÃO suportada);
- * - secret deve existir e começar com sk_test_;
- * - sk_live_ e sk_ genérica são recusadas.
+ * PRODUCTION:
+ * - PAGARME_ENV=production
+ * - secret somente sk_live_
+ * - Core: https://api.pagar.me/core/v5
+ * - Checkout: https://api.pagar.me/core/v5
+ *
+ * Nunca cruzar test↔live. Sem fallback. Sem inferir env pela chave.
  */
 
 import type {
@@ -17,11 +23,17 @@ import type {
   PagarmeSecretKeyKind,
 } from "./types.ts";
 
-/** Core API — orders / charges. */
+/** Core API — orders / charges (test e production). */
 export const PAGARME_CORE_API_BASE_URL = "https://api.pagar.me/core/v5";
 
 /** Checkout / Payment Links em ambiente TEST. */
 export const PAGARME_CHECKOUT_TEST_API_BASE_URL = "https://sdx-api.pagar.me/core/v5";
+
+/**
+ * Checkout / Payment Links em ambiente PRODUCTION.
+ * Mesma host do Core, mas surface semanticamente distinta.
+ */
+export const PAGARME_CHECKOUT_PRODUCTION_API_BASE_URL = "https://api.pagar.me/core/v5";
 
 /**
  * @deprecated Preferir PAGARME_CHECKOUT_TEST_API_BASE_URL.
@@ -79,20 +91,17 @@ function normalizeBaseUrl(raw: string): string {
 
 /**
  * Classifica o prefixo da secret sem expor o valor.
- * Neste checkpoint (ENV=test):
- * - sk_test_ => test (única permitida)
- * - sk_live_ => live (bloqueada)
- * - sk_ genérica => unknown (bloqueada; exige sk_test_ real)
- * - demais => unknown
+ * - sk_live_ => live
+ * - sk_test_ => test
+ * - demais (incl. sk_ genérica) => unknown
  *
- * Ambiente NÃO é inferido só pelo prefixo: PAGARME_ENV=test é obrigatório.
+ * Ambiente NÃO é inferido pelo prefixo: PAGARME_ENV é obrigatório e separado.
  */
 export function classifyPagarmeSecretKey(secretKey: string): PagarmeSecretKeyKind {
   const key = String(secretKey ?? "").trim();
   if (!key) return "missing";
   if (key.startsWith("sk_live_")) return "live";
   if (key.startsWith("sk_test_")) return "test";
-  // sk_ genérica (Dashboard antigo) NÃO é aceita neste checkpoint — exige sk_test_.
   return "unknown";
 }
 
@@ -103,9 +112,18 @@ export function parsePagarmeEnvironment(raw: string): PagarmeEnvironment | null 
   return null;
 }
 
+export function expectedCheckoutBaseUrlForEnv(
+  pagarmeEnv: PagarmeEnvironment | null,
+): string | null {
+  if (pagarmeEnv === "test") return PAGARME_CHECKOUT_TEST_API_BASE_URL;
+  if (pagarmeEnv === "production") return PAGARME_CHECKOUT_PRODUCTION_API_BASE_URL;
+  return null;
+}
+
 /**
  * Avalia base URL do Core (orders/charges).
- * Neste checkpoint: somente ENV=test + api.pagar.me.
+ * TEST e PRODUCTION: somente https://api.pagar.me/core/v5
+ * sdx-api nunca é Core.
  */
 export function evaluatePagarmeCoreBaseUrl(
   rawBaseUrl: string,
@@ -119,7 +137,7 @@ export function evaluatePagarmeCoreBaseUrl(
   if (!pagarmeEnv) {
     return { url, allowed: false, reason: "unexpected_base_url" };
   }
-  if (pagarmeEnv !== "test") {
+  if (pagarmeEnv !== "test" && pagarmeEnv !== "production") {
     return { url, allowed: false, reason: "production_env_unsupported" };
   }
   if (url === PAGARME_CHECKOUT_TEST_API_BASE_URL) {
@@ -133,7 +151,8 @@ export function evaluatePagarmeCoreBaseUrl(
 
 /**
  * Avalia base URL do Checkout (paymentlinks).
- * Neste checkpoint: somente ENV=test + sdx-api.
+ * TEST: somente sdx-api
+ * PRODUCTION: somente api.pagar.me (mesmo host do Core; surface distinta)
  */
 export function evaluatePagarmeCheckoutBaseUrl(
   rawBaseUrl: string,
@@ -147,16 +166,25 @@ export function evaluatePagarmeCheckoutBaseUrl(
   if (!pagarmeEnv) {
     return { url, allowed: false, reason: "unexpected_base_url" };
   }
-  if (pagarmeEnv !== "test") {
-    return { url, allowed: false, reason: "production_env_unsupported" };
+  if (pagarmeEnv === "test") {
+    if (url === PAGARME_CORE_API_BASE_URL) {
+      return { url, allowed: false, reason: "wrong_surface_for_env" };
+    }
+    if (url !== PAGARME_CHECKOUT_TEST_API_BASE_URL) {
+      return { url, allowed: false, reason: "unexpected_base_url" };
+    }
+    return { url, allowed: true, reason: "ok" };
   }
-  if (url === PAGARME_CORE_API_BASE_URL) {
-    return { url, allowed: false, reason: "wrong_surface_for_env" };
+  if (pagarmeEnv === "production") {
+    if (url === PAGARME_CHECKOUT_TEST_API_BASE_URL) {
+      return { url, allowed: false, reason: "wrong_surface_for_env" };
+    }
+    if (url !== PAGARME_CHECKOUT_PRODUCTION_API_BASE_URL) {
+      return { url, allowed: false, reason: "unexpected_base_url" };
+    }
+    return { url, allowed: true, reason: "ok" };
   }
-  if (url !== PAGARME_CHECKOUT_TEST_API_BASE_URL) {
-    return { url, allowed: false, reason: "unexpected_base_url" };
-  }
-  return { url, allowed: true, reason: "ok" };
+  return { url, allowed: false, reason: "production_env_unsupported" };
 }
 
 /**
@@ -182,33 +210,50 @@ export function evaluatePagarmeBaseUrl(rawBaseUrl: string): {
   return { url, allowed: true, reason: "ok" };
 }
 
-function resolveEnvSecretCompatibility(
+/**
+ * Compatibilidade env × kind da secret (fail-closed).
+ * Usar também no client.assertTransport — não confiar em flags pré-computadas.
+ */
+export function resolveEnvSecretCompatibility(
   pagarmeEnv: PagarmeEnvironment | null,
   secretKind: PagarmeSecretKeyKind,
 ): { ok: boolean; reason: string | null } {
   if (!pagarmeEnv) {
     return { ok: false, reason: "env_missing" };
   }
-  // Checkpoint: produção NÃO suportada, independentemente da secret.
-  if (pagarmeEnv === "production") {
-    return { ok: false, reason: "production_env_unsupported" };
-  }
   if (secretKind === "missing") {
     return { ok: false, reason: "missing_secret" };
-  }
-  if (secretKind === "live") {
-    return { ok: false, reason: "live_secret_blocked" };
   }
   if (secretKind === "unknown") {
     return { ok: false, reason: "secret_kind_unknown" };
   }
-  // secretKind === "test" (somente sk_test_)
-  return { ok: true, reason: null };
+
+  if (pagarmeEnv === "test") {
+    if (secretKind === "live") {
+      return { ok: false, reason: "live_secret_blocked" };
+    }
+    if (secretKind === "test") {
+      return { ok: true, reason: null };
+    }
+    return { ok: false, reason: "secret_kind_unknown" };
+  }
+
+  if (pagarmeEnv === "production") {
+    if (secretKind === "test") {
+      return { ok: false, reason: "env_secret_mismatch" };
+    }
+    if (secretKind === "live") {
+      return { ok: true, reason: null };
+    }
+    return { ok: false, reason: "secret_kind_unknown" };
+  }
+
+  return { ok: false, reason: "env_missing" };
 }
 
 /**
  * Lê configuração do ambiente.
- * Sem PAGARME_ENV=test / secret sk_ não-live / bases allowlisted: transportAllowed=false.
+ * Sem ENV válido / secret pareada / bases allowlisted / ENABLED=true: transportAllowed=false.
  */
 export function getPagarmeConfig(
   env: PagarmeEnvSource = typeof process !== "undefined" ? process.env : {},
@@ -221,10 +266,16 @@ export function getPagarmeConfig(
   const legacySingleBase = readEnv(env, "PAGARME_API_BASE_URL");
   const rawCore =
     readEnv(env, "PAGARME_CORE_API_BASE_URL") ||
-    (pagarmeEnv === "test" && !legacySingleBase ? PAGARME_CORE_API_BASE_URL : "");
+    ((pagarmeEnv === "test" || pagarmeEnv === "production") && !legacySingleBase
+      ? PAGARME_CORE_API_BASE_URL
+      : "");
   const rawCheckout =
     readEnv(env, "PAGARME_CHECKOUT_API_BASE_URL") ||
-    (pagarmeEnv === "test" && !legacySingleBase ? PAGARME_CHECKOUT_TEST_API_BASE_URL : "");
+    (pagarmeEnv === "test" && !legacySingleBase
+      ? PAGARME_CHECKOUT_TEST_API_BASE_URL
+      : pagarmeEnv === "production" && !legacySingleBase
+        ? PAGARME_CHECKOUT_PRODUCTION_API_BASE_URL
+        : "");
 
   // Legacy PAGARME_API_BASE_URL sozinho é ambíguo (Core×Checkout) → bloquear.
   const legacyAmbiguous =
@@ -238,7 +289,6 @@ export function getPagarmeConfig(
 
   let blockReason: string | null = null;
   if (!pagarmeEnv) blockReason = "env_missing";
-  else if (pagarmeEnv === "production") blockReason = "production_env_unsupported";
   else if (legacyAmbiguous) blockReason = "legacy_ambiguous_base_url";
   else if (!envSecret.ok) blockReason = envSecret.reason;
   else if (!coreEval.allowed) {
@@ -261,11 +311,11 @@ export function getPagarmeConfig(
             : "unexpected_checkout_base_url";
   }
 
-  const envAllowed = pagarmeEnv === "test";
-  const secretAllowed = envSecret.ok && secretKeyKind !== "missing" && secretKeyKind !== "live";
-  const coreBaseUrlAllowed = coreEval.allowed && !legacyAmbiguous && pagarmeEnv === "test";
+  const envAllowed = pagarmeEnv === "test" || pagarmeEnv === "production";
+  const secretAllowed = envSecret.ok === true;
+  const coreBaseUrlAllowed = coreEval.allowed && !legacyAmbiguous && envAllowed;
   const checkoutBaseUrlAllowed =
-    checkoutEval.allowed && !legacyAmbiguous && pagarmeEnv === "test";
+    checkoutEval.allowed && !legacyAmbiguous && envAllowed;
   const baseUrlAllowed = coreBaseUrlAllowed && checkoutBaseUrlAllowed;
   const hasSecret = Boolean(secretKey);
   const transportAllowed =
@@ -276,10 +326,15 @@ export function getPagarmeConfig(
     baseUrlAllowed &&
     blockReason === null;
 
+  const defaultCheckout =
+    pagarmeEnv === "production"
+      ? PAGARME_CHECKOUT_PRODUCTION_API_BASE_URL
+      : PAGARME_CHECKOUT_TEST_API_BASE_URL;
+
   return {
     env: pagarmeEnv,
     coreApiBaseUrl: coreEval.url || PAGARME_CORE_API_BASE_URL,
-    checkoutApiBaseUrl: checkoutEval.url || PAGARME_CHECKOUT_TEST_API_BASE_URL,
+    checkoutApiBaseUrl: checkoutEval.url || defaultCheckout,
     /** Compat: aponta para Core (orders/charges). */
     apiBaseUrl: coreEval.url || PAGARME_CORE_API_BASE_URL,
     secretKey,

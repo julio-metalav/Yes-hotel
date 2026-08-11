@@ -4,10 +4,15 @@
  */
 import assert from "node:assert/strict";
 import {
+  PAGARME_CHECKOUT_PRODUCTION_API_BASE_URL,
   PAGARME_CHECKOUT_TEST_API_BASE_URL,
   PAGARME_CORE_API_BASE_URL,
+  PAGARME_FIXTURE_CHARGE_ID,
   PAGARME_FIXTURE_COBRANCA_ID,
+  PAGARME_FIXTURE_LIVE_SECRET,
+  PAGARME_FIXTURE_ORDER_ID,
   PAGARME_FIXTURE_SECRET,
+  PAGARME_FIXTURE_TX_ID,
   PAGARME_HOMOLOG_API_BASE_URL,
   PAGARME_PRODUCTION_API_BASE_URL,
   PagarmeClient,
@@ -25,6 +30,7 @@ import {
   getPagarmeConfig,
   maxInstallmentsForAmount,
   sanitizeUnknown,
+  type PagarmeConfig,
 } from "../src/lib/integrations/pagarme";
 
 let passed = 0;
@@ -42,6 +48,64 @@ function homologEnv(extra: Record<string, string> = {}) {
     PAGARME_CHECKOUT_API_BASE_URL: PAGARME_CHECKOUT_TEST_API_BASE_URL,
     ...extra,
   };
+}
+
+function productionEnv(extra: Record<string, string> = {}) {
+  return {
+    PAGARME_ENV: "production",
+    PAGARME_INTEGRATION_ENABLED: "true",
+    PAGARME_SECRET_KEY: PAGARME_FIXTURE_LIVE_SECRET,
+    PAGARME_CORE_API_BASE_URL: PAGARME_CORE_API_BASE_URL,
+    PAGARME_CHECKOUT_API_BASE_URL: PAGARME_CHECKOUT_PRODUCTION_API_BASE_URL,
+    ...extra,
+  };
+}
+
+/** Config manual com flags forjadas — assertTransport deve ignorar as flags. */
+function forgedConfig(overrides: Partial<PagarmeConfig>): PagarmeConfig {
+  return {
+    env: "test",
+    coreApiBaseUrl: PAGARME_CORE_API_BASE_URL,
+    checkoutApiBaseUrl: PAGARME_CHECKOUT_TEST_API_BASE_URL,
+    apiBaseUrl: PAGARME_CORE_API_BASE_URL,
+    secretKey: PAGARME_FIXTURE_SECRET,
+    secretKeyKind: "test",
+    integrationEnabled: true,
+    requestTimeoutMs: 20_000,
+    pixExpiresInSeconds: 86_400,
+    envAllowed: true,
+    secretAllowed: true,
+    coreBaseUrlAllowed: true,
+    checkoutBaseUrlAllowed: true,
+    baseUrlAllowed: true,
+    transportAllowed: true,
+    blockReason: null,
+    ...overrides,
+  };
+}
+
+async function assertBlockedBeforeFetch(
+  config: PagarmeConfig,
+  expectedCode: string,
+): Promise<number> {
+  let fetchCalls = 0;
+  const client = new PagarmeClient({
+    config,
+    fetchImpl: ((..._args: unknown[]) => {
+      fetchCalls += 1;
+      throw new Error("fetch nao deveria ser chamado");
+    }) as never,
+  });
+  await assert.rejects(
+    () =>
+      client.createPaymentLink({
+        cobrancaId: PAGARME_FIXTURE_COBRANCA_ID,
+        valorCentavos: 1000,
+        idempotencyKey: "forged-block",
+      }),
+    (e: unknown) => e instanceof PagarmeError && e.code === expectedCode,
+  );
+  return fetchCalls;
 }
 
 async function main() {
@@ -144,10 +208,10 @@ async function main() {
   assert.equal(legacySdx.allowed, true);
   ok("legado evaluatePagarmeBaseUrl: sdx ok, api.pagar.me blocked as checkout");
 
-  // --- Fail-closed env Ã— chave (checkpoint sÃ³ TEST) ---
+  // --- Fail-closed env × chave ---
   assert.equal(classifyPagarmeSecretKey(PAGARME_FIXTURE_SECRET), "test");
   assert.equal(classifyPagarmeSecretKey("sk_homolog_generic_not_live_000"), "unknown");
-  assert.equal(classifyPagarmeSecretKey("sk_live_synthetic_not_real"), "live");
+  assert.equal(classifyPagarmeSecretKey(PAGARME_FIXTURE_LIVE_SECRET), "live");
   assert.equal(classifyPagarmeSecretKey("pk_test_x"), "unknown");
 
   const cfgOk = getPagarmeConfig(homologEnv());
@@ -155,17 +219,25 @@ async function main() {
   assert.equal(cfgOk.env, "test");
   assert.equal(cfgOk.coreApiBaseUrl, PAGARME_CORE_API_BASE_URL);
   assert.equal(cfgOk.checkoutApiBaseUrl, PAGARME_CHECKOUT_TEST_API_BASE_URL);
-  ok("test + sk_test + Core api + Checkout sdx => permitido");
+  ok("A. TEST válido => permitido");
 
-  const cfgGenericSk = getPagarmeConfig(
-    homologEnv({ PAGARME_SECRET_KEY: "sk_homolog_generic_not_live_000" }),
+  const cfgProdOk = getPagarmeConfig(productionEnv());
+  assert.equal(cfgProdOk.transportAllowed, true);
+  assert.equal(cfgProdOk.env, "production");
+  assert.equal(cfgProdOk.secretKeyKind, "live");
+  assert.equal(cfgProdOk.coreApiBaseUrl, PAGARME_CORE_API_BASE_URL);
+  assert.equal(cfgProdOk.checkoutApiBaseUrl, PAGARME_CHECKOUT_PRODUCTION_API_BASE_URL);
+  ok("B. PRODUCTION válido => permitido");
+
+  const cfgProdTestKey = getPagarmeConfig(
+    productionEnv({ PAGARME_SECRET_KEY: PAGARME_FIXTURE_SECRET }),
   );
-  assert.equal(cfgGenericSk.transportAllowed, false);
-  assert.equal(cfgGenericSk.blockReason, "secret_kind_unknown");
-  ok("test + sk_<generica> => bloqueia");
+  assert.equal(cfgProdTestKey.transportAllowed, false);
+  assert.equal(cfgProdTestKey.blockReason, "env_secret_mismatch");
+  ok("C. production + sk_test_ => bloqueado");
 
   const cfgLiveKey = getPagarmeConfig(
-    homologEnv({ PAGARME_SECRET_KEY: "sk_live_synthetic_not_real" }),
+    homologEnv({ PAGARME_SECRET_KEY: PAGARME_FIXTURE_LIVE_SECRET }),
   );
   assert.equal(cfgLiveKey.transportAllowed, false);
   assert.equal(cfgLiveKey.blockReason, "live_secret_blocked");
@@ -183,47 +255,53 @@ async function main() {
       }),
     (e: unknown) => e instanceof PagarmeError && e.code === "live_secret_blocked",
   );
-  ok("test + sk_live => bloqueado");
+  ok("D. test + sk_live_ => bloqueado (antes do fetch)");
 
-  const cfgProd = getPagarmeConfig(
-    homologEnv({
-      PAGARME_ENV: "production",
-      PAGARME_CHECKOUT_API_BASE_URL: PAGARME_CORE_API_BASE_URL,
-    }),
+  const cfgProdGeneric = getPagarmeConfig(
+    productionEnv({ PAGARME_SECRET_KEY: "sk_homolog_generic_not_live_000" }),
   );
-  assert.equal(cfgProd.transportAllowed, false);
-  assert.equal(cfgProd.blockReason, "production_env_unsupported");
-  const blockedProd = new PagarmeClient({
-    config: cfgProd,
-    fetchImpl: createMockPagarmeFetch([]) as never,
-  });
-  await assert.rejects(
-    () =>
-      blockedProd.createPaymentLink({
-        cobrancaId: PAGARME_FIXTURE_COBRANCA_ID,
-        valorCentavos: 1000,
-        idempotencyKey: "prod-x",
-      }),
-    (e: unknown) => e instanceof PagarmeError && e.code === "production_env_unsupported",
-  );
-  ok("production => bloqueado incondicionalmente");
+  assert.equal(cfgProdGeneric.transportAllowed, false);
+  assert.equal(cfgProdGeneric.blockReason, "secret_kind_unknown");
+  ok("E. production + generic sk_ => bloqueado");
 
-  const cfgNoEnv = getPagarmeConfig({
-    PAGARME_INTEGRATION_ENABLED: "true",
+  const cfgGenericSk = getPagarmeConfig(
+    homologEnv({ PAGARME_SECRET_KEY: "sk_homolog_generic_not_live_000" }),
+  );
+  assert.equal(cfgGenericSk.transportAllowed, false);
+  assert.equal(cfgGenericSk.blockReason, "secret_kind_unknown");
+  ok("F. test + generic sk_ => bloqueado");
+
+  const cfgProdSdx = getPagarmeConfig(
+    productionEnv({ PAGARME_CHECKOUT_API_BASE_URL: PAGARME_CHECKOUT_TEST_API_BASE_URL }),
+  );
+  assert.equal(cfgProdSdx.transportAllowed, false);
+  assert.equal(cfgProdSdx.blockReason, "checkout_base_wrong_surface");
+  ok("G. production + checkout sdx => bloqueado");
+
+  const cfgCheckoutWrong = getPagarmeConfig(
+    homologEnv({ PAGARME_CHECKOUT_API_BASE_URL: PAGARME_CORE_API_BASE_URL }),
+  );
+  assert.equal(cfgCheckoutWrong.transportAllowed, false);
+  assert.equal(cfgCheckoutWrong.blockReason, "checkout_base_wrong_surface");
+  ok("H. test + checkout api.pagar.me => bloqueado");
+
+  const cfgProdCoreBad = getPagarmeConfig(
+    productionEnv({ PAGARME_CORE_API_BASE_URL: "https://evil.example/core/v5" }),
+  );
+  assert.equal(cfgProdCoreBad.transportAllowed, false);
+  assert.equal(cfgProdCoreBad.blockReason, "unexpected_core_base_url");
+  ok("I. production + core hostname errado => bloqueado");
+
+  const cfgDisabled = getPagarmeConfig(homologEnv({ PAGARME_INTEGRATION_ENABLED: "false" }));
+  assert.equal(cfgDisabled.transportAllowed, false);
+  const cfgEnabledMissing = getPagarmeConfig({
+    PAGARME_ENV: "test",
     PAGARME_SECRET_KEY: PAGARME_FIXTURE_SECRET,
     PAGARME_CORE_API_BASE_URL: PAGARME_CORE_API_BASE_URL,
     PAGARME_CHECKOUT_API_BASE_URL: PAGARME_CHECKOUT_TEST_API_BASE_URL,
   });
-  assert.equal(cfgNoEnv.transportAllowed, false);
-  assert.equal(cfgNoEnv.blockReason, "env_missing");
-  ok("config sem PAGARME_ENV => bloqueado");
-
-  const cfgBadPrefix = getPagarmeConfig(
-    homologEnv({ PAGARME_SECRET_KEY: "not_a_secret_key" }),
-  );
-  assert.equal(cfgBadPrefix.transportAllowed, false);
-  assert.equal(cfgBadPrefix.blockReason, "secret_kind_unknown");
-  ok("secret que nao comeca sk_ => bloqueado");
+  assert.equal(cfgEnabledMissing.transportAllowed, false);
+  ok("J. INTEGRATION_ENABLED false/ausente => bloqueado");
 
   const cfgLegacy = getPagarmeConfig({
     PAGARME_ENV: "test",
@@ -233,14 +311,212 @@ async function main() {
   });
   assert.equal(cfgLegacy.transportAllowed, false);
   assert.equal(cfgLegacy.blockReason, "legacy_ambiguous_base_url");
-  ok("PAGARME_API_BASE_URL legado sozinho => bloqueado");
+  ok("K. PAGARME_API_BASE_URL legado sozinho => bloqueado");
 
-  const cfgCheckoutWrong = getPagarmeConfig(
-    homologEnv({ PAGARME_CHECKOUT_API_BASE_URL: PAGARME_CORE_API_BASE_URL }),
+  const cfgBadEnv = getPagarmeConfig(homologEnv({ PAGARME_ENV: "staging" }));
+  assert.equal(cfgBadEnv.transportAllowed, false);
+  assert.equal(cfgBadEnv.blockReason, "env_missing");
+  const cfgNoEnv = getPagarmeConfig({
+    PAGARME_INTEGRATION_ENABLED: "true",
+    PAGARME_SECRET_KEY: PAGARME_FIXTURE_SECRET,
+    PAGARME_CORE_API_BASE_URL: PAGARME_CORE_API_BASE_URL,
+    PAGARME_CHECKOUT_API_BASE_URL: PAGARME_CHECKOUT_TEST_API_BASE_URL,
+  });
+  assert.equal(cfgNoEnv.transportAllowed, false);
+  assert.equal(cfgNoEnv.blockReason, "env_missing");
+  ok("L. env inválido/ausente => bloqueado");
+
+  const cfgNoSecret = getPagarmeConfig(
+    homologEnv({ PAGARME_SECRET_KEY: "" }),
   );
-  assert.equal(cfgCheckoutWrong.transportAllowed, false);
-  assert.equal(cfgCheckoutWrong.blockReason, "checkout_base_wrong_surface");
-  ok("test + api.pagar.me para paymentlink => bloqueado");
+  assert.equal(cfgNoSecret.transportAllowed, false);
+  assert.equal(cfgNoSecret.blockReason, "missing_secret");
+  ok("M. secret ausente => bloqueado");
+
+  // Production routing com mock — ZERO rede externa
+  let sawProdCheckoutLink = false;
+  let sawProdCoreCharge = false;
+  const prodMock = createMockPagarmeFetch([
+    {
+      match: (url, method) => {
+        if (method === "POST" && url === `${PAGARME_CORE_API_BASE_URL}/paymentlinks`) {
+          sawProdCheckoutLink = true;
+          return true;
+        }
+        return false;
+      },
+      body: fixturePaymentLinkResponse,
+    },
+    {
+      match: (url, method) => {
+        if (
+          method === "GET" &&
+          url === `${PAGARME_CORE_API_BASE_URL}/charges/${encodeURIComponent(PAGARME_FIXTURE_CHARGE_ID)}`
+        ) {
+          sawProdCoreCharge = true;
+          return true;
+        }
+        return false;
+      },
+      body: {
+        id: PAGARME_FIXTURE_CHARGE_ID,
+        status: "paid",
+        amount: 180000,
+        paid_amount: 180000,
+        currency: "BRL",
+        order_id: PAGARME_FIXTURE_ORDER_ID,
+        order: { id: PAGARME_FIXTURE_ORDER_ID, code: PAGARME_FIXTURE_COBRANCA_ID },
+        last_transaction: { id: PAGARME_FIXTURE_TX_ID },
+      },
+    },
+  ]);
+  const prodClient = new PagarmeClient({
+    config: getPagarmeConfig(productionEnv()),
+    fetchImpl: prodMock as never,
+  });
+  const prodLink = await prodClient.createPaymentLink({
+    cobrancaId: PAGARME_FIXTURE_COBRANCA_ID,
+    valorCentavos: 180_000,
+    idempotencyKey: "idem-prod-link",
+  });
+  assert.equal(prodLink.extract.paymentLinkId, fixturePaymentLinkResponse.id);
+  assert.equal(sawProdCheckoutLink, true);
+  const prodCharge = await prodClient.getCharge(PAGARME_FIXTURE_CHARGE_ID);
+  assert.equal(prodCharge.snapshot.chargeId, PAGARME_FIXTURE_CHARGE_ID);
+  assert.equal(sawProdCoreCharge, true);
+  ok("production mock: paymentlinks + charges em api.pagar.me/core/v5 (sem rede)");
+
+  // Cruzado barrado ANTES do fetch mockado
+  let crossedFetchCalls = 0;
+  const crossedMock = createMockPagarmeFetch([
+    {
+      match: () => {
+        crossedFetchCalls += 1;
+        return true;
+      },
+      body: {},
+    },
+  ]);
+  const crossedClient = new PagarmeClient({
+    config: getPagarmeConfig(
+      productionEnv({ PAGARME_SECRET_KEY: PAGARME_FIXTURE_SECRET }),
+    ),
+    fetchImpl: crossedMock as never,
+  });
+  await assert.rejects(
+    () =>
+      crossedClient.createPaymentLink({
+        cobrancaId: PAGARME_FIXTURE_COBRANCA_ID,
+        valorCentavos: 1000,
+        idempotencyKey: "crossed",
+      }),
+    (e: unknown) => e instanceof PagarmeError && e.code === "env_secret_mismatch",
+  );
+  assert.equal(crossedFetchCalls, 0);
+  ok("cruzado production+sk_test barrado ANTES do fetch");
+
+  // --- Config forjada: flags true NÃO liberam fetch ---
+  const forgedA = forgedConfig({
+    env: "test",
+    secretKey: PAGARME_FIXTURE_LIVE_SECRET,
+    secretKeyKind: "test", // forjado mentiroso
+    secretAllowed: true,
+    envAllowed: true,
+    transportAllowed: true,
+  });
+  assert.equal(await assertBlockedBeforeFetch(forgedA, "live_secret_blocked"), 0);
+  ok("forjada A: test+sk_live_ + flags true => bloqueado fetchCalls=0");
+
+  const forgedB = forgedConfig({
+    env: "production",
+    secretKey: PAGARME_FIXTURE_SECRET,
+    secretKeyKind: "live", // forjado mentiroso
+    coreApiBaseUrl: PAGARME_CORE_API_BASE_URL,
+    checkoutApiBaseUrl: PAGARME_CHECKOUT_PRODUCTION_API_BASE_URL,
+    apiBaseUrl: PAGARME_CORE_API_BASE_URL,
+    secretAllowed: true,
+    envAllowed: true,
+    transportAllowed: true,
+  });
+  assert.equal(await assertBlockedBeforeFetch(forgedB, "env_secret_mismatch"), 0);
+  ok("forjada B: production+sk_test_ + flags true => bloqueado fetchCalls=0");
+
+  const forgedC = forgedConfig({
+    env: "production",
+    secretKey: PAGARME_FIXTURE_LIVE_SECRET,
+    secretKeyKind: "live",
+    coreApiBaseUrl: PAGARME_CORE_API_BASE_URL,
+    checkoutApiBaseUrl: PAGARME_CHECKOUT_TEST_API_BASE_URL,
+    apiBaseUrl: PAGARME_CORE_API_BASE_URL,
+    secretAllowed: true,
+    envAllowed: true,
+    checkoutBaseUrlAllowed: true,
+    transportAllowed: true,
+  });
+  assert.equal(
+    await assertBlockedBeforeFetch(forgedC, "checkout_base_wrong_surface"),
+    0,
+  );
+  ok("forjada C: production+checkout sdx + flags true => bloqueado fetchCalls=0");
+
+  const forgedD = forgedConfig({
+    env: "test",
+    secretKey: PAGARME_FIXTURE_SECRET,
+    secretKeyKind: "test",
+    coreApiBaseUrl: PAGARME_CORE_API_BASE_URL,
+    checkoutApiBaseUrl: PAGARME_CORE_API_BASE_URL,
+    apiBaseUrl: PAGARME_CORE_API_BASE_URL,
+    secretAllowed: true,
+    envAllowed: true,
+    checkoutBaseUrlAllowed: true,
+    transportAllowed: true,
+  });
+  assert.equal(
+    await assertBlockedBeforeFetch(forgedD, "checkout_base_wrong_surface"),
+    0,
+  );
+  ok("forjada D: test+checkout api.pagar.me + flags true => bloqueado fetchCalls=0");
+
+  let forgedEFetchCalls = 0;
+  let forgedESawLink = false;
+  const forgedEValid = forgedConfig({
+    env: "production",
+    secretKey: PAGARME_FIXTURE_LIVE_SECRET,
+    secretKeyKind: "unknown", // mentiroso; assert reclassifica pela secret
+    coreApiBaseUrl: PAGARME_CORE_API_BASE_URL,
+    checkoutApiBaseUrl: PAGARME_CHECKOUT_PRODUCTION_API_BASE_URL,
+    apiBaseUrl: PAGARME_CORE_API_BASE_URL,
+    envAllowed: false,
+    secretAllowed: false,
+    transportAllowed: false,
+    blockReason: "env_secret_mismatch",
+  });
+  const forgedEMock = createMockPagarmeFetch([
+    {
+      match: (url, method) => {
+        forgedEFetchCalls += 1;
+        if (method === "POST" && url === `${PAGARME_CORE_API_BASE_URL}/paymentlinks`) {
+          forgedESawLink = true;
+          return true;
+        }
+        return false;
+      },
+      body: fixturePaymentLinkResponse,
+    },
+  ]);
+  const forgedEClient = new PagarmeClient({
+    config: forgedEValid,
+    fetchImpl: forgedEMock as never,
+  });
+  const forgedELink = await forgedEClient.createPaymentLink({
+    cobrancaId: PAGARME_FIXTURE_COBRANCA_ID,
+    valorCentavos: 180_000,
+    idempotencyKey: "forged-e-valid",
+  });
+  assert.equal(forgedELink.extract.paymentLinkId, fixturePaymentLinkResponse.id);
+  assert.equal(forgedESawLink, true);
+  assert.equal(forgedEFetchCalls, 1);
+  ok("forjada E: production válida (flags false mentirosas) => mock permitido sem rede");
 
   const cfgCoreWrong = getPagarmeConfig(
     homologEnv({ PAGARME_CORE_API_BASE_URL: PAGARME_CHECKOUT_TEST_API_BASE_URL }),
