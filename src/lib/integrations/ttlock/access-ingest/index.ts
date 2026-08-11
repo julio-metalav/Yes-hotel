@@ -9,3 +9,4 @@ export * from "./lock-type.ts";
 export * from "./constant-time.ts";
 export * from "./crypto-hmac.ts";
 export * from "./handle-ingest.ts";
+export * from "./handle-poll.ts";

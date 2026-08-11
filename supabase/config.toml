@@ -57,3 +57,12 @@ verify_jwt = false
 # Envio multicanal do Payment Link ao hóspede (não cria cobrança).
 [functions.send-payment-link]
 verify_jwt = false
+
+# Diagnóstico read-only lockRecord/list (token scheduler / service_role).
+[functions.ttlock-lock-record-diagnose]
+verify_jwt = false
+
+# Polling TTLock lockRecord/list → first-room-access (fallback sem callback).
+# Auth: service_role ou x-access-tolerance-token. Flag YES_HOTEL_TTLOCK_ACCESS_POLL_ENABLED.
+[functions.ttlock-access-poller]
+verify_jwt = false

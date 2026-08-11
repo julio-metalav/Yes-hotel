@@ -26,6 +26,7 @@
     "test:yes:access-suspension-strategy": "tsx scripts/test-access-suspension-strategy.ts",
     "test:yes:first-room-access-orchestrator": "tsx scripts/test-first-room-access-orchestrator.ts",
     "test:yes:ttlock-access-ingest": "tsx scripts/test-ttlock-access-ingest.ts",
+    "test:yes:ttlock-access-poller": "tsx scripts/test-ttlock-access-poller.ts",
     "test:yes:fnrh-roles-completion": "tsx scripts/test-fnrh-roles-completion.ts",
     "test:yes:first-room-access-transaction": "tsx scripts/test-first-room-access-transaction.ts",
     "test:yes:access-tolerance-processor": "tsx scripts/test-access-tolerance-processor.ts",
