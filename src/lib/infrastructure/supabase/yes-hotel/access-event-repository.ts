@@ -46,6 +46,39 @@ export class SupabaseAccessEventRepository implements AccessEventRepository {
     return data ? mapRow(data as EventRow) : null;
   }
 
+  async findFirstProcessedApartmentByCredentialId(
+    credentialId: string,
+  ): Promise<AccessEventRecord | null> {
+    const { data, error } = await this.client
+      .from("operacional_acesso_eventos")
+      .select("*")
+      .eq("credential_id", credentialId)
+      .eq("processing_status", "processed")
+      .or("logical_destination.ilike.APT-%,logical_destination.ilike.APTO-%")
+      .order("occurred_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      throw new Error(`findFirstProcessedApartmentByCredentialId: ${error.message}`);
+    }
+    return data ? mapRow(data as EventRow) : null;
+  }
+
+  async hasProcessedApartmentFirstAccess(credentialId: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from("operacional_acesso_eventos")
+      .select("id, logical_destination")
+      .eq("credential_id", credentialId)
+      .eq("processing_status", "processed")
+      .limit(50);
+    if (error) throw new Error(`hasProcessedApartmentFirstAccess: ${error.message}`);
+    const rows = (data ?? []) as Array<{ logical_destination: string | null }>;
+    return rows.some((r) => {
+      const d = (r.logical_destination ?? "").toUpperCase();
+      return d.startsWith("APT-") || d.startsWith("APTO-");
+    });
+  }
+
   async insertRawEvent(
     input: ProcessFirstRoomAccessInput & {
       access_method: AccessEventRecord["access_method"];

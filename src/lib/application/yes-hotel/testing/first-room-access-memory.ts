@@ -38,6 +38,8 @@ type MemoryState = {
   toleranceItems: AccessToleranceItemRecord[];
   outbox: OutboxMessage[];
   accessOutbox: AccessOutboxRecord[];
+  /** Modelo vigente: entrou_no_apto + timestamp canônico por reserva. */
+  reservationEntered: Record<string, { entrou_no_apto: true; first_access_at: string }>;
 };
 
 function cloneState(state: MemoryState): MemoryState {
@@ -74,6 +76,7 @@ export class InMemoryUnitOfWork implements UnitOfWorkPort {
       );
       this.state.outbox.splice(0, this.state.outbox.length, ...snapshot.outbox);
       this.state.accessOutbox.splice(0, this.state.accessOutbox.length, ...snapshot.accessOutbox);
+      this.state.reservationEntered = structuredClone(snapshot.reservationEntered);
       throw e;
     }
   }
@@ -164,12 +167,33 @@ export class InMemoryUnitOfWork implements UnitOfWorkPort {
       }
 
       if (command.decision === "processed_no_pending") {
+        const reservationId = command.correlation?.reservation_id;
+        if (!reservationId) {
+          throw new Error("processed_no_pending exige reservation_id");
+        }
+        const already = state.reservationEntered[reservationId];
+        if (already) {
+          event.processing_status = "ignored";
+          event.ignored_reason = "already_started";
+          event.processed_at = now;
+          return {
+            status: "already_started" as const,
+            event_id: event.id,
+            ignored_reason: "already_started",
+            first_access_at: already.first_access_at,
+          };
+        }
         event.processing_status = "processed";
         event.processed_at = now;
+        state.reservationEntered[reservationId] = {
+          entrou_no_apto: true,
+          first_access_at: command.event.occurred_at,
+        };
         return {
           status: "processed_no_pending" as const,
           event_id: event.id,
           pending_reasons: [],
+          first_access_at: command.event.occurred_at,
         };
       }
 
@@ -236,12 +260,21 @@ export class InMemoryUnitOfWork implements UnitOfWorkPort {
       event.processing_status = "processed";
       event.processed_at = now;
 
+      const reservationId = command.correlation!.reservation_id!;
+      if (!state.reservationEntered[reservationId]) {
+        state.reservationEntered[reservationId] = {
+          entrou_no_apto: true,
+          first_access_at: grace.first_room_access_at,
+        };
+      }
+
       return {
         status: "grace_started" as const,
         event_id: event.id,
         tolerance_id: tolId,
         suspension_due_at: grace.suspension_due_at,
         pending_reasons: grace.pending_snapshot,
+        first_access_at: grace.first_room_access_at,
       };
     });
   }
@@ -314,6 +347,21 @@ export class InMemoryAccessEventRepository implements AccessEventRepository {
 
   async findByIdempotencyKey(key: string): Promise<AccessEventRecord | null> {
     return this.state.events.find((e) => e.idempotency_key === key) ?? null;
+  }
+
+  async findFirstProcessedApartmentByCredentialId(
+    credentialId: string,
+  ): Promise<AccessEventRecord | null> {
+    const rows = this.state.events
+      .filter(
+        (e) =>
+          e.credential_id === credentialId &&
+          e.processing_status === "processed" &&
+          !!e.logical_destination &&
+          /^APT-|^APTO-/i.test(e.logical_destination),
+      )
+      .sort((a, b) => a.occurred_at.localeCompare(b.occurred_at));
+    return rows[0] ?? null;
   }
 
   async insertRawEvent(
@@ -831,6 +879,7 @@ export function createFirstRoomAccessMemoryHarness(seed: {
     toleranceItems: [],
     outbox: [],
     accessOutbox: [],
+    reservationEntered: {},
   };
   const clock = new FixedClock(seed.now ?? new Date("2026-08-08T18:05:00.000Z"));
   const pendingPort = new InMemoryReservationPendingStatePort(seed.pending);
