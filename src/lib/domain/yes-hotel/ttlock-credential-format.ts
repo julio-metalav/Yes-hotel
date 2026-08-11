@@ -61,6 +61,51 @@ function guestFirstAndSecondOrNull(fullName: string | null | undefined): string 
 }
 
 /**
+ * Normaliza o PIN técnico TTLock (somente dígitos).
+ * Nunca inclui "#" — o hash é só instrução de uso no teclado físico.
+ */
+export function normalizeTechnicalTtlockPasscode(passcode: string | null | undefined): string {
+  return extractDigits(String(passcode ?? ""));
+}
+
+export type TtlockPasscodeGuestPresentation = {
+  /** PIN técnico (ex.: 1134) — banco / API TTLock. */
+  technical: string;
+  /** Apresentação com tecla de confirmação (ex.: 1134#). */
+  displayWithHash: string;
+  /** Linha explicativa (ex.: (digite 1134 + #)). */
+  instructionLine: string;
+  /**
+   * Bloco para WhatsApp/e-mail/hóspede.
+   * Mesma senha no apartamento e portões do bloco (teclados TTLock confirmam com #).
+   */
+  guestBlock: string;
+  /** Fragmento HTML do mesmo bloco (texto escapado pelo caller se necessário). */
+  guestBlockHtml: string;
+};
+
+/**
+ * Apresentação da senha ao hóspede.
+ * PIN técnico permanece sem "#"; "#" é instrução da fechadura física (apto e portões TTLock).
+ */
+export function formatTtlockPasscodeForGuest(
+  passcode: string | null | undefined,
+): TtlockPasscodeGuestPresentation {
+  const technical = normalizeTechnicalTtlockPasscode(passcode);
+  const displayWithHash = technical ? `${technical}#` : "";
+  const instructionLine = technical ? `(digite ${technical} + #)` : "";
+  const guestBlock = technical
+    ? `Senha do apartamento: ${displayWithHash}\n${instructionLine}\n\nEssa mesma senha vale para o apartamento e para os portões do bloco. Em todas as fechaduras, digite os números e confirme com #.`
+    : "Senha do apartamento: (indisponível)";
+  const guestBlockHtml = technical
+    ? `<p><strong>Senha do apartamento: ${displayWithHash}</strong></p>` +
+      `<p>${instructionLine}</p>` +
+      `<p>Essa mesma senha vale para o apartamento e para os portões do bloco. Em todas as fechaduras, digite os números e confirme com #.</p>`
+    : `<p><strong>Senha do apartamento: (indisponível)</strong></p>`;
+  return { technical, displayWithHash, instructionLine, guestBlock, guestBlockHtml };
+}
+
+/**
  * Nome do passcode na TTLock: "{apartamento} {primeiro segundo}" ou "{apartamento} Hóspede" sem nome.
  * Apartamento vazio no banco usa "?" como placeholder do prefixo.
  */

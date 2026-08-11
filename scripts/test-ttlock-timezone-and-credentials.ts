@@ -7,7 +7,14 @@ import {
   resolveDefaultCredentialValidityIso,
   validityIsoToTtlockMs,
   YES_HOTEL_TIMEZONE,
+  deriveTtlockPasscodeFromReservation,
+  formatTtlockPasscodeForGuest,
+  normalizeTechnicalTtlockPasscode,
 } from "../src/lib/domain/yes-hotel";
+import {
+  formatTtlockPasscodeForGuest as edgeFormatGuest,
+  normalizeTechnicalTtlockPasscode as edgeNormalize,
+} from "../supabase/functions/_shared/ttlock-credential-format.ts";
 import {
   hotelLocalToUtcIso as edgeHotelLocalToUtcIso,
   resolveDefaultCredentialValidityIso as edgeResolveValidity,
@@ -192,6 +199,38 @@ function alertaConflitoSemVinculo(opts: {
     }),
     "alerta_manual",
   );
+}
+
+// --- Apresentação ao hóspede: PIN técnico vs instrução com # ---
+{
+  const pin = "1134";
+  const guest = formatTtlockPasscodeForGuest(pin);
+  assert.equal(guest.technical, "1134");
+  assert.equal(guest.displayWithHash, "1134#");
+  assert.equal(guest.instructionLine, "(digite 1134 + #)");
+  assert.match(guest.guestBlock, /^Senha do apartamento: 1134#/);
+  assert.match(guest.guestBlock, /\(digite 1134 \+ #\)/);
+  assert.match(guest.guestBlock, /portões do bloco/);
+  assert.match(guest.guestBlockHtml, /1134#/);
+  assert.match(guest.guestBlockHtml, /\(digite 1134 \+ #\)/);
+
+  // "#" na entrada do hóspede não vira PIN técnico
+  assert.equal(normalizeTechnicalTtlockPasscode("1134#"), "1134");
+  assert.equal(formatTtlockPasscodeForGuest("1134#").technical, "1134");
+  assert.equal(formatTtlockPasscodeForGuest("1134#").displayWithHash, "1134#");
+
+  // Domínio e Edge alinhados (mesmo texto e-mail/WhatsApp)
+  const edge = edgeFormatGuest("1134");
+  assert.equal(edge.guestBlock, guest.guestBlock);
+  assert.equal(edge.guestBlockHtml, guest.guestBlockHtml);
+  assert.equal(edgeNormalize("1134#"), "1134");
+
+  // Derivação técnica continua 4 dígitos sem hash
+  const derived = deriveTtlockPasscodeFromReservation("HITS-FAKE-E2E-20260811-BRENO-APT34", "80a2d708-5bcc-4af3-856d-505f234055e0");
+  assert.equal(derived.length, 4);
+  assert.equal(/\D/.test(derived), false);
+  assert.equal(formatTtlockPasscodeForGuest(derived).technical, derived);
+  assert.equal(formatTtlockPasscodeForGuest(derived).displayWithHash, `${derived}#`);
 }
 
 console.log("ok: test-ttlock-timezone-and-credentials");
