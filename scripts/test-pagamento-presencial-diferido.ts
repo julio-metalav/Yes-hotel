@@ -6,6 +6,7 @@ import {
   canShowPresencialDiferidoButton,
   evaluatePresencialDiferidoOnFirstAccess,
   isDiaUtilCorumba,
+  isPagarmeObrigacaoLiquidadaForPpd,
   resolvePresencialDiferidoRegra,
   resolvePresencialDiferidoUiLabel,
   utcIsoToHotelLocalParts,
@@ -426,4 +427,84 @@ function graceWith(occurred: string, autorizado: boolean) {
   }
 }
 
-console.log("OK test-pagamento-presencial-diferido (A–R + calendário oficial)");
+// ---- CP5 hotfix: PPD vs Pagar.me paid (A–F) ----
+const baseEligible = {
+  nowIso: localIso(CHECKIN, 10, 0),
+  checkInYmd: CHECKIN,
+  statusReserva: "ativa",
+  pagamentoStatus: "pendente",
+  classificacaoComissionamento: "nao_comissionada",
+  perfilUsuario: "admin",
+  featureEnabled: true,
+} as const;
+
+// A) HITS pendente + sem Pagar.me paid => PPD pode aparecer
+{
+  const d = canShowPresencialDiferidoButton({
+    ...baseEligible,
+    cobrancasPagarme: [],
+  });
+  assert.equal(d.allowed, true);
+  assert.equal(d.reason, "ok");
+}
+
+// B) HITS pendente + Pagar.me paid => botão NÃO aparece
+{
+  const d = canShowPresencialDiferidoButton({
+    ...baseEligible,
+    cobrancasPagarme: [{ status: "paid" }],
+  });
+  assert.equal(d.allowed, false);
+  assert.equal(d.reason, "pagarme_ja_pago");
+  assert.equal(isPagarmeObrigacaoLiquidadaForPpd([{ status: "paid" }]), true);
+}
+
+// C) mesma condição via flag explícita (backend/UI) => rejeitada
+{
+  const d = canShowPresencialDiferidoButton({
+    ...baseEligible,
+    pagarmeObrigacaoLiquidada: true,
+  });
+  assert.equal(d.allowed, false);
+  assert.equal(d.reason, "pagarme_ja_pago");
+}
+
+// D) HITS pago => PPD não aparece
+{
+  const d = canShowPresencialDiferidoButton({
+    ...baseEligible,
+    pagamentoStatus: "pago",
+    cobrancasPagarme: [],
+  });
+  assert.equal(d.allowed, false);
+  assert.equal(d.reason, "ja_pago");
+}
+
+// E) Pagar.me pending => não considerar paid
+{
+  assert.equal(isPagarmeObrigacaoLiquidadaForPpd([{ status: "pending" }]), false);
+  const d = canShowPresencialDiferidoButton({
+    ...baseEligible,
+    cobrancasPagarme: [{ status: "pending" }],
+  });
+  assert.equal(d.allowed, true);
+  assert.equal(d.reason, "ok");
+}
+
+// F) refunded/chargeback => não tratar automaticamente como paid
+{
+  assert.equal(isPagarmeObrigacaoLiquidadaForPpd([{ status: "refunded" }]), false);
+  assert.equal(isPagarmeObrigacaoLiquidadaForPpd([{ status: "chargeback" }]), false);
+  const dRef = canShowPresencialDiferidoButton({
+    ...baseEligible,
+    cobrancasPagarme: [{ status: "refunded" }],
+  });
+  assert.equal(dRef.allowed, true);
+  const dCb = canShowPresencialDiferidoButton({
+    ...baseEligible,
+    cobrancasPagarme: [{ status: "chargeback" }],
+  });
+  assert.equal(dCb.allowed, true);
+}
+
+console.log("OK test-pagamento-presencial-diferido (A–R + calendário + Pagar.me/PPD A–F)");

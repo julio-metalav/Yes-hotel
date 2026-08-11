@@ -55,6 +55,18 @@
     return s === "pendente" || s === "parcial" || s === "emergencial";
   }
 
+  /** Somente status exatamente "paid" liquida a obrigação para PPD. */
+  function isPagarmeObrigacaoLiquidadaForPpd(cobrancas) {
+    if (!Array.isArray(cobrancas) || cobrancas.length === 0) return false;
+    for (var i = 0; i < cobrancas.length; i++) {
+      var st = String((cobrancas[i] && cobrancas[i].status) || "")
+        .trim()
+        .toLowerCase();
+      if (st === "paid") return true;
+    }
+    return false;
+  }
+
   function canShowPresencialDiferidoButton(input) {
     if (!isPagamentoPresencialDiferidoUiEnabled(input.featureEnabled)) {
       return { allowed: false, reason: "feature_off" };
@@ -67,6 +79,12 @@
     }
     if (String(input.pagamentoStatus || "").toLowerCase() === "pago") {
       return { allowed: false, reason: "ja_pago" };
+    }
+    var pagarmePaid =
+      input.pagarmeObrigacaoLiquidada === true ||
+      isPagarmeObrigacaoLiquidadaForPpd(input.cobrancasPagarme);
+    if (pagarmePaid) {
+      return { allowed: false, reason: "pagarme_ja_pago" };
     }
     if (!isPaymentPendingStatus(input.pagamentoStatus)) {
       return { allowed: false, reason: "pagamento_nao_pendente" };
@@ -90,6 +108,8 @@
 
   function resolvePresencialDiferidoUiLabel(input) {
     if (String(input.pagamentoStatus || "").toLowerCase() === "pago") return null;
+    if (input.pagarmeObrigacaoLiquidada === true) return null;
+    if (isPagarmeObrigacaoLiquidadaForPpd(input.cobrancasPagarme)) return null;
     if (!input.autorizado) return null;
     var suspended =
       input.graceStatus === "suspended" ||
@@ -102,6 +122,7 @@
 
   global.YesPagamentoPresencialDiferidoUi = {
     isPagamentoPresencialDiferidoUiEnabled: isPagamentoPresencialDiferidoUiEnabled,
+    isPagarmeObrigacaoLiquidadaForPpd: isPagarmeObrigacaoLiquidadaForPpd,
     canShowPresencialDiferidoButton: canShowPresencialDiferidoButton,
     resolvePresencialDiferidoUiLabel: resolvePresencialDiferidoUiLabel,
     hotelLocalToUtcMs: hotelLocalToUtcMs,

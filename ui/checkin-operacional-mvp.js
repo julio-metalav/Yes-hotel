@@ -803,6 +803,7 @@ function canShowPresencialDiferidoBtn(reserva) {
     jaAutorizado: !!reserva.pagamentoPresencialDiferidoAutorizado,
     perfilUsuario: painelOperadorRole || "",
     featureEnabled: readPresencialDiferidoUiEnabledFlag(),
+    cobrancasPagarme: reserva.cobrancasPagarme || [],
   });
   return !!(d && d.allowed);
 }
@@ -818,6 +819,7 @@ function presencialDiferidoLabelForReserva(reserva) {
     pagamentoStatus: reserva.pagamento,
     graceStatus: tol.grace_status || null,
     nowIso: new Date().toISOString(),
+    cobrancasPagarme: reserva.cobrancasPagarme || [],
   });
 }
 
@@ -829,6 +831,28 @@ async function marcarPagamentoPresencialDiferido(reservaId) {
   });
   if (!reserva || !canShowPresencialDiferidoBtn(reserva)) {
     return { ok: false, error: "nao_elegivel" };
+  }
+  // Releitura fail-closed: Pagar.me paid bloqueia mesmo se cache UI estiver stale.
+  try {
+    const { data: cobRows, error: cobErr } = await supabase
+      .from("operacional_cobrancas_pagarme")
+      .select("id, status")
+      .eq("reserva_id", reservaId);
+    if (!cobErr && Array.isArray(cobRows)) {
+      const api = getPresencialDiferidoUiApi();
+      const paid =
+        api && typeof api.isPagarmeObrigacaoLiquidadaForPpd === "function"
+          ? api.isPagarmeObrigacaoLiquidadaForPpd(cobRows)
+          : cobRows.some(function (c) {
+              return String(c.status || "").toLowerCase() === "paid";
+            });
+      if (paid) {
+        reserva.cobrancasPagarme = cobRows;
+        return { ok: false, error: "pagarme_ja_pago" };
+      }
+    }
+  } catch (_e) {
+    /* segue com gate local; trigger DB ainda protege */
   }
   const user = await supabase.auth.getUser();
   const uid = user?.data?.user?.id || null;
@@ -844,7 +868,13 @@ async function marcarPagamentoPresencialDiferido(reservaId) {
     })
     .eq("id", reservaId)
     .eq("pagamento_presencial_diferido_autorizado", false);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    const msg = String(error.message || "");
+    if (msg.includes("ppd_bloqueado_pagarme_pago")) {
+      return { ok: false, error: "pagarme_ja_pago" };
+    }
+    return { ok: false, error: error.message };
+  }
   await supabase.from("operacional_reserva_eventos").insert({
     reserva_id: reservaId,
     tipo: "pagamento_presencial_diferido_autorizado",
