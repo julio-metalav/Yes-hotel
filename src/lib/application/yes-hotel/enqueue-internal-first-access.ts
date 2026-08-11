@@ -3,8 +3,8 @@
  * Idempotente por idempotency_key. Sem senha/IDs técnicos no body.
  */
 
-import { buildInternalFirstAccessMessage } from "../../domain/yes-hotel/access-grace-messages";
-import type { AccessOutboxQueuePort } from "./first-room-access-ports";
+import { buildInternalFirstAccessMessage } from "../../domain/yes-hotel/access-grace-messages.ts";
+import type { AccessOutboxQueuePort } from "./first-room-access-ports.ts";
 
 export type EnqueueInternalFirstAccessInput = {
   queue: AccessOutboxQueuePort;

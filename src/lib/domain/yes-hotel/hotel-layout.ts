@@ -1,4 +1,4 @@
-import type { AccessTarget } from "./types";
+import type { AccessTarget } from "./types.ts";
 
 interface BlockLayout {
   blockCode: string;

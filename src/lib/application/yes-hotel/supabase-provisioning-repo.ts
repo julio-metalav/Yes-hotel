@@ -10,11 +10,11 @@ import type {
   NovoItemDestino,
   ProvisioningRepository,
   SyncStatus,
-} from "./provisioning-executor";
+} from "./provisioning-executor.ts";
 import type {
   OperacionalCredencialStatus,
   OperacionalItemProvisionamentoStatus,
-} from "./types";
+} from "./types.ts";
 
 interface DbCredencial {
   id: string;

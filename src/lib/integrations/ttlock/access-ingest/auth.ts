@@ -3,8 +3,8 @@ import {
   ENV_TTLOCK_ACCESS_WEBHOOK_SECRET,
   TTLOCK_ACCESS_WEBHOOK_SECRET_HEADER,
   TTLOCK_ACCESS_WEBHOOK_SECRET_QUERY,
-} from "./constants";
-import { constantTimeEqual } from "./constant-time";
+} from "./constants.ts";
+import { constantTimeEqual } from "./constant-time.ts";
 
 export type WebhookAuthInput = {
   headerSecret?: string | null;

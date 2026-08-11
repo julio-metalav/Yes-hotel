@@ -8,18 +8,18 @@ import {
   evaluateFirstRoomAccessEvent,
   TTLOCK_RECORD_TYPE,
   type NormalizedRoomAccessEvent,
-} from "../../domain/yes-hotel/first-room-access-policy";
-import { buildWelcomePendingMessage } from "../../domain/yes-hotel/access-grace-messages";
-import { evaluateReservationPendingState } from "../../domain/yes-hotel/reservation-pending-state";
-import type { FirstRoomAccessCommitCommand } from "./first-room-access-commit";
-import { enqueueInternalFirstAccessMessage } from "./enqueue-internal-first-access";
-import type { FirstRoomAccessPorts } from "./first-room-access-ports";
+} from "../../domain/yes-hotel/first-room-access-policy.ts";
+import { buildWelcomePendingMessage } from "../../domain/yes-hotel/access-grace-messages.ts";
+import { evaluateReservationPendingState } from "../../domain/yes-hotel/reservation-pending-state.ts";
+import type { FirstRoomAccessCommitCommand } from "./first-room-access-commit.ts";
+import { enqueueInternalFirstAccessMessage } from "./enqueue-internal-first-access.ts";
+import type { FirstRoomAccessPorts } from "./first-room-access-ports.ts";
 import type {
   AccessMethodPersisted,
   ProcessFirstRoomAccessInput,
   ProcessFirstRoomAccessResult,
   ProvisionedCredentialItem,
-} from "./first-room-access-types";
+} from "./first-room-access-types.ts";
 
 function mapAccessMethod(recordType: number): AccessMethodPersisted {
   switch (recordType) {

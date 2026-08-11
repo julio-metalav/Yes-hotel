@@ -3,9 +3,9 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AccessOutboxQueuePort } from "../../../application/yes-hotel/first-room-access-ports";
-import type { AccessOutboxRecord } from "../../../application/yes-hotel/first-room-access-types";
-import { assertSanitizedPayloadSafe } from "../../../integrations/ttlock/access-ingest/sanitize";
+import type { AccessOutboxQueuePort } from "../../../application/yes-hotel/first-room-access-ports.ts";
+import type { AccessOutboxRecord } from "../../../application/yes-hotel/first-room-access-types.ts";
+import { assertSanitizedPayloadSafe } from "../../../integrations/ttlock/access-ingest/sanitize.ts";
 
 type OutboxRow = AccessOutboxRecord;
 

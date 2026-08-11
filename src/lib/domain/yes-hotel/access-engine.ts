@@ -2,20 +2,20 @@ import {
   getAccessTargetsForApartment,
   normalizeApartmentCode,
   resolveBlockLayoutByApartment,
-} from "./hotel-layout";
+} from "./hotel-layout.ts";
 import {
   DEFAULT_CHECK_IN_HOUR,
   DEFAULT_CHECK_OUT_HOUR,
   extractYmd,
   hotelLocalToUtcMs,
-} from "./hotel-timezone";
+} from "./hotel-timezone.ts";
 import type {
   AccessPlan,
   CredentialWindow,
   InternalReservation,
   ReservationAdjustment,
   RoomChangePlan,
-} from "./types";
+} from "./types.ts";
 
 function parseInputDate(value: string | Date): Date {
   const date = value instanceof Date ? new Date(value) : new Date(value);

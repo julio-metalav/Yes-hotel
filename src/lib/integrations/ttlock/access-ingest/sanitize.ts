@@ -8,7 +8,7 @@ import type {
   TtlockAccessNotifySanitized,
   TtlockAccessRecordParsed,
   TtlockAccessRecordSanitized,
-} from "./types";
+} from "./types.ts";
 
 const SENSITIVE_KEY_PATTERN_RE =
   /["']?(?:keyboardPwd|newKeyboardPwd|password|passwd|senha|secret|token|authorization|apikey|api_key|accessToken|clientSecret)["']?\s*:/i;

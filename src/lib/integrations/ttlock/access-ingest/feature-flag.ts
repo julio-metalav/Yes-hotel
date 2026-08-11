@@ -1,4 +1,4 @@
-import { ENV_TTLOCK_ACCESS_INGEST_ENABLED } from "./constants";
+import { ENV_TTLOCK_ACCESS_INGEST_ENABLED } from "./constants.ts";
 
 /** Ativo somente quando o valor é exatamente "true" (case-sensitive). */
 export function isTtlockAccessIngestEnabled(

@@ -1,11 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ReservationPendingStatePort } from "../../../application/yes-hotel/first-room-access-ports";
-import type { ReservationPendingStateInput } from "../../../domain/yes-hotel/reservation-pending-state";
+import type { ReservationPendingStatePort } from "../../../application/yes-hotel/first-room-access-ports.ts";
+import type { ReservationPendingStateInput } from "../../../domain/yes-hotel/reservation-pending-state.ts";
 import {
   buildReservationPendingInputFromRows,
   FirstRoomAccessConfigurationError,
   type GuestFnrhSourceRow,
-} from "./reservation-pending-mapper";
+} from "./reservation-pending-mapper.ts";
 
 function isMissingColumnError(message: string): boolean {
   const m = message.toLowerCase();

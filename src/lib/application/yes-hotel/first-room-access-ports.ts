@@ -3,7 +3,7 @@
  * Sem fetch/Supabase no orquestrador — apenas interfaces.
  */
 
-import type { ReservationPendingStateInput } from "../../domain/yes-hotel/reservation-pending-state";
+import type { ReservationPendingStateInput } from "../../domain/yes-hotel/reservation-pending-state.ts";
 import type {
   AccessEventRecord,
   AccessGraceStatusPersisted,
@@ -13,7 +13,7 @@ import type {
   OutboxMessage,
   ProcessFirstRoomAccessInput,
   ProvisionedCredentialItem,
-} from "./first-room-access-types";
+} from "./first-room-access-types.ts";
 
 export interface AccessEventRepository {
   findByIdempotencyKey(key: string): Promise<AccessEventRecord | null>;

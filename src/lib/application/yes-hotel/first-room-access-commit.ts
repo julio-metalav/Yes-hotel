@@ -6,7 +6,7 @@
 import type {
   AccessMethodPersisted,
   ProcessFirstRoomAccessResult,
-} from "./first-room-access-types";
+} from "./first-room-access-types.ts";
 
 export type FirstRoomAccessCommitDecision =
   | "ignored"

@@ -1,10 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AccessToleranceRepository } from "../../../application/yes-hotel/first-room-access-ports";
+import type { AccessToleranceRepository } from "../../../application/yes-hotel/first-room-access-ports.ts";
 import type {
   AccessGraceStatusPersisted,
   AccessToleranceRecord,
   CreateToleranceInput,
-} from "../../../application/yes-hotel/first-room-access-types";
+} from "../../../application/yes-hotel/first-room-access-types.ts";
 
 type TolRow = {
   id: string;

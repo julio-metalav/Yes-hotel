@@ -4,13 +4,13 @@ import {
   buildRoomChangePlan,
   generateOperationalCredentialPreview,
   resolveBlockCode,
-} from "../../domain/yes-hotel";
-import type { ReservationAdjustment } from "../../domain/yes-hotel";
+} from "../../domain/yes-hotel.ts";
+import type { ReservationAdjustment } from "../../domain/yes-hotel.ts";
 import type {
   ReservationOperationalContext,
   ReservationOperationalPlan,
   ReservationOperationalSummary,
-} from "./types";
+} from "./types.ts";
 
 function buildSummary(
   context: ReservationOperationalContext,

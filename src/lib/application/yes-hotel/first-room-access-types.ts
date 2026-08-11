@@ -3,8 +3,8 @@
  * Sem senha em texto. Sem I/O.
  */
 
-import type { LockLogicalType } from "../../domain/yes-hotel/first-room-access-policy";
-import type { ReservationPendingStateInput } from "../../domain/yes-hotel/reservation-pending-state";
+import type { LockLogicalType } from "../../domain/yes-hotel/first-room-access-policy.ts";
+import type { ReservationPendingStateInput } from "../../domain/yes-hotel/reservation-pending-state.ts";
 
 export type AccessEventProcessingStatus =
   | "received"

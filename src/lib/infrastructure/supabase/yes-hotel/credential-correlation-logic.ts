@@ -1,6 +1,6 @@
-import type { CorrelatedRoomAccessResult } from "../../../application/yes-hotel/first-room-access-types";
-import { constantTimeEqual } from "../../../integrations/ttlock/access-ingest/constant-time";
-import { classifyLogicalDestination } from "../../../integrations/ttlock/access-ingest/lock-type";
+import type { CorrelatedRoomAccessResult } from "../../../application/yes-hotel/first-room-access-types.ts";
+import { constantTimeEqual } from "../../../integrations/ttlock/access-ingest/constant-time.ts";
+import { classifyLogicalDestination } from "../../../integrations/ttlock/access-ingest/lock-type.ts";
 
 /** Candidato já carregado do banco (sem I/O). */
 export type CorrelationCandidate = {

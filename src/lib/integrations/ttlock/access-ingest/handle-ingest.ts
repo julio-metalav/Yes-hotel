@@ -3,27 +3,27 @@
  * Usado pela Edge e pelos testes locais (sem Deno).
  */
 
-import { processFirstRoomAccessEvent } from "../../../application/yes-hotel/first-room-access-orchestrator";
-import type { FirstRoomAccessPorts } from "../../../application/yes-hotel/first-room-access-ports";
-import type { ProcessFirstRoomAccessResult } from "../../../application/yes-hotel/first-room-access-types";
+import { processFirstRoomAccessEvent } from "../../../application/yes-hotel/first-room-access-orchestrator.ts";
+import type { FirstRoomAccessPorts } from "../../../application/yes-hotel/first-room-access-ports.ts";
+import type { ProcessFirstRoomAccessResult } from "../../../application/yes-hotel/first-room-access-types.ts";
 import {
   ACCESS_EVENT_SOURCE_NOTIFY,
   TTLOCK_NOTIFY_SUCCESS_BODY,
-} from "./constants";
+} from "./constants.ts";
 import {
   extractWebhookSecretFromUrl,
   extractWebhookSecretsFromHeaders,
   validateTtlockAccessWebhookAuth,
-} from "./auth";
-import { isTtlockAccessIngestEnabled } from "./feature-flag";
-import { buildIdempotencyKey, buildSourceEventId } from "./idempotency";
-import { parseTtlockAccessNotifyPayload } from "./parse-notify";
+} from "./auth.ts";
+import { isTtlockAccessIngestEnabled } from "./feature-flag.ts";
+import { buildIdempotencyKey, buildSourceEventId } from "./idempotency.ts";
+import { parseTtlockAccessNotifyPayload } from "./parse-notify.ts";
 import {
   assertSanitizedPayloadSafe,
   sanitizeNotifyPayload,
   stripEphemeralPassword,
-} from "./sanitize";
-import type { TtlockAccessRecordParsed } from "./types";
+} from "./sanitize.ts";
+import type { TtlockAccessRecordParsed } from "./types.ts";
 
 export type IngestRequest = {
   method: string;

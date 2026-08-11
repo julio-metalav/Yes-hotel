@@ -15,8 +15,8 @@ import type {
   FirstRoomAccessPorts,
   ReservationPendingStatePort,
   UnitOfWorkPort,
-} from "../first-room-access-ports";
-import type { FirstRoomAccessCommitCommand } from "../first-room-access-commit";
+} from "../first-room-access-ports.ts";
+import type { FirstRoomAccessCommitCommand } from "../first-room-access-commit.ts";
 import type {
   AccessEventRecord,
   AccessGraceStatusPersisted,
@@ -29,8 +29,8 @@ import type {
   ProcessFirstRoomAccessInput,
   ProcessFirstRoomAccessResult,
   ProvisionedCredentialItem,
-} from "../first-room-access-types";
-import type { ReservationPendingStateInput } from "../../../domain/yes-hotel/reservation-pending-state";
+} from "../first-room-access-types.ts";
+import type { ReservationPendingStateInput } from "../../../domain/yes-hotel/reservation-pending-state.ts";
 
 type MemoryState = {
   events: AccessEventRecord[];

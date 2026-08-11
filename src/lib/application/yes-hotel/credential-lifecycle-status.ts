@@ -3,7 +3,7 @@
  * Base para futura integração com o painel — sem UI nesta fase.
  */
 
-import type { CredencialRow, ProvisioningRepository, SyncStatus } from "./provisioning-executor";
+import type { CredencialRow, ProvisioningRepository, SyncStatus } from "./provisioning-executor.ts";
 
 export interface CredentialLifecycleStatus {
   credencialId: string;

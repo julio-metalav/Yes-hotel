@@ -8,9 +8,9 @@ import type {
   CobrancaPagarmeRow,
   PagamentoPagarmeRow,
   ReservaCobrancaRow,
-} from "../cobranca-pagarme-service";
-import type { PagarmePixCustomer } from "../../../integrations/pagarme";
-import { isYesHotelCobrancaUuid } from "../../../integrations/pagarme";
+} from "../cobranca-pagarme-service.ts";
+import type { PagarmePixCustomer } from "../../../integrations/pagarme.ts";
+import { isYesHotelCobrancaUuid } from "../../../integrations/pagarme.ts";
 
 export interface MemoryCobrancaState {
   reservas: Map<string, ReservaCobrancaRow>;

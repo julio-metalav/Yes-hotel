@@ -14,10 +14,10 @@ import type {
   TtlockKeyboardPwdChangeParams,
   TtlockKeyboardPwdDeleteParams,
   TtlockSuccessResponse,
-} from "./types";
-import { TtlockApiError } from "./types";
-import { getTtlockConfig, isTtlockAvailable } from "./config";
-import { logTtlockLifecycle } from "./lifecycle-log";
+} from "./types.ts";
+import { TtlockApiError } from "./types.ts";
+import { getTtlockConfig, isTtlockAvailable } from "./config.ts";
+import { logTtlockLifecycle } from "./lifecycle-log.ts";
 
 function md5Lower(value: string): string {
   return crypto.createHash("md5").update(value, "utf8").digest("hex").toLowerCase();

@@ -3,7 +3,7 @@
  * Sem I/O. Só problemas — estados regulares retornam null/lista vazia.
  */
 
-import type { AccessGraceStatusPersisted } from "../../application/yes-hotel/first-room-access-types";
+import type { AccessGraceStatusPersisted } from "../../application/yes-hotel/first-room-access-types.ts";
 
 export type AccessToleranceUiInput = {
   reservation_id: string;

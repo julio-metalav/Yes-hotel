@@ -1,4 +1,4 @@
-import type { ReservationOperationalPlan } from "./types";
+import type { ReservationOperationalPlan } from "./types.ts";
 
 function formatWindow(plan: ReservationOperationalPlan): string {
   if (!plan.window) {

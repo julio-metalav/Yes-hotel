@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { UnitOfWorkPort } from "../../../application/yes-hotel/first-room-access-ports";
-import type { FirstRoomAccessCommitCommand } from "../../../application/yes-hotel/first-room-access-commit";
-import type { ProcessFirstRoomAccessResult } from "../../../application/yes-hotel/first-room-access-types";
-import { assertSanitizedPayloadSafe } from "../../../integrations/ttlock/access-ingest/sanitize";
+import type { UnitOfWorkPort } from "../../../application/yes-hotel/first-room-access-ports.ts";
+import type { FirstRoomAccessCommitCommand } from "../../../application/yes-hotel/first-room-access-commit.ts";
+import type { ProcessFirstRoomAccessResult } from "../../../application/yes-hotel/first-room-access-types.ts";
+import { assertSanitizedPayloadSafe } from "../../../integrations/ttlock/access-ingest/sanitize.ts";
 
 /**
  * UoW Supabase: uma única RPC `yes_hotel_process_first_room_access` (migration 0025).

@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CredentialItemsPort } from "../../../application/yes-hotel/first-room-access-ports";
-import type { ProvisionedCredentialItem } from "../../../application/yes-hotel/first-room-access-types";
-import { classifyLogicalDestination } from "../../../integrations/ttlock/access-ingest/lock-type";
-import type { LockLogicalType } from "../../../domain/yes-hotel/first-room-access-policy";
+import type { CredentialItemsPort } from "../../../application/yes-hotel/first-room-access-ports.ts";
+import type { ProvisionedCredentialItem } from "../../../application/yes-hotel/first-room-access-types.ts";
+import { classifyLogicalDestination } from "../../../integrations/ttlock/access-ingest/lock-type.ts";
+import type { LockLogicalType } from "../../../domain/yes-hotel/first-room-access-policy.ts";
 
 export class SupabaseCredentialItemsPort implements CredentialItemsPort {
   constructor(private readonly client: SupabaseClient) {}

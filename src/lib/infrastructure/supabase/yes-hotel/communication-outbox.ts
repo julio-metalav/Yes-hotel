@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CommunicationOutboxPort } from "../../../application/yes-hotel/first-room-access-ports";
-import type { OutboxMessage } from "../../../application/yes-hotel/first-room-access-types";
-import { assertSanitizedPayloadSafe } from "../../../integrations/ttlock/access-ingest/sanitize";
+import type { CommunicationOutboxPort } from "../../../application/yes-hotel/first-room-access-ports.ts";
+import type { OutboxMessage } from "../../../application/yes-hotel/first-room-access-types.ts";
+import { assertSanitizedPayloadSafe } from "../../../integrations/ttlock/access-ingest/sanitize.ts";
 
 /**
  * Outbox sem envio: grava em operacional_comunicacao_envios com status=simulado.

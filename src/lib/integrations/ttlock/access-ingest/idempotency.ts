@@ -3,9 +3,9 @@ import {
   ACCESS_EVENT_SOURCE_POLLING,
   ENV_TTLOCK_ACCESS_IDEMPOTENCY_SECRET,
   ENV_TTLOCK_ACCESS_WEBHOOK_SECRET,
-} from "./constants";
-import { hmacSha256Hex } from "./crypto-hmac";
-import type { TtlockAccessRecordParsed } from "./types";
+} from "./constants.ts";
+import { hmacSha256Hex } from "./crypto-hmac.ts";
+import type { TtlockAccessRecordParsed } from "./types.ts";
 
 export type IdempotencyMaterial = {
   lockId: number;

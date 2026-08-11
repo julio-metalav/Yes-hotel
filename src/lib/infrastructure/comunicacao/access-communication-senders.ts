@@ -4,10 +4,10 @@
  * Nunca selecionar mock silenciosamente.
  */
 
-import type { AccessCommunicationSenderPort } from "../../application/yes-hotel/first-room-access-ports";
+import type { AccessCommunicationSenderPort } from "../../application/yes-hotel/first-room-access-ports.ts";
 import {
   createDisabledAccessCommunicationSender,
-} from "../../application/yes-hotel/access-outbox-dispatcher";
+} from "../../application/yes-hotel/access-outbox-dispatcher.ts";
 
 export type DigisacSenderConfig = {
   apiBaseUrl: string;

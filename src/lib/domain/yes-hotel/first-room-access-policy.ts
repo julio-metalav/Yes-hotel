@@ -3,8 +3,8 @@
  * Sem I/O — sem TTLock, DigiSac, Supabase ou senha em texto.
  */
 
-import { evaluatePresencialDiferidoOnFirstAccess } from "./pagamento-presencial-diferido";
-import type { PresencialDiferidoEffectiveness } from "./pagamento-presencial-diferido";
+import { evaluatePresencialDiferidoOnFirstAccess } from "./pagamento-presencial-diferido.ts";
+import type { PresencialDiferidoEffectiveness } from "./pagamento-presencial-diferido.ts";
 
 /** Tipos TTLock recordType relevantes (doc Open Platform lockRecord/list). */
 export const TTLOCK_RECORD_TYPE = {

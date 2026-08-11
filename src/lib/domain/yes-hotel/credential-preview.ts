@@ -1,5 +1,5 @@
-import { normalizeApartmentCode } from "./hotel-layout";
-import type { OperationalCredentialPreview } from "./types";
+import { normalizeApartmentCode } from "./hotel-layout.ts";
+import type { OperationalCredentialPreview } from "./types.ts";
 
 function hashText(input: string): number {
   let hash = 0;
