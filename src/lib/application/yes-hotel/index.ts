@@ -13,6 +13,7 @@ export * from "./format";
 export * from "./orchestrator";
 export * from "./provisioning";
 export * from "./provisioning-executor";
+export * from "./presencial-diferido-audit-port";
 export * from "./reservation-sync-repository";
 export * from "./reservation-sync-service";
 // simulated-reservation-pending-state: somente testes/dev explícito — não exportar no barrel de produção.

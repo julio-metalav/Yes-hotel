@@ -11,9 +11,12 @@ import {
   SystemClock,
 } from "./first-room-access-unit-of-work";
 import { SupabaseReservationPendingStatePort } from "./reservation-pending-state";
+import { SupabasePresencialDiferidoAuditPort } from "./presencial-diferido-audit";
+import { isPagamentoPresencialDiferidoServerEnabled } from "../../../domain/yes-hotel/pagamento-presencial-diferido";
 
 export function createSupabaseFirstRoomAccessPorts(
   client: SupabaseClient,
+  env?: Record<string, string | undefined> | null,
 ): FirstRoomAccessPorts {
   return {
     events: new SupabaseAccessEventRepository(client),
@@ -40,6 +43,8 @@ export function createSupabaseFirstRoomAccessPorts(
         };
       },
     },
+    presencialDiferidoAudit: new SupabasePresencialDiferidoAuditPort(client),
+    presencialDiferidoFeatureEnabled: isPagamentoPresencialDiferidoServerEnabled(env ?? null),
   };
 }
 
@@ -56,3 +61,4 @@ export * from "./communication-outbox";
 export * from "./first-room-access-unit-of-work";
 export * from "./supabase-reservation-sync-repository";
 export * from "./fake-reservation-sync-client";
+export * from "./presencial-diferido-audit";

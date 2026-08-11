@@ -42,6 +42,7 @@ export type AccessToleranceProcessorPorts = {
   ttlock: TtlockValidityChangePort;
   outboxQueue: AccessOutboxQueuePort;
   clock: ClockPort;
+  presencialDiferidoAudit?: import("./presencial-diferido-audit-port").PresencialDiferidoAuditPort;
 };
 
 export type AccessToleranceProcessorOptions = {
@@ -468,6 +469,17 @@ export async function processOneToleranceDue(
     if (!claimed) {
       return { tolerance_id: tolerance.id, action: "already_processing" };
     }
+    if (
+      ports.presencialDiferidoAudit &&
+      Array.isArray(tolerance.pending_snapshot) &&
+      tolerance.pending_snapshot.includes("pagamento_presencial_diferido") &&
+      !pending.payment_pending
+    ) {
+      await ports.presencialDiferidoAudit.markRegularizado({
+        reservation_id: tolerance.reservation_id,
+        at_iso: nowIso,
+      });
+    }
     return {
       tolerance_id: tolerance.id,
       action: "cancelled_all_clear",
@@ -600,6 +612,17 @@ export async function processOneToleranceDue(
 
   if (actionable.length > 0 && actionableFailed === 0 && actionableSucceeded > 0) {
     await ports.tolerances.markSuspended(tolerance.id, nowIso);
+    if (
+      ports.presencialDiferidoAudit &&
+      Array.isArray(tolerance.pending_snapshot) &&
+      tolerance.pending_snapshot.includes("pagamento_presencial_diferido")
+    ) {
+      await ports.presencialDiferidoAudit.markBloqueado({
+        reservation_id: tolerance.reservation_id,
+        at_iso: nowIso,
+        motivo: "prazo_09h_vencido_pagamento_pendente",
+      });
+    }
     const msg = buildAccessSuspendedMessage();
     await enqueueGuestAndInternal(ports.outboxQueue, {
       event_type: "guest_access_suspended",
@@ -832,6 +855,16 @@ export async function processOneToleranceRestore(
 
   if (apply.failed === 0 && apply.succeeded > 0) {
     await ports.tolerances.markRestored(tolerance.id, nowIso);
+    if (
+      ports.presencialDiferidoAudit &&
+      Array.isArray(tolerance.pending_snapshot) &&
+      tolerance.pending_snapshot.includes("pagamento_presencial_diferido")
+    ) {
+      await ports.presencialDiferidoAudit.markRegularizado({
+        reservation_id: tolerance.reservation_id,
+        at_iso: nowIso,
+      });
+    }
     const msg = buildAccessRestoredMessage();
     await enqueueGuestAndInternal(ports.outboxQueue, {
       event_type: "guest_access_restored",

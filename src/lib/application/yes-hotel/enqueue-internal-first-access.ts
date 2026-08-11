@@ -17,6 +17,7 @@ export type EnqueueInternalFirstAccessInput = {
   payment_pending: boolean;
   fnrh_pending: boolean;
   grace_started: boolean;
+  presencial_diferido_efetivado?: boolean;
   nowIso: string;
 };
 
@@ -30,6 +31,7 @@ export async function enqueueInternalFirstAccessMessage(
     payment_pending: input.payment_pending,
     fnrh_pending: input.fnrh_pending,
     grace_started: input.grace_started,
+    presencial_diferido_efetivado: input.presencial_diferido_efetivado === true,
   });
   return input.queue.enqueue({
     event_type: "internal_first_access",

@@ -17,6 +17,8 @@ export * from "./fnrh-completion-policy";
 export * from "./hotel-layout";
 export * from "./hotel-timezone";
 export * from "./pagarme-payment-ui";
+export * from "./pagamento-presencial-diferido";
+export * from "./corumba-calendar";
 export * from "./reservation-fnrh-state";
 export * from "./reservation-pending-state";
 export * from "./reservation-sync-diff";

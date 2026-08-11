@@ -239,4 +239,8 @@ export type FirstRoomAccessPorts = {
       guest_main_name: string;
     }>;
   };
+  /** Auditoria pagamento presencial diferido (opcional; fail-soft se ausente). */
+  presencialDiferidoAudit?: import("./presencial-diferido-audit-port").PresencialDiferidoAuditPort;
+  /** Fail-closed: só true quando YES_HOTEL_PAGAMENTO_PRESENCIAL_DIFERIDO_ENABLED=true. */
+  presencialDiferidoFeatureEnabled?: boolean;
 };
