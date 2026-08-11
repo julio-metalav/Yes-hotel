@@ -24,6 +24,18 @@ Resposta exigida pela TTLock: corpo texto plano `success`.
 
 Referência: [Lock Records Notify](https://euopen.ttlock.com/doc/api/v3/lockRecord/notify) (corpo `"success"`).
 
+### Onde cadastrar (portal TTLock)
+
+Não há API no código Yes Hotel para setar o callback. Cadastro manual:
+
+1. Abrir https://open.ttlock.com/manager (ou EU equivalente se a conta for EU).
+2. Selecionar o **aplicativo Open Platform** já aprovado usado pelo Yes Hotel.
+3. Campo **Callback URL** / CallBack URL → editar.
+4. Colar a URL completa com `?secret=<valor do secret TTLOCK_ACCESS_WEBHOOK_SECRET>` lido no Dashboard Supabase (Edge Secrets) — **nunca** commit/chat.
+5. Salvar. Validação típica: TTLock envia um notify de teste quando a URL responde `success` em tempo hábil; após um unlock real com gateway online, o ingest deve aparecer nos logs da Edge `ttlock-access-ingest`.
+
+Antes de sobrescrever: se o Callback URL já apontar para outra integração (ex.: Home Assistant), **parar** e decidir migração/proxy — um app TTLock só tem um callback.
+
 ## Feature flag
 
 | Variável | Default | Comportamento |
