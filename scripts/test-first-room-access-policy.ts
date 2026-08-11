@@ -107,10 +107,23 @@ const freshCtx = {
   assert.equal(d.ignored_reason, "unsuccessful");
 }
 
-// 8) sem correlação
+// 8) sem correlação (apto reconhecido)
 {
   const d = evaluateFirstRoomAccessEvent(baseEvent({ correlated: false }), freshCtx);
   assert.equal(d.ignored_reason, "uncorrelated");
+}
+
+// 8b) lock desconhecido (sem lock_type/destino apto) → not_apartment
+{
+  const d = evaluateFirstRoomAccessEvent(
+    baseEvent({
+      correlated: false,
+      lock_type: undefined,
+      logical_destination: undefined,
+    }),
+    freshCtx,
+  );
+  assert.equal(d.ignored_reason, "not_apartment");
 }
 
 // 9) fora da janela

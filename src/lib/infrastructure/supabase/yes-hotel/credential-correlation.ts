@@ -17,7 +17,7 @@ type ItemJoinRow = {
     id: string;
     reserva_id: string;
     status: string;
-    /** Pode não existir no schema atual; correlacionar via remote_keyboard_pwd_id. */
+    /** PIN técnico provisionado — obrigatório para match com keyboardPwd da TTLock. */
     codigo_credencial?: string | null;
     valido_de: string | null;
     valido_ate: string | null;
@@ -54,6 +54,7 @@ export class SupabaseCredentialCorrelationPort implements CredentialCorrelationP
             id,
             reserva_id,
             status,
+            codigo_credencial,
             valido_de,
             valido_ate
           )

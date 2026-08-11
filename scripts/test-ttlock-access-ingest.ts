@@ -351,6 +351,7 @@ async function main() {
     });
     assert.equal(r.correlated, false);
     assert.notEqual(r.ambiguous, true);
+    assert.equal(r.lock_type, "apartamento");
     ok("12 nenhuma correspondência");
   }
 

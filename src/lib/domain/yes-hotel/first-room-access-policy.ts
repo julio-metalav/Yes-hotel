@@ -119,6 +119,12 @@ export function evaluateFirstRoomAccessEvent(
     return reject("not_passcode");
   }
 
+  // Apartamento reconhecido (lock_type/destino) mas sem match de credencial:
+  // uncorrelated — não mascarar como not_apartment.
+  if (isApartmentLock(event) && !event.correlated) {
+    return reject("uncorrelated");
+  }
+
   if (!isApartmentLock(event)) {
     return reject("not_apartment");
   }

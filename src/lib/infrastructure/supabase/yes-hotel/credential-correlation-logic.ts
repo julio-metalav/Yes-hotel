@@ -17,12 +17,26 @@ export type CorrelationCandidate = {
   valido_ate: string | null;
 };
 
-function uncorrelated(): CorrelatedRoomAccessResult {
+function uncorrelatedUnknown(): CorrelatedRoomAccessResult {
   return { correlated: false, within_reservation_window: false };
 }
 
-function ambiguous(): CorrelatedRoomAccessResult {
-  return { correlated: false, ambiguous: true, within_reservation_window: false };
+/** Lock reconhecido como apartamento, mas sem match de credencial/senha. */
+function uncorrelatedApartment(): CorrelatedRoomAccessResult {
+  return {
+    correlated: false,
+    within_reservation_window: false,
+    lock_type: "apartamento",
+  };
+}
+
+function ambiguousApartment(): CorrelatedRoomAccessResult {
+  return {
+    correlated: false,
+    ambiguous: true,
+    within_reservation_window: false,
+    lock_type: "apartamento",
+  };
 }
 
 export function withinCredentialWindow(
@@ -41,6 +55,9 @@ export function withinCredentialWindow(
 /**
  * Correlação pura sobre candidatos já filtrados por lockId.
  * Usada pelo adapter Supabase e pelos testes de fixture.
+ *
+ * Com keyboardPwd presente: exige match em codigo_credencial (fail-closed).
+ * Sem keyboardPwd: só aceita se houver exatamente 1 candidato apto ativo.
  */
 export function correlateApartmentPasscodeCandidates(input: {
   candidates: CorrelationCandidate[];
@@ -50,21 +67,31 @@ export function correlateApartmentPasscodeCandidates(input: {
 }): CorrelatedRoomAccessResult {
   const inactive = new Set(["revogada", "falhou"]);
 
-  let matched = input.candidates.filter((row) => {
+  const apartmentRows = input.candidates.filter(
+    (row) => classifyLogicalDestination(row.logical_destination) === "apartamento",
+  );
+  const lockIsApartment = apartmentRows.length > 0;
+
+  let matched = apartmentRows.filter((row) => {
     if (row.status_provisionamento !== "provisionado") return false;
     if (inactive.has(String(row.credential_status ?? "").toLowerCase())) return false;
     if (!row.reservation_id) return false;
-    return classifyLogicalDestination(row.logical_destination) === "apartamento";
+    return true;
   });
 
-  if (matched.length === 0) return uncorrelated();
+  if (matched.length === 0) {
+    return lockIsApartment ? uncorrelatedApartment() : uncorrelatedUnknown();
+  }
 
   if (input.keyboard_pwd_id != null) {
     const byRemote = matched.filter(
-      (r) => r.remote_keyboard_pwd_id != null && Number(r.remote_keyboard_pwd_id) === Number(input.keyboard_pwd_id),
+      (r) =>
+        r.remote_keyboard_pwd_id != null &&
+        Number(r.remote_keyboard_pwd_id) === Number(input.keyboard_pwd_id),
     );
     if (byRemote.length === 1) matched = byRemote;
-    else if (byRemote.length > 1) return ambiguous();
+    else if (byRemote.length > 1) return ambiguousApartment();
+    // 0 by remote: mantém matched (ainda pode resolver por senha)
   }
 
   const pwd = input.ephemeral_keyboard_pwd;
@@ -73,19 +100,23 @@ export function correlateApartmentPasscodeCandidates(input: {
       if (!r.codigo_credencial) return false;
       return constantTimeEqual(String(r.codigo_credencial), String(pwd));
     });
-    if (pwdMatches.length === 0) return uncorrelated();
-    if (pwdMatches.length > 1) return ambiguous();
+    if (pwdMatches.length === 0) return uncorrelatedApartment();
+    if (pwdMatches.length > 1) return ambiguousApartment();
     matched = pwdMatches;
   } else if (matched.length > 1) {
-    return ambiguous();
+    return ambiguousApartment();
   }
 
   if (matched.length !== 1) {
-    return matched.length > 1 ? ambiguous() : uncorrelated();
+    return matched.length > 1 ? ambiguousApartment() : uncorrelatedApartment();
   }
 
   const hit = matched[0]!;
   const windowOk = withinCredentialWindow(input.occurred_at, hit.valido_de, hit.valido_ate);
+  if (!windowOk) {
+    // Fora da validade: não correlaciona (fail-closed).
+    return uncorrelatedApartment();
+  }
 
   return {
     correlated: true,
@@ -94,7 +125,7 @@ export function correlateApartmentPasscodeCandidates(input: {
     credential_item_id: hit.credential_item_id,
     logical_destination: hit.logical_destination,
     lock_type: "apartamento",
-    within_reservation_window: windowOk,
+    within_reservation_window: true,
     keyboard_pwd_id:
       hit.remote_keyboard_pwd_id != null ? Number(hit.remote_keyboard_pwd_id) : undefined,
     original_valid_from: hit.valido_de ?? undefined,

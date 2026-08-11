@@ -11,7 +11,15 @@ e presente em `/v3/lockRecord/list`. Fallback: polling oficial da Open API.
 2. Lista locks candidatos (`yes_hotel_list_ttlock_poll_candidate_locks`)
 3. Por lock: `/v3/lockRecord/list` com watermark (`operacional_ttlock_poll_checkpoints`)
 4. Records com `lockDate > watermark` → `processFirstRoomAccessEvent` (`source=ttlock_polling`)
-5. Mesma `idempotency_key` do Notify; outbox / DigiSac inalterados
+5. Correlação: `lockId` → itens APT + `keyboardPwd` ↔ `codigo_credencial`
+6. Mesma `idempotency_key` do Notify; outbox / DigiSac inalterados
+
+## Callback vs poller
+
+| Mecanismo | Status |
+|-----------|--------|
+| Callback Notify (`ttlock-access-ingest`) | Indisponível na prática (não entrega) — código/protegido mantidos |
+| Poller Open API (`ttlock-access-poller`) | **Mecanismo operacional** (~1 min, cron ACTIVE) |
 
 ## Flags / secrets
 
@@ -24,8 +32,8 @@ e presente em `/v3/lockRecord/list`. Fallback: polling oficial da Open API.
 
 ## Checkpoint crítico
 
-Lock `16274746` seed com `last_lock_date_ms = 1786487991000` (evento 18:39:51 CG).
-Esse evento **não** é processado.
+Lock `16274746` watermark atualizado após eventos diagnósticos. Records com
+`lockDate <= watermark` **não** são reprocessados.
 
 Locks novos sem checkpoint: bootstrap watermark=`now` (sem histórico).
 
