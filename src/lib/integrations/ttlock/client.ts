@@ -466,6 +466,71 @@ export class TtlockClient {
   }
 
   /**
+   * Lista registros de acesso (Open API /v3/lockRecord/list).
+   * startDate/endDate em milissegundos. Read-only.
+   */
+  async listLockRecords(params: {
+    lockId: number | string;
+    startDate: number;
+    endDate: number;
+    pageNo?: number;
+    pageSize?: number;
+    date?: number;
+  }): Promise<{ list: Record<string, unknown>[]; pages?: number; total?: number }> {
+    if (!this.isAvailable()) {
+      throw new Error(
+        "TTLock: credenciais nao configuradas. Configure TTLOCK_CLIENT_ID, TTLOCK_CLIENT_SECRET, TTLOCK_USERNAME, TTLOCK_PASSWORD.",
+      );
+    }
+    const accessToken = await this.ensureAccessToken();
+    const url = `${this.config.apiBaseUrl}/v3/lockRecord/list`;
+    const body = new URLSearchParams({
+      clientId: this.config.clientId,
+      accessToken,
+      lockId: String(params.lockId),
+      startDate: String(params.startDate),
+      endDate: String(params.endDate),
+      pageNo: String(params.pageNo ?? 1),
+      pageSize: String(params.pageSize ?? 100),
+      date: String(params.date ?? Date.now()),
+    });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const res = await this.fetchImpl(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      const data = (await parseJsonSafe(res)) as {
+        errcode?: number;
+        errmsg?: string;
+        list?: unknown;
+        pages?: number;
+        total?: number;
+      };
+      if (!res.ok) {
+        throw new TtlockApiError(data?.errmsg ?? `listLockRecords HTTP ${res.status}`, res.status, data);
+      }
+      if (data.errcode != null && data.errcode !== 0) {
+        throw new TtlockApiError(data.errmsg ?? "listLockRecords error", res.status, data);
+      }
+      const list = Array.isArray(data.list)
+        ? (data.list as Record<string, unknown>[])
+        : [];
+      return { list, pages: data.pages, total: data.total };
+    } catch (e) {
+      clearTimeout(timeout);
+      if (e instanceof TtlockApiError) throw e;
+      if (e instanceof Error) throw e;
+      throw new Error(String(e));
+    }
+  }
+
+  /**
    * Alias para compatibilidade com código que já usava o nome updateKeyboardPassword.
    * Delega para changeKeyboardPassword com startDate/endDate.
    */
