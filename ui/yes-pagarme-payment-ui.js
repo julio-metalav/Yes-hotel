@@ -176,13 +176,22 @@
     }
 
     if (cobranca && BLOQUEANTES[status]) {
+      var processing = status === "processing";
       return baseState({
         kind: "aguardando",
-        listaLabel: "Aguardando pagamento",
-        detalheTexto: "Há cobrança Pagar.me em andamento. Não criar segunda cobrança.",
+        listaLabel: processing ? "Pagamento em processamento" : "Aguardando pagamento",
+        detalheTexto: processing
+          ? "Pagamento em processamento. Não gerar nova cobrança."
+          : link
+            ? "Link de pagamento já gerado. Reutilize o mesmo link — não criar segunda cobrança."
+            : "Há cobrança Pagar.me em andamento. Não criar segunda cobrança.",
         variant: "info",
         ctaKind: "pagarme_ver",
-        ctaLabel: "Ver cobrança",
+        ctaLabel: processing
+          ? "Ver pagamento"
+          : link
+            ? "Abrir link de pagamento"
+            : "Ver cobrança",
         cobranca: cobranca,
         paymentLinkUrl: link,
         canOpenLink: !!link && String(cobranca.metodo || "") === "cartao",
@@ -226,13 +235,13 @@
       }
       return baseState({
         kind: hint ? "nova_tentativa" : "cobrar",
-        listaLabel: hint ? "Nova cobrança" : "Cobrar",
+        listaLabel: hint ? "Nova cobrança" : "Gerar e enviar link de pagamento",
         detalheTexto: hint
-          ? hint + ". Você pode gerar uma nova cobrança de cartão."
-          : "Reserva não comissionada com pagamento pendente. Informe o valor e gere o link de cartão.",
+          ? hint + ". Você pode gerar um novo link de pagamento."
+          : "Reserva não comissionada com pagamento pendente. Informe o valor e gere o link de pagamento.",
         variant: "warn",
         ctaKind: "pagarme_cobrar",
-        ctaLabel: hint ? "Nova cobrança" : "Cobrar",
+        ctaLabel: hint ? "Nova cobrança" : "Gerar e enviar link de pagamento",
         cobranca: cobranca,
         showValorInput: true,
         showGerarCartao: true,
@@ -385,6 +394,107 @@
     };
   }
 
+  function isPagarmeDirectPaymentBadgeType(statusType) {
+    var t = String(statusType == null ? "" : statusType).trim();
+    return t === "pendente-pagamento" || t === "pagarme-pago-hits-pendente";
+  }
+
+  function resolvePagarmeModalPresentation(payUi) {
+    payUi = payUi || {};
+    var status = asStatus(payUi.cobranca && payUi.cobranca.status);
+    var hasLink = !!payUi.paymentLinkUrl;
+    var showLinkActions = !!(payUi.canOpenLink || payUi.canCopyLink);
+
+    if (payUi.kind === "classificar") {
+      return {
+        title: "Classificar cobrança",
+        subtitle: "Defina se a reserva é comissionada antes de gerar pagamento.",
+        generateLabel: "Gerar link de pagamento",
+        linkSectionTitle: null,
+        showGenerate: false,
+        showLinkActions: false,
+        allowSendActions: false,
+      };
+    }
+    if (payUi.kind === "comissionada") {
+      return {
+        title: "Reserva comissionada",
+        subtitle: "Pendente de regularização no HITS. Não cobrar o hóspede.",
+        generateLabel: "Gerar link de pagamento",
+        linkSectionTitle: null,
+        showGenerate: false,
+        showLinkActions: false,
+        allowSendActions: false,
+      };
+    }
+    if (payUi.kind === "pago_pagarme_hits_pendente") {
+      return {
+        title: "Pago no Pagar.me",
+        subtitle: "HITS pendente de regularização",
+        generateLabel: "Gerar link de pagamento",
+        linkSectionTitle: hasLink ? "Link do pagamento" : null,
+        showGenerate: false,
+        showLinkActions: showLinkActions,
+        allowSendActions: false,
+      };
+    }
+    if (payUi.kind === "revisao") {
+      return {
+        title: "Revisão necessária",
+        subtitle: "Não gerar nova cobrança automaticamente.",
+        generateLabel: "Gerar link de pagamento",
+        linkSectionTitle: hasLink ? "Link existente" : null,
+        showGenerate: false,
+        showLinkActions: showLinkActions,
+        allowSendActions: false,
+      };
+    }
+    if (payUi.kind === "aguardando") {
+      if (status === "processing") {
+        return {
+          title: "Pagamento em processamento",
+          subtitle: "Aguarde a confirmação. Não gerar nova cobrança.",
+          generateLabel: "Gerar link de pagamento",
+          linkSectionTitle: hasLink ? "Link de pagamento" : null,
+          showGenerate: false,
+          showLinkActions: showLinkActions,
+          allowSendActions: false,
+        };
+      }
+      return {
+        title: "Pagamento pendente",
+        subtitle: hasLink
+          ? "Link de pagamento já gerado"
+          : "Cobrança em andamento — não criar segunda cobrança.",
+        generateLabel: "Gerar link de pagamento",
+        linkSectionTitle: hasLink ? "Link de pagamento já gerado" : null,
+        showGenerate: false,
+        showLinkActions: showLinkActions,
+        allowSendActions: hasLink,
+      };
+    }
+    if (payUi.kind === "cobrar" || payUi.kind === "nova_tentativa") {
+      return {
+        title: "Pagamento pendente",
+        subtitle: "Gerar e enviar link de pagamento",
+        generateLabel: "Gerar link de pagamento",
+        linkSectionTitle: null,
+        showGenerate: !!payUi.showGerarCartao,
+        showLinkActions: false,
+        allowSendActions: false,
+      };
+    }
+    return {
+      title: "Pagamento pendente",
+      subtitle: "Gerar e enviar link de pagamento",
+      generateLabel: "Gerar link de pagamento",
+      linkSectionTitle: null,
+      showGenerate: false,
+      showLinkActions: false,
+      allowSendActions: false,
+    };
+  }
+
   var api = {
     isPagarmeUiEnabled: isPagarmeUiEnabled,
     shouldFetchPagarmeCobrancas: shouldFetchPagarmeCobrancas,
@@ -393,6 +503,8 @@
     pickRelevantCobranca: pickRelevantCobranca,
     paymentLinkUrlOf: paymentLinkUrlOf,
     isSafeHttpsPaymentLinkUrl: isSafeHttpsPaymentLinkUrl,
+    isPagarmeDirectPaymentBadgeType: isPagarmeDirectPaymentBadgeType,
+    resolvePagarmeModalPresentation: resolvePagarmeModalPresentation,
     parseBRLToCentavos: parseBRLToCentavos,
     formatCentavosToBRL: formatCentavosToBRL,
     formatBRLInputDisplay: formatBRLInputDisplay,

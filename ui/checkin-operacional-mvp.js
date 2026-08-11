@@ -1955,6 +1955,23 @@ function badgeClassFromStatusType(type) {
   return map[type] || "op-badge op-badge--neutral";
 }
 
+/** Badge de status financeiro: clique abre modal Pagar.me (quando UI habilitada). */
+function renderOperacionalStatusBadgeHtml(status, reservaId) {
+  const badgeCls = badgeClassFromStatusType(status.type);
+  const label = escapeHtml(status.label);
+  const api = getPagarmePaymentUiApi();
+  const direct =
+    isPagarmeUiEnabledInPainel() &&
+    api &&
+    typeof api.isPagarmeDirectPaymentBadgeType === "function" &&
+    api.isPagarmeDirectPaymentBadgeType(status.type);
+  if (!direct) {
+    return `<span class="${badgeCls}">${label}</span>`;
+  }
+  const rid = escapeHtml(String(reservaId || ""));
+  return `<button type="button" class="${badgeCls} op-badge--clickable" data-id="${rid}" data-payment-badge="1" title="Abrir cobrança" aria-label="${label}">${label}</button>`;
+}
+
 function syncToolbarSelectFromFiltro() {
   if (opToolbarStatusSelect instanceof HTMLSelectElement) {
     const v = filtroAtivo;
@@ -2193,7 +2210,6 @@ function renderOperacionalLista() {
   const rowsHtml = ordenadas
     .map((reserva) => {
       const status = derivarStatusOperacional(reserva);
-      const badgeCls = badgeClassFromStatusType(status.type);
       const ci = formatDataBR(reserva.checkInPrevisto);
       const co = formatDataBR(reserva.checkOutPrevisto);
       const n = noitesEntre(reserva.checkInPrevisto, reserva.checkOutPrevisto);
@@ -2205,6 +2221,7 @@ function renderOperacionalLista() {
       const rid = escapeHtml(String(reserva.id));
       const guestName = reserva.hospedePrincipal || "—";
       const guestTitle = titleAttrEscape(guestName);
+      const statusBadgeHtml = renderOperacionalStatusBadgeHtml(status, reserva.id);
       const proxHtml =
         proxInfo.cta && proxInfo.cta.kind
           ? `<button type="button" class="op-next-action-btn" data-id="${rid}" data-cta-kind="${escapeHtml(proxInfo.cta.kind)}" title="${titleAttrEscape(prox)}">${escapeHtml(prox)}</button>`
@@ -2220,7 +2237,7 @@ function renderOperacionalLista() {
           ${noitesTxt ? `<div class="op-period-sub">${escapeHtml(noitesTxt)}</div>` : ""}
         </td>
         <td class="op-td op-td--flux"><div class="op-flux">${flux}</div></td>
-        <td class="op-td op-td--status"><span class="${badgeCls}">${escapeHtml(status.label)}</span></td>
+        <td class="op-td op-td--status">${statusBadgeHtml}</td>
         <td class="op-td op-td--next">${proxHtml}</td>
         <td class="op-td op-td--actions">
           <div class="op-actions-cell">
@@ -2237,7 +2254,6 @@ function renderOperacionalLista() {
   const mobileHtml = ordenadas
     .map((reserva) => {
       const status = derivarStatusOperacional(reserva);
-      const badgeCls = badgeClassFromStatusType(status.type);
       const ci = formatDataBR(reserva.checkInPrevisto);
       const co = formatDataBR(reserva.checkOutPrevisto);
       const proxInfoM = listaProximaAcaoOperacional(reserva);
@@ -2245,6 +2261,7 @@ function renderOperacionalLista() {
       const rid = escapeHtml(String(reserva.id));
       const mGuest = reserva.hospedePrincipal || "—";
       const mGuestTitle = titleAttrEscape(mGuest);
+      const statusBadgeHtml = renderOperacionalStatusBadgeHtml(status, reserva.id);
       const proxMobileHtml =
         proxInfoM.cta && proxInfoM.cta.kind
           ? `<button type="button" class="op-next-action-btn op-next-action-btn--mcard" data-id="${rid}" data-cta-kind="${escapeHtml(proxInfoM.cta.kind)}" data-stop="1">${escapeHtml(prox)}</button>`
@@ -2252,7 +2269,7 @@ function renderOperacionalLista() {
       return `<button type="button" class="op-mcard" data-id="${rid}">
         <div class="op-mcard__r1">
           <span class="op-mcard__apt">${escapeHtml(String(reserva.apartamento || "—"))}</span>
-          <span class="${badgeCls}">${escapeHtml(status.label)}</span>
+          ${statusBadgeHtml}
         </div>
         <div class="op-mcard__name" title="${mGuestTitle}">${escapeHtml(mGuest)}</div>
         <div class="op-mcard__meta">${ci} → ${co}</div>
@@ -2289,6 +2306,13 @@ function renderOperacionalLista() {
       if (id) openDetail(id);
     });
   });
+  opTableBody?.querySelectorAll("[data-payment-badge]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute("data-id");
+      if (id) openPagarmeCobrancaModal(id);
+    });
+  });
   opTableBody?.querySelectorAll(".op-next-action-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -2302,6 +2326,13 @@ function renderOperacionalLista() {
     card.addEventListener("click", (e) => {
       const id = card.getAttribute("data-id");
       if (!id) return;
+      const payBadge = e.target && e.target.closest ? e.target.closest("[data-payment-badge]") : null;
+      if (payBadge) {
+        e.stopPropagation();
+        const rid = payBadge.getAttribute("data-id") || id;
+        openPagarmeCobrancaModal(rid);
+        return;
+      }
       const ctaBtn = e.target && e.target.closest ? e.target.closest(".op-next-action-btn") : null;
       if (ctaBtn) {
         e.stopPropagation();
@@ -2324,6 +2355,15 @@ function renderOperacionalLista() {
 /** Abre o painel e reutiliza o mesmo roteador de CTA do detalhe. */
 function openDetailAndRunCta(reservaId, kind) {
   if (!reservaId || !kind) return;
+  if (
+    kind === "pagarme_classificar" ||
+    kind === "pagarme_cobrar" ||
+    kind === "pagarme_ver" ||
+    kind === "pagarme_revisao"
+  ) {
+    openPagarmeCobrancaModal(reservaId);
+    return;
+  }
   openDetail(reservaId);
   window.setTimeout(function () {
     executeRecomendacaoCta(reservaId, kind);
@@ -5730,26 +5770,49 @@ function openPagarmeCobrancaModal(reservaId) {
   }
 }
 
+function getPagarmeGuestContacts(reserva) {
+  const hospedes = Array.isArray(reserva && reserva.hospedes) ? reserva.hospedes : [];
+  const principal = hospedes.find(function (h) {
+    return h && h.principal;
+  }) || hospedes[0] || null;
+  const whatsapp = principal ? String(principal.whatsapp || "").trim() : "";
+  const email = principal ? String(principal.email || "").trim() : "";
+  return {
+    hasWhatsapp: whatsapp.length > 0,
+    hasEmail: email.length > 0,
+  };
+}
+
 function renderPagarmeCobrancaModal(reserva) {
   const api = getPagarmePaymentUiApi();
   const payUi = resolvePaymentUiForReserva(reserva) || {};
+  const presentation =
+    api && typeof api.resolvePagarmeModalPresentation === "function"
+      ? api.resolvePagarmeModalPresentation(payUi)
+      : {
+          title: "Pagamento pendente",
+          subtitle: "Gerar e enviar link de pagamento",
+          generateLabel: "Gerar link de pagamento",
+          linkSectionTitle: null,
+          showGenerate: !!payUi.showGerarCartao,
+          showLinkActions: !!(payUi.canOpenLink || payUi.canCopyLink),
+          allowSendActions: false,
+        };
   const titleEl = document.getElementById("modal-pagarme-title");
+  const subtitleEl = document.getElementById("modal-pagarme-subtitle");
   const bodyEl = document.getElementById("modal-pagarme-body");
   if (!(bodyEl instanceof HTMLElement)) return;
 
-  if (titleEl) {
-    titleEl.textContent =
-      payUi.kind === "classificar"
-        ? "Classificar cobrança"
-        : payUi.kind === "aguardando"
-          ? "Aguardando pagamento"
-          : payUi.kind === "pago_pagarme_hits_pendente"
-            ? "Pago no Pagar.me"
-            : payUi.kind === "revisao"
-              ? "Revisão necessária"
-              : payUi.kind === "comissionada"
-                ? "Reserva comissionada"
-                : "Cobrança";
+  if (titleEl) titleEl.textContent = presentation.title || "Pagamento pendente";
+  if (subtitleEl instanceof HTMLElement) {
+    const sub = String(presentation.subtitle || "").trim();
+    if (sub) {
+      subtitleEl.textContent = sub;
+      subtitleEl.classList.remove("hidden");
+    } else {
+      subtitleEl.textContent = "";
+      subtitleEl.classList.add("hidden");
+    }
   }
 
   const classifLabel =
@@ -5765,6 +5828,7 @@ function renderPagarmeCobrancaModal(reserva) {
     cob && cob.valor_centavos != null && api
       ? api.formatCentavosToBRL(cob.valor_centavos)
       : "—";
+  const contacts = getPagarmeGuestContacts(reserva);
 
   let actionsHtml = "";
   if (payUi.showClassificar) {
@@ -5786,7 +5850,7 @@ function renderPagarmeCobrancaModal(reserva) {
   if (payUi.kind === "pago_pagarme_hits_pendente") {
     actionsHtml +=
       '<div class="modal-pagarme-alert modal-pagarme-alert--ok" role="status">' +
-      "<strong>Pago no Pagar.me</strong><br>Regularização no HITS pendente." +
+      "<strong>Pago no Pagar.me</strong><br>HITS pendente de regularização." +
       "</div>";
   }
 
@@ -5802,26 +5866,53 @@ function renderPagarmeCobrancaModal(reserva) {
       '<p class="modal-pagarme-hint-soft">' + escapeHtml(payUi.hintAnterior) + "</p>";
   }
 
-  if (payUi.showValorInput && payUi.showGerarCartao) {
+  if (presentation.showGenerate && payUi.showValorInput) {
     actionsHtml +=
       '<div class="modal-pagarme-form">' +
       '<label for="modal-pagarme-valor">Valor a cobrar</label>' +
       '<input type="text" id="modal-pagarme-valor" inputmode="decimal" placeholder="R$ 0,00" autocomplete="off" />' +
       '<p class="modal-pagarme-hint">Somente cartão neste momento. Pix não está disponível.</p>' +
-      '<button type="button" class="op-btn op-btn--primary" id="modal-pagarme-gerar-cartao">Gerar link de cartão</button>' +
+      '<button type="button" class="op-btn op-btn--primary" id="modal-pagarme-gerar-cartao">' +
+      escapeHtml(presentation.generateLabel || "Gerar link de pagamento") +
+      "</button>" +
       "</div>";
   }
 
-  if (payUi.canOpenLink || payUi.canCopyLink) {
+  if (presentation.linkSectionTitle) {
     actionsHtml +=
-      '<div class="modal-pagarme-link-actions">' +
-      (payUi.canOpenLink
-        ? '<button type="button" class="op-btn op-btn--primary" id="modal-pagarme-abrir-link">Abrir link</button>'
-        : "") +
-      (payUi.canCopyLink
-        ? '<button type="button" class="op-btn op-btn--secondary" id="modal-pagarme-copiar-link">Copiar link</button>'
-        : "") +
-      "</div>";
+      '<p class="modal-pagarme-link-title">' +
+      escapeHtml(presentation.linkSectionTitle) +
+      "</p>";
+  }
+
+  if (presentation.showLinkActions || presentation.allowSendActions) {
+    actionsHtml += '<div class="modal-pagarme-link-actions">';
+    if (presentation.allowSendActions) {
+      if (contacts.hasWhatsapp) {
+        actionsHtml +=
+          '<button type="button" class="op-btn op-btn--secondary" id="modal-pagarme-enviar-whatsapp" disabled title="Envio DigiSac será habilitado na próxima etapa">Enviar por WhatsApp</button>';
+      }
+      if (contacts.hasEmail) {
+        actionsHtml +=
+          '<button type="button" class="op-btn op-btn--secondary" id="modal-pagarme-enviar-email" disabled title="Envio de e-mail será habilitado na próxima etapa">Enviar por e-mail</button>';
+      }
+      if (!contacts.hasWhatsapp && !contacts.hasEmail) {
+        actionsHtml +=
+          '<p class="modal-pagarme-hint-soft">Cadastre um contato para enviar o link</p>';
+      } else {
+        actionsHtml +=
+          '<button type="button" class="op-btn op-btn--secondary" id="modal-pagarme-reenviar" disabled title="Reenvio DigiSac será habilitado na próxima etapa">Reenviar</button>';
+      }
+    }
+    if (payUi.canCopyLink) {
+      actionsHtml +=
+        '<button type="button" class="op-btn op-btn--secondary" id="modal-pagarme-copiar-link">Copiar link</button>';
+    }
+    if (payUi.canOpenLink) {
+      actionsHtml +=
+        '<button type="button" class="op-btn op-btn--primary" id="modal-pagarme-abrir-link">Abrir link</button>';
+    }
+    actionsHtml += "</div>";
   } else if (cob) {
     const rawLink = String(cob.payment_link_url || cob.pagarme_payment_link_url || "").trim();
     if (
@@ -5974,7 +6065,7 @@ async function submitPagarmeCriarCartao(reservaId) {
   pagarmeModalBusy = false;
   if (gerarBtn instanceof HTMLButtonElement) {
     gerarBtn.disabled = false;
-    gerarBtn.textContent = "Gerar link de cartão";
+    gerarBtn.textContent = "Gerar link de pagamento";
   }
   if (!result.ok) {
     const mapped = api

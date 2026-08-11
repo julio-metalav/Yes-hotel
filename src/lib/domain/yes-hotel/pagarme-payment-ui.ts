@@ -260,13 +260,22 @@ export function resolvePaymentUiState(input: {
   }
 
   if (cobranca && BLOQUEANTES.has(status)) {
+    const processing = status === "processing";
     return baseState({
       kind: "aguardando",
-      listaLabel: "Aguardando pagamento",
-      detalheTexto: "Há cobrança Pagar.me em andamento. Não criar segunda cobrança.",
+      listaLabel: processing ? "Pagamento em processamento" : "Aguardando pagamento",
+      detalheTexto: processing
+        ? "Pagamento em processamento. Não gerar nova cobrança."
+        : link
+          ? "Link de pagamento já gerado. Reutilize o mesmo link — não criar segunda cobrança."
+          : "Há cobrança Pagar.me em andamento. Não criar segunda cobrança.",
       variant: "info",
       ctaKind: "pagarme_ver",
-      ctaLabel: "Ver cobrança",
+      ctaLabel: processing
+        ? "Ver pagamento"
+        : link
+          ? "Abrir link de pagamento"
+          : "Ver cobrança",
       cobranca,
       paymentLinkUrl: link,
       canOpenLink: Boolean(link) && String(cobranca.metodo || "") === "cartao",
@@ -312,13 +321,13 @@ export function resolvePaymentUiState(input: {
         : null;
     return baseState({
       kind: hint ? "nova_tentativa" : "cobrar",
-      listaLabel: hint ? "Nova cobrança" : "Cobrar",
+      listaLabel: hint ? "Nova cobrança" : "Gerar e enviar link de pagamento",
       detalheTexto: hint
-        ? `${hint}. Você pode gerar uma nova cobrança de cartão.`
-        : "Reserva não comissionada com pagamento pendente. Informe o valor e gere o link de cartão.",
+        ? `${hint}. Você pode gerar um novo link de pagamento.`
+        : "Reserva não comissionada com pagamento pendente. Informe o valor e gere o link de pagamento.",
       variant: "warn",
       ctaKind: "pagarme_cobrar",
-      ctaLabel: hint ? "Nova cobrança" : "Cobrar",
+      ctaLabel: hint ? "Nova cobrança" : "Gerar e enviar link de pagamento",
       cobranca,
       showValorInput: true,
       showGerarCartao: true,
@@ -390,6 +399,131 @@ export function toBRLInputEditValue(input: string): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(parsed.centavos / 100);
+}
+
+/** Badge da tabela que abre o fluxo financeiro direto (sem drawer geral). */
+export function isPagarmeDirectPaymentBadgeType(statusType: unknown): boolean {
+  const t = String(statusType ?? "").trim();
+  return t === "pendente-pagamento" || t === "pagarme-pago-hits-pendente";
+}
+
+export type PagarmeModalPresentation = {
+  title: string;
+  subtitle: string | null;
+  generateLabel: string;
+  linkSectionTitle: string | null;
+  showGenerate: boolean;
+  showLinkActions: boolean;
+  allowSendActions: boolean;
+};
+
+/**
+ * Textos do modal financeiro compacto (UX operacional).
+ * Não muda regras de negócio — só apresentação.
+ */
+export function resolvePagarmeModalPresentation(
+  payUi: Pick<
+    PagarmePaymentUiState,
+    | "kind"
+    | "cobranca"
+    | "paymentLinkUrl"
+    | "showGerarCartao"
+    | "canOpenLink"
+    | "canCopyLink"
+  >,
+): PagarmeModalPresentation {
+  const status = asStatus(payUi.cobranca?.status);
+  const hasLink = Boolean(payUi.paymentLinkUrl);
+  const showLinkActions = Boolean(payUi.canOpenLink || payUi.canCopyLink);
+
+  if (payUi.kind === "classificar") {
+    return {
+      title: "Classificar cobrança",
+      subtitle: "Defina se a reserva é comissionada antes de gerar pagamento.",
+      generateLabel: "Gerar link de pagamento",
+      linkSectionTitle: null,
+      showGenerate: false,
+      showLinkActions: false,
+      allowSendActions: false,
+    };
+  }
+  if (payUi.kind === "comissionada") {
+    return {
+      title: "Reserva comissionada",
+      subtitle: "Pendente de regularização no HITS. Não cobrar o hóspede.",
+      generateLabel: "Gerar link de pagamento",
+      linkSectionTitle: null,
+      showGenerate: false,
+      showLinkActions: false,
+      allowSendActions: false,
+    };
+  }
+  if (payUi.kind === "pago_pagarme_hits_pendente") {
+    return {
+      title: "Pago no Pagar.me",
+      subtitle: "HITS pendente de regularização",
+      generateLabel: "Gerar link de pagamento",
+      linkSectionTitle: hasLink ? "Link do pagamento" : null,
+      showGenerate: false,
+      showLinkActions,
+      allowSendActions: false,
+    };
+  }
+  if (payUi.kind === "revisao") {
+    return {
+      title: "Revisão necessária",
+      subtitle: "Não gerar nova cobrança automaticamente.",
+      generateLabel: "Gerar link de pagamento",
+      linkSectionTitle: hasLink ? "Link existente" : null,
+      showGenerate: false,
+      showLinkActions,
+      allowSendActions: false,
+    };
+  }
+  if (payUi.kind === "aguardando") {
+    if (status === "processing") {
+      return {
+        title: "Pagamento em processamento",
+        subtitle: "Aguarde a confirmação. Não gerar nova cobrança.",
+        generateLabel: "Gerar link de pagamento",
+        linkSectionTitle: hasLink ? "Link de pagamento" : null,
+        showGenerate: false,
+        showLinkActions,
+        allowSendActions: false,
+      };
+    }
+    return {
+      title: "Pagamento pendente",
+      subtitle: hasLink
+        ? "Link de pagamento já gerado"
+        : "Cobrança em andamento — não criar segunda cobrança.",
+      generateLabel: "Gerar link de pagamento",
+      linkSectionTitle: hasLink ? "Link de pagamento já gerado" : null,
+      showGenerate: false,
+      showLinkActions,
+      allowSendActions: hasLink,
+    };
+  }
+  if (payUi.kind === "cobrar" || payUi.kind === "nova_tentativa") {
+    return {
+      title: "Pagamento pendente",
+      subtitle: "Gerar e enviar link de pagamento",
+      generateLabel: "Gerar link de pagamento",
+      linkSectionTitle: null,
+      showGenerate: Boolean(payUi.showGerarCartao),
+      showLinkActions: false,
+      allowSendActions: false,
+    };
+  }
+  return {
+    title: "Pagamento pendente",
+    subtitle: "Gerar e enviar link de pagamento",
+    generateLabel: "Gerar link de pagamento",
+    linkSectionTitle: null,
+    showGenerate: false,
+    showLinkActions: false,
+    allowSendActions: false,
+  };
 }
 
 export function mapPagarmeAdminError(input: {

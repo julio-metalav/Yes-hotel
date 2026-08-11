@@ -1160,6 +1160,20 @@ html {
   color: var(--op-destructive);
 }
 
+.checkin-view .op-badge--clickable {
+  cursor: pointer;
+  font: inherit;
+  line-height: inherit;
+  appearance: none;
+}
+
+.checkin-view .op-badge--clickable:hover,
+.checkin-view .op-badge--clickable:focus-visible {
+  filter: brightness(0.96);
+  outline: 2px solid rgba(52, 89, 185, 0.35);
+  outline-offset: 1px;
+}
+
 .checkin-view .op-badge--pagarme-hits {
   background: rgba(33, 122, 74, 0.1);
   border-color: rgba(33, 122, 74, 0.25);
@@ -3312,6 +3326,17 @@ html {
 }
 .modal-pagarme-body {
   margin: 0.5rem 0 0.75rem;
+}
+.modal-pagarme-subtitle {
+  margin: 0.15rem 0 0;
+  font-size: 0.92rem;
+  color: var(--op-text-muted, #64748b);
+}
+.modal-pagarme-link-title {
+  margin: 0.85rem 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--op-text, #0f172a);
 }
 .modal-pagarme-meta {
   display: grid;
