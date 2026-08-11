@@ -69,6 +69,26 @@ export function mapLifecycleToLegacyCompletion(
   return "pending";
 }
 
+/**
+ * Compatibilidade lifecycle PR4 × status legado.
+ * - lifecycle explícito → prevalece (mesmo se legado disser completo);
+ * - lifecycle null/ausente → fallback para `fnrh_status` legado.
+ */
+export function resolveEffectiveFnrhStatusSource(input: {
+  fnrh_lifecycle_status?: string | null;
+  fnrh_status?: string | null;
+}): { source: "lifecycle" | "legacy"; value: string | null } {
+  const life = input.fnrh_lifecycle_status;
+  if (life != null && String(life).trim() !== "") {
+    return { source: "lifecycle", value: String(life).trim() };
+  }
+  const legacy = input.fnrh_status;
+  if (legacy == null || String(legacy).trim() === "") {
+    return { source: "legacy", value: null };
+  }
+  return { source: "legacy", value: String(legacy).trim() };
+}
+
 /** @deprecated Prefer mapLifecycleToLegacyCompletion. Mantido para testes PR3. */
 export function mapFnrhStatusFromDb(value: string | null | undefined): FnrhCompletionStatus {
   return mapLifecycleToLegacyCompletion(value);
@@ -254,11 +274,37 @@ export function buildReservationPendingInputFromRows(args: {
         );
       }
 
+      const resolved = resolveEffectiveFnrhStatusSource({
+        fnrh_lifecycle_status: g.fnrh_lifecycle_status,
+        fnrh_status: g.fnrh_status,
+      });
+
+      // Lifecycle ausente: fallback legado (ex.: confirmado_hospede → completed).
+      // Não exige confirmation_source/core_fields PR4 — compatibilidade operacional.
+      if (resolved.source === "legacy") {
+        const legacyCompletion = mapLifecycleToLegacyCompletion(resolved.value);
+        return {
+          id: g.id,
+          role,
+          fnrh_status: legacyCompletion,
+          individual_confirmation:
+            role !== "menor" &&
+            g.confirmation_source === "guest" &&
+            g.completed_by_guest_id === g.id,
+          has_phone: g.has_whatsapp,
+          has_email: g.has_email,
+          completed_by_guardian:
+            role === "menor" &&
+            legacyCompletion === "completed" &&
+            (g.confirmation_source === "responsible" || g.completed_by_guardian === true),
+        };
+      }
+
       const completion = evaluateFnrhCompletion({
         guest_id: g.id,
         guest_role: g.guest_role as GuestRoleDb,
         fnrh_required: g.fnrh_required !== false,
-        fnrh_status: (g.fnrh_lifecycle_status as FnrhLifecycleStatus) ?? null,
+        fnrh_status: resolved.value as FnrhLifecycleStatus,
         responsible_guest_id: g.responsible_guest_id,
         completed_by_guest_id: g.completed_by_guest_id,
         completed_by_user_id: g.completed_by_user_id,
@@ -282,7 +328,7 @@ export function buildReservationPendingInputFromRows(args: {
         role,
         fnrh_status: completion.is_complete
           ? ("completed" as const)
-          : mapLifecycleToLegacyCompletion(g.fnrh_lifecycle_status),
+          : mapLifecycleToLegacyCompletion(resolved.value),
         individual_confirmation:
           role !== "menor" &&
           g.confirmation_source === "guest" &&
