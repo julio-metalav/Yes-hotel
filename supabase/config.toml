@@ -41,9 +41,11 @@ verify_jwt = false
 [functions.ttlock-access-ingest]
 verify_jwt = false
 
-# Processador de tolerância / outbox (auth: service_role ou ACCESS_TOLERANCE_PROCESSOR_TOKEN).
+# Processador de tolerância / outbox.
+# verify_jwt=false: autenticação própria (service_role Bearer OU x-access-tolerance-token),
+# alinhado a senha-auto-envio / fnrh-auto-reenvio para cron pg_net sem JWT gateway.
 [functions.access-tolerance-processor]
-verify_jwt = true
+verify_jwt = false
 
 # Pagar.me webhook (Checkpoint 2) — NOTIFICAÇÃO apenas; confirmação = GET server-to-server.
 # verify_jwt=false SOMENTE nesta Edge pública de callback.
