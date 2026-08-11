@@ -51,3 +51,7 @@ verify_jwt = true
 # Admin (cobranca-pagarme-admin) mantém JWT obrigatório (default verify_jwt=true).
 [functions.cobranca-pagarme-webhook]
 verify_jwt = false
+
+# Envio multicanal do Payment Link ao hóspede (não cria cobrança).
+[functions.send-payment-link]
+verify_jwt = false

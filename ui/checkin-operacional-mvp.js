@@ -6010,20 +6010,23 @@ function renderPagarmeCobrancaModal(reserva) {
   if (presentation.showLinkActions || presentation.allowSendActions) {
     actionsHtml += '<div class="modal-pagarme-link-actions">';
     if (presentation.allowSendActions) {
-      if (contacts.hasWhatsapp) {
-        actionsHtml +=
-          '<button type="button" class="op-btn op-btn--secondary" id="modal-pagarme-enviar-whatsapp" disabled title="Envio DigiSac será habilitado na próxima etapa">Enviar por WhatsApp</button>';
-      }
-      if (contacts.hasEmail) {
-        actionsHtml +=
-          '<button type="button" class="op-btn op-btn--secondary" id="modal-pagarme-enviar-email" disabled title="Envio de e-mail será habilitado na próxima etapa">Enviar por e-mail</button>';
-      }
       if (!contacts.hasWhatsapp && !contacts.hasEmail) {
         actionsHtml +=
           '<p class="modal-pagarme-hint-soft">Cadastre um contato para enviar o link</p>';
       } else {
+        const sendTitle = contacts.hasWhatsapp && contacts.hasEmail
+          ? "Envia o mesmo Payment Link por e-mail e WhatsApp"
+          : contacts.hasEmail
+            ? "Envia o Payment Link por e-mail"
+            : "Envia o Payment Link por WhatsApp";
         actionsHtml +=
-          '<button type="button" class="op-btn op-btn--secondary" id="modal-pagarme-reenviar" disabled title="Reenvio DigiSac será habilitado na próxima etapa">Reenviar</button>';
+          '<button type="button" class="op-btn op-btn--primary" id="modal-pagarme-enviar-link" title="' +
+          escapeHtml(sendTitle) +
+          '">Enviar link</button>';
+        actionsHtml +=
+          '<button type="button" class="op-btn op-btn--secondary" id="modal-pagarme-reenviar" title="' +
+          escapeHtml(sendTitle) +
+          '">Reenviar</button>';
       }
     }
     if (payUi.canCopyLink) {
@@ -6130,6 +6133,89 @@ function renderPagarmeCobrancaModal(reserva) {
       }
     });
   }
+  const cobrancaIdEnvio = cob && cob.id ? String(cob.id) : null;
+  const enviarLinkBtn = bodyEl.querySelector("#modal-pagarme-enviar-link");
+  if (enviarLinkBtn) {
+    enviarLinkBtn.addEventListener("click", function () {
+      void submitPagarmeEnviarPaymentLink(reserva.id, cobrancaIdEnvio);
+    });
+  }
+  const reenviarBtn = bodyEl.querySelector("#modal-pagarme-reenviar");
+  if (reenviarBtn) {
+    reenviarBtn.addEventListener("click", function () {
+      void submitPagarmeEnviarPaymentLink(reserva.id, cobrancaIdEnvio);
+    });
+  }
+}
+
+async function backendEnviarPaymentLink(reservaId, cobrancaId) {
+  const supabase = getSupabase();
+  if (!supabase || !auth?.getEdgeFunctionFetchHeaders) {
+    return { ok: false, error: "auth_indisponivel", message: "Autenticação indisponível." };
+  }
+  let headers;
+  try {
+    headers = await auth.getEdgeFunctionFetchHeaders();
+  } catch (_e) {
+    return { ok: false, error: "unauthorized", message: "Sessão inválida ou expirada." };
+  }
+  const base = (
+    typeof supabase.supabaseUrl === "string" ? supabase.supabaseUrl : ""
+  ).replace(/\/$/, "");
+  if (!base) {
+    return { ok: false, error: "config_indisponivel", message: "URL do Supabase indisponível." };
+  }
+  const payload = { reserva_id: reservaId };
+  if (cobrancaId) payload.cobranca_id = cobrancaId;
+  let res;
+  try {
+    res = await fetch(base + "/functions/v1/send-payment-link", {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify(payload),
+    });
+  } catch (_err) {
+    return { ok: false, error: "rede", message: "Falha de rede ao enviar Payment Link." };
+  }
+  const data = await res.json().catch(function () {
+    return {};
+  });
+  if (!res.ok || !data.ok) {
+    return {
+      ok: false,
+      httpStatus: res.status,
+      error: data.error || "erro",
+      message: data.message || data.error || res.statusText,
+      data: data,
+    };
+  }
+  return { ok: true, httpStatus: res.status, data: data };
+}
+
+async function submitPagarmeEnviarPaymentLink(reservaId, cobrancaId) {
+  if (pagarmeModalBusy) return;
+  pagarmeModalBusy = true;
+  setPagarmeModalMsg("Enviando Payment Link (e-mail + WhatsApp)…", null);
+  const result = await backendEnviarPaymentLink(reservaId, cobrancaId);
+  pagarmeModalBusy = false;
+  if (!result.ok) {
+    const d = result.data || {};
+    const partial =
+      d.enviado_email || d.enviado_whatsapp
+        ? " Entrega parcial registrada; o link permanece o mesmo."
+        : "";
+    setPagarmeModalMsg(
+      (result.message || "Falha ao enviar Payment Link.") + partial,
+      "error",
+    );
+    return;
+  }
+  const d = result.data || {};
+  const parts = [];
+  if (d.enviado_email) parts.push("e-mail");
+  if (d.enviado_whatsapp) parts.push("WhatsApp");
+  const canalTxt = parts.length ? parts.join(" + ") : "canal disponível";
+  setPagarmeModalMsg("Payment Link enviado por " + canalTxt + ".", "success");
 }
 
 async function submitPagarmeClassificar(reservaId, classificacao) {
