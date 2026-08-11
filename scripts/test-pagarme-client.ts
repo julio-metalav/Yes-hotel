@@ -210,16 +210,18 @@ async function main() {
 
   // --- Fail-closed env × chave ---
   assert.equal(classifyPagarmeSecretKey(PAGARME_FIXTURE_SECRET), "test");
-  assert.equal(classifyPagarmeSecretKey("sk_homolog_generic_not_live_000"), "unknown");
   assert.equal(classifyPagarmeSecretKey(PAGARME_FIXTURE_LIVE_SECRET), "live");
+  assert.equal(classifyPagarmeSecretKey("sk_live_unsupported_format_000"), "unknown");
   assert.equal(classifyPagarmeSecretKey("pk_test_x"), "unknown");
+  assert.equal(classifyPagarmeSecretKey("ak_unknown_000"), "unknown");
 
   const cfgOk = getPagarmeConfig(homologEnv());
   assert.equal(cfgOk.transportAllowed, true);
   assert.equal(cfgOk.env, "test");
+  assert.equal(cfgOk.secretKeyKind, "test");
   assert.equal(cfgOk.coreApiBaseUrl, PAGARME_CORE_API_BASE_URL);
   assert.equal(cfgOk.checkoutApiBaseUrl, PAGARME_CHECKOUT_TEST_API_BASE_URL);
-  ok("A. TEST válido => permitido");
+  ok("A. test + sk_test_ => permitido");
 
   const cfgProdOk = getPagarmeConfig(productionEnv());
   assert.equal(cfgProdOk.transportAllowed, true);
@@ -227,14 +229,7 @@ async function main() {
   assert.equal(cfgProdOk.secretKeyKind, "live");
   assert.equal(cfgProdOk.coreApiBaseUrl, PAGARME_CORE_API_BASE_URL);
   assert.equal(cfgProdOk.checkoutApiBaseUrl, PAGARME_CHECKOUT_PRODUCTION_API_BASE_URL);
-  ok("B. PRODUCTION válido => permitido");
-
-  const cfgProdTestKey = getPagarmeConfig(
-    productionEnv({ PAGARME_SECRET_KEY: PAGARME_FIXTURE_SECRET }),
-  );
-  assert.equal(cfgProdTestKey.transportAllowed, false);
-  assert.equal(cfgProdTestKey.blockReason, "env_secret_mismatch");
-  ok("C. production + sk_test_ => bloqueado");
+  ok("B. production + sk_ sintética => permitido");
 
   const cfgLiveKey = getPagarmeConfig(
     homologEnv({ PAGARME_SECRET_KEY: PAGARME_FIXTURE_LIVE_SECRET }),
@@ -255,21 +250,38 @@ async function main() {
       }),
     (e: unknown) => e instanceof PagarmeError && e.code === "live_secret_blocked",
   );
-  ok("D. test + sk_live_ => bloqueado (antes do fetch)");
+  ok("C. test + sk_ sintética => bloqueado (antes do fetch)");
 
-  const cfgProdGeneric = getPagarmeConfig(
-    productionEnv({ PAGARME_SECRET_KEY: "sk_homolog_generic_not_live_000" }),
+  const cfgProdTestKey = getPagarmeConfig(
+    productionEnv({ PAGARME_SECRET_KEY: PAGARME_FIXTURE_SECRET }),
   );
-  assert.equal(cfgProdGeneric.transportAllowed, false);
-  assert.equal(cfgProdGeneric.blockReason, "secret_kind_unknown");
-  ok("E. production + generic sk_ => bloqueado");
+  assert.equal(cfgProdTestKey.transportAllowed, false);
+  assert.equal(cfgProdTestKey.blockReason, "env_secret_mismatch");
+  ok("D. production + sk_test_ => bloqueado");
 
-  const cfgGenericSk = getPagarmeConfig(
-    homologEnv({ PAGARME_SECRET_KEY: "sk_homolog_generic_not_live_000" }),
+  const cfgProdUnknown = getPagarmeConfig(
+    productionEnv({ PAGARME_SECRET_KEY: "pk_unknown_prefix_000" }),
   );
-  assert.equal(cfgGenericSk.transportAllowed, false);
-  assert.equal(cfgGenericSk.blockReason, "secret_kind_unknown");
-  ok("F. test + generic sk_ => bloqueado");
+  assert.equal(cfgProdUnknown.transportAllowed, false);
+  assert.equal(cfgProdUnknown.blockReason, "secret_kind_unknown");
+  const cfgSkLiveUnsupported = getPagarmeConfig(
+    productionEnv({ PAGARME_SECRET_KEY: "sk_live_unsupported_format_000" }),
+  );
+  assert.equal(cfgSkLiveUnsupported.transportAllowed, false);
+  assert.equal(cfgSkLiveUnsupported.blockReason, "secret_kind_unknown");
+  const cfgTestUnknown = getPagarmeConfig(
+    homologEnv({ PAGARME_SECRET_KEY: "ak_unknown_000" }),
+  );
+  assert.equal(cfgTestUnknown.transportAllowed, false);
+  assert.equal(cfgTestUnknown.blockReason, "secret_kind_unknown");
+  ok("E. prefixo desconhecido (e sk_live_) => bloqueado");
+
+  const cfgNoSecret = getPagarmeConfig(
+    homologEnv({ PAGARME_SECRET_KEY: "" }),
+  );
+  assert.equal(cfgNoSecret.transportAllowed, false);
+  assert.equal(cfgNoSecret.blockReason, "missing_secret");
+  ok("F. secret ausente => bloqueado");
 
   const cfgProdSdx = getPagarmeConfig(
     productionEnv({ PAGARME_CHECKOUT_API_BASE_URL: PAGARME_CHECKOUT_TEST_API_BASE_URL }),
@@ -325,13 +337,6 @@ async function main() {
   assert.equal(cfgNoEnv.transportAllowed, false);
   assert.equal(cfgNoEnv.blockReason, "env_missing");
   ok("L. env inválido/ausente => bloqueado");
-
-  const cfgNoSecret = getPagarmeConfig(
-    homologEnv({ PAGARME_SECRET_KEY: "" }),
-  );
-  assert.equal(cfgNoSecret.transportAllowed, false);
-  assert.equal(cfgNoSecret.blockReason, "missing_secret");
-  ok("M. secret ausente => bloqueado");
 
   // Production routing com mock — ZERO rede externa
   let sawProdCheckoutLink = false;
@@ -425,7 +430,7 @@ async function main() {
     transportAllowed: true,
   });
   assert.equal(await assertBlockedBeforeFetch(forgedA, "live_secret_blocked"), 0);
-  ok("forjada A: test+sk_live_ + flags true => bloqueado fetchCalls=0");
+  ok("forjada A: test+sk_ + flags true => bloqueado fetchCalls=0");
 
   const forgedB = forgedConfig({
     env: "production",
