@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=48" />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=50" />
   </head>
   <body class="op-body checkin-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -402,6 +402,23 @@
           <p class="modal-enviar-senha-msg hidden" id="modal-enviar-senha-msg"></p>
         </div>
       </div>
+
+      <div class="modal-overlay hidden" id="modal-pagarme-overlay" aria-hidden="true">
+        <div
+          class="modal-enviar-senha modal-pagarme"
+          role="dialog"
+          aria-labelledby="modal-pagarme-title"
+        >
+          <h3 id="modal-pagarme-title">Cobrança</h3>
+          <div id="modal-pagarme-body" class="modal-pagarme-body"></div>
+          <p class="modal-enviar-senha-msg hidden" id="modal-pagarme-msg"></p>
+          <div class="modal-enviar-senha-actions">
+            <button type="button" class="op-btn op-btn--secondary" id="modal-pagarme-close">
+              Fechar
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <nav class="mobile-nav" aria-label="Navegação principal móvel" hidden>
@@ -416,6 +433,7 @@
     <script defer src="./yes-access-tolerance-policy.js?v=1"></script>
     <script defer src="./yes-arrivals-policy.js?v=1"></script>
     <script defer src="./yes-checkin-panel-presentation.js?v=3"></script>
-    <script defer src="./checkin-operacional-mvp.js?v=44"></script>
+    <script defer src="./yes-pagarme-payment-ui.js?v=3"></script>
+    <script defer src="./checkin-operacional-mvp.js?v=47"></script>
   </body>
 </html>
