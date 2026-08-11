@@ -3,6 +3,8 @@
  */
 
 export const PAGARME_FIXTURE_SECRET = "sk_test_synthetic_not_real_000";
+/** Secret sintética LIVE — nunca valor real; só testes fail-closed. */
+export const PAGARME_FIXTURE_LIVE_SECRET = "sk_live_synthetic_not_real_000";
 export const PAGARME_FIXTURE_COBRANCA_ID = "11111111-1111-4111-8111-111111111111";
 export const PAGARME_FIXTURE_ORDER_ID = "or_synthetic_order_001";
 export const PAGARME_FIXTURE_CHARGE_ID = "ch_synthetic_charge_001";

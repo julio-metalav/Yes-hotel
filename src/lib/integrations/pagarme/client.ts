@@ -8,9 +8,16 @@
  */
 
 import {
+  classifyPagarmeSecretKey,
+  evaluatePagarmeCheckoutBaseUrl,
+  evaluatePagarmeCoreBaseUrl,
+  expectedCheckoutBaseUrlForEnv,
   getPagarmeConfig,
+  PAGARME_CHECKOUT_PRODUCTION_API_BASE_URL,
   PAGARME_CHECKOUT_TEST_API_BASE_URL,
   PAGARME_CORE_API_BASE_URL,
+  parsePagarmeEnvironment,
+  resolveEnvSecretCompatibility,
   resolvePagarmeBaseForSurface,
   pagarmeConfigStatus,
   type PagarmeEnvSource,
@@ -126,8 +133,14 @@ export class PagarmeClient {
     return pagarmeConfigStatus(this.config);
   }
 
+  /**
+   * Gate fail-closed independente de flags pré-computadas no config.
+   * Recomputa a partir de primitivos: env, secretKey, integrationEnabled,
+   * coreApiBaseUrl, checkoutApiBaseUrl — mesmo se secretAllowed/envAllowed/
+   * transportAllowed forem forjados como true.
+   */
   private assertTransport(action: string, surface: PagarmeProductSurface): void {
-    if (!this.config.integrationEnabled) {
+    if (this.config.integrationEnabled !== true) {
       throw new PagarmeError({
         code: "integration_disabled",
         message: `Integracao Pagar.me desligada; ${action} bloqueado.`,
@@ -136,7 +149,9 @@ export class PagarmeClient {
         retryable: false,
       });
     }
-    if (!this.config.secretKey) {
+
+    const secretKey = String(this.config.secretKey ?? "").trim();
+    if (!secretKey) {
       throw new PagarmeError({
         code: "missing_secret",
         message: `PAGARME_SECRET_KEY ausente; ${action} bloqueado.`,
@@ -145,76 +160,85 @@ export class PagarmeClient {
         retryable: false,
       });
     }
-    if (this.config.env === "production" || this.config.blockReason === "production_env_unsupported") {
-      throw new PagarmeError({
-        code: "production_env_unsupported",
-        message: `PAGARME_ENV=production nao suportado neste checkpoint; ${action} bloqueado.`,
-        httpStatus: null,
-        ambiguous: false,
-        retryable: false,
-      });
-    }
-    if (!this.config.envAllowed || this.config.env == null) {
+
+    const env = parsePagarmeEnvironment(
+      this.config.env == null ? "" : String(this.config.env),
+    );
+    if (!env) {
       throw new PagarmeError({
         code: "env_missing",
-        message: `PAGARME_ENV ausente ou invalido; ${action} bloqueado. Use test.`,
+        message: `PAGARME_ENV ausente ou invalido; ${action} bloqueado. Use test ou production.`,
         httpStatus: null,
         ambiguous: false,
         retryable: false,
       });
     }
-    if (!this.config.secretAllowed) {
-      const code = blockReasonToErrorCode(this.config.blockReason);
+
+    const secretKind = classifyPagarmeSecretKey(secretKey);
+    const envSecret = resolveEnvSecretCompatibility(env, secretKind);
+    if (!envSecret.ok) {
+      const code = blockReasonToErrorCode(envSecret.reason);
+      const message =
+        code === "live_secret_blocked"
+          ? `Secret sk_live_ bloqueada em PAGARME_ENV=test; ${action} bloqueado.`
+          : code === "env_secret_mismatch"
+            ? `Secret incompativel com PAGARME_ENV=${env}; ${action} bloqueado.`
+            : `PAGARME_ENV/chave incompativeis; ${action} bloqueado.`;
       throw new PagarmeError({
         code,
-        message:
-          code === "live_secret_blocked"
-            ? `Secret sk_live_ bloqueada neste checkpoint; ${action} bloqueado.`
-            : `PAGARME_ENV/chave incompativeis; ${action} bloqueado.`,
+        message,
         httpStatus: null,
         ambiguous: false,
         retryable: false,
-        details: { secret_key_kind: this.config.secretKeyKind },
+        details: { secret_key_kind: secretKind },
       });
     }
-    if (surface === "core" && !this.config.coreBaseUrlAllowed) {
-      const code = blockReasonToErrorCode(
-        this.config.blockReason ?? "unexpected_core_base_url",
-      );
+
+    const coreEval = evaluatePagarmeCoreBaseUrl(this.config.coreApiBaseUrl, env);
+    if (!coreEval.allowed) {
+      const reason =
+        coreEval.reason === "wrong_surface_for_env"
+          ? "core_base_wrong_surface"
+          : coreEval.reason === "missing_base_url"
+            ? "missing_core_base_url"
+            : coreEval.reason === "production_env_unsupported"
+              ? "production_env_unsupported"
+              : "unexpected_core_base_url";
       throw new PagarmeError({
-        code,
+        code: blockReasonToErrorCode(reason),
         message: `Base Core Pagar.me nao permitida (${safeUrlHint(this.config.coreApiBaseUrl)}). Use ${PAGARME_CORE_API_BASE_URL}.`,
         httpStatus: null,
         ambiguous: false,
         retryable: false,
+        details: { surface, block_reason: reason },
       });
     }
-    if (surface === "checkout" && !this.config.checkoutBaseUrlAllowed) {
-      const code = blockReasonToErrorCode(
-        this.config.blockReason ?? "unexpected_checkout_base_url",
-      );
+
+    const checkoutEval = evaluatePagarmeCheckoutBaseUrl(
+      this.config.checkoutApiBaseUrl,
+      env,
+    );
+    if (!checkoutEval.allowed) {
+      const reason =
+        checkoutEval.reason === "wrong_surface_for_env"
+          ? "checkout_base_wrong_surface"
+          : checkoutEval.reason === "missing_base_url"
+            ? "missing_checkout_base_url"
+            : checkoutEval.reason === "production_env_unsupported"
+              ? "production_env_unsupported"
+              : "unexpected_checkout_base_url";
       const expected =
-        this.config.env === "test"
-          ? PAGARME_CHECKOUT_TEST_API_BASE_URL
-          : PAGARME_CORE_API_BASE_URL;
+        expectedCheckoutBaseUrlForEnv(env) ||
+        (env === "production"
+          ? PAGARME_CHECKOUT_PRODUCTION_API_BASE_URL
+          : PAGARME_CHECKOUT_TEST_API_BASE_URL);
       throw new PagarmeError({
-        code,
+        code: blockReasonToErrorCode(reason),
         message: `Base Checkout Pagar.me nao permitida (${safeUrlHint(this.config.checkoutApiBaseUrl)}). Use ${expected}.`,
         httpStatus: null,
         ambiguous: false,
         retryable: false,
-      });
-    }
-    if (!this.config.transportAllowed) {
-      throw new PagarmeError({
-        code: blockReasonToErrorCode(this.config.blockReason) || "integration_disabled",
-        message: `Transporte Pagar.me nao permitido; ${action} bloqueado.`,
-        httpStatus: null,
-        ambiguous: false,
-        retryable: false,
-        details: this.config.blockReason
-          ? { block_reason: this.config.blockReason }
-          : undefined,
+        details: { surface, block_reason: reason },
       });
     }
   }
