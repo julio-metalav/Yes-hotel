@@ -10,6 +10,7 @@ import type {
   ReservaCobrancaRow,
 } from "../cobranca-pagarme-service";
 import type { PagarmePixCustomer } from "../../../integrations/pagarme";
+import { isYesHotelCobrancaUuid } from "../../../integrations/pagarme";
 
 export interface MemoryCobrancaState {
   reservas: Map<string, ReservaCobrancaRow>;
@@ -137,14 +138,17 @@ export function createMemoryCobrancaRepo(
     },
 
     async getCobrancaById(cobrancaId) {
+      if (!isYesHotelCobrancaUuid(cobrancaId)) return null;
       return state.cobrancas.get(cobrancaId) ?? null;
     },
 
     async findCobrancaByOrderCode(orderCode) {
+      if (isYesHotelCobrancaUuid(orderCode)) {
+        const byId = state.cobrancas.get(orderCode);
+        if (byId) return { ...byId };
+      }
       return (
-        [...state.cobrancas.values()].find(
-          (c) => c.id === orderCode || c.pagarme_order_id === orderCode,
-        ) ?? null
+        [...state.cobrancas.values()].find((c) => c.pagarme_order_id === orderCode) ?? null
       );
     },
 

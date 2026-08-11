@@ -18,6 +18,7 @@ import {
   isChargebackEvent,
   isCobrancaStatusBloqueante,
   isObrigacaoLiquidadaOuContenciosa,
+  isYesHotelCobrancaUuid,
   mapStatusAfterRemoteCreate,
   mapWebhookEventToRevisaoMotivo,
   sanitizeWebhookPayload,
@@ -181,6 +182,10 @@ function publicCobrancaView(row: CobrancaPagarmeRow): Record<string, unknown> {
 /**
  * Localiza candidato local Yes Hotel a partir de hints do payload.
  * NÃO é prova financeira — só pré-filtro contra eventos Bee2Pay/OTA.
+ *
+ * Separação rigorosa:
+ * - IDs remotos or_/ch_/pl_ → somente colunas TEXT remotas
+ * - order_code/code/metadata local → getCobrancaById SOMENTE se UUID válido
  */
 export async function findLocalCobrancaCandidateFromHints(
   repo: Pick<
@@ -197,23 +202,23 @@ export async function findLocalCobrancaCandidateFromHints(
     paymentLinkId: string | null;
   },
 ): Promise<CobrancaPagarmeRow | null> {
-  if (hints.orderCode) {
-    const byCode = await repo.findCobrancaByOrderCode(hints.orderCode);
-    if (byCode) return byCode;
-    const byId = await repo.getCobrancaById(hints.orderCode);
-    if (byId) return byId;
-  }
-  if (hints.orderId) {
-    const byOrderId = await repo.findCobrancaByOrderCode(hints.orderId);
-    if (byOrderId) return byOrderId;
-  }
   if (hints.chargeId) {
     const byCharge = await repo.findCobrancaByChargeId(hints.chargeId);
     if (byCharge) return byCharge;
   }
+  if (hints.orderId) {
+    // or_* → pagarme_order_id (TEXT). findCobrancaByOrderCode não consulta UUID se não-UUID.
+    const byOrderId = await repo.findCobrancaByOrderCode(hints.orderId);
+    if (byOrderId) return byOrderId;
+  }
   if (hints.paymentLinkId) {
     const byLink = await repo.findCobrancaByPaymentLinkId(hints.paymentLinkId);
     if (byLink) return byLink;
+  }
+  // order_code / code / metadata.yes_hotel_cobranca_id — só UUID local.
+  if (hints.orderCode && isYesHotelCobrancaUuid(hints.orderCode)) {
+    const byLocalId = await repo.getCobrancaById(hints.orderCode);
+    if (byLocalId) return byLocalId;
   }
   return null;
 }
@@ -672,7 +677,9 @@ export class CobrancaPagarmeService {
         if (!cobranca && snapshot.orderCode) {
           cobranca =
             (await this.repo.findCobrancaByOrderCode(snapshot.orderCode)) ??
-            (await this.repo.getCobrancaById(snapshot.orderCode));
+            (isYesHotelCobrancaUuid(snapshot.orderCode)
+              ? await this.repo.getCobrancaById(snapshot.orderCode)
+              : null);
         }
         if (!cobranca) {
           await this.repo.markWebhookProcessed({
@@ -710,11 +717,14 @@ export class CobrancaPagarmeService {
         }
 
         if (snapshot.statusNormalized === "chargeback") {
+          // IDs remotos só após correlação; nunca sobrescrever IDs locais já validados.
           await this.repo.updateCobranca(cobranca.id, {
             status: "chargeback",
             pagarme_status_raw: snapshot.statusRaw,
-            pagarme_charge_id: snapshot.chargeId || cobranca.pagarme_charge_id,
-            pagarme_order_id: snapshot.orderId || cobranca.pagarme_order_id,
+            pagarme_charge_id:
+              cobranca.pagarme_charge_id ?? snapshot.chargeId ?? null,
+            pagarme_order_id:
+              cobranca.pagarme_order_id ?? snapshot.orderId ?? null,
           });
         } else {
           await this.repo.markWebhookProcessed({
@@ -754,22 +764,13 @@ export class CobrancaPagarmeService {
         if (!cobranca && snapshot.orderCode) {
           cobranca =
             (await this.repo.findCobrancaByOrderCode(snapshot.orderCode)) ??
-            (await this.repo.getCobrancaById(snapshot.orderCode));
+            (isYesHotelCobrancaUuid(snapshot.orderCode)
+              ? await this.repo.getCobrancaById(snapshot.orderCode)
+              : null);
         }
 
         if (cobranca) {
-          // Persistir IDs descobertos via Payment Link (primeiro webhook).
-          const idPatch: Partial<CobrancaPagarmeRow> = {};
-          if (snapshot.chargeId && !cobranca.pagarme_charge_id) {
-            idPatch.pagarme_charge_id = snapshot.chargeId;
-          }
-          if (snapshot.orderId && !cobranca.pagarme_order_id) {
-            idPatch.pagarme_order_id = snapshot.orderId;
-          }
-          if (Object.keys(idPatch).length) {
-            cobranca = await this.repo.updateCobranca(cobranca.id, idPatch);
-          }
-
+          // IDs remotos NUNCA são persistidos antes de assertSnapshotBelongsToCobranca.
           if (snapshot.statusNormalized === "paid") {
             const corr = assertSnapshotBelongsToCobranca({
               orderCode: snapshot.orderCode,
@@ -785,6 +786,7 @@ export class CobrancaPagarmeService {
               if (!corr.ok) reasons.push(corr.reason);
               if (!valorOk) reasons.push("valor_divergente");
               if (!moedaOk) reasons.push("moeda_divergente");
+              // Sem pagarme_charge_id / pagarme_order_id — evita envenenar correlação.
               await this.repo.updateCobranca(cobranca.id, {
                 pagarme_status_raw: snapshot.statusRaw,
               });
@@ -807,8 +809,11 @@ export class CobrancaPagarmeService {
             cobranca = await this.repo.updateCobranca(cobranca.id, {
               status: "paid",
               pagarme_status_raw: snapshot.statusRaw,
-              pagarme_charge_id: snapshot.chargeId,
-              pagarme_order_id: snapshot.orderId ?? cobranca.pagarme_order_id,
+              // Persistência de IDs somente pós-correlação; não sobrescrever IDs já validados.
+              pagarme_charge_id:
+                cobranca.pagarme_charge_id ?? snapshot.chargeId ?? null,
+              pagarme_order_id:
+                cobranca.pagarme_order_id ?? snapshot.orderId ?? null,
             });
             const pay = await this.repo.insertPagamento({
               cobranca_id: cobranca.id,
@@ -828,9 +833,29 @@ export class CobrancaPagarmeService {
             snapshot.statusNormalized === "pending" ||
             snapshot.statusNormalized === "processing"
           ) {
-            // Atualiza espelho sem promover a paid.
+            const corr = assertSnapshotBelongsToCobranca({
+              orderCode: snapshot.orderCode,
+              cobrancaId: cobranca.id,
+            });
+            if (!corr.ok) {
+              await this.repo.markWebhookProcessed({
+                pagarme_event_id: hints.eventId,
+                cobranca_id: cobranca.id,
+                erro: `status_espelho_correlacao_${corr.reason}`,
+              });
+              return {
+                ok: true,
+                data: {
+                  duplicate_event: false,
+                  payment_registered: false,
+                  cobranca_id: cobranca.id,
+                },
+              };
+            }
+
+            // Atualiza espelho sem promover a paid; IDs só após correlação.
             if (cobranca.status !== "paid") {
-              await this.repo.updateCobranca(cobranca.id, {
+              const patch: Partial<CobrancaPagarmeRow> = {
                 status:
                   cobranca.status === "processing" || cobranca.status === "created"
                     ? snapshot.statusNormalized === "pending"
@@ -838,7 +863,14 @@ export class CobrancaPagarmeService {
                       : snapshot.statusNormalized
                     : cobranca.status,
                 pagarme_status_raw: snapshot.statusRaw,
-              });
+              };
+              if (snapshot.chargeId && !cobranca.pagarme_charge_id) {
+                patch.pagarme_charge_id = snapshot.chargeId;
+              }
+              if (snapshot.orderId && !cobranca.pagarme_order_id) {
+                patch.pagarme_order_id = snapshot.orderId;
+              }
+              await this.repo.updateCobranca(cobranca.id, patch);
             }
           }
         }

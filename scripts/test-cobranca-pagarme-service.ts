@@ -25,6 +25,7 @@ import {
   fixtureWebhookChargePaid,
   fixtureWebhookUnderpaid,
   getPagarmeConfig,
+  isYesHotelCobrancaUuid,
   mapStatusAfterRemoteCreate,
 } from "../src/lib/integrations/pagarme";
 
@@ -911,20 +912,17 @@ async function main() {
   }
 
   // --- Prefilter Bee2Pay / unrelated: zero INSERT, zero GET, zero mutação ---
-  const UNRELATED_EVENTS = [
-    "charge.paid",
-    "charge.payment_failed",
-    "charge.pending",
-    "charge.processing",
-    "charge.refunded",
-    "chargeback.received",
-    "charge.chargedback",
-    "charge.underpaid",
-    "charge.overpaid",
-    "charge.partial_canceled",
-  ] as const;
+  assert.equal(isYesHotelCobrancaUuid(PAGARME_FIXTURE_COBRANCA_ID), true);
+  assert.equal(isYesHotelCobrancaUuid("or_bee2pay_external_001"), false);
+  assert.equal(isYesHotelCobrancaUuid("ch_bee2pay_external_001"), false);
+  assert.equal(isYesHotelCobrancaUuid("pl_bee2pay_external_001"), false);
+  assert.equal(isYesHotelCobrancaUuid("BEE2PAY-OTA-ORDER-XYZ"), false);
+  ok("isYesHotelCobrancaUuid: UUID local vs or_/ch_/pl_/texto");
 
-  for (const tipo of UNRELATED_EVENTS) {
+  async function assertUnrelatedIgnored(
+    label: string,
+    payload: Record<string, unknown>,
+  ) {
     const { repo, state } = seedRepo();
     const reservaAntes = structuredClone(state.reservas.get(RESERVA_OK)!);
     let getCalls = 0;
@@ -945,18 +943,7 @@ async function main() {
         ]) as never,
       ),
     });
-    const r = await svc.processWebhook({
-      id: `evt_bee2pay_${tipo.replace(/\./g, "_")}`,
-      type: tipo,
-      data: {
-        id: "ch_bee2pay_ota_unrelated_001",
-        status: "paid",
-        amount: 99900,
-        order_id: "or_bee2pay_ota_unrelated_001",
-        code: "BEE2PAY-OTA-ORDER-XYZ",
-        payment_link_id: "pl_bee2pay_ota_unrelated_001",
-      },
-    });
+    const r = await svc.processWebhook(payload);
     assert.equal(r.ok, true);
     if (r.ok) {
       assert.equal(r.data.unrelated_ignored, true);
@@ -968,7 +955,564 @@ async function main() {
     assert.equal(state.pagamentos.size, 0);
     assert.equal(state.cobrancas.size, 0);
     assert.deepEqual(state.reservas.get(RESERVA_OK), reservaAntes);
-    ok(`unrelated ${tipo}: ignored sem INSERT/GET/mutacao`);
+    ok(label);
+  }
+
+  // Reprodução do bug produção: or_* em lookup UUID → agora ignored sem throw
+  await assertUnrelatedIgnored("bug or_* externo: unrelated sem exception/INSERT/GET", {
+    id: "evt_bug_or_non_uuid",
+    type: "charge.paid",
+    data: {
+      id: "ch_bee2pay_external_001",
+      status: "paid",
+      amount: 99900,
+      order_id: "or_bee2pay_external_001",
+      code: "BEE2PAY-EXTERNAL-CODE",
+      payment_link_id: "pl_bee2pay_external_001",
+    },
+  });
+
+  const UNRELATED_EVENTS = [
+    "charge.paid",
+    "charge.payment_failed",
+    "charge.pending",
+    "charge.processing",
+    "charge.refunded",
+    "chargeback.received",
+    "charge.chargedback",
+    "charge.underpaid",
+    "charge.overpaid",
+    "charge.partial_canceled",
+  ] as const;
+
+  for (const tipo of UNRELATED_EVENTS) {
+    await assertUnrelatedIgnored(`unrelated ${tipo}: ignored sem INSERT/GET/mutacao`, {
+      id: `evt_bee2pay_${tipo.replace(/\./g, "_")}`,
+      type: tipo,
+      data: {
+        id: "ch_bee2pay_ota_unrelated_001",
+        status: "paid",
+        amount: 99900,
+        order_id: "or_bee2pay_ota_unrelated_001",
+        code: "BEE2PAY-OTA-ORDER-XYZ",
+        payment_link_id: "pl_bee2pay_ota_unrelated_001",
+      },
+    });
+  }
+
+  // Hints isolados não-UUID / remotos externos
+  await assertUnrelatedIgnored("hint A: so order_id or_*", {
+    id: "evt_hint_or_only",
+    type: "charge.paid",
+    data: { order_id: "or_bee2pay_only_001", status: "paid" },
+  });
+  await assertUnrelatedIgnored("hint B: so charge_id ch_*", {
+    id: "evt_hint_ch_only",
+    type: "charge.paid",
+    data: { id: "ch_bee2pay_only_001", status: "paid" },
+  });
+  await assertUnrelatedIgnored("hint C: so payment_link_id pl_*", {
+    id: "evt_hint_pl_only",
+    type: "charge.paid",
+    data: { payment_link_id: "pl_bee2pay_only_001", status: "paid" },
+  });
+  await assertUnrelatedIgnored("hint D: so code nao-UUID", {
+    id: "evt_hint_code_only",
+    type: "charge.paid",
+    data: { code: "BEE2PAY-CODE-ONLY", status: "paid" },
+  });
+  await assertUnrelatedIgnored("hint E: so order_code nao-UUID", {
+    id: "evt_hint_order_code_only",
+    type: "charge.paid",
+    data: { order_code: "RESERVA-OTA-XYZ", status: "paid" },
+  });
+  await assertUnrelatedIgnored("hint F: metadata yes_hotel_cobranca_id nao-UUID", {
+    id: "evt_hint_meta_only",
+    type: "charge.paid",
+    data: {
+      status: "paid",
+      metadata: { yes_hotel_cobranca_id: "not-a-uuid-external" },
+    },
+  });
+
+  // Remote IDs legítimos Yes Hotel (colunas TEXT)
+  async function assertRemoteIdFindsLocal(opts: {
+    label: string;
+    seed: Partial<{
+      pagarme_order_id: string | null;
+      pagarme_charge_id: string | null;
+      pagarme_payment_link_id: string | null;
+    }>;
+    payloadData: Record<string, unknown>;
+    remoteChargeIdForGet: string;
+  }) {
+    const { repo, state } = seedRepo();
+    state.cobrancas.set(PAGARME_FIXTURE_COBRANCA_ID, {
+      id: PAGARME_FIXTURE_COBRANCA_ID,
+      reserva_id: RESERVA_OK,
+      external_reservation_id: null,
+      metodo: "cartao",
+      valor_centavos: 170_000,
+      moeda: "BRL",
+      idempotency_key: "x",
+      status: "pending",
+      pagarme_payment_link_id: opts.seed.pagarme_payment_link_id ?? null,
+      pagarme_payment_link_url: null,
+      pagarme_order_id: opts.seed.pagarme_order_id ?? null,
+      pagarme_charge_id: opts.seed.pagarme_charge_id ?? null,
+      pix_qr_code: null,
+      pix_qr_code_url: null,
+      expira_em: null,
+      pagarme_status_raw: "pending",
+      requer_revisao_operacional: false,
+      requer_revisao_motivo: null,
+      requer_revisao_detectado_em: null,
+      criado_por_user_id: OPERATOR,
+    });
+    let getCalls = 0;
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: (u, m) => {
+              if (m === "GET" && u.includes(`/charges/${opts.remoteChargeIdForGet}`)) {
+                getCalls += 1;
+                return true;
+              }
+              return false;
+            },
+            body: {
+              ...fixturePaidChargeResponse,
+              id: opts.remoteChargeIdForGet,
+              order_id: opts.seed.pagarme_order_id ?? PAGARME_FIXTURE_ORDER_ID,
+              code: PAGARME_FIXTURE_COBRANCA_ID,
+              order: {
+                id: opts.seed.pagarme_order_id ?? PAGARME_FIXTURE_ORDER_ID,
+                code: PAGARME_FIXTURE_COBRANCA_ID,
+              },
+            },
+          },
+        ]) as never,
+      ),
+    });
+    const r = await svc.processWebhook({
+      id: `evt_remote_${opts.label}`,
+      type: "charge.paid",
+      data: opts.payloadData,
+    });
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.data.unrelated_ignored, undefined);
+      assert.equal(r.data.payment_registered, true);
+    }
+    assert.equal(state.webhooks.size, 1);
+    assert.equal(getCalls, 1);
+    assert.equal(state.pagamentos.size, 1);
+    assert.equal(state.cobrancas.get(PAGARME_FIXTURE_COBRANCA_ID)!.status, "paid");
+    ok(opts.label);
+  }
+
+  await assertRemoteIdFindsLocal({
+    label: "remote order_id or_yes encontra pagarme_order_id",
+    seed: { pagarme_order_id: "or_yes_123", pagarme_charge_id: null },
+    payloadData: {
+      id: "ch_yes_from_order",
+      order_id: "or_yes_123",
+      status: "paid",
+      amount: 170000,
+    },
+    remoteChargeIdForGet: "ch_yes_from_order",
+  });
+  await assertRemoteIdFindsLocal({
+    label: "remote charge_id ch_yes encontra pagarme_charge_id",
+    seed: { pagarme_charge_id: "ch_yes_123" },
+    payloadData: {
+      id: "ch_yes_123",
+      status: "paid",
+      amount: 170000,
+      code: PAGARME_FIXTURE_COBRANCA_ID,
+    },
+    remoteChargeIdForGet: "ch_yes_123",
+  });
+  await assertRemoteIdFindsLocal({
+    label: "remote pl_yes encontra pagarme_payment_link_id",
+    seed: { pagarme_payment_link_id: "pl_yes_123" },
+    payloadData: {
+      id: "ch_yes_from_pl",
+      payment_link_id: "pl_yes_123",
+      status: "paid",
+      amount: 170000,
+      code: PAGARME_FIXTURE_COBRANCA_ID,
+    },
+    remoteChargeIdForGet: "ch_yes_from_pl",
+  });
+
+  // Adversarial: UUID local forjado no payload + charge remoto alheio → GET + fail-closed
+  {
+    const { repo, state } = seedRepo();
+    state.cobrancas.set(PAGARME_FIXTURE_COBRANCA_ID, {
+      id: PAGARME_FIXTURE_COBRANCA_ID,
+      reserva_id: RESERVA_OK,
+      external_reservation_id: null,
+      metodo: "cartao",
+      valor_centavos: 170_000,
+      moeda: "BRL",
+      idempotency_key: "x",
+      status: "pending",
+      pagarme_payment_link_id: PAGARME_FIXTURE_PAYMENT_LINK_ID,
+      pagarme_payment_link_url: PAGARME_FIXTURE_LINK_URL,
+      pagarme_order_id: null,
+      pagarme_charge_id: null,
+      pix_qr_code: null,
+      pix_qr_code_url: null,
+      expira_em: null,
+      pagarme_status_raw: "pending",
+      requer_revisao_operacional: false,
+      requer_revisao_motivo: null,
+      requer_revisao_detectado_em: null,
+      criado_por_user_id: OPERATOR,
+    });
+    let getCalls = 0;
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: (u, m) => {
+              if (m === "GET" && u.includes("/charges/ch_bee2pay_foreign_001")) {
+                getCalls += 1;
+                return true;
+              }
+              return false;
+            },
+            body: {
+              ...fixturePaidChargeResponse,
+              id: "ch_bee2pay_foreign_001",
+              order_id: "or_bee2pay_foreign_001",
+              code: "00000000-0000-4000-8000-000000000099",
+              order: {
+                id: "or_bee2pay_foreign_001",
+                code: "00000000-0000-4000-8000-000000000099",
+              },
+              metadata: {
+                yes_hotel_cobranca_id: "00000000-0000-4000-8000-000000000099",
+              },
+            },
+          },
+        ]) as never,
+      ),
+    });
+    const r = await svc.processWebhook({
+      id: "evt_forged_uuid_payload",
+      type: "charge.paid",
+      data: {
+        id: "ch_bee2pay_foreign_001",
+        code: PAGARME_FIXTURE_COBRANCA_ID,
+        status: "paid",
+        amount: 170000,
+      },
+    });
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.data.unrelated_ignored, undefined);
+      assert.equal(r.data.payment_registered, false);
+    }
+    assert.equal(state.webhooks.size, 1);
+    assert.equal(getCalls, 1);
+    assert.equal(state.pagamentos.size, 0);
+    const cobForged = state.cobrancas.get(PAGARME_FIXTURE_COBRANCA_ID)!;
+    assert.equal(cobForged.status, "pending");
+    assert.equal(cobForged.pagarme_charge_id, null);
+    assert.equal(cobForged.pagarme_order_id, null);
+    assert.equal(cobForged.pagarme_payment_link_id, PAGARME_FIXTURE_PAYMENT_LINK_ID);
+    ok("forjado: rejeita paid e NAO contamina charge_id/order_id");
+  }
+
+  // IDs legítimos pré-existentes permanecem intactos sob snapshot estrangeiro
+  {
+    const { repo, state } = seedRepo();
+    state.cobrancas.set(PAGARME_FIXTURE_COBRANCA_ID, {
+      id: PAGARME_FIXTURE_COBRANCA_ID,
+      reserva_id: RESERVA_OK,
+      external_reservation_id: null,
+      metodo: "cartao",
+      valor_centavos: 170_000,
+      moeda: "BRL",
+      idempotency_key: "x",
+      status: "pending",
+      pagarme_payment_link_id: "pl_yes_legitimo",
+      pagarme_payment_link_url: "https://payment-link.pagar.me/pl_yes_legitimo",
+      pagarme_order_id: "or_yes_legitimo",
+      pagarme_charge_id: "ch_yes_legitimo",
+      pix_qr_code: null,
+      pix_qr_code_url: null,
+      expira_em: null,
+      pagarme_status_raw: "pending",
+      requer_revisao_operacional: false,
+      requer_revisao_motivo: null,
+      requer_revisao_detectado_em: null,
+      criado_por_user_id: OPERATOR,
+    });
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: (u, m) => m === "GET" && u.includes("/charges/ch_bee2pay_foreign_002"),
+            body: {
+              ...fixturePaidChargeResponse,
+              id: "ch_bee2pay_foreign_002",
+              order_id: "or_bee2pay_foreign_002",
+              code: "00000000-0000-4000-8000-000000000088",
+              order: {
+                id: "or_bee2pay_foreign_002",
+                code: "00000000-0000-4000-8000-000000000088",
+              },
+            },
+          },
+        ]) as never,
+      ),
+    });
+    const r = await svc.processWebhook({
+      id: "evt_foreign_vs_legit_ids",
+      type: "charge.paid",
+      data: {
+        id: "ch_bee2pay_foreign_002",
+        code: PAGARME_FIXTURE_COBRANCA_ID,
+        status: "paid",
+        amount: 170000,
+      },
+    });
+    assert.equal(r.ok, true);
+    if (r.ok) assert.equal(r.data.payment_registered, false);
+    const cob = state.cobrancas.get(PAGARME_FIXTURE_COBRANCA_ID)!;
+    assert.equal(cob.status, "pending");
+    assert.equal(cob.pagarme_charge_id, "ch_yes_legitimo");
+    assert.equal(cob.pagarme_order_id, "or_yes_legitimo");
+    assert.equal(cob.pagarme_payment_link_id, "pl_yes_legitimo");
+    assert.equal(state.pagamentos.size, 0);
+    ok("IDs legitimos pre-existentes intactos sob snapshot estrangeiro");
+  }
+
+  // payment_failed estrangeiro nao contamina IDs
+  {
+    const { repo, state } = seedRepo();
+    state.cobrancas.set(PAGARME_FIXTURE_COBRANCA_ID, {
+      id: PAGARME_FIXTURE_COBRANCA_ID,
+      reserva_id: RESERVA_OK,
+      external_reservation_id: null,
+      metodo: "cartao",
+      valor_centavos: 170_000,
+      moeda: "BRL",
+      idempotency_key: "x",
+      status: "pending",
+      pagarme_payment_link_id: PAGARME_FIXTURE_PAYMENT_LINK_ID,
+      pagarme_payment_link_url: PAGARME_FIXTURE_LINK_URL,
+      pagarme_order_id: null,
+      pagarme_charge_id: null,
+      pix_qr_code: null,
+      pix_qr_code_url: null,
+      expira_em: null,
+      pagarme_status_raw: "pending",
+      requer_revisao_operacional: false,
+      requer_revisao_motivo: null,
+      requer_revisao_detectado_em: null,
+      criado_por_user_id: OPERATOR,
+    });
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: (u, m) => m === "GET" && u.includes("/charges/ch_bee2pay_fail_001"),
+            body: {
+              ...fixturePaidChargeResponse,
+              id: "ch_bee2pay_fail_001",
+              order_id: "or_bee2pay_fail_001",
+              status: "failed",
+              code: "00000000-0000-4000-8000-000000000077",
+              order: {
+                id: "or_bee2pay_fail_001",
+                code: "00000000-0000-4000-8000-000000000077",
+              },
+              paid_amount: null,
+              paid_at: null,
+            },
+          },
+        ]) as never,
+      ),
+    });
+    const r = await svc.processWebhook({
+      id: "evt_foreign_failed",
+      type: "charge.payment_failed",
+      data: {
+        id: "ch_bee2pay_fail_001",
+        code: PAGARME_FIXTURE_COBRANCA_ID,
+        status: "failed",
+      },
+    });
+    assert.equal(r.ok, true);
+    const cob = state.cobrancas.get(PAGARME_FIXTURE_COBRANCA_ID)!;
+    assert.equal(cob.status, "pending");
+    assert.equal(cob.pagarme_charge_id, null);
+    assert.equal(cob.pagarme_order_id, null);
+    assert.equal(cob.pagarme_payment_link_id, PAGARME_FIXTURE_PAYMENT_LINK_ID);
+    ok("payment_failed estrangeiro: zero contaminacao de IDs");
+  }
+
+  // chargeback estrangeiro nao contamina IDs
+  {
+    const { repo, state } = seedRepo();
+    state.cobrancas.set(PAGARME_FIXTURE_COBRANCA_ID, {
+      id: PAGARME_FIXTURE_COBRANCA_ID,
+      reserva_id: RESERVA_OK,
+      external_reservation_id: null,
+      metodo: "cartao",
+      valor_centavos: 170_000,
+      moeda: "BRL",
+      idempotency_key: "x",
+      status: "paid",
+      pagarme_payment_link_id: "pl_yes_legitimo",
+      pagarme_payment_link_url: null,
+      pagarme_order_id: "or_yes_legitimo",
+      pagarme_charge_id: "ch_yes_legitimo",
+      pix_qr_code: null,
+      pix_qr_code_url: null,
+      expira_em: null,
+      pagarme_status_raw: "paid",
+      requer_revisao_operacional: false,
+      requer_revisao_motivo: null,
+      requer_revisao_detectado_em: null,
+      criado_por_user_id: OPERATOR,
+    });
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: (u, m) => m === "GET" && u.includes("/charges/ch_bee2pay_cb_001"),
+            body: {
+              ...fixturePaidChargeResponse,
+              id: "ch_bee2pay_cb_001",
+              order_id: "or_bee2pay_cb_001",
+              status: "chargedback",
+              code: "00000000-0000-4000-8000-000000000066",
+              order: {
+                id: "or_bee2pay_cb_001",
+                code: "00000000-0000-4000-8000-000000000066",
+              },
+            },
+          },
+        ]) as never,
+      ),
+    });
+    const r = await svc.processWebhook({
+      id: "evt_foreign_cb",
+      type: "charge.chargedback",
+      data: {
+        id: "ch_bee2pay_cb_001",
+        code: PAGARME_FIXTURE_COBRANCA_ID,
+        status: "chargedback",
+      },
+    });
+    assert.equal(r.ok, true);
+    const cob = state.cobrancas.get(PAGARME_FIXTURE_COBRANCA_ID)!;
+    assert.equal(cob.status, "paid");
+    assert.equal(cob.pagarme_charge_id, "ch_yes_legitimo");
+    assert.equal(cob.pagarme_order_id, "or_yes_legitimo");
+    ok("chargeback estrangeiro: zero contaminacao; status intacto");
+  }
+
+  // Hints contraditórios: charge aponta A, code aponta C — correlação falha sem contaminar
+  {
+    const otherId = "22222222-2222-4222-8222-222222222222";
+    const { repo, state } = seedRepo();
+    state.cobrancas.set(PAGARME_FIXTURE_COBRANCA_ID, {
+      id: PAGARME_FIXTURE_COBRANCA_ID,
+      reserva_id: RESERVA_OK,
+      external_reservation_id: null,
+      metodo: "cartao",
+      valor_centavos: 170_000,
+      moeda: "BRL",
+      idempotency_key: "a",
+      status: "pending",
+      pagarme_payment_link_id: null,
+      pagarme_payment_link_url: null,
+      pagarme_order_id: null,
+      pagarme_charge_id: "ch_candidate_a",
+      pix_qr_code: null,
+      pix_qr_code_url: null,
+      expira_em: null,
+      pagarme_status_raw: "pending",
+      requer_revisao_operacional: false,
+      requer_revisao_motivo: null,
+      requer_revisao_detectado_em: null,
+      criado_por_user_id: OPERATOR,
+    });
+    state.cobrancas.set(otherId, {
+      id: otherId,
+      reserva_id: RESERVA_OK,
+      external_reservation_id: null,
+      metodo: "cartao",
+      valor_centavos: 50_000,
+      moeda: "BRL",
+      idempotency_key: "b",
+      status: "failed",
+      pagarme_payment_link_id: null,
+      pagarme_payment_link_url: null,
+      pagarme_order_id: "or_candidate_b",
+      pagarme_charge_id: null,
+      pix_qr_code: null,
+      pix_qr_code_url: null,
+      expira_em: null,
+      pagarme_status_raw: "failed",
+      requer_revisao_operacional: false,
+      requer_revisao_motivo: null,
+      requer_revisao_detectado_em: null,
+      criado_por_user_id: OPERATOR,
+    });
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: (u, m) => m === "GET" && u.includes("/charges/ch_candidate_a"),
+            body: {
+              ...fixturePaidChargeResponse,
+              id: "ch_candidate_a",
+              order_id: "or_foreign_snap",
+              code: otherId,
+              order: { id: "or_foreign_snap", code: otherId },
+              amount: 170000,
+              paid_amount: 170000,
+            },
+          },
+        ]) as never,
+      ),
+    });
+    const r = await svc.processWebhook({
+      id: "evt_contradictory_hints",
+      type: "charge.paid",
+      data: {
+        id: "ch_candidate_a",
+        order_id: "or_candidate_b",
+        code: otherId,
+        status: "paid",
+        amount: 170000,
+      },
+    });
+    assert.equal(r.ok, true);
+    if (r.ok) assert.equal(r.data.payment_registered, false);
+    const a = state.cobrancas.get(PAGARME_FIXTURE_COBRANCA_ID)!;
+    const b = state.cobrancas.get(otherId)!;
+    assert.equal(a.status, "pending");
+    assert.equal(a.pagarme_charge_id, "ch_candidate_a");
+    assert.equal(a.pagarme_order_id, null);
+    assert.equal(b.status, "failed");
+    assert.equal(b.pagarme_order_id, "or_candidate_b");
+    assert.equal(state.pagamentos.size, 0);
+    ok("hints contraditorios: fail-closed sem contaminacao");
   }
 
   // charge.payment_failed local — fluxo preservado (espelho sem paid)

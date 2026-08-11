@@ -28,6 +28,7 @@ import {
   fixturePaymentLinkResponse,
   getPagarmeConfig,
   isCobrancaStatusBloqueante,
+  isYesHotelCobrancaUuid,
 } from "../src/lib/integrations/pagarme";
 
 let passed = 0;
@@ -215,6 +216,7 @@ function createPgRepo(client: import("pg").Client): CobrancaPagarmeRepository {
       return rows[0] ? mapRow(rows[0] as Record<string, unknown>) : null;
     },
     async getCobrancaById(id) {
+      if (!isYesHotelCobrancaUuid(id)) return null;
       const { rows } = await client.query(
         `select * from operacional_cobrancas_pagarme where id = $1`,
         [id],
@@ -222,8 +224,10 @@ function createPgRepo(client: import("pg").Client): CobrancaPagarmeRepository {
       return rows[0] ? mapRow(rows[0] as Record<string, unknown>) : null;
     },
     async findCobrancaByOrderCode(orderCode) {
-      const byId = await this.getCobrancaById(orderCode);
-      if (byId) return byId;
+      if (isYesHotelCobrancaUuid(orderCode)) {
+        const byId = await this.getCobrancaById(orderCode);
+        if (byId) return byId;
+      }
       const { rows } = await client.query(
         `select * from operacional_cobrancas_pagarme where pagarme_order_id = $1`,
         [orderCode],
@@ -491,6 +495,29 @@ async function main() {
     );
     assert.equal(Number(n2.rows[0].n), 2);
     ok("failed permite nova cobranca (indice libera)");
+
+    // Não-UUID nunca consulta coluna UUID (reprodução do bug produção).
+    const repoPg = createPgRepo(client);
+    for (const bad of [
+      "or_bee2pay_external_001",
+      "ch_bee2pay_external_001",
+      "pl_bee2pay_external_001",
+      "BEE2PAY-OTA-XYZ",
+    ]) {
+      const byId = await repoPg.getCobrancaById(bad);
+      assert.equal(byId, null);
+      const byCode = await repoPg.findCobrancaByOrderCode(bad);
+      assert.equal(byCode, null);
+    }
+    // Prova positiva: UUID válido ainda resolve.
+    const existing = await client.query(
+      `select id from operacional_cobrancas_pagarme limit 1`,
+    );
+    const existingId = String(existing.rows[0].id);
+    const byUuid = await repoPg.getCobrancaById(existingId);
+    assert.ok(byUuid);
+    assert.equal(byUuid!.id, existingId);
+    ok("postgres: getCobrancaById/findCobrancaByOrderCode nao-UUID => null sem erro");
 
     await client2.end();
     console.log(`\n[test-cobranca-pagarme-pg-concurrency] ${passed} assertions OK\n`);

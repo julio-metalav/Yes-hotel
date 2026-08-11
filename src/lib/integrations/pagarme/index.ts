@@ -55,6 +55,7 @@ export {
   isChargebackEvent,
   isCobrancaStatusBloqueante,
   isObrigacaoLiquidadaOuContenciosa,
+  isYesHotelCobrancaUuid,
   mapStatusAfterRemoteCreate,
   mapWebhookEventToRevisaoMotivo,
   maxInstallmentsForAmount,

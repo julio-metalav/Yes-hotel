@@ -13,6 +13,7 @@ import type {
   ReservaCobrancaRow,
 } from "../../../application/yes-hotel/cobranca-pagarme-service.ts";
 import type { PagarmePixCustomer } from "../../../integrations/pagarme/types.ts";
+import { isYesHotelCobrancaUuid } from "../../../integrations/pagarme/mapper.ts";
 
 /** Subset do client usado pelo repository (Edge jsr ou testes). */
 export type CobrancaPagarmeSupabaseClient = {
@@ -146,6 +147,8 @@ export function createSupabaseCobrancaPagarmeRepository(
     },
 
     async getCobrancaById(cobrancaId) {
+      // Fail-closed: nunca enviar IDs remotos or_/ch_/pl_ ou texto externo para coluna UUID.
+      if (!isYesHotelCobrancaUuid(cobrancaId)) return null;
       const { data, error } = await admin
         .from("operacional_cobrancas_pagarme")
         .select("*")
@@ -156,8 +159,11 @@ export function createSupabaseCobrancaPagarmeRepository(
     },
 
     async findCobrancaByOrderCode(orderCode) {
-      const byId = await this.getCobrancaById(orderCode);
-      if (byId) return byId;
+      // UUID local → id; qualquer string (incl. or_*) → pagarme_order_id TEXT.
+      if (isYesHotelCobrancaUuid(orderCode)) {
+        const byId = await this.getCobrancaById(orderCode);
+        if (byId) return byId;
+      }
       const { data, error } = await admin
         .from("operacional_cobrancas_pagarme")
         .select("*")
