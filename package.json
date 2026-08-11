@@ -29,6 +29,7 @@
     "test:yes:ttlock-access-poller": "tsx scripts/test-ttlock-access-poller.ts",
     "test:yes:ttlock-correlation-fix": "tsx scripts/test-ttlock-correlation-fix.ts",
     "test:yes:fnrh-roles-completion": "tsx scripts/test-fnrh-roles-completion.ts",
+    "test:yes:fnrh-legacy-lifecycle-compat": "tsx scripts/test-fnrh-legacy-lifecycle-compat.ts",
     "test:yes:first-room-access-transaction": "tsx scripts/test-first-room-access-transaction.ts",
     "test:yes:access-tolerance-processor": "tsx scripts/test-access-tolerance-processor.ts",
     "test:yes:access-outbox-dispatcher": "tsx scripts/test-access-outbox-dispatcher.ts",

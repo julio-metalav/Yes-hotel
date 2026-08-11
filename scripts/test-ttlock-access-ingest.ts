@@ -508,8 +508,10 @@ async function main() {
         { id: "1", principal: true, fnrh_status: "confirmado_hospede", role: "principal_adulto" },
       ],
     });
-    assert.equal(evaluateReservationPendingState(unk).payment_pending, true);
-    ok("22-23 adapter pendência mapeia pago; parcial/desconhecido pendentes");
+    const unkPending = evaluateReservationPendingState(unk);
+    assert.equal(unkPending.payment_pending, false);
+    assert.equal(unkPending.payment_unknown, true);
+    ok("22-23 adapter: pago ok; parcial pendente; desconhecido=unknown (não inicia tolerância sozinho)");
   }
 
   // 24 FNRH incompleta
