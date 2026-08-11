@@ -1,10 +1,17 @@
 /**
- * Envio de links FNRH por e-mail (Resend) e WhatsApp (camada DigiSac stub/real).
+ * Envio de links FNRH por e-mail (Resend) e WhatsApp (DigiSac).
+ * Multicanal ao hóspede: se ambos os contatos forem válidos, tenta os dois
+ * de forma independente (sucesso em um não impede o outro). Mesmo link/token.
  * POST: { reserva_id, tipo_evento?, base_url?, check_in_previsto?, job_date? }.
  * Só envia se existir pelo menos 1 FNRH não preenchida.
  * tipo_evento: reserva_criada | d_minus_1 | d0_0700 | porta
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+  aggregateGuestChannelResults,
+  planGuestChannels,
+  type GuestChannelAttempt,
+} from "../_shared/comunicacao-operacional/guest-multichannel.ts";
 import { outboundWhatsappTransacional } from "../_shared/comunicacao-operacional/outbound-whatsapp.ts";
 import { maskEmailForLog, previewCorpo, registrarOperacionalComunicacaoEnvio } from "../_shared/comunicacao-operacional/registro-envio.ts";
 import { buildFnrhPreenchimentoUrl, maskFnrhLinkForLog } from "../_shared/fnrh-public-link.ts";
@@ -124,6 +131,7 @@ Deno.serve(async (req: Request) => {
   let enviados = 0;
   let tentativasComEmail = 0;
   let tentativasComWhatsapp = 0;
+  let enviadosEmail = 0;
   let enviadosWhatsapp = 0;
   const erros: string[] = [];
 
@@ -134,15 +142,18 @@ Deno.serve(async (req: Request) => {
     const nome = (hospede?.nome ?? p.hospede_nome ?? "Hóspede").trim();
     // guest_id = fnrh_hospedes.id (formulário público + fnrh-get)
     // Origem = frontend público (FNRH_PUBLIC_BASE_URL), nunca SUPABASE_URL.
+    // Mesmo link/token nos dois canais — sem duplicar FNRH.
     const link = buildFnrhPreenchimentoUrl(p.id, p.link_token, {
       baseUrl: body.base_url,
       envValue: fnrhPublicEnv,
       version: 2,
     });
 
-    let enviadoEsteHospede = false;
+    const plan = planGuestChannels(email, whatsapp, "hospede");
+    let emailAttempt: GuestChannelAttempt | null = null;
+    let whatsappAttempt: GuestChannelAttempt | null = null;
 
-    if (email) {
+    if (plan.tryEmail) {
       tentativasComEmail++;
       const subject = `Ficha de Registro (FNRH) — ${apartamento || "sua reserva"}`;
       const html = `
@@ -155,16 +166,8 @@ Deno.serve(async (req: Request) => {
       `;
       const result = await sendEmail(email, subject, html);
       if (result.ok) {
-        enviados++;
-        enviadoEsteHospede = true;
-        const tentativas = typeof hospede?.tentativas_envio === "number" ? hospede.tentativas_envio + 1 : 1;
-        await admin.from("operacional_hospedes").update({
-          status_operacional: "enviado",
-          ultimo_envio_canal: "email",
-          ultimo_envio_em: now,
-          tentativas_envio: tentativas,
-          updated_at: now,
-        }).eq("id", p.hospede_id);
+        emailAttempt = { status: "enviado" };
+        enviadosEmail++;
         await registrarOperacionalComunicacaoEnvio(admin, {
           reserva_id: reservaId,
           conversa_id: null,
@@ -176,15 +179,33 @@ Deno.serve(async (req: Request) => {
           status: "enviada",
           provider: "resend",
           provider_message_id: null,
-          metadata: { tipo_evento: tipoEvento, fnrh_hospede_id: p.id },
+          metadata: { tipo_evento: tipoEvento, fnrh_hospede_id: p.id, resource_link: maskFnrhLinkForLog(link) },
           erro: null,
         });
       } else {
+        emailAttempt = { status: "falhou", error: result.error ?? "Falha e-mail" };
         erros.push(`${nome}: ${result.error}`);
+        await registrarOperacionalComunicacaoEnvio(admin, {
+          reserva_id: reservaId,
+          conversa_id: null,
+          hospede_id: p.hospede_id,
+          proposito: "fnrh_links",
+          canal: "email",
+          destinatario_mascara: maskEmailForLog(email),
+          corpo_preview: previewCorpo(`FNRH link: ${maskFnrhLinkForLog(link)}`),
+          status: "falha",
+          provider: "resend",
+          provider_message_id: null,
+          metadata: { tipo_evento: tipoEvento, fnrh_hospede_id: p.id },
+          erro: result.error ?? "Falha e-mail",
+        });
       }
+    } else {
+      emailAttempt = { status: "indisponivel" };
     }
 
-    if (!enviadoEsteHospede && whatsapp) {
+    // Independente do e-mail: sempre tenta WhatsApp se contato válido (mesmo link).
+    if (plan.tryWhatsapp) {
       tentativasComWhatsapp++;
       const textoWhatsapp =
         `Olá, ${nome}! Para agilizar seu check-in${apartamento ? ` no apto ${apartamento}` : ""}${checkIn ? ` (check-in: ${checkIn})` : ""}, preencha sua FNRH pelo link:\n${link}\n\nObrigado!`;
@@ -196,22 +217,30 @@ Deno.serve(async (req: Request) => {
         proposito: "fnrh_links",
       });
       if (wResult.ok) {
-        enviados++;
+        whatsappAttempt = { status: "enviado" };
         enviadosWhatsapp++;
-        const tentativas = typeof hospede?.tentativas_envio === "number" ? hospede.tentativas_envio + 1 : 1;
-        await admin.from("operacional_hospedes").update({
-          status_operacional: "enviado",
-          ultimo_envio_canal: "whatsapp",
-          ultimo_envio_em: now,
-          tentativas_envio: tentativas,
-          updated_at: now,
-        }).eq("id", p.hospede_id);
       } else {
+        whatsappAttempt = { status: "falhou", error: wResult.error ?? "falha" };
         erros.push(`${nome} (WhatsApp): ${wResult.error ?? "falha"}`);
       }
+    } else {
+      whatsappAttempt = { status: "indisponivel" };
     }
 
-    if (!email && !whatsapp) {
+    const agg = aggregateGuestChannelResults(emailAttempt, whatsappAttempt);
+    if (agg.delivered) {
+      enviados++;
+      const tentativas = typeof hospede?.tentativas_envio === "number" ? hospede.tentativas_envio + 1 : 1;
+      await admin.from("operacional_hospedes").update({
+        status_operacional: "enviado",
+        ultimo_envio_canal: agg.ultimoEnvioCanal,
+        ultimo_envio_em: now,
+        tentativas_envio: tentativas,
+        updated_at: now,
+      }).eq("id", p.hospede_id);
+    }
+
+    if (!plan.tryEmail && !plan.tryWhatsapp) {
       erros.push(`${nome}: sem e-mail e sem WhatsApp cadastrados.`);
     }
   }
@@ -225,11 +254,13 @@ Deno.serve(async (req: Request) => {
       check_in_previsto: checkInPrevisto,
       job_date: jobDate || null,
       enviados,
+      enviados_email: enviadosEmail,
       enviados_whatsapp: enviadosWhatsapp,
       erros: erros.length,
       tentativas_com_email: tentativasComEmail,
       tentativas_com_whatsapp: tentativasComWhatsapp,
       canal_operacional_whatsapp: "digisac",
+      multicanal_hospede: true,
       timestamp: now,
     }),
   });
@@ -246,6 +277,7 @@ Deno.serve(async (req: Request) => {
       reserva_id: reservaId,
       tipo_evento: tipoEvento,
       enviados,
+      enviados_email: enviadosEmail,
       enviados_whatsapp: enviadosWhatsapp,
       erros: erros.length ? erros : undefined,
       pendentes: pendentes.length,
