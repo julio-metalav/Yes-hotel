@@ -13,3 +13,6 @@ supabase/.temp/
 
 homologacao/
 
+# Sandbox / artefatos temporários locais (não versionar)
+tmp/
+

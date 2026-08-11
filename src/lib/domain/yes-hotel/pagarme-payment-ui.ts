@@ -156,6 +156,39 @@ function baseState(
   };
 }
 
+/**
+ * Feature flag fail-closed da UI Pagar.me.
+ * Somente boolean literal `true` habilita. Qualquer outro valor/erro = desabilitado.
+ */
+export function isPagarmeUiEnabled(value: unknown): boolean {
+  try {
+    return value === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Gate operacional: sem flag true, não resolve estados de cobrança Pagar.me. */
+export function resolveOperacionalPaymentUi(
+  input: Parameters<typeof resolvePaymentUiState>[0] & {
+    pagarmeUiEnabled?: unknown;
+  },
+): PagarmePaymentUiState {
+  if (!isPagarmeUiEnabled(input.pagarmeUiEnabled)) {
+    return baseState({
+      kind: "none",
+      listaLabel: "",
+      detalheTexto: "",
+    });
+  }
+  return resolvePaymentUiState(input);
+}
+
+/** Gate de batch: sem flag true, zero consultas às tabelas Pagar.me. */
+export function shouldFetchPagarmeCobrancas(pagarmeUiEnabled: unknown): boolean {
+  return isPagarmeUiEnabled(pagarmeUiEnabled);
+}
+
 export function resolvePaymentUiState(input: {
   pagamentoStatus: string | null | undefined;
   classificacaoComissionamento: string | null | undefined;

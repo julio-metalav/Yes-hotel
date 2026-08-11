@@ -5,11 +5,14 @@ import assert from "node:assert/strict";
 import {
   formatBRLInputDisplay,
   formatCentavosToBRL,
+  isPagarmeUiEnabled,
   isSafeHttpsPaymentLinkUrl,
   mapPagarmeAdminError,
   parseBRLToCentavos,
   pickRelevantCobranca,
+  resolveOperacionalPaymentUi,
   resolvePaymentUiState,
+  shouldFetchPagarmeCobrancas,
   toBRLInputEditValue,
 } from "../src/lib/domain/yes-hotel/pagarme-payment-ui";
 
@@ -335,6 +338,87 @@ function baseReserva(
   assert.equal(isSafeHttpsPaymentLinkUrl(""), false);
   assert.equal(isSafeHttpsPaymentLinkUrl(null), false);
   ok("URL https segura / protocolos bloqueados");
+}
+
+{
+  assert.equal(isPagarmeUiEnabled(undefined), false);
+  assert.equal(isPagarmeUiEnabled(null), false);
+  assert.equal(isPagarmeUiEnabled(false), false);
+  assert.equal(isPagarmeUiEnabled("true"), false);
+  assert.equal(isPagarmeUiEnabled(1), false);
+  assert.equal(isPagarmeUiEnabled({}), false);
+  assert.equal(isPagarmeUiEnabled(true), true);
+  ok("flag A-D: somente boolean true habilita (fail-closed)");
+}
+
+{
+  const off = resolveOperacionalPaymentUi({
+    pagarmeUiEnabled: false,
+    pagamentoStatus: "pendente",
+    classificacaoComissionamento: "desconhecida",
+    perfilUsuario: "recepcao",
+    cobrancas: [],
+  });
+  assert.equal(off.kind, "none");
+  assert.notEqual(off.kind, "classificar");
+  assert.equal(off.ctaKind, null);
+  assert.equal(off.showClassificar, false);
+  assert.equal(off.showGerarCartao, false);
+
+  const absent = resolveOperacionalPaymentUi({
+    pagamentoStatus: "pendente",
+    classificacaoComissionamento: "desconhecida",
+    perfilUsuario: "recepcao",
+    cobrancas: [{ id: "c1", status: "paid", metodo: "cartao" }],
+  });
+  assert.equal(absent.kind, "none");
+  assert.notEqual(absent.kind, "pago_pagarme_hits_pendente");
+  assert.notEqual(absent.listaLabel, "Classificar cobrança");
+  assert.notEqual(absent.listaLabel, "Pago no Pagar.me");
+  ok("flag E: desligada + HITS pendente => sem Classificar/Cobrar/Pago Pagar.me");
+}
+
+{
+  assert.equal(shouldFetchPagarmeCobrancas(undefined), false);
+  assert.equal(shouldFetchPagarmeCobrancas(false), false);
+  assert.equal(shouldFetchPagarmeCobrancas("true"), false);
+  assert.equal(shouldFetchPagarmeCobrancas(true), true);
+  ok("flag F: attach/batch só consulta com flag true");
+}
+
+{
+  const onClassificar = resolveOperacionalPaymentUi({
+    pagarmeUiEnabled: true,
+    pagamentoStatus: "pendente",
+    classificacaoComissionamento: "desconhecida",
+    perfilUsuario: "recepcao",
+    cobrancas: [],
+  });
+  assert.equal(onClassificar.kind, "classificar");
+  assert.equal(onClassificar.ctaKind, "pagarme_classificar");
+
+  const onPago = resolveOperacionalPaymentUi({
+    pagarmeUiEnabled: true,
+    pagamentoStatus: "pendente",
+    classificacaoComissionamento: "nao_comissionada",
+    perfilUsuario: "recepcao",
+    cobrancas: [{ id: "c1", status: "paid", metodo: "cartao" }],
+  });
+  assert.equal(onPago.kind, "pago_pagarme_hits_pendente");
+  assert.equal(onPago.situacaoLabel, "Pago no Pagar.me");
+  assert.match(String(onPago.situacaoSubtexto || ""), /HITS pendente/);
+  assert.equal(onPago.ctaLabel, "Ver cobrança");
+
+  const onCobrar = resolveOperacionalPaymentUi({
+    pagarmeUiEnabled: true,
+    pagamentoStatus: "pendente",
+    classificacaoComissionamento: "nao_comissionada",
+    perfilUsuario: "recepcao",
+    cobrancas: [],
+  });
+  assert.equal(onCobrar.kind, "cobrar");
+  assert.equal(onCobrar.showGerarCartao, true);
+  ok("flag G: true preserva estados CP3 homologados");
 }
 
 console.log(`\n[test-pagarme-payment-ui] ${cases} assertions OK`);

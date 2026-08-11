@@ -92,6 +92,27 @@
     );
   }
 
+  /** Somente boolean literal true habilita. Fail-closed. */
+  function isPagarmeUiEnabled(value) {
+    try {
+      return value === true;
+    } catch (_e) {
+      return false;
+    }
+  }
+
+  function shouldFetchPagarmeCobrancas(pagarmeUiEnabled) {
+    return isPagarmeUiEnabled(pagarmeUiEnabled);
+  }
+
+  function resolveOperacionalPaymentUi(input) {
+    input = input || {};
+    if (!isPagarmeUiEnabled(input.pagarmeUiEnabled)) {
+      return baseState({ kind: "none", listaLabel: "", detalheTexto: "" });
+    }
+    return resolvePaymentUiState(input);
+  }
+
   function resolvePaymentUiState(input) {
     input = input || {};
     var perfil = String(input.perfilUsuario || "")
@@ -365,6 +386,9 @@
   }
 
   var api = {
+    isPagarmeUiEnabled: isPagarmeUiEnabled,
+    shouldFetchPagarmeCobrancas: shouldFetchPagarmeCobrancas,
+    resolveOperacionalPaymentUi: resolveOperacionalPaymentUi,
     resolvePaymentUiState: resolvePaymentUiState,
     pickRelevantCobranca: pickRelevantCobranca,
     paymentLinkUrlOf: paymentLinkUrlOf,

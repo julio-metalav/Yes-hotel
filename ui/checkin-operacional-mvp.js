@@ -763,21 +763,52 @@ function getPagarmePaymentUiApi() {
     : null;
 }
 
-function resolvePaymentUiForReserva(reserva) {
-  const api = getPagarmePaymentUiApi();
-  if (!api || typeof api.resolvePaymentUiState !== "function") {
-    return null;
+/** Lê YES_HOTEL_SUPABASE_CONFIG.pagarmeUiEnabled — somente boolean true habilita (fail-closed). */
+function readPagarmeUiEnabledFlag() {
+  try {
+    const cfg =
+      typeof window !== "undefined" && window.YES_HOTEL_SUPABASE_CONFIG
+        ? window.YES_HOTEL_SUPABASE_CONFIG
+        : null;
+    const api = getPagarmePaymentUiApi();
+    const raw = cfg ? cfg.pagarmeUiEnabled : undefined;
+    if (api && typeof api.isPagarmeUiEnabled === "function") {
+      return api.isPagarmeUiEnabled(raw) === true;
+    }
+    return raw === true;
+  } catch (_e) {
+    return false;
   }
-  return api.resolvePaymentUiState({
+}
+
+function isPagarmeUiEnabledInPainel() {
+  return readPagarmeUiEnabledFlag() === true;
+}
+
+function resolvePaymentUiForReserva(reserva) {
+  if (!isPagarmeUiEnabledInPainel()) return null;
+  const api = getPagarmePaymentUiApi();
+  if (!api) return null;
+  const resolveFn =
+    typeof api.resolveOperacionalPaymentUi === "function"
+      ? api.resolveOperacionalPaymentUi
+      : typeof api.resolvePaymentUiState === "function"
+        ? api.resolvePaymentUiState
+        : null;
+  if (!resolveFn) return null;
+  return resolveFn({
     pagamentoStatus: reserva && reserva.pagamento,
     classificacaoComissionamento: reserva && reserva.classificacaoComissionamento,
     cobrancas: reserva && reserva.cobrancasPagarme,
     pagamentos: reserva && reserva.pagamentosPagarme,
     perfilUsuario: painelOperadorRole || "recepcao",
+    pagarmeUiEnabled: true,
   });
 }
 
 async function attachPagarmeCobrancasBatch(supabase, reservasList) {
+  // Fail-closed: sem flag explícita true, zero queries às tabelas Pagar.me.
+  if (!isPagarmeUiEnabledInPainel()) return;
   if (!supabase || !Array.isArray(reservasList) || reservasList.length === 0) return;
   const ids = reservasList.map(function (r) {
     return r.id;
@@ -5587,6 +5618,14 @@ let pagarmeModalReservaId = null;
 let pagarmeModalBusy = false;
 
 async function backendCobrancaPagarmeAdmin(body) {
+  if (!isPagarmeUiEnabledInPainel()) {
+    return {
+      ok: false,
+      httpStatus: 0,
+      error: "pagarme_ui_desabilitada",
+      message: "Cobrança Pagar.me não está habilitada neste ambiente.",
+    };
+  }
   const supabase = getSupabase();
   if (!supabase || !auth || typeof auth.getEdgeFunctionFetchHeaders !== "function") {
     return {
@@ -5679,6 +5718,7 @@ function closePagarmeCobrancaModal() {
 }
 
 function openPagarmeCobrancaModal(reservaId) {
+  if (!isPagarmeUiEnabledInPainel()) return;
   const reserva = getReservaById(reservaId);
   if (!reserva) return;
   pagarmeModalReservaId = reservaId;
@@ -5957,6 +5997,7 @@ async function submitPagarmeCriarCartao(reservaId) {
 }
 
 function buildPagarmeDetailSectionHtml(reserva) {
+  if (!isPagarmeUiEnabledInPainel()) return "";
   const payUi = resolvePaymentUiForReserva(reserva);
   if (!payUi || payUi.kind === "none" || payUi.kind === "hidden_perfil") return "";
   if (isPagamentoOk(reserva) && payUi.kind === "none") return "";
