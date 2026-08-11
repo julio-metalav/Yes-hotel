@@ -244,6 +244,20 @@ export function isObrigacaoLiquidadaOuContenciosa(
 }
 
 /**
+ * UUID local de cobrança Yes Hotel (coluna id UUID).
+ * IDs remotos Pagar.me (or_/ch_/pl_) e codes externos NÃO passam.
+ */
+const YES_HOTEL_COBRANCA_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isYesHotelCobrancaUuid(value: string | null | undefined): boolean {
+  if (value == null) return false;
+  const v = String(value).trim();
+  if (!v) return false;
+  return YES_HOTEL_COBRANCA_UUID_RE.test(v);
+}
+
+/**
  * Correlação fail-closed: order_code/code da resposta S2S DEVE ser o UUID
  * da cobrança local. Ausente ou divergente → rejeita mudança financeira.
  */
