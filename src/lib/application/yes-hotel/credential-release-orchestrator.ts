@@ -8,7 +8,7 @@ import {
   type AvaliarLiberacaoCredenciaisResultado,
   type OrigemLiberacaoCredencial,
   type PendenciaCredencial,
-} from "../../domain/yes-hotel/credential-release-policy";
+} from "../../domain/yes-hotel/credential-release-policy.ts";
 
 export type CredentialReleaseOrigemRegistro =
   | "requisitos"

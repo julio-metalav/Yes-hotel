@@ -13,7 +13,7 @@
  * Região: use euapi.ttlock.com para EU, cnapi.ttlock.com para China, etc.
  */
 
-import type { TtlockConfig } from "./types";
+import type { TtlockConfig } from "./types.ts";
 
 const DEFAULT_TOKEN_URL = "https://euapi.ttlock.com/oauth2/token";
 const DEFAULT_API_BASE_URL = "https://euapi.ttlock.com";

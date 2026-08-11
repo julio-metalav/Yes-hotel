@@ -8,10 +8,10 @@
 import {
   deriveTtlockPasscodeFromReservation,
   formatTtlockKeyboardPwdName,
-} from "../../domain/yes-hotel/ttlock-credential-format";
-import { logTtlockLifecycle } from "../../integrations/ttlock";
-import type { TtlockClient } from "../../integrations/ttlock";
-import type { OperacionalCredencialStatus, OperacionalItemProvisionamentoStatus } from "./types";
+} from "../../domain/yes-hotel/ttlock-credential-format.ts";
+import { logTtlockLifecycle } from "../../integrations/ttlock.ts";
+import type { TtlockClient } from "../../integrations/ttlock.ts";
+import type { OperacionalCredencialStatus, OperacionalItemProvisionamentoStatus } from "./types.ts";
 
 /** Estado de sincronização com TTLock (Fase 3.1). */
 export type SyncStatus = "ok" | "pending" | "partial" | "failed";

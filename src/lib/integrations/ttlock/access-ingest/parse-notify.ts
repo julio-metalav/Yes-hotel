@@ -1,10 +1,10 @@
-import { MAX_NOTIFY_PAYLOAD_BYTES, MAX_NOTIFY_RECORDS } from "./constants";
+import { MAX_NOTIFY_PAYLOAD_BYTES, MAX_NOTIFY_RECORDS } from "./constants.ts";
 import type {
   ParseNotifyResult,
   TtlockAccessNotifyPayloadRaw,
   TtlockAccessRecordParsed,
   TtlockAccessRecordRaw,
-} from "./types";
+} from "./types.ts";
 
 function asFiniteNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;

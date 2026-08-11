@@ -1,10 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CredentialCorrelationPort } from "../../../application/yes-hotel/first-room-access-ports";
-import type { CorrelatedRoomAccessResult } from "../../../application/yes-hotel/first-room-access-types";
+import type { CredentialCorrelationPort } from "../../../application/yes-hotel/first-room-access-ports.ts";
+import type { CorrelatedRoomAccessResult } from "../../../application/yes-hotel/first-room-access-types.ts";
 import {
   correlateApartmentPasscodeCandidates,
   type CorrelationCandidate,
-} from "./credential-correlation-logic";
+} from "./credential-correlation-logic.ts";
 
 type ItemJoinRow = {
   id: string;

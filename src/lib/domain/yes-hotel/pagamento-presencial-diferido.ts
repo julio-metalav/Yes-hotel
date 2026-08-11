@@ -5,13 +5,13 @@
  * Fonte financeira vigente: operacional_reservas.pagamento_status (HITS/PMS).
  */
 
-import { isCorumbaApplicableHoliday } from "./corumba-calendar";
+import { isCorumbaApplicableHoliday } from "./corumba-calendar.ts";
 import {
   YES_HOTEL_TIMEZONE,
   YES_HOTEL_UTC_OFFSET_MINUTES,
   extractYmd,
   hotelLocalToUtcIso,
-} from "./hotel-timezone";
+} from "./hotel-timezone.ts";
 
 export const PAGAMENTO_PRESENCIAL_DIFERIDO_FEATURE = "pagamento_presencial_diferido";
 

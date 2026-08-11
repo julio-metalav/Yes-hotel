@@ -4,11 +4,11 @@
  * Substituição futura: HITS ReservationPendingStatePort — mesma interface.
  */
 
-import type { ReservationPendingStatePort } from "../../application/yes-hotel/first-room-access-ports";
+import type { ReservationPendingStatePort } from "../../application/yes-hotel/first-room-access-ports.ts";
 import type {
   PaymentStatusPending,
   ReservationPendingStateInput,
-} from "../../domain/yes-hotel/reservation-pending-state";
+} from "../../domain/yes-hotel/reservation-pending-state.ts";
 
 export type SimulatedPendingScenario =
   | "pago"

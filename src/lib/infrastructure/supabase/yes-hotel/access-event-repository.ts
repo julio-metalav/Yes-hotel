@@ -1,10 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AccessEventRepository } from "../../../application/yes-hotel/first-room-access-ports";
+import type { AccessEventRepository } from "../../../application/yes-hotel/first-room-access-ports.ts";
 import type {
   AccessEventRecord,
   ProcessFirstRoomAccessInput,
-} from "../../../application/yes-hotel/first-room-access-types";
-import { assertSanitizedPayloadSafe } from "../../../integrations/ttlock/access-ingest/sanitize";
+} from "../../../application/yes-hotel/first-room-access-types.ts";
+import { assertSanitizedPayloadSafe } from "../../../integrations/ttlock/access-ingest/sanitize.ts";
 
 type EventRow = {
   id: string;

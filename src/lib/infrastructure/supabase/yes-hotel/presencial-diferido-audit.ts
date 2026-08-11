@@ -6,7 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   PresencialDiferidoAuditPort,
   PresencialDiferidoFirstAccessOutcome,
-} from "../../../application/yes-hotel/presencial-diferido-audit-port";
+} from "../../../application/yes-hotel/presencial-diferido-audit-port.ts";
 
 export class SupabasePresencialDiferidoAuditPort implements PresencialDiferidoAuditPort {
   constructor(private readonly client: SupabaseClient) {}

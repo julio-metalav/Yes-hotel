@@ -7,30 +7,30 @@ import {
   buildAccessRestoreStrategy,
   buildAccessSuspensionStrategy,
   assertSuspensionContractSafe,
-} from "../../domain/yes-hotel/access-suspension-strategy";
+} from "../../domain/yes-hotel/access-suspension-strategy.ts";
 import {
   buildAccessRestoredMessage,
   buildAccessSuspendedMessage,
   buildTechnicalFailureMessage,
   assertMessageHasNoTechnicalJargon,
-} from "../../domain/yes-hotel/access-grace-messages";
+} from "../../domain/yes-hotel/access-grace-messages.ts";
 import {
   getAccessToleranceFlags,
   type AccessToleranceFlags,
-} from "../../domain/yes-hotel/access-tolerance-flags";
-import { evaluateReservationPendingState } from "../../domain/yes-hotel/reservation-pending-state";
+} from "../../domain/yes-hotel/access-tolerance-flags.ts";
+import { evaluateReservationPendingState } from "../../domain/yes-hotel/reservation-pending-state.ts";
 import type {
   AccessToleranceItemRecord,
   AccessToleranceRecord,
   ProcessToleranceResult,
-} from "./first-room-access-types";
+} from "./first-room-access-types.ts";
 import type {
   AccessToleranceRepository,
   AccessOutboxQueuePort,
   ClockPort,
   ReservationPendingStatePort,
   TtlockValidityChangePort,
-} from "./first-room-access-ports";
+} from "./first-room-access-ports.ts";
 
 const MAX_ITEM_ATTEMPTS = 5;
 const STALE_PENDING_MS = 15 * 60_000;

@@ -3,14 +3,14 @@ import type {
   ReservationPendingStateInput,
   FnrhCompletionStatus,
   GuestRoleForFnrh,
-} from "../../../domain/yes-hotel/reservation-pending-state";
+} from "../../../domain/yes-hotel/reservation-pending-state.ts";
 import type {
   FnrhConfirmationSource,
   FnrhLifecycleStatus,
   GuestRoleDb,
-} from "../../../domain/yes-hotel/fnrh-completion-policy";
-import { evaluateFnrhCompletion } from "../../../domain/yes-hotel/fnrh-completion-policy";
-import { evaluateReservationFnrhState } from "../../../domain/yes-hotel/reservation-fnrh-state";
+} from "../../../domain/yes-hotel/fnrh-completion-policy.ts";
+import { evaluateFnrhCompletion } from "../../../domain/yes-hotel/fnrh-completion-policy.ts";
+import { evaluateReservationFnrhState } from "../../../domain/yes-hotel/reservation-fnrh-state.ts";
 
 export class FirstRoomAccessConfigurationError extends Error {
   readonly code: string;

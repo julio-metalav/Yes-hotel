@@ -3,12 +3,12 @@
  * Revogação, alteração de validade, reprovisionamento e handlers por cenário operacional.
  */
 
-import { logTtlockLifecycle } from "../../integrations/ttlock";
-import type { TtlockClient } from "../../integrations/ttlock";
-import { generateRandomTtlockPasscode } from "../../domain/yes-hotel/ttlock-credential-format";
-import type { CredencialItemRow, CredencialRow, ProvisioningRepository } from "./provisioning-executor";
-import { processarCredencialDeAcesso } from "./provisioning-executor";
-import type { OperacionalCredencialStatus } from "./types";
+import { logTtlockLifecycle } from "../../integrations/ttlock.ts";
+import type { TtlockClient } from "../../integrations/ttlock.ts";
+import { generateRandomTtlockPasscode } from "../../domain/yes-hotel/ttlock-credential-format.ts";
+import type { CredencialItemRow, CredencialRow, ProvisioningRepository } from "./provisioning-executor.ts";
+import { processarCredencialDeAcesso } from "./provisioning-executor.ts";
+import type { OperacionalCredencialStatus } from "./types.ts";
 
 export type MotivoRevogacao =
   | "cancelamento"

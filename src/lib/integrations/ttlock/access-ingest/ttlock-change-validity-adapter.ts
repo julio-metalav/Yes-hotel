@@ -3,12 +3,12 @@
  * Nunca envia newKeyboardPwd. Nunca usa updateKeyboardPassword.
  */
 
-import type { TtlockClient } from "../../ttlock/client";
+import type { TtlockClient } from "../../ttlock/client.ts";
 import type {
   TtlockValidityChangePort,
   TtlockValidityChangeRequest,
   TtlockValidityChangeResult,
-} from "../../../application/yes-hotel/first-room-access-ports";
+} from "../../../application/yes-hotel/first-room-access-ports.ts";
 
 export class TtlockChangeValidityAdapter implements TtlockValidityChangePort {
   constructor(private readonly client: TtlockClient) {}

@@ -1,4 +1,4 @@
-import type { LockLogicalType } from "../../../domain/yes-hotel/first-room-access-policy";
+import type { LockLogicalType } from "../../../domain/yes-hotel/first-room-access-policy.ts";
 
 /** Classifica destino lógico APT-/GATE-*-EXTERNAL/INTERNAL. */
 export function classifyLogicalDestination(codigo: string): LockLogicalType | "other" {

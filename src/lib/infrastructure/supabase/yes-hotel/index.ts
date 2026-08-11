@@ -1,18 +1,18 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { FirstRoomAccessPorts } from "../../../application/yes-hotel/first-room-access-ports";
-import { SupabaseAccessEventRepository } from "./access-event-repository";
-import { SupabaseAccessToleranceRepository } from "./access-tolerance-repository";
-import { SupabaseCommunicationOutboxPort } from "./communication-outbox";
-import { SupabaseCredentialCorrelationPort } from "./credential-correlation";
-import { SupabaseCredentialItemsPort } from "./credential-items";
-import { SupabaseAccessOutboxQueuePort } from "./access-outbox-queue";
+import type { FirstRoomAccessPorts } from "../../../application/yes-hotel/first-room-access-ports.ts";
+import { SupabaseAccessEventRepository } from "./access-event-repository.ts";
+import { SupabaseAccessToleranceRepository } from "./access-tolerance-repository.ts";
+import { SupabaseCommunicationOutboxPort } from "./communication-outbox.ts";
+import { SupabaseCredentialCorrelationPort } from "./credential-correlation.ts";
+import { SupabaseCredentialItemsPort } from "./credential-items.ts";
+import { SupabaseAccessOutboxQueuePort } from "./access-outbox-queue.ts";
 import {
   SupabaseFirstRoomAccessUnitOfWork,
   SystemClock,
-} from "./first-room-access-unit-of-work";
-import { SupabaseReservationPendingStatePort } from "./reservation-pending-state";
-import { SupabasePresencialDiferidoAuditPort } from "./presencial-diferido-audit";
-import { isPagamentoPresencialDiferidoServerEnabled } from "../../../domain/yes-hotel/pagamento-presencial-diferido";
+} from "./first-room-access-unit-of-work.ts";
+import { SupabaseReservationPendingStatePort } from "./reservation-pending-state.ts";
+import { SupabasePresencialDiferidoAuditPort } from "./presencial-diferido-audit.ts";
+import { isPagamentoPresencialDiferidoServerEnabled } from "../../../domain/yes-hotel/pagamento-presencial-diferido.ts";
 
 export function createSupabaseFirstRoomAccessPorts(
   client: SupabaseClient,
@@ -48,17 +48,17 @@ export function createSupabaseFirstRoomAccessPorts(
   };
 }
 
-export * from "./access-event-repository";
-export * from "./access-outbox-queue";
-export * from "./access-tolerance-repository";
-export * from "./cobranca-pagarme-repository";
-export * from "./credential-correlation";
-export * from "./credential-correlation-logic";
-export * from "./reservation-pending-state";
-export * from "./reservation-pending-mapper";
-export * from "./credential-items";
-export * from "./communication-outbox";
-export * from "./first-room-access-unit-of-work";
-export * from "./supabase-reservation-sync-repository";
-export * from "./fake-reservation-sync-client";
-export * from "./presencial-diferido-audit";
+export * from "./access-event-repository.ts";
+export * from "./access-outbox-queue.ts";
+export * from "./access-tolerance-repository.ts";
+export * from "./cobranca-pagarme-repository.ts";
+export * from "./credential-correlation.ts";
+export * from "./credential-correlation-logic.ts";
+export * from "./reservation-pending-state.ts";
+export * from "./reservation-pending-mapper.ts";
+export * from "./credential-items.ts";
+export * from "./communication-outbox.ts";
+export * from "./first-room-access-unit-of-work.ts";
+export * from "./supabase-reservation-sync-repository.ts";
+export * from "./fake-reservation-sync-client.ts";
+export * from "./presencial-diferido-audit.ts";

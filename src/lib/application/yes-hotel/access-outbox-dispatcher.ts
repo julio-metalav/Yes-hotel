@@ -8,14 +8,14 @@
 import {
   getAccessToleranceFlags,
   type AccessToleranceFlags,
-} from "../../domain/yes-hotel/access-tolerance-flags";
-import { assertMessageHasNoTechnicalJargon } from "../../domain/yes-hotel/access-grace-messages";
-import type { AccessOutboxRecord } from "./first-room-access-types";
+} from "../../domain/yes-hotel/access-tolerance-flags.ts";
+import { assertMessageHasNoTechnicalJargon } from "../../domain/yes-hotel/access-grace-messages.ts";
+import type { AccessOutboxRecord } from "./first-room-access-types.ts";
 import type {
   AccessCommunicationSenderPort,
   AccessOutboxQueuePort,
   ClockPort,
-} from "./first-room-access-ports";
+} from "./first-room-access-ports.ts";
 
 const MAX_ATTEMPTS = 5;
 const RETRY_BACKOFF_MS = 60_000;

@@ -8,15 +8,15 @@ import {
   calculateCredentialWindow,
   getAccessTargetsForApartment,
   normalizeApartmentCode,
-} from "../../domain/yes-hotel";
-import type { CredentialWindow } from "../../domain/yes-hotel";
-import type { ReservationAdjustment } from "../../domain/yes-hotel";
+} from "../../domain/yes-hotel.ts";
+import type { CredentialWindow } from "../../domain/yes-hotel.ts";
+import type { ReservationAdjustment } from "../../domain/yes-hotel.ts";
 import type {
   FechaduraRow,
   OperacionalMotivoOrigem,
   ProvisioningDestination,
   ProvisioningPlanToPersist,
-} from "./types";
+} from "./types.ts";
 
 /** Mapeia source da janela (domínio) para motivo_origem (persistência). */
 export function mapWindowSourceToMotivoOrigem(

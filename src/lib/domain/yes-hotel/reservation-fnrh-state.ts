@@ -6,7 +6,7 @@ import {
   evaluateFnrhCompletion,
   type FnrhCompletionPolicyInput,
   type GuestRoleDb,
-} from "./fnrh-completion-policy";
+} from "./fnrh-completion-policy.ts";
 
 export type ReservationFnrhGuestSnapshot = FnrhCompletionPolicyInput;
 
