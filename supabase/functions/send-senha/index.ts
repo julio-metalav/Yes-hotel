@@ -18,6 +18,7 @@ import {
 import { outboundWhatsappTransacional } from "../_shared/comunicacao-operacional/outbound-whatsapp.ts";
 import { maskEmailForLog, previewCorpo, registrarOperacionalComunicacaoEnvio } from "../_shared/comunicacao-operacional/registro-envio.ts";
 import { buildFnrhPreenchimentoUrl, maskFnrhTokensInText } from "../_shared/fnrh-public-link.ts";
+import { formatTtlockPasscodeForGuest } from "../_shared/ttlock-credential-format.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -274,10 +275,14 @@ Deno.serve(async (req: Request) => {
     : "(nenhum link FNRH)";
 
   const r = reserva as { apartamento?: string };
-  const msg = `Olá, sua reserva está pronta.\n\n🔐 Senha de acesso: ${passcode}\n\nPara agilizar seu check-in, preencha seus dados:\n${linksText}`;
+  // PIN técnico (passcode) permanece sem "#"; apresentação ao hóspede inclui # só como instrução.
+  const guestPass = formatTtlockPasscodeForGuest(passcode);
+  const msg =
+    `Olá, sua reserva está pronta.\n\n${guestPass.guestBlock}\n\n` +
+    `Para agilizar seu check-in, preencha seus dados:\n${linksText}`;
   const html = `
     <p>Olá, sua reserva está pronta.</p>
-    <p><strong>🔐 Senha de acesso: ${String(passcode).replace(/</g, "&lt;")}</strong></p>
+    ${guestPass.guestBlockHtml}
     <p>Para agilizar seu check-in${r.apartamento ? ` no apartamento ${String(r.apartamento).replace(/</g, "&lt;")}` : ""}, preencha seus dados pelos links abaixo:</p>
     <ul>${links.map((url: string) => `<li><a href="${url}">Abrir formulário FNRH</a></li>`).join("")}</ul>
     ${links.length === 0 ? "<p>(Nenhum link FNRH pendente.)</p>" : ""}

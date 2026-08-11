@@ -44,6 +44,40 @@ function guestFirstAndSecondOrNull(fullName: string | null | undefined): string 
   return `${parts[0]} ${parts[1]}`;
 }
 
+/** Normaliza PIN técnico (somente dígitos). Nunca inclui "#". */
+export function normalizeTechnicalTtlockPasscode(passcode: string | null | undefined): string {
+  return extractDigits(String(passcode ?? ""));
+}
+
+export type TtlockPasscodeGuestPresentation = {
+  technical: string;
+  displayWithHash: string;
+  instructionLine: string;
+  guestBlock: string;
+  guestBlockHtml: string;
+};
+
+/**
+ * Apresentação ao hóspede: PIN técnico sem "#"; "#" é instrução do teclado físico
+ * (apartamento e portões TTLock do bloco usam a mesma senha + #).
+ */
+export function formatTtlockPasscodeForGuest(
+  passcode: string | null | undefined,
+): TtlockPasscodeGuestPresentation {
+  const technical = normalizeTechnicalTtlockPasscode(passcode);
+  const displayWithHash = technical ? `${technical}#` : "";
+  const instructionLine = technical ? `(digite ${technical} + #)` : "";
+  const guestBlock = technical
+    ? `Senha do apartamento: ${displayWithHash}\n${instructionLine}\n\nEssa mesma senha vale para o apartamento e para os portões do bloco. Em todas as fechaduras, digite os números e confirme com #.`
+    : "Senha do apartamento: (indisponível)";
+  const guestBlockHtml = technical
+    ? `<p><strong>Senha do apartamento: ${displayWithHash}</strong></p>` +
+      `<p>${instructionLine}</p>` +
+      `<p>Essa mesma senha vale para o apartamento e para os portões do bloco. Em todas as fechaduras, digite os números e confirme com #.</p>`
+    : `<p><strong>Senha do apartamento: (indisponível)</strong></p>`;
+  return { technical, displayWithHash, instructionLine, guestBlock, guestBlockHtml };
+}
+
 export function formatTtlockKeyboardPwdName(
   apartamento: string | null | undefined,
   fullName: string | null | undefined,
