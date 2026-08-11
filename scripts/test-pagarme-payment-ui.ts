@@ -5,12 +5,14 @@ import assert from "node:assert/strict";
 import {
   formatBRLInputDisplay,
   formatCentavosToBRL,
+  isPagarmeDirectPaymentBadgeType,
   isPagarmeUiEnabled,
   isSafeHttpsPaymentLinkUrl,
   mapPagarmeAdminError,
   parseBRLToCentavos,
   pickRelevantCobranca,
   resolveOperacionalPaymentUi,
+  resolvePagarmeModalPresentation,
   resolvePaymentUiState,
   shouldFetchPagarmeCobrancas,
   toBRLInputEditValue,
@@ -419,6 +421,148 @@ function baseReserva(
   assert.equal(onCobrar.kind, "cobrar");
   assert.equal(onCobrar.showGerarCartao, true);
   ok("flag G: true preserva estados CP3 homologados");
+}
+
+{
+  assert.equal(isPagarmeDirectPaymentBadgeType("pendente-pagamento"), true);
+  assert.equal(isPagarmeDirectPaymentBadgeType("pagarme-pago-hits-pendente"), true);
+  assert.equal(isPagarmeDirectPaymentBadgeType("ok"), false);
+  assert.equal(isPagarmeDirectPaymentBadgeType("fnrh-pendente"), false);
+  ok("UX A0: badge types diretos de pagamento");
+
+  // A. pending sem link => modal gerar
+  {
+    const s = baseReserva({ classificacaoComissionamento: "nao_comissionada" });
+    assert.equal(s.kind, "cobrar");
+    assert.equal(s.showGerarCartao, true);
+    const p = resolvePagarmeModalPresentation(s);
+    assert.equal(p.title, "Pagamento pendente");
+    assert.equal(p.subtitle, "Gerar e enviar link de pagamento");
+    assert.equal(p.generateLabel, "Gerar link de pagamento");
+    assert.equal(p.showGenerate, true);
+    assert.equal(p.showLinkActions, false);
+    assert.equal(p.allowSendActions, false);
+    assert.doesNotMatch(s.ctaLabel || "", /credenciais/i);
+    ok("UX A: pending sem link => Gerar link");
+  }
+
+  // B. pending com link existente => reutilizar, zero create
+  {
+    const s = baseReserva({
+      classificacaoComissionamento: "nao_comissionada",
+      cobrancas: [
+        {
+          id: "c-link",
+          status: "pending",
+          metodo: "cartao",
+          payment_link_url: "https://payment-link-v3.pagar.me/pl_existente",
+        },
+      ],
+    });
+    assert.equal(s.kind, "aguardando");
+    assert.equal(s.showGerarCartao, false);
+    assert.equal(s.canOpenLink, true);
+    assert.equal(s.canCopyLink, true);
+    assert.equal(s.cobranca?.id, "c-link");
+    const p = resolvePagarmeModalPresentation(s);
+    assert.equal(p.title, "Pagamento pendente");
+    assert.equal(p.subtitle, "Link de pagamento já gerado");
+    assert.equal(p.linkSectionTitle, "Link de pagamento já gerado");
+    assert.equal(p.showGenerate, false);
+    assert.equal(p.showLinkActions, true);
+    assert.equal(p.allowSendActions, true);
+    ok("UX B: pending com link => reutilizar / zero create");
+  }
+
+  // C. processing => zero nova cobrança
+  {
+    const s = baseReserva({
+      classificacaoComissionamento: "nao_comissionada",
+      cobrancas: [
+        {
+          id: "c-proc",
+          status: "processing",
+          metodo: "cartao",
+          payment_link_url: "https://payment-link-v3.pagar.me/pl_proc",
+        },
+      ],
+    });
+    assert.equal(s.kind, "aguardando");
+    assert.equal(s.showGerarCartao, false);
+    const p = resolvePagarmeModalPresentation(s);
+    assert.equal(p.title, "Pagamento em processamento");
+    assert.equal(p.showGenerate, false);
+    assert.equal(p.showLinkActions, true);
+    assert.equal(p.allowSendActions, false);
+    ok("UX C: processing => zero nova cobrança");
+  }
+
+  // D. paid => zero ação de cobrança
+  {
+    const s = baseReserva({
+      classificacaoComissionamento: "nao_comissionada",
+      cobrancas: [{ id: "c-paid", status: "paid", metodo: "cartao" }],
+    });
+    assert.equal(s.kind, "pago_pagarme_hits_pendente");
+    assert.equal(s.showGerarCartao, false);
+    const p = resolvePagarmeModalPresentation(s);
+    assert.equal(p.title, "Pago no Pagar.me");
+    assert.match(String(p.subtitle || ""), /HITS pendente/);
+    assert.equal(p.showGenerate, false);
+    assert.equal(p.allowSendActions, false);
+    ok("UX D: paid => zero ação de cobrança");
+  }
+
+  // E. comissionada => bloqueia
+  {
+    const s = baseReserva({ classificacaoComissionamento: "comissionada" });
+    assert.equal(s.kind, "comissionada");
+    assert.equal(s.showGerarCartao, false);
+    assert.match(s.detalheTexto, /Não cobrar o hóspede/);
+    const p = resolvePagarmeModalPresentation(s);
+    assert.equal(p.title, "Reserva comissionada");
+    assert.match(String(p.subtitle || ""), /Não cobrar o hóspede/);
+    assert.equal(p.showGenerate, false);
+    ok("UX E: comissionada bloqueada");
+  }
+
+  // F. desconhecida => exige classificação
+  {
+    const s = baseReserva({ classificacaoComissionamento: "desconhecida" });
+    assert.equal(s.kind, "classificar");
+    assert.equal(s.showClassificar, true);
+    assert.equal(s.showGerarCartao, false);
+    const p = resolvePagarmeModalPresentation(s);
+    assert.equal(p.title, "Classificar cobrança");
+    assert.equal(p.showGenerate, false);
+    ok("UX F: desconhecida exige classificação");
+  }
+
+  // I. CTA financeiro (não credenciais) para pending cobrável
+  {
+    const s = baseReserva({ classificacaoComissionamento: "nao_comissionada" });
+    assert.equal(s.ctaKind, "pagarme_cobrar");
+    assert.match(String(s.ctaLabel || ""), /link de pagamento/i);
+    assert.doesNotMatch(String(s.ctaLabel || ""), /credenciais/i);
+    ok("UX I: CTA financeiro prioriza link (não credenciais)");
+  }
+
+  // J. flag OFF fail-closed (já coberto acima; reforço presentation)
+  {
+    const off = resolveOperacionalPaymentUi({
+      pagarmeUiEnabled: false,
+      pagamentoStatus: "pendente",
+      classificacaoComissionamento: "nao_comissionada",
+      perfilUsuario: "recepcao",
+      cobrancas: [],
+    });
+    assert.equal(off.kind, "none");
+    assert.equal(off.showGerarCartao, false);
+    assert.equal(off.ctaKind, null);
+    const p = resolvePagarmeModalPresentation(off);
+    assert.equal(p.showGenerate, false);
+    ok("UX J: pagarmeUiEnabled OFF => fail-closed sem controles");
+  }
 }
 
 console.log(`\n[test-pagarme-payment-ui] ${cases} assertions OK`);
