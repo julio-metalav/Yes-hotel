@@ -178,6 +178,46 @@ function publicCobrancaView(row: CobrancaPagarmeRow): Record<string, unknown> {
   };
 }
 
+/**
+ * Localiza candidato local Yes Hotel a partir de hints do payload.
+ * NÃO é prova financeira — só pré-filtro contra eventos Bee2Pay/OTA.
+ */
+export async function findLocalCobrancaCandidateFromHints(
+  repo: Pick<
+    CobrancaPagarmeRepository,
+    | "findCobrancaByOrderCode"
+    | "findCobrancaByChargeId"
+    | "findCobrancaByPaymentLinkId"
+    | "getCobrancaById"
+  >,
+  hints: {
+    orderCode: string | null;
+    orderId: string | null;
+    chargeId: string | null;
+    paymentLinkId: string | null;
+  },
+): Promise<CobrancaPagarmeRow | null> {
+  if (hints.orderCode) {
+    const byCode = await repo.findCobrancaByOrderCode(hints.orderCode);
+    if (byCode) return byCode;
+    const byId = await repo.getCobrancaById(hints.orderCode);
+    if (byId) return byId;
+  }
+  if (hints.orderId) {
+    const byOrderId = await repo.findCobrancaByOrderCode(hints.orderId);
+    if (byOrderId) return byOrderId;
+  }
+  if (hints.chargeId) {
+    const byCharge = await repo.findCobrancaByChargeId(hints.chargeId);
+    if (byCharge) return byCharge;
+  }
+  if (hints.paymentLinkId) {
+    const byLink = await repo.findCobrancaByPaymentLinkId(hints.paymentLinkId);
+    if (byLink) return byLink;
+  }
+  return null;
+}
+
 export class CobrancaPagarmeService {
   private readonly repo: CobrancaPagarmeRepository;
   private readonly client: PagarmeClient;
@@ -493,12 +533,18 @@ export class CobrancaPagarmeService {
 
   /**
    * Webhook = notificação. Confirmação financeira só após GET server-to-server.
+   *
+   * Conta Pagar.me compartilhada (Yes Hotel + Bee2Pay/OTAs):
+   * ANTES de INSERT em operacional_cobranca_webhooks e de qualquer GET S2S,
+   * exige candidato local via hints do payload (não prova financeira).
+   * Sem candidato → 200 silencioso (unrelated_ignored), zero side-effect.
    */
   async processWebhook(payload: unknown): Promise<
     ServiceResult<{
       duplicate_event: boolean;
       payment_registered: boolean;
       cobranca_id: string | null;
+      unrelated_ignored?: boolean;
     }>
   > {
     const hints = extractWebhookHints(payload);
@@ -506,36 +552,44 @@ export class CobrancaPagarmeService {
       return err("webhook_invalido", "Webhook sem event id/tipo.", 400);
     }
 
+    // Prefilter: sem cobrança local → evento externo (Bee2Pay/OTA). Não poluir.
+    const localCandidate = await findLocalCobrancaCandidateFromHints(this.repo, hints);
+    if (!localCandidate) {
+      console.info("[cobranca-pagarme] webhook_unrelated_ignored", {
+        tipo_evento: hints.tipoEvento,
+      });
+      return {
+        ok: true,
+        data: {
+          duplicate_event: false,
+          payment_registered: false,
+          cobranca_id: null,
+          unrelated_ignored: true,
+        },
+      };
+    }
+
     const sanitized = sanitizeWebhookPayload(payload);
     const insert = await this.repo.insertWebhookEvent({
       pagarme_event_id: hints.eventId,
       tipo_evento: hints.tipoEvento,
       payload_sanitizado: sanitized,
-      cobranca_id: null,
+      cobranca_id: localCandidate.id,
     });
 
     if (!insert.inserted) {
       return {
         ok: true,
-        data: { duplicate_event: true, payment_registered: false, cobranca_id: null },
+        data: {
+          duplicate_event: true,
+          payment_registered: false,
+          cobranca_id: localCandidate.id,
+        },
       };
     }
 
     try {
-      let cobranca: CobrancaPagarmeRow | null = null;
-      if (hints.orderCode) {
-        cobranca = await this.repo.findCobrancaByOrderCode(hints.orderCode);
-      }
-      if (!cobranca && hints.chargeId) {
-        cobranca = await this.repo.findCobrancaByChargeId(hints.chargeId);
-      }
-      if (!cobranca && hints.paymentLinkId) {
-        cobranca = await this.repo.findCobrancaByPaymentLinkId(hints.paymentLinkId);
-      }
-      // order_code = UUID da cobrança
-      if (!cobranca && hints.orderCode) {
-        cobranca = await this.repo.getCobrancaById(hints.orderCode);
-      }
+      let cobranca: CobrancaPagarmeRow | null = localCandidate;
 
       const revisaoMotivo = mapWebhookEventToRevisaoMotivo(hints.tipoEvento);
       if (revisaoMotivo) {

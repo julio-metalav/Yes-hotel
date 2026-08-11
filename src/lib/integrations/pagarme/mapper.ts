@@ -423,6 +423,8 @@ export function extractWebhookHints(payload: unknown): {
     orderCode:
       asString(data.order_code) ??
       asString(order?.code) ??
+      asString(data.code) ??
+      asString(charge?.code) ??
       asString(asRecord(data.metadata)?.yes_hotel_cobranca_id) ??
       asString(asRecord(charge?.metadata)?.yes_hotel_cobranca_id),
   };
