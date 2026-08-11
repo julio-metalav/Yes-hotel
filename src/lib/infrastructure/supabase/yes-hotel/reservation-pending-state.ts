@@ -27,12 +27,33 @@ export class SupabaseReservationPendingStatePort implements ReservationPendingSt
   constructor(private readonly client: SupabaseClient) {}
 
   async getReservationPendingInput(reservationId: string): Promise<ReservationPendingStateInput> {
-    const { data: reserva, error: resErr } = await this.client
-      .from("operacional_reservas")
-      .select("id, pagamento_status")
-      .eq("id", reservationId)
-      .maybeSingle();
-    if (resErr) throw new Error(`reserva: ${resErr.message}`);
+    let reserva: {
+      pagamento_status?: string;
+      pagamento_presencial_diferido_autorizado?: boolean;
+      pagamento_presencial_diferido_efetivado?: boolean;
+    } | null = null;
+    {
+      const first = await this.client
+        .from("operacional_reservas")
+        .select(
+          "id, pagamento_status, pagamento_presencial_diferido_autorizado, pagamento_presencial_diferido_efetivado",
+        )
+        .eq("id", reservationId)
+        .maybeSingle();
+      if (first.error && isMissingColumnError(first.error.message)) {
+        const legacy = await this.client
+          .from("operacional_reservas")
+          .select("id, pagamento_status")
+          .eq("id", reservationId)
+          .maybeSingle();
+        if (legacy.error) throw new Error(`reserva: ${legacy.error.message}`);
+        reserva = legacy.data as typeof reserva;
+      } else if (first.error) {
+        throw new Error(`reserva: ${first.error.message}`);
+      } else {
+        reserva = first.data as typeof reserva;
+      }
+    }
     if (!reserva) throw new Error(`Reserva não encontrada: ${reservationId}`);
 
     const { data: hospedes, error: hopErr } = await this.client
@@ -134,10 +155,20 @@ export class SupabaseReservationPendingStatePort implements ReservationPendingSt
       };
     });
 
-    return buildReservationPendingInputFromRows({
-      pagamento_status: (reserva as { pagamento_status?: string }).pagamento_status,
-      guests,
-    });
+    return {
+      ...buildReservationPendingInputFromRows({
+        pagamento_status: (reserva as { pagamento_status?: string }).pagamento_status,
+        guests,
+      }),
+      pagamento_presencial_diferido_autorizado: Boolean(
+        (reserva as { pagamento_presencial_diferido_autorizado?: boolean })
+          .pagamento_presencial_diferido_autorizado,
+      ),
+      pagamento_presencial_diferido_efetivado: Boolean(
+        (reserva as { pagamento_presencial_diferido_efetivado?: boolean })
+          .pagamento_presencial_diferido_efetivado,
+      ),
+    };
   }
 
   private async loadLegacyAndFail(

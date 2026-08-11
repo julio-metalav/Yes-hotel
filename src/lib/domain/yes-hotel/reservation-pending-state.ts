@@ -49,6 +49,12 @@ export type ReservationPendingStateInput = {
   emergency_access?: boolean;
   manual_access_release?: boolean;
   guests: ExpectedGuestFnrhInput[];
+  /**
+   * Autorização operacional de pagamento presencial diferido (NÃO é pago).
+   * Usado só na decisão de prazo de tolerância no 1º acesso.
+   */
+  pagamento_presencial_diferido_autorizado?: boolean;
+  pagamento_presencial_diferido_efetivado?: boolean;
 };
 
 export type ReservationPendingStateResult = {

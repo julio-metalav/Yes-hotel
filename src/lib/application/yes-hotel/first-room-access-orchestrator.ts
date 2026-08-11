@@ -342,6 +342,9 @@ export async function processFirstRoomAccessEvent(
       correlation.reservation_id,
     );
     const pending = evaluateReservationPendingState(pendingInput);
+    const ppdFeatureOn = ports.presencialDiferidoFeatureEnabled === true;
+    const ppdAutorizado =
+      ppdFeatureOn && pendingInput.pagamento_presencial_diferido_autorizado === true;
 
     const grace = decideAccessGrace({
       event_accepted: true,
@@ -351,6 +354,7 @@ export async function processFirstRoomAccessEvent(
       fnrh_pending: pending.fnrh_pending,
       pending_reasons: pending.pending_reasons,
       occurred_at: input.occurred_at,
+      pagamento_presencial_diferido_autorizado: ppdAutorizado,
     });
 
     if (!grace.start_grace) {
@@ -407,9 +411,11 @@ export async function processFirstRoomAccessEvent(
         throw new Error("original_valid_until ausente na correlação.");
       })();
 
+    const ppdEfetivado = grace.grace_mode === "presencial_diferido_09h";
     const welcome = buildWelcomePendingMessage({
       payment_pending: pending.payment_pending,
       fnrh_pending: pending.fnrh_pending,
+      presencial_diferido_efetivado: ppdEfetivado,
     });
     if (!welcome) {
       throw new Error("Mensagem de boas-vindas esperada com pendências.");
@@ -468,6 +474,21 @@ export async function processFirstRoomAccessEvent(
       },
     });
     assertNoPasswordLeak(result);
+    if (result.status === "grace_started" && ports.presencialDiferidoAudit && ppdAutorizado) {
+      const ctxApt = ports.reservationDisplay
+        ? await ports.reservationDisplay.getContext(correlation.reservation_id)
+        : null;
+      await ports.presencialDiferidoAudit.persistFirstAccessOutcome({
+        reservation_id: correlation.reservation_id,
+        autorizado: true,
+        efetivado: ppdEfetivado,
+        regra: grace.presencial_diferido?.regra ?? null,
+        first_access_at: input.occurred_at,
+        deadline_iso: ppdEfetivado ? grace.suspension_due_at ?? null : null,
+        now_iso: ports.clock.now().toISOString(),
+        apartment_number: ctxApt?.apartment_number ?? null,
+      });
+    }
     if (
       result.status === "grace_started" &&
       ports.accessOutboxQueue &&
@@ -491,6 +512,7 @@ export async function processFirstRoomAccessEvent(
         payment_pending: pending.payment_pending,
         fnrh_pending: pending.fnrh_pending,
         grace_started: true,
+        presencial_diferido_efetivado: ppdEfetivado,
         nowIso: ports.clock.now().toISOString(),
       });
       // Canal e-mail complementar (idempotente); ausência de e-mail tratada no dispatcher.

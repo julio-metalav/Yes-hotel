@@ -18,6 +18,7 @@
     "test:yes:ttlock-timezone": "tsx scripts/test-ttlock-timezone-and-credentials.ts",
     "test:yes:lifecycle-update-validity": "tsx scripts/test-lifecycle-update-validity.ts",
     "test:yes:first-room-access": "tsx scripts/test-first-room-access-policy.ts",
+    "test:yes:pagamento-presencial-diferido": "tsx scripts/test-pagamento-presencial-diferido.ts",
     "test:yes:reservation-pending-state": "tsx scripts/test-reservation-pending-state.ts",
     "test:yes:access-grace-messages": "tsx scripts/test-access-grace-messages.ts",
     "test:yes:access-suspension-strategy": "tsx scripts/test-access-suspension-strategy.ts",

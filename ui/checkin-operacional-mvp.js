@@ -740,6 +740,9 @@ function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows, enviosRo
     classificacaoComissionamentoAtualizadoEm: r.classificacao_comissionamento_atualizado_em || null,
     cobrancasPagarme: [],
     pagamentosPagarme: [],
+    pagamentoPresencialDiferidoAutorizado: !!r.pagamento_presencial_diferido_autorizado,
+    pagamentoPresencialDiferidoEfetivado: !!r.pagamento_presencial_diferido_efetivado,
+    pagamentoPresencialDiferidoDeadlineEm: r.pagamento_presencial_diferido_deadline_em || null,
     hospedes,
     historicoOperacional: historico,
     comunicacaoEnviosOperacional: mapDbComunicacaoEnviosToInternal(enviosRows || []),
@@ -761,6 +764,102 @@ function getPagarmePaymentUiApi() {
   return typeof YesPagarmePaymentUi !== "undefined" && YesPagarmePaymentUi
     ? YesPagarmePaymentUi
     : null;
+}
+
+/** Lê YES_HOTEL_SUPABASE_CONFIG.pagamentoPresencialDiferidoUiEnabled — só boolean true (fail-closed). */
+function readPresencialDiferidoUiEnabledFlag() {
+  try {
+    const cfg =
+      typeof window !== "undefined" && window.YES_HOTEL_SUPABASE_CONFIG
+        ? window.YES_HOTEL_SUPABASE_CONFIG
+        : null;
+    const raw = cfg ? cfg.pagamentoPresencialDiferidoUiEnabled : undefined;
+    const api =
+      typeof YesPagamentoPresencialDiferidoUi !== "undefined" ? YesPagamentoPresencialDiferidoUi : null;
+    if (api && typeof api.isPagamentoPresencialDiferidoUiEnabled === "function") {
+      return api.isPagamentoPresencialDiferidoUiEnabled(raw) === true;
+    }
+    return raw === true;
+  } catch (_e) {
+    return false;
+  }
+}
+
+function getPresencialDiferidoUiApi() {
+  return typeof YesPagamentoPresencialDiferidoUi !== "undefined" && YesPagamentoPresencialDiferidoUi
+    ? YesPagamentoPresencialDiferidoUi
+    : null;
+}
+
+function canShowPresencialDiferidoBtn(reserva) {
+  const api = getPresencialDiferidoUiApi();
+  if (!api || typeof api.canShowPresencialDiferidoButton !== "function") return false;
+  const d = api.canShowPresencialDiferidoButton({
+    nowIso: new Date().toISOString(),
+    checkInYmd: reserva.checkInPrevisto,
+    statusReserva: reserva.statusReserva,
+    pagamentoStatus: reserva.pagamento,
+    classificacaoComissionamento: reserva.classificacaoComissionamento || "desconhecida",
+    jaAutorizado: !!reserva.pagamentoPresencialDiferidoAutorizado,
+    perfilUsuario: painelOperadorRole || "",
+    featureEnabled: readPresencialDiferidoUiEnabledFlag(),
+  });
+  return !!(d && d.allowed);
+}
+
+function presencialDiferidoLabelForReserva(reserva) {
+  const api = getPresencialDiferidoUiApi();
+  if (!api || typeof api.resolvePresencialDiferidoUiLabel !== "function") return null;
+  const tol = reserva.acessoTolerancia || {};
+  return api.resolvePresencialDiferidoUiLabel({
+    autorizado: !!reserva.pagamentoPresencialDiferidoAutorizado,
+    efetivado: !!reserva.pagamentoPresencialDiferidoEfetivado,
+    deadlineIso: reserva.pagamentoPresencialDiferidoDeadlineEm || null,
+    pagamentoStatus: reserva.pagamento,
+    graceStatus: tol.grace_status || null,
+    nowIso: new Date().toISOString(),
+  });
+}
+
+async function marcarPagamentoPresencialDiferido(reservaId) {
+  const supabase = getSupabase();
+  if (!supabase) return { ok: false, error: "sem_supabase" };
+  const reserva = (reservas || []).find(function (r) {
+    return r.id === reservaId;
+  });
+  if (!reserva || !canShowPresencialDiferidoBtn(reserva)) {
+    return { ok: false, error: "nao_elegivel" };
+  }
+  const user = await supabase.auth.getUser();
+  const uid = user?.data?.user?.id || null;
+  const email = user?.data?.user?.email || null;
+  const nowIso = new Date().toISOString();
+  const { error } = await supabase
+    .from("operacional_reservas")
+    .update({
+      pagamento_presencial_diferido_autorizado: true,
+      pagamento_presencial_diferido_autorizado_em: nowIso,
+      pagamento_presencial_diferido_autorizado_por: uid,
+      pagamento_presencial_diferido_autorizado_por_email: email,
+    })
+    .eq("id", reservaId)
+    .eq("pagamento_presencial_diferido_autorizado", false);
+  if (error) return { ok: false, error: error.message };
+  await supabase.from("operacional_reserva_eventos").insert({
+    reserva_id: reservaId,
+    tipo: "pagamento_presencial_diferido_autorizado",
+    titulo: "Pagamento presencial diferido autorizado",
+    detalhe:
+      "apto=" +
+      (reserva.apartamento || "—") +
+      "; por=" +
+      (email || uid || "operador") +
+      "; em=" +
+      nowIso +
+      "; efetivo=nao_ate_primeiro_acesso",
+  });
+  reserva.pagamentoPresencialDiferidoAutorizado = true;
+  return { ok: true };
 }
 
 /** Lê YES_HOTEL_SUPABASE_CONFIG.pagarmeUiEnabled — somente boolean true habilita (fail-closed). */
@@ -2222,6 +2321,13 @@ function renderOperacionalLista() {
       const guestName = reserva.hospedePrincipal || "—";
       const guestTitle = titleAttrEscape(guestName);
       const statusBadgeHtml = renderOperacionalStatusBadgeHtml(status, reserva.id);
+      const ppdLabel = presencialDiferidoLabelForReserva(reserva);
+      const ppdBtn = canShowPresencialDiferidoBtn(reserva)
+        ? `<button type="button" class="op-btn-table op-btn-ppd" data-id="${rid}" data-ppd="1" title="Autorizar pagamento presencial diferido">Pagto presencial diferido</button>`
+        : "";
+      const ppdStateHtml = ppdLabel
+        ? `<div class="op-ppd-state">${escapeHtml(ppdLabel)}</div>`
+        : "";
       const proxHtml =
         proxInfo.cta && proxInfo.cta.kind
           ? `<button type="button" class="op-next-action-btn" data-id="${rid}" data-cta-kind="${escapeHtml(proxInfo.cta.kind)}" title="${titleAttrEscape(prox)}">${escapeHtml(prox)}</button>`
@@ -2236,11 +2342,12 @@ function renderOperacionalLista() {
           <div class="op-period-line">${ci} → ${co}</div>
           ${noitesTxt ? `<div class="op-period-sub">${escapeHtml(noitesTxt)}</div>` : ""}
         </td>
-        <td class="op-td op-td--flux"><div class="op-flux">${flux}</div></td>
+        <td class="op-td op-td--flux"><div class="op-flux">${flux}</div>${ppdStateHtml}</td>
         <td class="op-td op-td--status">${statusBadgeHtml}</td>
         <td class="op-td op-td--next">${proxHtml}</td>
         <td class="op-td op-td--actions">
           <div class="op-actions-cell">
+            ${ppdBtn}
             <button type="button" class="op-btn-table op-btn-ver" data-id="${rid}">Ver</button>
             <button type="button" class="op-btn-icon op-btn-more" data-id="${rid}" title="Detalhes" aria-label="Abrir detalhes">⋯</button>
           </div>
@@ -2304,6 +2411,21 @@ function renderOperacionalLista() {
       e.stopPropagation();
       const id = btn.getAttribute("data-id");
       if (id) openDetail(id);
+    });
+  });
+  opTableBody?.querySelectorAll("[data-ppd]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute("data-id");
+      if (!id) return;
+      btn.disabled = true;
+      const res = await marcarPagamentoPresencialDiferido(id);
+      if (!res.ok) {
+        btn.disabled = false;
+        window.alert("Não foi possível autorizar pagamento presencial diferido: " + (res.error || ""));
+        return;
+      }
+      renderOperacionalLista();
     });
   });
   opTableBody?.querySelectorAll("[data-payment-badge]").forEach((btn) => {

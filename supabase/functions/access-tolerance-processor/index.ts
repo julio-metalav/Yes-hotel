@@ -71,6 +71,7 @@ function denoFlagsEnv(): Record<string, string | undefined> {
     "YES_HOTEL_ACCESS_OUTBOX_DISPATCH_ENABLED",
     "YES_HOTEL_ACCESS_DIGISAC_REAL_ENABLED",
     "YES_HOTEL_ACCESS_EMAIL_REAL_ENABLED",
+    "YES_HOTEL_PAGAMENTO_PRESENCIAL_DIFERIDO_ENABLED",
     "YES_HOTEL_TTLOCK_HOMOLOG_LOCK_ID",
     "YES_HOTEL_DIGISAC_INTERNAL_NUMBER",
     "DIGISAC_USE_MOCK",
@@ -156,7 +157,7 @@ Deno.serve(async (req: Request) => {
   const limit = Math.min(Number(body.limit ?? 20) || 20, 50);
   const dryRun = resolveEffectiveDryRun(body.dry_run, flags);
 
-  const basePorts = createSupabaseFirstRoomAccessPorts(admin);
+  const basePorts = createSupabaseFirstRoomAccessPorts(admin, env);
   const outboxQueue = new SupabaseAccessOutboxQueuePort(admin);
 
   const realTtlock = flags.ttlockSuspensionEnabled && !dryRun && flags.homologLockIdFilter != null;
@@ -170,6 +171,7 @@ Deno.serve(async (req: Request) => {
     ttlock,
     outboxQueue,
     clock: basePorts.clock,
+    presencialDiferidoAudit: basePorts.presencialDiferidoAudit,
   };
 
   const sender = buildProductionAccessCommunicationSender(

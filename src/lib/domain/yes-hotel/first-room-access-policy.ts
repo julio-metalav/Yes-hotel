@@ -3,6 +3,9 @@
  * Sem I/O — sem TTLock, DigiSac, Supabase ou senha em texto.
  */
 
+import { evaluatePresencialDiferidoOnFirstAccess } from "./pagamento-presencial-diferido";
+import type { PresencialDiferidoEffectiveness } from "./pagamento-presencial-diferido";
+
 /** Tipos TTLock recordType relevantes (doc Open Platform lockRecord/list). */
 export const TTLOCK_RECORD_TYPE = {
   APP_UNLOCK: 1,
@@ -155,7 +158,14 @@ export type AccessGraceDecisionInput = {
   pending_reasons: string[];
   /** ISO UTC do evento de primeiro acesso. */
   occurred_at: string;
+  /**
+   * Autorização operacional já marcada (NÃO significa pago).
+   * Só efetiva se payment_pending e horário do 1º acesso na janela.
+   */
+  pagamento_presencial_diferido_autorizado?: boolean;
 };
+
+export type AccessGraceMode = "standard_1h" | "presencial_diferido_09h";
 
 export type AccessGraceDecision = {
   start_grace: boolean;
@@ -164,12 +174,16 @@ export type AccessGraceDecision = {
   pending_snapshot: string[];
   /** Primeiro acesso deve ser registrado mesmo sem iniciar tolerância. */
   register_first_access: boolean;
+  grace_mode?: AccessGraceMode;
+  /** Detalhe da avaliação presencial diferido (auditoria). */
+  presencial_diferido?: PresencialDiferidoEffectiveness | null;
 };
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
 /**
- * Decide se inicia tolerância de 1h após um primeiro acesso aceito.
+ * Decide se inicia tolerância após um primeiro acesso aceito.
+ * Default: 1h. Exceção: pagamento presencial diferido efetivado → 09:00 do dia seguinte.
  * Idempotente: se já iniciou, não reinicia.
  */
 export function decideAccessGrace(input: AccessGraceDecisionInput): AccessGraceDecision {
@@ -178,6 +192,8 @@ export function decideAccessGrace(input: AccessGraceDecisionInput): AccessGraceD
       start_grace: false,
       pending_snapshot: [],
       register_first_access: false,
+      grace_mode: "standard_1h",
+      presencial_diferido: null,
     };
   }
 
@@ -186,6 +202,8 @@ export function decideAccessGrace(input: AccessGraceDecisionInput): AccessGraceD
       start_grace: false,
       pending_snapshot: [],
       register_first_access: false,
+      grace_mode: "standard_1h",
+      presencial_diferido: null,
     };
   }
 
@@ -197,6 +215,8 @@ export function decideAccessGrace(input: AccessGraceDecisionInput): AccessGraceD
       start_grace: false,
       pending_snapshot: [],
       register_first_access,
+      grace_mode: "standard_1h",
+      presencial_diferido: null,
     };
   }
 
@@ -205,14 +225,32 @@ export function decideAccessGrace(input: AccessGraceDecisionInput): AccessGraceD
     throw new Error(`occurred_at inválido: ${input.occurred_at}`);
   }
 
-  const due = new Date(started.getTime() + ONE_HOUR_MS);
   const snapshot = [...input.pending_reasons];
+  const deferredEval = evaluatePresencialDiferidoOnFirstAccess({
+    autorizado: Boolean(input.pagamento_presencial_diferido_autorizado) && input.payment_pending,
+    firstAccessAtIso: input.occurred_at,
+  });
 
+  if (deferredEval.efetivada) {
+    return {
+      start_grace: true,
+      grace_started_at: started.toISOString(),
+      suspension_due_at: deferredEval.deadlineIso,
+      pending_snapshot: [...snapshot, "pagamento_presencial_diferido"],
+      register_first_access,
+      grace_mode: "presencial_diferido_09h",
+      presencial_diferido: deferredEval,
+    };
+  }
+
+  const due = new Date(started.getTime() + ONE_HOUR_MS);
   return {
     start_grace: true,
     grace_started_at: started.toISOString(),
     suspension_due_at: due.toISOString(),
     pending_snapshot: snapshot,
     register_first_access,
+    grace_mode: "standard_1h",
+    presencial_diferido: input.pagamento_presencial_diferido_autorizado ? deferredEval : null,
   };
 }

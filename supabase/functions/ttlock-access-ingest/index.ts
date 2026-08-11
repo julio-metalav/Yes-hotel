@@ -31,6 +31,7 @@ function denoEnv(): Record<string, string | undefined> {
     "TTLOCK_ACCESS_WEBHOOK_SECRET",
     "TTLOCK_ACCESS_IDEMPOTENCY_SECRET",
     "TTLOCK_ACCESS_WEBHOOK_IP_ALLOWLIST",
+    "YES_HOTEL_PAGAMENTO_PRESENCIAL_DIFERIDO_ENABLED",
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
   ];
@@ -73,7 +74,7 @@ Deno.serve(async (req: Request) => {
       const admin = createClient(url, key, {
         auth: { autoRefreshToken: false, persistSession: false },
       });
-      ports = createSupabaseFirstRoomAccessPorts(admin);
+      ports = createSupabaseFirstRoomAccessPorts(admin, env);
     }
   }
 
