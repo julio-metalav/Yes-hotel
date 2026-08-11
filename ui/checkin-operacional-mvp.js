@@ -733,10 +733,156 @@ function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows, enviosRo
     fnrhStatusAgregado: r.fnrh_status_agregado || "fnrh_pendente",
     fnrhCompletoEm: r.fnrh_completo_em || null,
     senhaEnviadaEm: r.senha_enviada_em || null,
+    classificacaoComissionamento: mapClassificacaoComissionamentoFromDb(
+      r.classificacao_comissionamento,
+    ),
+    classificacaoComissionamentoOrigem: (r.classificacao_comissionamento_origem || "").trim() || null,
+    classificacaoComissionamentoAtualizadoEm: r.classificacao_comissionamento_atualizado_em || null,
+    cobrancasPagarme: [],
+    pagamentosPagarme: [],
     hospedes,
     historicoOperacional: historico,
     comunicacaoEnviosOperacional: mapDbComunicacaoEnviosToInternal(enviosRows || []),
   };
+}
+
+function mapClassificacaoComissionamentoFromDb(value) {
+  const s = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (s === "nao_comissionada" || s === "comissionada" || s === "desconhecida") return s;
+  return "desconhecida";
+}
+
+/** Perfil do operador logado (admin|recepcao). Cafe não chega nesta tela. */
+let painelOperadorRole = "";
+
+function getPagarmePaymentUiApi() {
+  return typeof YesPagarmePaymentUi !== "undefined" && YesPagarmePaymentUi
+    ? YesPagarmePaymentUi
+    : null;
+}
+
+/** Lê YES_HOTEL_SUPABASE_CONFIG.pagarmeUiEnabled — somente boolean true habilita (fail-closed). */
+function readPagarmeUiEnabledFlag() {
+  try {
+    const cfg =
+      typeof window !== "undefined" && window.YES_HOTEL_SUPABASE_CONFIG
+        ? window.YES_HOTEL_SUPABASE_CONFIG
+        : null;
+    const api = getPagarmePaymentUiApi();
+    const raw = cfg ? cfg.pagarmeUiEnabled : undefined;
+    if (api && typeof api.isPagarmeUiEnabled === "function") {
+      return api.isPagarmeUiEnabled(raw) === true;
+    }
+    return raw === true;
+  } catch (_e) {
+    return false;
+  }
+}
+
+function isPagarmeUiEnabledInPainel() {
+  return readPagarmeUiEnabledFlag() === true;
+}
+
+function resolvePaymentUiForReserva(reserva) {
+  if (!isPagarmeUiEnabledInPainel()) return null;
+  const api = getPagarmePaymentUiApi();
+  if (!api) return null;
+  const resolveFn =
+    typeof api.resolveOperacionalPaymentUi === "function"
+      ? api.resolveOperacionalPaymentUi
+      : typeof api.resolvePaymentUiState === "function"
+        ? api.resolvePaymentUiState
+        : null;
+  if (!resolveFn) return null;
+  return resolveFn({
+    pagamentoStatus: reserva && reserva.pagamento,
+    classificacaoComissionamento: reserva && reserva.classificacaoComissionamento,
+    cobrancas: reserva && reserva.cobrancasPagarme,
+    pagamentos: reserva && reserva.pagamentosPagarme,
+    perfilUsuario: painelOperadorRole || "recepcao",
+    pagarmeUiEnabled: true,
+  });
+}
+
+async function attachPagarmeCobrancasBatch(supabase, reservasList) {
+  // Fail-closed: sem flag explícita true, zero queries às tabelas Pagar.me.
+  if (!isPagarmeUiEnabledInPainel()) return;
+  if (!supabase || !Array.isArray(reservasList) || reservasList.length === 0) return;
+  const ids = reservasList.map(function (r) {
+    return r.id;
+  }).filter(Boolean);
+  if (!ids.length) return;
+
+  const { data: cobrancasRows, error: errCob } = await supabase
+    .from("operacional_cobrancas_pagarme")
+    .select(
+      "id, reserva_id, metodo, status, valor_centavos, moeda, pagarme_payment_link_id, pagarme_payment_link_url, pagarme_order_id, pagarme_charge_id, pagarme_status_raw, requer_revisao_operacional, requer_revisao_motivo, requer_revisao_detectado_em, created_at, updated_at",
+    )
+    .in("reserva_id", ids);
+  if (errCob) {
+    console.warn("[pagarme] falha ao carregar cobrancas em lote");
+    return;
+  }
+
+  const byReserva = {};
+  (cobrancasRows || []).forEach(function (row) {
+    const rid = String(row.reserva_id || "");
+    if (!byReserva[rid]) byReserva[rid] = [];
+    byReserva[rid].push({
+      id: row.id,
+      reserva_id: row.reserva_id,
+      metodo: row.metodo,
+      status: row.status,
+      valor_centavos: row.valor_centavos,
+      moeda: row.moeda,
+      pagarme_payment_link_id: row.pagarme_payment_link_id,
+      pagarme_payment_link_url: row.pagarme_payment_link_url,
+      payment_link_url: row.pagarme_payment_link_url,
+      pagarme_order_id: row.pagarme_order_id,
+      pagarme_charge_id: row.pagarme_charge_id,
+      pagarme_status_raw: row.pagarme_status_raw,
+      requer_revisao_operacional: !!row.requer_revisao_operacional,
+      requer_revisao_motivo: row.requer_revisao_motivo,
+      requer_revisao_detectado_em: row.requer_revisao_detectado_em,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    });
+  });
+
+  const cobrancaIds = (cobrancasRows || []).map(function (c) {
+    return c.id;
+  });
+  let pagamentosByCobranca = {};
+  if (cobrancaIds.length) {
+    const { data: pagRows, error: errPag } = await supabase
+      .from("operacional_pagamentos_pagarme")
+      .select(
+        "id, cobranca_id, valor_centavos_recebido, pago_em, sincronizacao_hits_status, pagarme_charge_id, pagarme_status_raw, created_at",
+      )
+      .in("cobranca_id", cobrancaIds);
+    if (!errPag && Array.isArray(pagRows)) {
+      pagRows.forEach(function (p) {
+        const cid = String(p.cobranca_id || "");
+        if (!pagamentosByCobranca[cid]) pagamentosByCobranca[cid] = [];
+        pagamentosByCobranca[cid].push(p);
+      });
+    }
+  }
+
+  reservasList.forEach(function (reserva) {
+    const cobrs = byReserva[String(reserva.id)] || [];
+    reserva.cobrancasPagarme = cobrs;
+    const pags = [];
+    cobrs.forEach(function (c) {
+      const list = pagamentosByCobranca[String(c.id)] || [];
+      list.forEach(function (p) {
+        pags.push(p);
+      });
+    });
+    reserva.pagamentosPagarme = pags;
+  });
 }
 
 /** Reservas com credencial ativa e item pendente/falho sem remote_keyboard_pwd_id (mesma regra do painel). */
@@ -894,6 +1040,7 @@ async function loadReservasFromBackend() {
     }
     out.push(internal);
   }
+  await attachPagarmeCobrancasBatch(supabase, out);
   return out;
 }
 
@@ -1564,6 +1711,13 @@ function getFaltamContato(reserva) {
 }
 
 function derivarStatusOperacional(reserva) {
+  const payUi = resolvePaymentUiForReserva(reserva);
+  if (payUi && payUi.kind === "pago_pagarme_hits_pendente") {
+    return {
+      label: payUi.statusBadgeLabel || "Pago Pagar.me · HITS pendente",
+      type: "pagarme-pago-hits-pendente",
+    };
+  }
   if (isPagamentoPendenteOperacional(reserva)) {
     return { label: "Pendente pagamento", type: "pendente-pagamento" };
   }
@@ -1791,6 +1945,7 @@ function noitesEntre(checkIn, checkOut) {
 function badgeClassFromStatusType(type) {
   const map = {
     "pendente-pagamento": "op-badge op-badge--pend-pag",
+    "pagarme-pago-hits-pendente": "op-badge op-badge--pagarme-hits",
     "pendente-fnrh": "op-badge op-badge--pend-fnrh",
     "pronto-liberar": "op-badge op-badge--pronto",
     "aguardando-chegada": "op-badge op-badge--aguardando",
@@ -1972,6 +2127,17 @@ function linhaFluxoResumo(reserva) {
   else fnrh = `FNRH ${total}/${total}`;
 
   const rest = [fnrh];
+
+  if (!pago) {
+    const payUi = resolvePaymentUiForReserva(reserva);
+    if (payUi && payUi.kind === "pago_pagarme_hits_pendente") {
+      rest.unshift("Pagar.me OK");
+    } else if (payUi && payUi.kind === "aguardando") {
+      rest.unshift("Aguard. pag.");
+    } else if (payUi && payUi.kind === "comissionada") {
+      rest.unshift("Comissionada");
+    }
+  }
 
   if (pago) {
     if (reserva.entrouNoApto) {
@@ -2196,6 +2362,15 @@ function executeRecomendacaoCta(reservaId, kind) {
   }
   if (kind === "simular_pagamento") {
     acaoMarcarPagamentoOk(reservaId);
+    return;
+  }
+  if (
+    kind === "pagarme_classificar" ||
+    kind === "pagarme_cobrar" ||
+    kind === "pagarme_ver" ||
+    kind === "pagarme_revisao"
+  ) {
+    openPagarmeCobrancaModal(reservaId);
     return;
   }
   if (kind === "ir_hospedes") {
@@ -4156,6 +4331,26 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
   }
 
   if (!isPagamentoOk(reserva)) {
+    var payUi = resolvePaymentUiForReserva(reserva);
+    if (payUi && payUi.kind && payUi.kind !== "none" && payUi.kind !== "hidden_perfil") {
+      var variantMap = {
+        warn: "warn",
+        info: "info",
+        success: "success",
+        danger: "danger",
+        amber: "warn",
+        neutral: "neutral",
+      };
+      return {
+        variant: variantMap[payUi.variant] || "warn",
+        texto: payUi.detalheTexto || payUi.listaLabel || "Pagamento pendente.",
+        listaLabel: payUi.listaLabel || "Pagamento",
+        cta:
+          payUi.ctaKind && payUi.ctaLabel
+            ? { kind: payUi.ctaKind, label: payUi.ctaLabel }
+            : null,
+      };
+    }
     var pagamentoEhPms = PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND;
     return {
       variant: "warn",
@@ -4394,7 +4589,21 @@ function buildSituacaoAcaoTopoHtml(
   }
 
   var situacaoLinha = escapeHtml(st.label);
-  var acaoHint = rec.listaLabel && String(rec.listaLabel).trim() && rec.listaLabel !== "—" ? escapeHtml(rec.listaLabel) : "";
+  var situacaoSubHtml = "";
+  var acaoHint = "";
+  var payUiTopo = resolvePaymentUiForReserva(reserva);
+  if (payUiTopo && payUiTopo.kind === "pago_pagarme_hits_pendente") {
+    situacaoLinha = escapeHtml(payUiTopo.situacaoLabel || "Pago no Pagar.me");
+    if (payUiTopo.situacaoSubtexto) {
+      situacaoSubHtml =
+        '<p class="detail-situacao-sub">' + escapeHtml(payUiTopo.situacaoSubtexto) + "</p>";
+    }
+  } else {
+    acaoHint =
+      rec.listaLabel && String(rec.listaLabel).trim() && rec.listaLabel !== "—"
+        ? escapeHtml(rec.listaLabel)
+        : "";
+  }
 
   var contatoPanelHtml = "";
   if (primaryRow || secondaryRow) {
@@ -4438,6 +4647,7 @@ function buildSituacaoAcaoTopoHtml(
     '<p class="detail-situacao-valor">' +
     situacaoLinha +
     "</p>" +
+    situacaoSubHtml +
     (acaoHint ? '<p class="detail-acao-hint">' + acaoHint + "</p>" : "") +
     acaoBlock +
     contextBlock +
@@ -5096,6 +5306,7 @@ function renderDetail(reserva) {
   detailBodyElement.innerHTML = `
     ${situacaoAcaoTopoHtml}
     ${toleranciaAcoesHtml}
+    ${buildPagarmeDetailSectionHtml(reserva)}
     ${localModeDetailHtml}
     ${ttlockSectionHtml}
     ${eventosSimuladosHtml}
@@ -5277,6 +5488,14 @@ function bindDetailListeners(reserva) {
     });
   }
 
+  const pagarmeOpenBtn = detailBodyElement.querySelector("#detail-pagarme-open-btn");
+  if (pagarmeOpenBtn) {
+    pagarmeOpenBtn.addEventListener("click", function () {
+      const rid = pagarmeOpenBtn.getAttribute("data-reserva-id");
+      if (rid) openPagarmeCobrancaModal(rid);
+    });
+  }
+
   const gerarNovaSenhaBtn = detailBodyElement.querySelector(
     "#detail-gerar-nova-senha-btn",
   );
@@ -5392,6 +5611,426 @@ function humanizarMensagemModalEnviarSenha(raw) {
   }
 
   return t;
+}
+
+/* ---------- Cobrança Pagar.me (Checkpoint 3 — UI operacional) ---------- */
+let pagarmeModalReservaId = null;
+let pagarmeModalBusy = false;
+
+async function backendCobrancaPagarmeAdmin(body) {
+  if (!isPagarmeUiEnabledInPainel()) {
+    return {
+      ok: false,
+      httpStatus: 0,
+      error: "pagarme_ui_desabilitada",
+      message: "Cobrança Pagar.me não está habilitada neste ambiente.",
+    };
+  }
+  const supabase = getSupabase();
+  if (!supabase || !auth || typeof auth.getEdgeFunctionFetchHeaders !== "function") {
+    return {
+      ok: false,
+      httpStatus: 0,
+      error: "auth_indisponivel",
+      message: "Autenticação indisponível para cobrança.",
+    };
+  }
+  let headers;
+  try {
+    headers = await auth.getEdgeFunctionFetchHeaders();
+  } catch (_e) {
+    return {
+      ok: false,
+      httpStatus: 401,
+      error: "unauthorized",
+      message: "Sessão inválida ou expirada.",
+    };
+  }
+  const base = (
+    typeof supabase.supabaseUrl === "string" ? supabase.supabaseUrl : ""
+  ).replace(/\/$/, "");
+  if (!base) {
+    return {
+      ok: false,
+      httpStatus: 0,
+      error: "config_indisponivel",
+      message: "URL do Supabase indisponível.",
+    };
+  }
+  let res;
+  try {
+    res = await fetch(base + "/functions/v1/cobranca-pagarme-admin", {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify(body || {}),
+    });
+  } catch (_err) {
+    return {
+      ok: false,
+      httpStatus: 0,
+      error: "rede",
+      message: "Falha de rede ao chamar cobrança.",
+      ambiguous: true,
+    };
+  }
+  const data = await res.json().catch(function () {
+    return {};
+  });
+  if (!res.ok) {
+    return {
+      ok: false,
+      httpStatus: res.status,
+      error: data.error || "erro",
+      message: data.message || "",
+      details: data.details,
+      ambiguous: res.status >= 500 || res.status === 502,
+    };
+  }
+  return { ok: true, httpStatus: res.status, data: data };
+}
+
+function setPagarmeModalMsg(text, kind) {
+  const el = document.getElementById("modal-pagarme-msg");
+  if (!(el instanceof HTMLElement)) return;
+  const t = String(text || "").trim();
+  if (!t) {
+    el.textContent = "";
+    el.classList.add("hidden");
+    el.classList.remove("is-error", "is-success", "is-warn");
+    return;
+  }
+  el.textContent = t;
+  el.classList.remove("hidden", "is-error", "is-success", "is-warn");
+  if (kind === "error") el.classList.add("is-error");
+  else if (kind === "success") el.classList.add("is-success");
+  else if (kind === "warn") el.classList.add("is-warn");
+}
+
+function closePagarmeCobrancaModal() {
+  const overlay = document.getElementById("modal-pagarme-overlay");
+  if (overlay instanceof HTMLElement) {
+    overlay.classList.add("hidden");
+    overlay.setAttribute("aria-hidden", "true");
+  }
+  pagarmeModalReservaId = null;
+  pagarmeModalBusy = false;
+  setPagarmeModalMsg("", null);
+}
+
+function openPagarmeCobrancaModal(reservaId) {
+  if (!isPagarmeUiEnabledInPainel()) return;
+  const reserva = getReservaById(reservaId);
+  if (!reserva) return;
+  pagarmeModalReservaId = reservaId;
+  renderPagarmeCobrancaModal(reserva);
+  const overlay = document.getElementById("modal-pagarme-overlay");
+  if (overlay instanceof HTMLElement) {
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+  }
+}
+
+function renderPagarmeCobrancaModal(reserva) {
+  const api = getPagarmePaymentUiApi();
+  const payUi = resolvePaymentUiForReserva(reserva) || {};
+  const titleEl = document.getElementById("modal-pagarme-title");
+  const bodyEl = document.getElementById("modal-pagarme-body");
+  if (!(bodyEl instanceof HTMLElement)) return;
+
+  if (titleEl) {
+    titleEl.textContent =
+      payUi.kind === "classificar"
+        ? "Classificar cobrança"
+        : payUi.kind === "aguardando"
+          ? "Aguardando pagamento"
+          : payUi.kind === "pago_pagarme_hits_pendente"
+            ? "Pago no Pagar.me"
+            : payUi.kind === "revisao"
+              ? "Revisão necessária"
+              : payUi.kind === "comissionada"
+                ? "Reserva comissionada"
+                : "Cobrança";
+  }
+
+  const classifLabel =
+    reserva.classificacaoComissionamento === "nao_comissionada"
+      ? "Não comissionada"
+      : reserva.classificacaoComissionamento === "comissionada"
+        ? "Comissionada"
+        : "Desconhecida";
+  const hitsLabel = isPagamentoOk(reserva) ? "Pago" : "Pendente";
+  const cob = payUi.cobranca || null;
+  const statusPagarme = cob ? String(cob.status || "—") : "—";
+  const valorFmt =
+    cob && cob.valor_centavos != null && api
+      ? api.formatCentavosToBRL(cob.valor_centavos)
+      : "—";
+
+  let actionsHtml = "";
+  if (payUi.showClassificar) {
+    actionsHtml +=
+      '<div class="modal-pagarme-classificar">' +
+      '<p class="modal-pagarme-hint">Escolha somente a classificação. A cobrança só fica disponível depois.</p>' +
+      '<button type="button" class="op-btn op-btn--primary" id="modal-pagarme-classificar-nao" data-classif="nao_comissionada">Reserva não comissionada — cobrar hóspede</button>' +
+      '<button type="button" class="op-btn op-btn--secondary" id="modal-pagarme-classificar-sim" data-classif="comissionada">Reserva comissionada — não cobrar hóspede</button>' +
+      "</div>";
+  }
+
+  if (payUi.kind === "comissionada") {
+    actionsHtml +=
+      '<div class="modal-pagarme-alert modal-pagarme-alert--amber" role="status">' +
+      escapeHtml(payUi.detalheTexto || "") +
+      "</div>";
+  }
+
+  if (payUi.kind === "pago_pagarme_hits_pendente") {
+    actionsHtml +=
+      '<div class="modal-pagarme-alert modal-pagarme-alert--ok" role="status">' +
+      "<strong>Pago no Pagar.me</strong><br>Regularização no HITS pendente." +
+      "</div>";
+  }
+
+  if (payUi.kind === "revisao") {
+    actionsHtml +=
+      '<div class="modal-pagarme-alert modal-pagarme-alert--danger" role="status">' +
+      escapeHtml(payUi.detalheTexto || "Revisão necessária.") +
+      "</div>";
+  }
+
+  if (payUi.hintAnterior) {
+    actionsHtml +=
+      '<p class="modal-pagarme-hint-soft">' + escapeHtml(payUi.hintAnterior) + "</p>";
+  }
+
+  if (payUi.showValorInput && payUi.showGerarCartao) {
+    actionsHtml +=
+      '<div class="modal-pagarme-form">' +
+      '<label for="modal-pagarme-valor">Valor a cobrar</label>' +
+      '<input type="text" id="modal-pagarme-valor" inputmode="decimal" placeholder="R$ 0,00" autocomplete="off" />' +
+      '<p class="modal-pagarme-hint">Somente cartão neste momento. Pix não está disponível.</p>' +
+      '<button type="button" class="op-btn op-btn--primary" id="modal-pagarme-gerar-cartao">Gerar link de cartão</button>' +
+      "</div>";
+  }
+
+  if (payUi.canOpenLink || payUi.canCopyLink) {
+    actionsHtml +=
+      '<div class="modal-pagarme-link-actions">' +
+      (payUi.canOpenLink
+        ? '<button type="button" class="op-btn op-btn--primary" id="modal-pagarme-abrir-link">Abrir link</button>'
+        : "") +
+      (payUi.canCopyLink
+        ? '<button type="button" class="op-btn op-btn--secondary" id="modal-pagarme-copiar-link">Copiar link</button>'
+        : "") +
+      "</div>";
+  } else if (cob) {
+    const rawLink = String(cob.payment_link_url || cob.pagarme_payment_link_url || "").trim();
+    if (
+      rawLink &&
+      api &&
+      typeof api.isSafeHttpsPaymentLinkUrl === "function" &&
+      !api.isSafeHttpsPaymentLinkUrl(rawLink)
+    ) {
+      actionsHtml +=
+        '<p class="modal-pagarme-hint-soft">Link de pagamento inválido. Atualize os dados da cobrança.</p>';
+    }
+  }
+
+  bodyEl.innerHTML =
+    '<dl class="modal-pagarme-meta">' +
+    "<div><dt>Reserva</dt><dd>" +
+    escapeHtml(String(reserva.id || "").slice(0, 8)) +
+    "…</dd></div>" +
+    "<div><dt>Apartamento</dt><dd>" +
+    escapeHtml(reserva.apartamento || "—") +
+    "</dd></div>" +
+    "<div><dt>Hóspede</dt><dd>" +
+    escapeHtml(reserva.hospedePrincipal || "—") +
+    "</dd></div>" +
+    "<div><dt>Classificação</dt><dd>" +
+    escapeHtml(classifLabel) +
+    "</dd></div>" +
+    "<div><dt>Status HITS</dt><dd>" +
+    escapeHtml(hitsLabel) +
+    "</dd></div>" +
+    "<div><dt>Status Pagar.me</dt><dd>" +
+    escapeHtml(statusPagarme) +
+    (cob && cob.valor_centavos != null ? " · " + escapeHtml(valorFmt) : "") +
+    "</dd></div>" +
+    "</dl>" +
+    actionsHtml;
+
+  bodyEl.querySelectorAll("[data-classif]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      const classif = btn.getAttribute("data-classif");
+      if (classif) void submitPagarmeClassificar(reserva.id, classif);
+    });
+  });
+  const valorInput = bodyEl.querySelector("#modal-pagarme-valor");
+  if (valorInput instanceof HTMLInputElement) {
+    valorInput.addEventListener("blur", function () {
+      if (!api || typeof api.formatBRLInputDisplay !== "function") return;
+      valorInput.value = api.formatBRLInputDisplay(valorInput.value);
+    });
+    valorInput.addEventListener("focus", function () {
+      if (!api || typeof api.toBRLInputEditValue !== "function") return;
+      valorInput.value = api.toBRLInputEditValue(valorInput.value);
+    });
+  }
+  const gerarBtn = bodyEl.querySelector("#modal-pagarme-gerar-cartao");
+  if (gerarBtn) {
+    gerarBtn.addEventListener("click", function () {
+      void submitPagarmeCriarCartao(reserva.id);
+    });
+  }
+  const abrirBtn = bodyEl.querySelector("#modal-pagarme-abrir-link");
+  if (abrirBtn && payUi.paymentLinkUrl) {
+    abrirBtn.addEventListener("click", function () {
+      const candidate = String(payUi.paymentLinkUrl || "");
+      if (
+        !api ||
+        typeof api.isSafeHttpsPaymentLinkUrl !== "function" ||
+        !api.isSafeHttpsPaymentLinkUrl(candidate)
+      ) {
+        setPagarmeModalMsg("Link de pagamento inválido. Atualize os dados da cobrança.", "error");
+        return;
+      }
+      window.open(candidate, "_blank", "noopener,noreferrer");
+    });
+  }
+  const copiarBtn = bodyEl.querySelector("#modal-pagarme-copiar-link");
+  if (copiarBtn && payUi.paymentLinkUrl) {
+    copiarBtn.addEventListener("click", async function () {
+      const candidate = String(payUi.paymentLinkUrl || "");
+      if (
+        !api ||
+        typeof api.isSafeHttpsPaymentLinkUrl !== "function" ||
+        !api.isSafeHttpsPaymentLinkUrl(candidate)
+      ) {
+        setPagarmeModalMsg("Link de pagamento inválido. Atualize os dados da cobrança.", "error");
+        return;
+      }
+      try {
+        await copyTextToClipboard(candidate);
+        setPagarmeModalMsg("Link copiado.", "success");
+      } catch (_e) {
+        setPagarmeModalMsg("Não foi possível copiar o link.", "error");
+      }
+    });
+  }
+}
+
+async function submitPagarmeClassificar(reservaId, classificacao) {
+  if (pagarmeModalBusy) return;
+  pagarmeModalBusy = true;
+  setPagarmeModalMsg("Salvando classificação…", null);
+  const result = await backendCobrancaPagarmeAdmin({
+    action: "classificar_comissionamento",
+    reserva_id: reservaId,
+    classificacao: classificacao,
+  });
+  pagarmeModalBusy = false;
+  const api = getPagarmePaymentUiApi();
+  if (!result.ok) {
+    const mapped = api
+      ? api.mapPagarmeAdminError({
+          code: result.error,
+          message: result.message,
+          httpStatus: result.httpStatus,
+        })
+      : { title: result.message || "Falha", detail: "", ambiguous: !!result.ambiguous };
+    setPagarmeModalMsg(mapped.title + (mapped.detail ? " " + mapped.detail : ""), "error");
+    if (result.ambiguous) await refreshFromSource();
+    return;
+  }
+  setPagarmeModalMsg("Classificação salva.", "success");
+  await refreshFromSource();
+  const updated = getReservaById(reservaId);
+  if (updated) renderPagarmeCobrancaModal(updated);
+}
+
+async function submitPagarmeCriarCartao(reservaId) {
+  if (pagarmeModalBusy) return;
+  const api = getPagarmePaymentUiApi();
+  const input = document.getElementById("modal-pagarme-valor");
+  const raw = input instanceof HTMLInputElement ? input.value : "";
+  const parsed = api ? api.parseBRLToCentavos(raw) : { ok: false, reason: "api" };
+  if (!parsed.ok) {
+    setPagarmeModalMsg("Informe um valor válido maior que zero (ex.: R$ 1.800,00).", "error");
+    return;
+  }
+  pagarmeModalBusy = true;
+  const gerarBtn = document.getElementById("modal-pagarme-gerar-cartao");
+  if (gerarBtn instanceof HTMLButtonElement) {
+    gerarBtn.disabled = true;
+    gerarBtn.textContent = "Gerando…";
+  }
+  setPagarmeModalMsg("Gerando link…", null);
+  const result = await backendCobrancaPagarmeAdmin({
+    action: "criar",
+    reserva_id: reservaId,
+    metodo: "cartao",
+    valor_centavos: parsed.centavos,
+  });
+  pagarmeModalBusy = false;
+  if (gerarBtn instanceof HTMLButtonElement) {
+    gerarBtn.disabled = false;
+    gerarBtn.textContent = "Gerar link de cartão";
+  }
+  if (!result.ok) {
+    const mapped = api
+      ? api.mapPagarmeAdminError({
+          code: result.error,
+          message: result.message,
+          httpStatus: result.httpStatus,
+        })
+      : { title: result.message || "Falha", detail: "", ambiguous: !!result.ambiguous };
+    setPagarmeModalMsg(mapped.title + (mapped.detail ? " " + mapped.detail : ""), "error");
+    await refreshFromSource();
+    const updatedErr = getReservaById(reservaId);
+    if (updatedErr) renderPagarmeCobrancaModal(updatedErr);
+    return;
+  }
+  setPagarmeModalMsg("Link de pagamento criado.", "success");
+  await refreshFromSource();
+  const updated = getReservaById(reservaId);
+  if (updated) renderPagarmeCobrancaModal(updated);
+}
+
+function buildPagarmeDetailSectionHtml(reserva) {
+  if (!isPagarmeUiEnabledInPainel()) return "";
+  const payUi = resolvePaymentUiForReserva(reserva);
+  if (!payUi || payUi.kind === "none" || payUi.kind === "hidden_perfil") return "";
+  if (isPagamentoOk(reserva) && payUi.kind === "none") return "";
+
+  const mod =
+    payUi.variant === "amber"
+      ? "warn"
+      : payUi.variant === "success"
+        ? "success"
+        : payUi.variant === "danger"
+          ? "danger"
+          : payUi.variant === "info"
+            ? "info"
+            : "warn";
+
+  return (
+    '<div class="reservation-detail-section reservation-detail-pagarme reservation-detail-recomendacao--' +
+    escapeHtml(mod) +
+    '" id="detail-pagarme-section">' +
+    '<p class="reservation-detail-section-title">Cobrança Pagar.me</p>' +
+    '<p class="reservation-detail-recomendacao-texto">' +
+    escapeHtml(payUi.detalheTexto || payUi.listaLabel || "") +
+    "</p>" +
+    (payUi.hintAnterior
+      ? '<p class="modal-pagarme-hint-soft">' + escapeHtml(payUi.hintAnterior) + "</p>"
+      : "") +
+    '<div class="reservation-detail-recomendacao-cta">' +
+    '<button type="button" class="primary-button" id="detail-pagarme-open-btn" data-reserva-id="' +
+    escapeHtml(String(reserva.id)) +
+    '">' +
+    escapeHtml(payUi.ctaLabel || "Ver cobrança") +
+    "</button></div></div>"
+  );
 }
 
 async function backendEnviarSenha(reservaId, email, whatsapp, options) {
@@ -5520,6 +6159,8 @@ async function initCheckinOperacional() {
     );
     return;
   }
+
+  painelOperadorRole = String(currentUser.role || "").trim().toLowerCase();
 
   if (accessStateElement instanceof HTMLElement) accessStateElement.classList.add("hidden");
   if (contentPanelElement instanceof HTMLElement) contentPanelElement.classList.remove("hidden");
@@ -5651,6 +6292,16 @@ async function initCheckinOperacional() {
       if (e.target === modalEnviarSenhaOverlay) closeModalEnviarSenha();
     });
   }
+
+  const modalPagarmeClose = document.getElementById("modal-pagarme-close");
+  const modalPagarmeOverlay = document.getElementById("modal-pagarme-overlay");
+  if (modalPagarmeClose) modalPagarmeClose.addEventListener("click", closePagarmeCobrancaModal);
+  if (modalPagarmeOverlay) {
+    modalPagarmeOverlay.addEventListener("click", function (e) {
+      if (e.target === modalPagarmeOverlay) closePagarmeCobrancaModal();
+    });
+  }
+
   if (modalEnviarSenhaForm) {
     modalEnviarSenhaForm.addEventListener("submit", async (e) => {
       e.preventDefault();

@@ -1160,6 +1160,12 @@ html {
   color: var(--op-destructive);
 }
 
+.checkin-view .op-badge--pagarme-hits {
+  background: rgba(33, 122, 74, 0.1);
+  border-color: rgba(33, 122, 74, 0.25);
+  color: var(--op-success);
+}
+
 .checkin-view .op-badge--pend-fnrh {
   background: rgba(229, 171, 66, 0.1);
   border-color: rgba(229, 171, 66, 0.35);
@@ -2142,6 +2148,13 @@ html {
   font-weight: 700;
   color: #0f172a;
   line-height: 1.3;
+}
+
+.op-detail__scroll .detail-situacao-sub {
+  margin: -2px 0 10px;
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.4;
 }
 
 .op-detail__scroll .detail-acao-hint {
@@ -3273,6 +3286,111 @@ html {
   color: var(--op-text-muted);
 }
 
+/* ---------- Cobrança Pagar.me (Checkpoint 3) ---------- */
+.reservation-detail-pagarme {
+  margin-top: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #fafbfc;
+}
+.reservation-detail-pagarme.reservation-detail-recomendacao--success {
+  border-color: rgba(22, 163, 74, 0.28);
+  background: rgba(22, 163, 74, 0.06);
+}
+.reservation-detail-pagarme.reservation-detail-recomendacao--warn {
+  border-color: rgba(217, 119, 6, 0.28);
+  background: rgba(245, 158, 11, 0.08);
+}
+.reservation-detail-pagarme.reservation-detail-recomendacao--info {
+  border-color: rgba(37, 99, 235, 0.22);
+  background: rgba(37, 99, 235, 0.05);
+}
+.reservation-detail-pagarme.reservation-detail-recomendacao--danger {
+  border-color: rgba(185, 28, 28, 0.25);
+  background: rgba(185, 28, 28, 0.05);
+}
+.modal-pagarme-body {
+  margin: 0.5rem 0 0.75rem;
+}
+.modal-pagarme-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem 0.85rem;
+  margin: 0 0 0.85rem;
+}
+.modal-pagarme-meta dt {
+  font-size: 0.72rem;
+  color: var(--op-text-muted, #64748b);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.modal-pagarme-meta dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.92rem;
+  color: var(--op-text, #0f172a);
+}
+.modal-pagarme-classificar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-bottom: 0.5rem;
+}
+.modal-pagarme-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.35rem 0 0.65rem;
+}
+.modal-pagarme-form input {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 8px;
+  font-size: 1rem;
+}
+.modal-pagarme-hint,
+.modal-pagarme-hint-soft {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--op-text-muted, #64748b);
+}
+.modal-pagarme-hint-soft {
+  font-style: italic;
+  margin-bottom: 0.45rem;
+}
+.modal-pagarme-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.modal-pagarme-alert {
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  margin-bottom: 0.55rem;
+}
+.modal-pagarme-alert--amber {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(217, 119, 6, 0.28);
+  color: #92400e;
+}
+.modal-pagarme-alert--ok {
+  background: rgba(22, 163, 74, 0.1);
+  border: 1px solid rgba(22, 163, 74, 0.25);
+  color: #166534;
+}
+.modal-pagarme-alert--danger {
+  background: rgba(185, 28, 28, 0.08);
+  border: 1px solid rgba(185, 28, 28, 0.22);
+  color: #991b1b;
+}
+#modal-pagarme-msg.is-warn {
+  color: #92400e;
+}
+
 @media (max-width: 480px) {
   .detail-local-grid {
     grid-template-columns: 1fr;
@@ -3284,5 +3402,9 @@ html {
 
   .detail-copy-access-btn {
     width: 100%;
+  }
+
+  .modal-pagarme-meta {
+    grid-template-columns: 1fr;
   }
 }
