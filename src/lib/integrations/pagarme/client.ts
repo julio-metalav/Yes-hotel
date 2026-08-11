@@ -180,7 +180,7 @@ export class PagarmeClient {
       const code = blockReasonToErrorCode(envSecret.reason);
       const message =
         code === "live_secret_blocked"
-          ? `Secret sk_live_ bloqueada em PAGARME_ENV=test; ${action} bloqueado.`
+          ? `Secret de production (sk_) bloqueada em PAGARME_ENV=test; ${action} bloqueado.`
           : code === "env_secret_mismatch"
             ? `Secret incompativel com PAGARME_ENV=${env}; ${action} bloqueado.`
             : `PAGARME_ENV/chave incompativeis; ${action} bloqueado.`;

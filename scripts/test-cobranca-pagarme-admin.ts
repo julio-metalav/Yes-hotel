@@ -122,7 +122,7 @@ async function main() {
     ok("fluxo admin: classificar -> criar cartao");
   }
 
-  // .env.example documenta vars sem secret real (placeholders sk_test_... / sk_live_... ok)
+  // .env.example documenta vars sem secret real (placeholders sk_test_... / sk_... ok)
   const envExample = readFileSync(resolve(".env.example"), "utf8");
   assert.match(envExample, /PAGARME_INTEGRATION_ENABLED/);
   assert.match(envExample, /PAGARME_ENV=test/);
@@ -130,7 +130,7 @@ async function main() {
   assert.match(envExample, /PAGARME_CHECKOUT_API_BASE_URL=https:\/\/sdx-api\.pagar\.me\/core\/v5/);
   assert.match(envExample, /# PAGARME_SECRET_KEY=/);
   assert.match(envExample, /sk_test_\.\.\./);
-  assert.match(envExample, /sk_live_\.\.\./);
+  assert.match(envExample, /PAGARME_SECRET_KEY=sk_\.\.\./);
   assert.match(envExample, /PAGARME_ENV=production/);
   assert.match(
     envExample,
@@ -139,6 +139,7 @@ async function main() {
   // Sem secret real (prefixo + corpo alfanumérico longo)
   assert.equal(/sk_test_[A-Za-z0-9]{12,}/.test(envExample), false);
   assert.equal(/sk_live_[A-Za-z0-9]{12,}/.test(envExample), false);
+  assert.equal(/PAGARME_SECRET_KEY=sk_[A-Za-z0-9]{12,}/.test(envExample), false);
   ok(".env.example documenta Pagar.me sem secret");
 
   console.log(`\n[test-cobranca-pagarme-admin] ${passed} assertions OK\n`);

@@ -9,11 +9,12 @@
  *
  * PRODUCTION:
  * - PAGARME_ENV=production
- * - secret somente sk_live_
+ * - secret somente sk_ (formato oficial atual da conta LIVE)
  * - Core: https://api.pagar.me/core/v5
  * - Checkout: https://api.pagar.me/core/v5
  *
- * Nunca cruzar test↔live. Sem fallback. Sem inferir env pela chave.
+ * sk_live_ NÃO é suportado (formato não usado pela conta LIVE Yes Hotel).
+ * Nunca cruzar test↔production. Sem fallback. Sem inferir env pela chave.
  */
 
 import type {
@@ -91,17 +92,22 @@ function normalizeBaseUrl(raw: string): string {
 
 /**
  * Classifica o prefixo da secret sem expor o valor.
- * - sk_live_ => live
- * - sk_test_ => test
- * - demais (incl. sk_ genérica) => unknown
+ * ORDEM CRÍTICA:
+ * 1) sk_test_ => test
+ * 2) sk_live_ => unknown (formato não suportado nesta integração)
+ * 3) sk_ => live/production (formato oficial LIVE atual)
+ * 4) demais => unknown
  *
  * Ambiente NÃO é inferido pelo prefixo: PAGARME_ENV é obrigatório e separado.
  */
 export function classifyPagarmeSecretKey(secretKey: string): PagarmeSecretKeyKind {
   const key = String(secretKey ?? "").trim();
   if (!key) return "missing";
-  if (key.startsWith("sk_live_")) return "live";
+  // sk_test_ ANTES de sk_ — senão cairia no ramo production.
   if (key.startsWith("sk_test_")) return "test";
+  // sk_live_ explicitamente não suportado (conta LIVE Yes Hotel usa sk_).
+  if (key.startsWith("sk_live_")) return "unknown";
+  if (key.startsWith("sk_")) return "live";
   return "unknown";
 }
 
