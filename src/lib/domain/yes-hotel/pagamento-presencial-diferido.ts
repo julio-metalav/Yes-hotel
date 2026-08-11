@@ -2,7 +2,9 @@
  * Regra travada: pagamento presencial diferido.
  * Sem I/O. NÃO marca como pago. NÃO altera Pagar.me.
  *
- * Fonte financeira vigente: operacional_reservas.pagamento_status (HITS/PMS).
+ * Fonte financeira HITS/PMS: operacional_reservas.pagamento_status.
+ * Fonte Pagar.me: status das cobranças correlacionadas (paid liquida a obrigação
+ * para fins de PPD mesmo com HITS ainda pendente).
  */
 
 import { isCorumbaApplicableHoliday } from "./corumba-calendar.ts";
@@ -28,6 +30,21 @@ export function isPagamentoPresencialDiferidoServerEnabled(
 
 export type PresencialDiferidoRegra = "util_19h" | "fim_semana_feriado_15h";
 
+export type PresencialDiferidoCobrancaHint = {
+  status?: string | null;
+};
+
+/**
+ * Obrigação liquidada no Pagar.me para fins de PPD.
+ * Somente status exatamente "paid". pending/processing/refunded/chargeback NÃO bloqueiam.
+ */
+export function isPagarmeObrigacaoLiquidadaForPpd(
+  cobrancas: PresencialDiferidoCobrancaHint[] | null | undefined,
+): boolean {
+  if (!Array.isArray(cobrancas) || cobrancas.length === 0) return false;
+  return cobrancas.some((c) => String(c?.status || "").trim().toLowerCase() === "paid");
+}
+
 export type PresencialDiferidoMarkInput = {
   nowIso: string;
   checkInYmd: string;
@@ -38,6 +55,13 @@ export type PresencialDiferidoMarkInput = {
   jaAutorizado?: boolean;
   perfilUsuario: string;
   featureEnabled: boolean;
+  /**
+   * Cobranças Pagar.me da reserva (hint). Se alguma estiver paid,
+   * PPD é inelegível mesmo com HITS/PMS pendente.
+   */
+  cobrancasPagarme?: PresencialDiferidoCobrancaHint[] | null;
+  /** Atalho explícito (UI) — true bloqueia. Preferir cobrancasPagarme quando disponível. */
+  pagarmeObrigacaoLiquidada?: boolean;
 };
 
 export type PresencialDiferidoMarkDecision = {
@@ -48,6 +72,7 @@ export type PresencialDiferidoMarkDecision = {
     | "perfil"
     | "reserva_inativa"
     | "ja_pago"
+    | "pagarme_ja_pago"
     | "comissionada"
     | "fora_do_dia_checkin"
     | "antes_das_08h"
@@ -108,7 +133,8 @@ function isAuthorizedProfile(perfil: string): boolean {
 
 /**
  * Visibilidade do botão "Pagto presencial diferido".
- * Só no dia do check-in, a partir das 08:00 locais, com pendência financeira.
+ * Só no dia do check-in, a partir das 08:00 locais, com pendência financeira
+ * e sem obrigação já liquidada no Pagar.me.
  */
 export function canShowPresencialDiferidoButton(
   input: PresencialDiferidoMarkInput,
@@ -124,6 +150,12 @@ export function canShowPresencialDiferidoButton(
   }
   if (String(input.pagamentoStatus || "").trim().toLowerCase() === "pago") {
     return { allowed: false, reason: "ja_pago" };
+  }
+  const pagarmePaid =
+    input.pagarmeObrigacaoLiquidada === true ||
+    isPagarmeObrigacaoLiquidadaForPpd(input.cobrancasPagarme);
+  if (pagarmePaid) {
+    return { allowed: false, reason: "pagarme_ja_pago" };
   }
   if (!isPaymentPendingStatus(input.pagamentoStatus)) {
     return { allowed: false, reason: "pagamento_nao_pendente" };
@@ -249,6 +281,8 @@ export type PresencialDiferidoUiStateInput = {
   pagamentoStatus: string;
   graceStatus?: string | null;
   nowIso: string;
+  cobrancasPagarme?: PresencialDiferidoCobrancaHint[] | null;
+  pagarmeObrigacaoLiquidada?: boolean;
 };
 
 export type PresencialDiferidoUiLabel =
@@ -261,6 +295,12 @@ export function resolvePresencialDiferidoUiLabel(
   input: PresencialDiferidoUiStateInput,
 ): PresencialDiferidoUiLabel {
   if (String(input.pagamentoStatus || "").toLowerCase() === "pago") {
+    return null;
+  }
+  if (
+    input.pagarmeObrigacaoLiquidada === true ||
+    isPagarmeObrigacaoLiquidadaForPpd(input.cobrancasPagarme)
+  ) {
     return null;
   }
   if (!input.autorizado) return null;
