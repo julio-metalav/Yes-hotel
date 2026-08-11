@@ -11,13 +11,19 @@ import {
   utcIsoToHotelLocalParts,
 } from "../src/lib/domain/yes-hotel/pagamento-presencial-diferido";
 import { hotelLocalToUtcIso } from "../src/lib/domain/yes-hotel/hotel-timezone";
-import { isCorumbaApplicableHoliday, easterSundayYmd } from "../src/lib/domain/yes-hotel/corumba-calendar";
+import { isCorumbaApplicableHoliday, easterSundayYmd, carnivalMondayTuesdayYmd } from "../src/lib/domain/yes-hotel/corumba-calendar";
 import { decideAccessGrace } from "../src/lib/domain/yes-hotel/first-room-access-policy";
 import {
   buildInternalFirstAccessMessage,
   buildWelcomePendingMessage,
 } from "../src/lib/domain/yes-hotel/access-grace-messages";
 
+function addDaysYmd(ymd: string, deltaDays: number): string {
+  const m = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})$/)!;
+  const utc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + deltaDays);
+  const d = new Date(utc);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
 const CHECKIN = "2026-08-11"; // terça-feira
 assert.equal(isDiaUtilCorumba(CHECKIN), true);
 assert.equal(resolvePresencialDiferidoRegra(CHECKIN), "util_19h");
@@ -316,4 +322,108 @@ function graceWith(occurred: string, autorizado: boolean) {
   assert.equal(d.reason, "feature_off");
 }
 
-console.log("OK test-pagamento-presencial-diferido (A–R)");
+// ---- Calendário oficial (auditoria fontes MS / Corumbá Lei 2.986/2025) ----
+{
+  // 11/07 NÃO é feriado estadual (ex.: sexta 2025-07-11 = dia útil 19h)
+  assert.equal(isCorumbaApplicableHoliday("2025-07-11"), false);
+  assert.equal(isCorumbaApplicableHoliday("2026-07-11"), false);
+  assert.equal(isDiaUtilCorumba("2025-07-11"), true);
+  assert.equal(resolvePresencialDiferidoRegra("2025-07-11"), "util_19h");
+  const gJul = evaluatePresencialDiferidoOnFirstAccess({
+    autorizado: true,
+    firstAccessAtIso: localIso("2025-07-11", 19, 1),
+  });
+  assert.equal(gJul.efetivada, true);
+  assert.equal(gJul.regra, "util_19h");
+  assert.equal(
+    evaluatePresencialDiferidoOnFirstAccess({
+      autorizado: true,
+      firstAccessAtIso: localIso("2025-07-11", 18, 59),
+    }).efetivada,
+    false,
+  );
+  assert.equal(
+    evaluatePresencialDiferidoOnFirstAccess({
+      autorizado: true,
+      firstAccessAtIso: localIso("2025-07-11", 19, 0),
+    }).efetivada,
+    false,
+  );
+
+  // 11/10 = feriado estadual Criação do MS
+  assert.equal(isCorumbaApplicableHoliday("2026-10-11"), true);
+  assert.equal(isDiaUtilCorumba("2026-10-11"), false);
+  assert.equal(resolvePresencialDiferidoRegra("2026-10-11"), "fim_semana_feriado_15h");
+  assert.equal(
+    evaluatePresencialDiferidoOnFirstAccess({
+      autorizado: true,
+      firstAccessAtIso: localIso("2026-10-11", 15, 1),
+    }).efetivada,
+    true,
+  );
+
+  const municipais = ["2026-02-02", "2026-06-13", "2026-06-24", "2026-09-21"];
+  for (const ymd of municipais) {
+    assert.equal(isCorumbaApplicableHoliday(ymd), true, ymd);
+    assert.equal(resolvePresencialDiferidoRegra(ymd), "fim_semana_feriado_15h", ymd);
+    assert.equal(
+      evaluatePresencialDiferidoOnFirstAccess({
+        autorizado: true,
+        firstAccessAtIso: localIso(ymd, 15, 1),
+      }).efetivada,
+      true,
+      `${ymd} 15:01`,
+    );
+  }
+
+  const easter2026 = easterSundayYmd(2026);
+  const goodFriday = addDaysYmd(easter2026, -2);
+  const corpus = addDaysYmd(easter2026, 60);
+  assert.equal(isCorumbaApplicableHoliday(goodFriday), true);
+  assert.equal(isCorumbaApplicableHoliday(corpus), true);
+  assert.equal(
+    evaluatePresencialDiferidoOnFirstAccess({
+      autorizado: true,
+      firstAccessAtIso: localIso(goodFriday, 15, 1),
+    }).efetivada,
+    true,
+  );
+  assert.equal(
+    evaluatePresencialDiferidoOnFirstAccess({
+      autorizado: true,
+      firstAccessAtIso: localIso(corpus, 15, 1),
+    }).efetivada,
+    true,
+  );
+
+  // Carnaval seg/ter = NÃO feriado (ponto facultativo)
+  const carn = carnivalMondayTuesdayYmd(2026);
+  assert.equal(isCorumbaApplicableHoliday(carn.monday), false);
+  assert.equal(isCorumbaApplicableHoliday(carn.tuesday), false);
+  // Se cair em dia de semana, regra 19h
+  if (resolvePresencialDiferidoRegra(carn.tuesday) === "util_19h") {
+    assert.equal(
+      evaluatePresencialDiferidoOnFirstAccess({
+        autorizado: true,
+        firstAccessAtIso: localIso(carn.tuesday, 18, 59),
+      }).efetivada,
+      false,
+    );
+    assert.equal(
+      evaluatePresencialDiferidoOnFirstAccess({
+        autorizado: true,
+        firstAccessAtIso: localIso(carn.tuesday, 19, 0),
+      }).efetivada,
+      false,
+    );
+    assert.equal(
+      evaluatePresencialDiferidoOnFirstAccess({
+        autorizado: true,
+        firstAccessAtIso: localIso(carn.tuesday, 19, 1),
+      }).efetivada,
+      true,
+    );
+  }
+}
+
+console.log("OK test-pagamento-presencial-diferido (A–R + calendário oficial)");

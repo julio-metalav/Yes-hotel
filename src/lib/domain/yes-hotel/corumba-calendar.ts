@@ -2,7 +2,14 @@
  * Calendário operacional Yes Hotel — feriados aplicáveis a Corumbá/MS.
  * Sem I/O. Usado pela regra de pagamento presencial diferido.
  *
- * Inclui: nacionais (fixos + móveis via Páscoa), estadual MS e municipais de Corumbá.
+ * Fontes:
+ * - Nacionais (fixos + móveis via Páscoa): calendário civil brasileiro.
+ * - Estadual MS: Criação do Estado = 11/OUT (Governo de MS) — NÃO 11/jul.
+ * - Municipais Corumbá: Lei Municipal nº 2.986/2025
+ *   (02/02, Sexta da Paixão, Corpus Christi, 13/06, 24/06, 21/09).
+ *
+ * Pontos facultativos (ex.: Carnaval seg/ter) NÃO são tratados como feriado
+ * nesta feature — limiar permanece 19:00 em dia útil.
  */
 
 /** Algoritmo anônimo gregoriano → domingo de Páscoa (YMD civil). */
@@ -47,16 +54,19 @@ export type HolidayEntry = {
 /** Feriados fixos (MM-DD) aplicáveis a Corumbá/MS. */
 const FIXED: Array<{ md: string; name: string; kind: HolidayKind }> = [
   { md: "01-01", name: "Confraternização Universal", kind: "nacional" },
+  { md: "02-02", name: "Nossa Senhora da Candelária", kind: "municipal_corumba" },
   { md: "04-21", name: "Tiradentes", kind: "nacional" },
   { md: "05-01", name: "Dia do Trabalho", kind: "nacional" },
+  { md: "06-13", name: "Retomada de Corumbá", kind: "municipal_corumba" },
+  { md: "06-24", name: "São João", kind: "municipal_corumba" },
   { md: "09-07", name: "Independência do Brasil", kind: "nacional" },
+  { md: "09-21", name: "Fundação de Corumbá", kind: "municipal_corumba" },
+  { md: "10-11", name: "Criação do Estado de Mato Grosso do Sul", kind: "estadual_ms" },
   { md: "10-12", name: "Nossa Senhora Aparecida", kind: "nacional" },
   { md: "11-02", name: "Finados", kind: "nacional" },
   { md: "11-15", name: "Proclamação da República", kind: "nacional" },
   { md: "11-20", name: "Consciência Negra", kind: "nacional" },
   { md: "12-25", name: "Natal", kind: "nacional" },
-  { md: "07-11", name: "Criação do Estado de Mato Grosso do Sul", kind: "estadual_ms" },
-  { md: "09-21", name: "Aniversário de Corumbá", kind: "municipal_corumba" },
 ];
 
 export function listHolidaysForYear(year: number): HolidayEntry[] {
@@ -67,11 +77,19 @@ export function listHolidaysForYear(year: number): HolidayEntry[] {
     kind: f.kind,
   }));
   const easter = easterSundayYmd(y);
+  // Móveis: Sexta-feira da Paixão e Corpus Christi (nacionais e Lei 2.986/2025 Corumbá).
+  // Carnaval (seg/ter) = ponto facultativo — NÃO incluir como feriado nesta regra.
   out.push(
-    { ymd: addDaysYmd(easter, -48), name: "Carnaval", kind: "nacional" },
-    { ymd: addDaysYmd(easter, -47), name: "Carnaval", kind: "nacional" },
-    { ymd: addDaysYmd(easter, -2), name: "Sexta-feira Santa", kind: "nacional" },
-    { ymd: addDaysYmd(easter, 60), name: "Corpus Christi", kind: "nacional" },
+    {
+      ymd: addDaysYmd(easter, -2),
+      name: "Sexta-feira da Paixão",
+      kind: "nacional",
+    },
+    {
+      ymd: addDaysYmd(easter, 60),
+      name: "Corpus Christi",
+      kind: "nacional",
+    },
   );
   out.sort((a, b) => a.ymd.localeCompare(b.ymd));
   return out;
@@ -82,4 +100,13 @@ export function isCorumbaApplicableHoliday(ymd: string): boolean {
   if (!m) return false;
   const year = Number(m[1]);
   return listHolidaysForYear(year).some((h) => h.ymd === `${m[1]}-${m[2]}-${m[3]}`);
+}
+
+/** YMD de Carnaval segunda/terça (ponto facultativo — não feriado nesta feature). */
+export function carnivalMondayTuesdayYmd(year: number): { monday: string; tuesday: string } {
+  const easter = easterSundayYmd(year);
+  return {
+    monday: addDaysYmd(easter, -48),
+    tuesday: addDaysYmd(easter, -47),
+  };
 }
