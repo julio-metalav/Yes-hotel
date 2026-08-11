@@ -17,6 +17,13 @@ import type {
 
 export interface AccessEventRepository {
   findByIdempotencyKey(key: string): Promise<AccessEventRecord | null>;
+  /**
+   * Primeiro evento APT já processado para a credencial (1º acesso registrado).
+   * Fail-closed no 2º unlock real sem tolerância (reserva paga).
+   */
+  findFirstProcessedApartmentByCredentialId(
+    credentialId: string,
+  ): Promise<AccessEventRecord | null>;
   insertRawEvent(
     input: ProcessFirstRoomAccessInput & {
       access_method: AccessEventRecord["access_method"];

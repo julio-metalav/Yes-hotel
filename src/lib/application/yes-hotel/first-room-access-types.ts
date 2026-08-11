@@ -326,6 +326,12 @@ export type ProcessFirstRoomAccessResult = {
   pending_reasons?: string[];
   ignored_reason?: string;
   error?: string;
+  /**
+   * Timestamp canônico do 1º acesso no modelo vigente:
+   * evento.occurred_at (pago) ou tolerância.first_room_access_at (com grace).
+   * Coluna operacional_reservas.primeiro_acesso_em não existe.
+   */
+  first_access_at?: string;
 };
 
 export type ReservationPendingPortResult = {

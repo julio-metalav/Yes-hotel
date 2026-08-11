@@ -112,6 +112,7 @@ export class SupabaseFirstRoomAccessUnitOfWork implements UnitOfWorkPort {
       pending_reasons: pending,
       ignored_reason: row.ignored_reason ? String(row.ignored_reason) : undefined,
       error: row.error ? String(row.error) : undefined,
+      first_access_at: row.first_access_at ? String(row.first_access_at) : undefined,
     };
   }
 }

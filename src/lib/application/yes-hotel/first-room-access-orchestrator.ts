@@ -269,6 +269,11 @@ export async function processFirstRoomAccessEvent(
     const existingTolerance = correlation.credential_id
       ? await ports.tolerances.findByCredentialId(correlation.credential_id)
       : null;
+    const existingFirstProcessed = correlation.credential_id
+      ? await ports.events.findFirstProcessedApartmentByCredentialId(correlation.credential_id)
+      : null;
+    const firstAccessAlready =
+      !!existingTolerance || !!existingFirstProcessed;
 
     const normalized: NormalizedRoomAccessEvent = {
       source_event_id: input.source_event_id,
@@ -288,15 +293,15 @@ export async function processFirstRoomAccessEvent(
     };
 
     const decision = evaluateFirstRoomAccessEvent(normalized, {
-      first_access_already_registered: !!existingTolerance,
+      first_access_already_registered: firstAccessAlready,
       event_already_processed: false,
-      grace_already_started: !!existingTolerance,
+      grace_already_started: firstAccessAlready,
     });
 
     if (!decision.accepted) {
       const reason = decision.ignored_reason ?? decision.decision;
       if (
-        existingTolerance &&
+        firstAccessAlready &&
         (reason === "already_started" || reason === "duplicate")
       ) {
         return await ports.uow.commitFirstRoomAccess({
@@ -304,9 +309,9 @@ export async function processFirstRoomAccessEvent(
           event: eventWrite,
           correlation: correlationWrite,
           ignored_reason: reason,
-          existing_tolerance_id: existingTolerance.id,
-          existing_suspension_due_at: existingTolerance.suspension_due_at,
-          existing_pending_snapshot: existingTolerance.pending_snapshot,
+          existing_tolerance_id: existingTolerance?.id,
+          existing_suspension_due_at: existingTolerance?.suspension_due_at,
+          existing_pending_snapshot: existingTolerance?.pending_snapshot,
         });
       }
       return await ports.uow.commitFirstRoomAccess({
@@ -317,15 +322,15 @@ export async function processFirstRoomAccessEvent(
       });
     }
 
-    if (existingTolerance) {
+    if (existingTolerance || existingFirstProcessed) {
       return await ports.uow.commitFirstRoomAccess({
         decision: "already_started",
         event: eventWrite,
         correlation: correlationWrite,
         ignored_reason: "already_started",
-        existing_tolerance_id: existingTolerance.id,
-        existing_suspension_due_at: existingTolerance.suspension_due_at,
-        existing_pending_snapshot: existingTolerance.pending_snapshot,
+        existing_tolerance_id: existingTolerance?.id,
+        existing_suspension_due_at: existingTolerance?.suspension_due_at,
+        existing_pending_snapshot: existingTolerance?.pending_snapshot,
       });
     }
 
