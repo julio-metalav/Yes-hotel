@@ -12,6 +12,10 @@ import {
   planGuestChannels,
   type GuestChannelAttempt,
 } from "../_shared/comunicacao-operacional/guest-multichannel.ts";
+import {
+  applyFnrhChannelIdempotency,
+  isAutomaticFnrhLinksEvent,
+} from "../_shared/comunicacao-operacional/fnrh-links-idempotency.ts";
 import { outboundWhatsappTransacional } from "../_shared/comunicacao-operacional/outbound-whatsapp.ts";
 import { maskEmailForLog, previewCorpo, registrarOperacionalComunicacaoEnvio } from "../_shared/comunicacao-operacional/registro-envio.ts";
 import { buildFnrhPreenchimentoUrl, maskFnrhLinkForLog } from "../_shared/fnrh-public-link.ts";
@@ -134,7 +138,25 @@ Deno.serve(async (req: Request) => {
   let enviadosEmail = 0;
   let enviadosWhatsapp = 0;
   let skippedMinors = 0;
+  let skippedEmailIdempotency = 0;
+  let skippedWhatsappIdempotency = 0;
   const erros: string[] = [];
+
+  const autoEvent = isAutomaticFnrhLinksEvent(tipoEvento);
+  let priorEnvios: {
+    canal: string;
+    status: string;
+    hospede_id?: string | null;
+    metadata?: Record<string, unknown> | null;
+  }[] = [];
+  if (autoEvent) {
+    const { data: enviosRows } = await admin
+      .from("operacional_comunicacao_envios")
+      .select("canal, status, hospede_id, metadata")
+      .eq("reserva_id", reservaId)
+      .eq("proposito", "fnrh_links");
+    priorEnvios = Array.isArray(enviosRows) ? enviosRows : [];
+  }
 
   for (const p of pendentes as { id: string; hospede_id: string; link_token: string; hospede_nome: string }[]) {
     const hospede = (hospedes as {
@@ -163,10 +185,24 @@ Deno.serve(async (req: Request) => {
     });
 
     const plan = planGuestChannels(email, whatsapp, "hospede");
+    const idem = applyFnrhChannelIdempotency({
+      tipoEvento,
+      fnrhHospedeId: p.id,
+      hospedeId: p.hospede_id,
+      tryEmail: plan.tryEmail,
+      tryWhatsapp: plan.tryWhatsapp,
+      registros: priorEnvios,
+    });
+    if (idem.skipEmail) skippedEmailIdempotency++;
+    if (idem.skipWhatsapp) skippedWhatsappIdempotency++;
+
     let emailAttempt: GuestChannelAttempt | null = null;
     let whatsappAttempt: GuestChannelAttempt | null = null;
 
-    if (plan.tryEmail) {
+    if (idem.skipEmail) {
+      emailAttempt = { status: "enviado" };
+      enviadosEmail++;
+    } else if (idem.tryEmail) {
       tentativasComEmail++;
       const subject = `Ficha de Registro (FNRH) — ${apartamento || "sua reserva"}`;
       const html = `
@@ -195,6 +231,12 @@ Deno.serve(async (req: Request) => {
           metadata: { tipo_evento: tipoEvento, fnrh_hospede_id: p.id, resource_link: maskFnrhLinkForLog(link) },
           erro: null,
         });
+        priorEnvios.push({
+          canal: "email",
+          status: "enviada",
+          hospede_id: p.hospede_id,
+          metadata: { tipo_evento: tipoEvento, fnrh_hospede_id: p.id },
+        });
       } else {
         emailAttempt = { status: "falhou", error: result.error ?? "Falha e-mail" };
         erros.push(`${nome}: ${result.error}`);
@@ -218,7 +260,10 @@ Deno.serve(async (req: Request) => {
     }
 
     // Independente do e-mail: sempre tenta WhatsApp se contato válido (mesmo link).
-    if (plan.tryWhatsapp) {
+    if (idem.skipWhatsapp) {
+      whatsappAttempt = { status: "enviado" };
+      enviadosWhatsapp++;
+    } else if (idem.tryWhatsapp) {
       tentativasComWhatsapp++;
       const textoWhatsapp =
         `Olá, ${nome}! Para agilizar seu check-in${apartamento ? ` no apto ${apartamento}` : ""}${checkIn ? ` (check-in: ${checkIn})` : ""}, preencha sua FNRH pelo link:\n${link}\n\nObrigado!`;
@@ -228,10 +273,21 @@ Deno.serve(async (req: Request) => {
         telefoneRaw: whatsapp,
         text: textoWhatsapp,
         proposito: "fnrh_links",
+        metadataExtra: {
+          tipo_evento: tipoEvento,
+          fnrh_hospede_id: p.id,
+          resource_link: maskFnrhLinkForLog(link),
+        },
       });
       if (wResult.ok) {
         whatsappAttempt = { status: "enviado" };
         enviadosWhatsapp++;
+        priorEnvios.push({
+          canal: "whatsapp",
+          status: "enviada",
+          hospede_id: p.hospede_id,
+          metadata: { tipo_evento: tipoEvento, fnrh_hospede_id: p.id },
+        });
       } else {
         whatsappAttempt = { status: "falhou", error: wResult.error ?? "falha" };
         erros.push(`${nome} (WhatsApp): ${wResult.error ?? "falha"}`);
@@ -243,14 +299,23 @@ Deno.serve(async (req: Request) => {
     const agg = aggregateGuestChannelResults(emailAttempt, whatsappAttempt);
     if (agg.delivered) {
       enviados++;
-      const tentativas = typeof hospede?.tentativas_envio === "number" ? hospede.tentativas_envio + 1 : 1;
-      await admin.from("operacional_hospedes").update({
-        status_operacional: "enviado",
-        ultimo_envio_canal: agg.ultimoEnvioCanal,
-        ultimo_envio_em: now,
-        tentativas_envio: tentativas,
-        updated_at: now,
-      }).eq("id", p.hospede_id);
+      const teveEnvioNovo = idem.tryEmail || idem.tryWhatsapp;
+      if (teveEnvioNovo) {
+        const tentativas = typeof hospede?.tentativas_envio === "number" ? hospede.tentativas_envio + 1 : 1;
+        await admin.from("operacional_hospedes").update({
+          status_operacional: "enviado",
+          ultimo_envio_canal: agg.ultimoEnvioCanal,
+          ultimo_envio_em: now,
+          tentativas_envio: tentativas,
+          updated_at: now,
+        }).eq("id", p.hospede_id);
+      } else {
+        await admin.from("operacional_hospedes").update({
+          status_operacional: "enviado",
+          ultimo_envio_canal: agg.ultimoEnvioCanal,
+          updated_at: now,
+        }).eq("id", p.hospede_id);
+      }
     }
 
     if (!plan.tryEmail && !plan.tryWhatsapp) {
@@ -270,6 +335,8 @@ Deno.serve(async (req: Request) => {
       enviados_email: enviadosEmail,
       enviados_whatsapp: enviadosWhatsapp,
       skipped_minors: skippedMinors,
+      skipped_email_idempotency: skippedEmailIdempotency,
+      skipped_whatsapp_idempotency: skippedWhatsappIdempotency,
       erros: erros.length,
       tentativas_com_email: tentativasComEmail,
       tentativas_com_whatsapp: tentativasComWhatsapp,
@@ -281,10 +348,15 @@ Deno.serve(async (req: Request) => {
 
   const adultosPendentes = pendentes.length - skippedMinors;
   const houveTentativa = tentativasComEmail > 0 || tentativasComWhatsapp > 0;
+  const soIdempotency =
+    !houveTentativa &&
+    (skippedEmailIdempotency > 0 || skippedWhatsappIdempotency > 0) &&
+    erros.length === 0;
   const nenhumEnviadoAposTentativa =
     adultosPendentes > 0 &&
     enviados === 0 &&
-    (houveTentativa || erros.length > 0);
+    (houveTentativa || erros.length > 0) &&
+    !soIdempotency;
 
   return jsonResponse(
     {
@@ -295,6 +367,8 @@ Deno.serve(async (req: Request) => {
       enviados_email: enviadosEmail,
       enviados_whatsapp: enviadosWhatsapp,
       skipped_minors: skippedMinors,
+      skipped_email_idempotency: skippedEmailIdempotency,
+      skipped_whatsapp_idempotency: skippedWhatsappIdempotency,
       erros: erros.length ? erros : undefined,
       pendentes: pendentes.length,
       ...(nenhumEnviadoAposTentativa

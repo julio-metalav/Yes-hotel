@@ -200,6 +200,8 @@ export async function outboundWhatsappTransacional(
     telefoneRaw: string;
     text: string;
     proposito: ComunicacaoProposito;
+    /** Metadados extras (ex.: tipo_evento / fnrh_hospede_id para idempotência). */
+    metadataExtra?: Record<string, unknown> | null;
   },
 ): Promise<{ ok: boolean; error?: string; provider_message_id?: string }> {
   const telefoneDigits = normalizePhoneDigits(params.telefoneRaw);
@@ -317,6 +319,9 @@ export async function outboundWhatsappTransacional(
       fluxo: "transacional",
       message_row_id: msgRowId,
       inbox_ok: Boolean(conversaId && msgRowId),
+      ...(params.metadataExtra && typeof params.metadataExtra === "object"
+        ? params.metadataExtra
+        : {}),
     },
     erro: digi.ok ? null : digi.error ?? null,
   });

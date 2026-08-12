@@ -18,7 +18,9 @@
  *   max_pages (1..50, default 50)
  *   max_reservations (1..100; omitido = sem hard-cap além da paginação)
  *
- * Sync de leitura/persistência NÃO dispara: cobrança, DigiSac, senha, TTLock, FNRH, escrita HITS.
+ * Sync de leitura/persistência NÃO dispara: cobrança, senha, TTLock, escrita HITS.
+ * Após create operacional (persistência real), orquestra FNRH via send-fnrh-links
+ * (tipo_evento=reserva_criada) sem falhar o sync se Resend/DigiSac estiverem indisponíveis.
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
@@ -33,6 +35,8 @@ import { SupabaseReservationSyncRepository } from "../../../src/lib/infrastructu
 import { resolveHitsReservationSource } from "../../../src/lib/integrations/hits/resolve-hits-reservation-source.ts";
 import type { HitsConfig } from "../../../src/lib/integrations/hits/config.ts";
 import { constantTimeEqual } from "../../../src/lib/integrations/ttlock/access-ingest/constant-time.ts";
+import { notifyFnrhLinksForCreatedReservations } from "../_shared/comunicacao-operacional/notify-fnrh-reservation-created.ts";
+import { resolveFnrhPublicBaseUrl } from "../_shared/fnrh-public-link.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -258,6 +262,43 @@ Deno.serve(async (req: Request) => {
       dateTo,
     });
 
+    let fnrhNotify: {
+      attempted: number;
+      ok: number;
+      failed: number;
+    } | null = null;
+    if (!dryRun && result.createdReservationIds.length > 0) {
+      const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? serviceRoleKey;
+      const baseUrl = resolveFnrhPublicBaseUrl({
+        envValue: Deno.env.get("FNRH_PUBLIC_BASE_URL"),
+      });
+      const notify = await notifyFnrhLinksForCreatedReservations({
+        supabaseUrl,
+        serviceRoleKey,
+        anonOrServiceKey: anonKey,
+        reservaIds: result.createdReservationIds,
+        baseUrl,
+      });
+      fnrhNotify = {
+        attempted: notify.attempted,
+        ok: notify.ok,
+        failed: notify.failed,
+      };
+      if (notify.failed > 0) {
+        console.warn(
+          "[HITS_RESERVATION_SYNC] fnrh_notify_partial",
+          JSON.stringify({
+            attempted: notify.attempted,
+            ok: notify.ok,
+            failed: notify.failed,
+            errors: notify.results
+              .filter((r) => !r.ok)
+              .map((r) => ({ reserva_id: r.reserva_id, error: r.error })),
+          }),
+        );
+      }
+    }
+
     const partial = result.errors > 0 && result.processed > result.errors;
     return json({
       ok: result.ok,
@@ -280,6 +321,7 @@ Deno.serve(async (req: Request) => {
       errors: result.errors,
       stopped_reason: result.stopped_reason ?? null,
       error: result.error ?? null,
+      fnrh_notify: fnrhNotify,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message.slice(0, 200) : "error";
