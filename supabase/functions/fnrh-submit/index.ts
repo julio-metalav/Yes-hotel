@@ -212,12 +212,24 @@ async function resolveFnrhRow(
   return { row };
 }
 
+/**
+ * Autosave: valores podem ser reenviados sem mudar provenance.
+ * Somente campos em dirty_manual_fields (edição real do hóspede) viram manual.
+ * Sem dirty_manual_fields → não inventa provenance manual (legado seguro).
+ */
+function parseDirtyManualFields(body: Record<string, unknown>): Set<string> | null {
+  const raw = body.dirty_manual_fields;
+  if (!Array.isArray(raw)) return null;
+  return new Set(raw.map((x) => String(x)));
+}
+
 function applyDraftFields(
   body: Record<string, unknown>,
   keys: readonly string[],
 ): { update: Record<string, unknown>; provenanceUpdates: FnrhFieldProvenanceMap } {
   const update: Record<string, unknown> = {};
   const provenanceUpdates: FnrhFieldProvenanceMap = {};
+  const dirty = parseDirtyManualFields(body);
   for (const k of keys) {
     if (!(k in body)) continue;
     const v = body[k];
@@ -227,10 +239,16 @@ function applyDraftFields(
       update[k] = ensureBool(v);
     } else if (k === "assinatura_base64") {
       update[k] = v != null && String(v).trim() !== "" ? String(v) : null;
+    } else if (k === "documento_tipo") {
+      const tipo = v != null ? String(v).trim().toLowerCase() : "";
+      // Placeholder técnico do upload — não persistir como tipo semântico.
+      update[k] = tipo === "other" ? null : tipo || null;
     } else {
       update[k] = v != null ? String(v) : "";
     }
-    provenanceUpdates[k] = "manual";
+    if (dirty?.has(k)) {
+      provenanceUpdates[k] = "manual";
+    }
   }
   return { update, provenanceUpdates };
 }

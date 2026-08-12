@@ -64,29 +64,32 @@ function ok(label: string) {
   ok("E. upload com document_type=other sem tipo prévio");
 }
 
-// F/G. OCR preenche e Confira dados mostra campos
+// F/G. OCR preenche e Confira dados mostra campos canônicos
 {
   assert.match(js, /function applyOcrSuggestions/);
+  assert.match(js, /Encontramos estes dados no seu documento/);
+  assert.match(js, /Brasileiro — CPF/);
+  assert.match(js, /Estrangeiro — Passaporte/);
   const confira = js.slice(js.indexOf("function renderConfiraDados()"), js.indexOf("function renderEndereco()"));
   assert.match(confira, /data-field="documento_tipo"/);
   assert.match(confira, /data-field="documento_numero"/);
   assert.match(confira, /data-field="data_nascimento"/);
-  assert.match(confira, /Encontramos estes dados no seu documento/);
-  ok("F/G. OCR + Etapa 2 com campos editáveis");
+  assert.match(confira, /optionHtml\(DOC_TYPES/);
+  ok("F/G. OCR + Etapa 2 com campos editáveis canônicos");
 }
 
 // H. OCR fail-soft
 {
   assert.match(
     js,
-    /Não conseguimos ler todos os dados automaticamente\. Você pode preenchê-los na próxima etapa\./,
+    /Alguns dados não foram identificados\. Confira e complete os campos abaixo\./,
   );
   ok("H. fallback manual após OCR");
 }
 
-// I. manual vence OCR
+// I. manual vence OCR (valor canônico preenchido)
 {
-  assert.match(js, /if \(state\.fieldOrigin\[target\] === "manual"\) return;/);
+  assert.match(js, /state\.fieldOrigin\[target\] === "manual"/);
   assert.equal(
     shouldApplySuggestedValue({
       currentValue: "ABC",
@@ -133,12 +136,13 @@ function ok(label: string) {
   ok("L. upload obrigatório na etapa Documento");
 }
 
-// M. verso só após tipo RG/CNH (needsTwoSides + needsVersoAfterOcr)
+// M. verso legado só se tipo RG/CNH (não é caminho canônico CPF/passaporte)
 {
   assert.match(js, /function needsTwoSides\(docType\)/);
   assert.match(js, /function needsVersoAfterOcr\(\)/);
-  assert.match(js, /Tirar foto do verso/);
-  ok("M. verso após OCR quando RG/CNH");
+  assert.match(js, /function isCanonicalDocType/);
+  assert.match(js, /Brasileiro — CPF/);
+  ok("M. canônicos CPF/passaporte; verso só legado RG/CNH");
 }
 
 // N. Google Vision path intacto (upload edge + applyOcrSuggestions)

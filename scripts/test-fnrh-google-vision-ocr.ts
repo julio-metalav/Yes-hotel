@@ -340,7 +340,7 @@ async function main() {
     ok("13 CPF inválido ignorado");
   }
 
-  // 14 CPF válido explícito
+  // 14 CPF válido explícito (mesmo com requested=other → canônico cpf)
   {
     assert.equal(isValidCpf(VALID_CPF), true);
     assert.equal(extractExplicitValidCpf("CPF: 529.982.247-25"), VALID_CPF);
@@ -348,11 +348,13 @@ async function main() {
     assert.equal(extractExplicitValidCpf("52998224725"), null);
     const n = normalizeGoogleVisionText({
       fullText: "NOME: FULANO TESTE\nCPF: 529.982.247-25\n",
-      requested_document_type: "cpf",
+      requested_document_type: "other",
     });
     assert.equal(n.suggested_fields.cpf, VALID_CPF);
     assert.equal(n.suggested_fields.documento_numero, VALID_CPF);
-    ok("14 CPF válido explicitamente presente");
+    assert.equal(n.suggested_fields.documento_tipo, "cpf");
+    assert.notEqual(n.suggested_fields.documento_tipo, "other");
+    ok("14 CPF válido explicitamente presente (other→cpf)");
   }
 
   // 15 manual > ocr
