@@ -2,8 +2,16 @@
  * FNRH digital — leitura por reserva_id (painel) ou guest_id+token (formulário público).
  * Pré-preenche com merge: fnrh_hospedes + operacional_hospedes + operacional_reservas.
  * guest_id = fnrh_hospedes.id (ou legado hospede_id).
+ * v2: campos estruturados, documentos (metadados), menores do responsável, feature flags.
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+  FNRH_PRIVACY_NOTICE_VERSION,
+  FNRH_TERMS_VERSION,
+  isFnrhFaceVerificationEnabled,
+  isFnrhOcrEnabled,
+} from "../../../src/lib/domain/yes-hotel/fnrh-checkin-v2-policy.ts";
+import { isFnrhLifecycleComplete } from "../../../src/lib/domain/yes-hotel/fnrh-completion-policy.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,6 +45,106 @@ const STATUS_ENCERRADO_HOSPEDE = new Set([
   "erro_sincronizacao",
 ]);
 
+const FNRH_GET_SELECT = [
+  "id",
+  "reserva_id",
+  "hospede_id",
+  "hospede_nome",
+  "status",
+  "link_token",
+  "documento",
+  "data_nascimento",
+  "nacionalidade",
+  "endereco",
+  "telefone",
+  "email",
+  "procedencia",
+  "destino",
+  "placa_veiculo",
+  "cor_veiculo",
+  "modelo_veiculo",
+  "assinatura_base64",
+  "preenchido_em",
+  "nome_social",
+  "sexo",
+  "documento_tipo",
+  "documento_numero",
+  "orgao_emissor",
+  "pais_emissor",
+  "documento_validade",
+  "cep",
+  "logradouro",
+  "numero",
+  "complemento",
+  "bairro",
+  "cidade",
+  "uf",
+  "pais",
+  "endereco_estrangeiro",
+  "motivo_viagem",
+  "meio_transporte",
+  "terms_version",
+  "privacy_notice_version",
+  "terms_accepted_at",
+  "data_confirmed",
+  "privacy_accepted",
+  "field_provenance",
+  "flow_version",
+  "fnrh_lifecycle_status",
+  "confirmation_source",
+  "completed_at",
+  "completed_by_guest_id",
+  "has_required_core_fields",
+  "has_required_documents",
+  "identity_verification_status",
+  "document_verification_status",
+  "face_verification_status",
+  "minor_relation",
+  "minor_relation_other",
+  "minor_accompaniment",
+].join(", ");
+
+function resolveFlowVersion(row: Record<string, unknown>): "legacy" | "v2" {
+  const fv = str(row.flow_version);
+  if (fv === "v2") return "v2";
+  // flow_version=legacy (incl. default DB): mantém canvas se já há progresso legado;
+  // formulários editáveis novos (pendente) → v2.
+  if (str(row.assinatura_base64)) return "legacy";
+  const st = str(row.status);
+  if (st === "rascunho") {
+    const hasV2Shape = Boolean(
+      str(row.documento_tipo) || str(row.cep) || str(row.motivo_viagem) || str(row.logradouro),
+    );
+    return hasV2Shape ? "v2" : "legacy";
+  }
+  return "v2";
+}
+
+function fechadoPayload(st: string, lifecycle: string | null): Response {
+  if (st === "erro_sincronizacao") {
+    return jsonResponse({
+      message: "Sua ficha foi confirmada. O envio ao sistema oficial falhou; procure a recepção se precisar.",
+      status: st,
+      fnrh_lifecycle_status: lifecycle,
+      fechado: true,
+    });
+  }
+  if (st === "enviado_oficial") {
+    return jsonResponse({
+      message: "FNRH confirmada e registrada com sucesso.",
+      status: st,
+      fnrh_lifecycle_status: lifecycle,
+      fechado: true,
+    });
+  }
+  return jsonResponse({
+    message: "Esta FNRH já foi preenchida e confirmada.",
+    status: st === "preenchido" ? "confirmado_hospede" : st,
+    fnrh_lifecycle_status: lifecycle,
+    fechado: true,
+  });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "GET") return jsonResponse({ error: "Método não permitido." }, 405);
@@ -57,7 +165,7 @@ Deno.serve(async (req: Request) => {
     }
     const { data: list, error: errList } = await admin
       .from("fnrh_hospedes")
-      .select("id, hospede_id, hospede_nome, status, preenchido_em, link_token")
+      .select("id, hospede_id, hospede_nome, status, preenchido_em, link_token, flow_version, fnrh_lifecycle_status")
       .eq("reserva_id", reservaId)
       .order("created_at", { ascending: true });
     if (errList) return jsonResponse({ error: "Falha ao listar FNRH." }, 500);
@@ -70,19 +178,29 @@ Deno.serve(async (req: Request) => {
         status: r.status,
         preenchido_em: r.preenchido_em,
         link_token: r.link_token,
+        flow_version: r.flow_version ?? "legacy",
+        fnrh_lifecycle_status: r.fnrh_lifecycle_status ?? null,
       })),
     });
   }
 
   if (guestId && token) {
-    const sel =
-      "id, reserva_id, hospede_id, hospede_nome, status, link_token, documento, data_nascimento, nacionalidade, endereco, telefone, email, procedencia, destino, placa_veiculo, cor_veiculo, modelo_veiculo, assinatura_base64, preenchido_em";
     let row: Record<string, unknown> | null = null;
-    const { data: byFnrhId, error: errId } = await admin.from("fnrh_hospedes").select(sel).eq("id", guestId).eq("link_token", token).maybeSingle();
+    const { data: byFnrhId, error: errId } = await admin
+      .from("fnrh_hospedes")
+      .select(FNRH_GET_SELECT)
+      .eq("id", guestId)
+      .eq("link_token", token)
+      .maybeSingle();
     if (errId) return jsonResponse({ error: "Falha ao validar link." }, 500);
     if (byFnrhId) row = byFnrhId as Record<string, unknown>;
     if (!row) {
-      const { data: byHospedeId, error: errH } = await admin.from("fnrh_hospedes").select(sel).eq("hospede_id", guestId).eq("link_token", token).maybeSingle();
+      const { data: byHospedeId, error: errH } = await admin
+        .from("fnrh_hospedes")
+        .select(FNRH_GET_SELECT)
+        .eq("hospede_id", guestId)
+        .eq("link_token", token)
+        .maybeSingle();
       if (errH) return jsonResponse({ error: "Falha ao validar link." }, 500);
       if (byHospedeId) row = byHospedeId as Record<string, unknown>;
     }
@@ -91,22 +209,12 @@ Deno.serve(async (req: Request) => {
     }
 
     const st = str(row.status);
-    if (STATUS_ENCERRADO_HOSPEDE.has(st)) {
-      if (st === "erro_sincronizacao") {
-        return jsonResponse({
-          message: "Sua ficha foi confirmada. O envio ao sistema oficial falhou; procure a recepção se precisar.",
-          status: st,
-          fechado: true,
-        });
-      }
-      if (st === "enviado_oficial") {
-        return jsonResponse({
-          message: "FNRH confirmada e registrada com sucesso.",
-          status: st,
-          fechado: true,
-        });
-      }
-      return jsonResponse({ message: "Esta FNRH já foi preenchida e confirmada.", status: st === "preenchido" ? "confirmado_hospede" : st, fechado: true });
+    const lifecycle = str(row.fnrh_lifecycle_status) || null;
+    if (
+      STATUS_ENCERRADO_HOSPEDE.has(st) ||
+      isFnrhLifecycleComplete(lifecycle as "completed" | "manually_completed" | "waived" | null)
+    ) {
+      return fechadoPayload(st || "confirmado_hospede", lifecycle);
     }
 
     const hospedeOperacionalId = str(row.hospede_id);
@@ -114,10 +222,19 @@ Deno.serve(async (req: Request) => {
 
     const { data: hospede } = await admin
       .from("operacional_hospedes")
-      .select("principal, nome, email, whatsapp")
+      .select("principal, nome, email, whatsapp, guest_role, responsible_guest_id, is_minor, data_nascimento")
       .eq("id", hospedeOperacionalId)
       .maybeSingle();
-    const h = hospede as { principal?: boolean; nome?: string; email?: string; whatsapp?: string } | null;
+    const h = hospede as {
+      principal?: boolean;
+      nome?: string;
+      email?: string;
+      whatsapp?: string;
+      guest_role?: string | null;
+      responsible_guest_id?: string | null;
+      is_minor?: boolean | null;
+      data_nascimento?: string | null;
+    } | null;
 
     const { data: resv } = await admin
       .from("operacional_reservas")
@@ -145,35 +262,146 @@ Deno.serve(async (req: Request) => {
 
     const preenchido = {
       hospede_nome: pick(row.hospede_nome, pick(h?.nome, nomeHotel)),
-      documento: pick(row.documento, ""),
-      data_nascimento: row.data_nascimento ?? null,
+      nome_social: pick(row.nome_social, ""),
+      sexo: pick(row.sexo, ""),
+      documento: pick(row.documento, pick(row.documento_numero, "")),
+      documento_tipo: pick(row.documento_tipo, ""),
+      documento_numero: pick(row.documento_numero, pick(row.documento, "")),
+      orgao_emissor: pick(row.orgao_emissor, ""),
+      pais_emissor: pick(row.pais_emissor, ""),
+      documento_validade: row.documento_validade ?? null,
+      data_nascimento: row.data_nascimento ?? h?.data_nascimento ?? null,
       nacionalidade: pick(row.nacionalidade, ""),
       endereco: pick(row.endereco, ""),
+      cep: pick(row.cep, ""),
+      logradouro: pick(row.logradouro, ""),
+      numero: pick(row.numero, ""),
+      complemento: pick(row.complemento, ""),
+      bairro: pick(row.bairro, ""),
+      cidade: pick(row.cidade, ""),
+      uf: pick(row.uf, ""),
+      pais: pick(row.pais, "Brasil"),
+      endereco_estrangeiro: pick(row.endereco_estrangeiro, ""),
       telefone: pick(row.telefone, str(h?.whatsapp)),
       email: pick(row.email, str(h?.email)),
       procedencia: pick(row.procedencia, ""),
       destino: pick(row.destino, hintDestino),
+      motivo_viagem: pick(row.motivo_viagem, ""),
+      meio_transporte: pick(row.meio_transporte, ""),
       placa_veiculo: pick(row.placa_veiculo, str(rv?.veiculo_placa)),
       cor_veiculo: pick(row.cor_veiculo, str(rv?.veiculo_cor)),
       modelo_veiculo: pick(row.modelo_veiculo, ""),
+      data_confirmed: row.data_confirmed === true,
+      privacy_accepted: row.privacy_accepted === true,
+      minor_relation: pick(row.minor_relation, ""),
+      minor_relation_other: pick(row.minor_relation_other, ""),
+      minor_accompaniment: pick(row.minor_accompaniment, ""),
     };
 
-    const principal = !!h?.principal;
+    const { data: docs } = await admin
+      .from("operacional_fnrh_documentos")
+      .select("id, document_type, document_subject, validation_status, storage_ref")
+      .eq("guest_id", hospedeOperacionalId)
+      .eq("reservation_id", reservaFk);
+
+    const documents = (docs ?? []).map((d: Record<string, unknown>) => ({
+      id: d.id,
+      document_type: d.document_type,
+      document_subject: d.document_subject,
+      validation_status: d.validation_status,
+      storage_ref_present: Boolean(str(d.storage_ref)),
+    }));
+
+    const guestRole = h?.guest_role ?? null;
+    const isMinor = h?.is_minor === true || guestRole === "minor";
+    const isResponsibleAdult =
+      !isMinor &&
+      (guestRole === "primary_adult" || guestRole === "adult_companion" || h?.principal === true);
+
+    let minors: Array<Record<string, unknown>> = [];
+    if (isResponsibleAdult) {
+      const { data: minorHospedes } = await admin
+        .from("operacional_hospedes")
+        .select("id, nome, guest_role, is_minor, responsible_guest_id, data_nascimento")
+        .eq("reserva_id", reservaFk)
+        .eq("guest_role", "minor")
+        .eq("responsible_guest_id", hospedeOperacionalId)
+        .eq("removed_from_reservation", false);
+
+      const minorIds = (minorHospedes ?? []).map((m: { id: string }) => m.id);
+      let minorFnrhByGuest = new Map<string, Record<string, unknown>>();
+      if (minorIds.length > 0) {
+        const { data: minorFnrh } = await admin
+          .from("fnrh_hospedes")
+          .select(
+            "id, hospede_id, hospede_nome, status, fnrh_lifecycle_status, flow_version, data_nascimento, minor_relation, minor_relation_other, minor_accompaniment, documento_tipo, documento_numero, nacionalidade",
+          )
+          .eq("reserva_id", reservaFk)
+          .in("hospede_id", minorIds);
+        for (const mf of minorFnrh ?? []) {
+          const rec = mf as Record<string, unknown>;
+          minorFnrhByGuest.set(str(rec.hospede_id), rec);
+        }
+      }
+
+      minors = (minorHospedes ?? []).map((m: Record<string, unknown>) => {
+        const fnrh = minorFnrhByGuest.get(str(m.id));
+        return {
+          guest_id: m.id,
+          nome: pick(fnrh?.hospede_nome, str(m.nome)),
+          data_nascimento: fnrh?.data_nascimento ?? m.data_nascimento ?? null,
+          status: fnrh?.status ?? "pendente",
+          fnrh_lifecycle_status: fnrh?.fnrh_lifecycle_status ?? null,
+          flow_version: fnrh?.flow_version ?? null,
+          minor_relation: fnrh?.minor_relation ?? null,
+          minor_relation_other: fnrh?.minor_relation_other ?? null,
+          minor_accompaniment: fnrh?.minor_accompaniment ?? null,
+          documento_tipo: fnrh?.documento_tipo ?? null,
+          documento_numero: fnrh?.documento_numero ?? null,
+          nacionalidade: fnrh?.nacionalidade ?? null,
+          fnrh_id: fnrh?.id ?? null,
+        };
+      });
+    }
+
+    const principal = !!h?.principal || guestRole === "primary_adult";
+    const flow_version = resolveFlowVersion(row);
 
     return jsonResponse({
       hospede_id: row.hospede_id,
+      fnrh_id: row.id,
       hospede_nome: preenchido.hospede_nome,
       reserva_id: row.reserva_id,
       status: st,
       principal,
+      guest_role: guestRole,
+      responsible_guest_id: h?.responsible_guest_id ?? null,
+      is_minor: isMinor,
       editavel: true,
+      flow_version,
+      fnrh_lifecycle_status: lifecycle,
+      terms_version: FNRH_TERMS_VERSION,
+      privacy_notice_version: FNRH_PRIVACY_NOTICE_VERSION,
+      field_provenance: (row.field_provenance as Record<string, unknown>) ?? {},
+      identity_verification_status: row.identity_verification_status ?? "not_required",
+      document_verification_status: row.document_verification_status ?? "not_required",
+      face_verification_status: row.face_verification_status ?? "not_required",
+      feature_flags: {
+        ocr_enabled: isFnrhOcrEnabled(Deno.env.get("FNRH_OCR_ENABLED")),
+        face_verification_enabled: isFnrhFaceVerificationEnabled(
+          Deno.env.get("FNRH_FACE_VERIFICATION_ENABLED"),
+        ),
+      },
       meta: {
         apartamento: str(rv?.apartamento),
         check_in_previsto: rv?.check_in_previsto ?? null,
         check_out_previsto: rv?.check_out_previsto ?? null,
       },
       preenchido,
-      assinatura_base64: row.assinatura_base64 ?? null,
+      documents,
+      minors,
+      // Legado: só expõe assinatura no fluxo canvas.
+      assinatura_base64: flow_version === "legacy" ? (row.assinatura_base64 ?? null) : null,
     });
   }
 

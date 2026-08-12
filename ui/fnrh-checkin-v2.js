@@ -1,0 +1,1198 @@
+/**
+ * FNRH check-in digital v2 — jornada mobile-first (8 etapas).
+ * Sem GOV.BR, OTP ou assinatura em canvas.
+ * Depende de window.YES_HOTEL_SUPABASE_CONFIG e de guest_id/token na URL.
+ */
+(function (global) {
+  "use strict";
+
+  var DEBOUNCE_MS = 850;
+  var STEPS = [
+    { id: "documento", label: "Documento" },
+    { id: "confira_dados", label: "Confira dados" },
+    { id: "endereco", label: "Endereço" },
+    { id: "viagem", label: "Viagem" },
+    { id: "hospedes_menores", label: "Hóspedes" },
+    { id: "revisao", label: "Revisão" },
+    { id: "aceite", label: "Aceite" },
+    { id: "concluido", label: "Concluído" },
+  ];
+
+  var DOC_TYPES = [
+    { value: "cpf", label: "CPF" },
+    { value: "rg", label: "RG" },
+    { value: "cnh", label: "CNH" },
+    { value: "passport", label: "Passaporte" },
+    { value: "birth_certificate", label: "Certidão de nascimento" },
+    { value: "other", label: "Outro" },
+  ];
+
+  var MOTIVO_OPTIONS = [
+    { value: "lazer", label: "Lazer / turismo" },
+    { value: "negocios", label: "Negócios" },
+    { value: "evento", label: "Evento" },
+    { value: "saude", label: "Saúde" },
+    { value: "estudo", label: "Estudo" },
+    { value: "outro", label: "Outro" },
+  ];
+
+  var TRANSPORTE_OPTIONS = [
+    { value: "carro", label: "Carro" },
+    { value: "aviao", label: "Avião" },
+    { value: "onibus", label: "Ônibus" },
+    { value: "outro", label: "Outro" },
+  ];
+
+  var RELATION_OPTIONS = [
+    { value: "pai", label: "Pai" },
+    { value: "mae", label: "Mãe" },
+    { value: "tutor_responsavel_legal", label: "Tutor / responsável legal" },
+    { value: "outro", label: "Outro" },
+  ];
+
+  var ACCOMPANIMENT_OPTIONS = [
+    { value: "acompanhado_por_pai_mae", label: "Acompanho como pai/mãe" },
+    { value: "acompanhado_por_responsavel_legal", label: "Acompanho como responsável legal" },
+    { value: "acompanhado_por_terceiro_autorizado", label: "Terceiro autorizado" },
+  ];
+
+  function escapeHtml(s) {
+    var div = document.createElement("div");
+    div.textContent = s == null ? "" : String(s);
+    return div.innerHTML;
+  }
+
+  function formatTime(d) {
+    return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function digitsOnly(v) {
+    return String(v || "").replace(/\D/g, "");
+  }
+
+  function hasText(v) {
+    return v != null && String(v).trim() !== "";
+  }
+
+  function isBrazilResident(state) {
+    var pais = String(state.pais || "Brasil").trim().toLowerCase();
+    if (!pais || pais === "brasil" || pais === "brazil" || pais === "br") return true;
+    var nac = String(state.nacionalidade || "").trim().toLowerCase();
+    if (nac.indexOf("brasil") >= 0 || nac === "brasileira" || nac === "brasileiro") {
+      return !hasText(state.endereco_estrangeiro);
+    }
+    return false;
+  }
+
+  function needsTwoSides(docType) {
+    return docType === "rg" || docType === "cnh";
+  }
+
+  function labelOf(options, value) {
+    for (var i = 0; i < options.length; i++) {
+      if (options[i].value === value) return options[i].label;
+    }
+    return value || "—";
+  }
+
+  function optionHtml(options, selected) {
+    return options
+      .map(function (o) {
+        return (
+          '<option value="' +
+          escapeHtml(o.value) +
+          '"' +
+          (o.value === selected ? " selected" : "") +
+          ">" +
+          escapeHtml(o.label) +
+          "</option>"
+        );
+      })
+      .join("");
+  }
+
+  /**
+   * @param {{
+   *   appEl: HTMLElement,
+   *   guestId: string,
+   *   token: string,
+   *   functionsUrl: string,
+   *   data: object
+   * }} opts
+   */
+  function start(opts) {
+    var app = opts.appEl;
+    var guestId = opts.guestId;
+    var token = opts.token;
+    var functionsUrl = opts.functionsUrl;
+    var data = opts.data || {};
+
+    if (data.is_minor) {
+      app.innerHTML =
+        "<h1>Check-in digital</h1>" +
+        '<p class="banner">A ficha de menores é preenchida e confirmada pelo <strong>responsável</strong> pelo link dele. ' +
+        "Use o link enviado ao adulto responsável desta reserva.</p>";
+      return;
+    }
+
+    var pre = data.preenchido || {};
+    var minors = Array.isArray(data.minors)
+      ? data.minors
+      : Array.isArray(data.menores)
+        ? data.menores
+        : [];
+    var documents = Array.isArray(data.documents) ? data.documents : [];
+    var termsVersion = data.terms_version || "terms-v1-2026-08";
+    var privacyVersion = data.privacy_notice_version || "privacy-v1-2026-08";
+    var meta = data.meta || {};
+    var flags = data.feature_flags || {};
+
+    var state = {
+      stepIndex: 0,
+      documento_tipo: pre.documento_tipo || "",
+      documento_numero: pre.documento_numero || pre.documento || "",
+      documento: pre.documento || pre.documento_numero || "",
+      data_nascimento: pre.data_nascimento ? String(pre.data_nascimento).slice(0, 10) : "",
+      hospede_nome: pre.hospede_nome || "",
+      nome_social: pre.nome_social || "",
+      nacionalidade: pre.nacionalidade || "",
+      telefone: pre.telefone || "",
+      email: pre.email || "",
+      cep: pre.cep || "",
+      logradouro: pre.logradouro || "",
+      numero: pre.numero || "",
+      complemento: pre.complemento || "",
+      bairro: pre.bairro || "",
+      cidade: pre.cidade || "",
+      uf: pre.uf || "",
+      pais: pre.pais || "Brasil",
+      endereco_estrangeiro: pre.endereco_estrangeiro || "",
+      endereco: pre.endereco || "",
+      procedencia: pre.procedencia || "",
+      destino: pre.destino || "",
+      motivo_viagem: pre.motivo_viagem || "",
+      meio_transporte: pre.meio_transporte || "",
+      placa_veiculo: pre.placa_veiculo || "",
+      cor_veiculo: pre.cor_veiculo || "",
+      modelo_veiculo: pre.modelo_veiculo || "",
+      // Aceite nunca inicia marcado na UI
+      data_confirmed: false,
+      privacy_accepted: false,
+      has_document_upload: documents.some(function (d) {
+        return d && d.storage_ref_present;
+      }),
+      uploadedSides: {},
+      minors: minors.map(function (m) {
+        return {
+          guest_id: m.guest_id || m.id || "",
+          nome: m.nome || "",
+          data_nascimento: m.data_nascimento ? String(m.data_nascimento).slice(0, 10) : "",
+          minor_relation: m.minor_relation || "",
+          minor_relation_other: m.minor_relation_other || "",
+          minor_accompaniment: m.minor_accompaniment || "",
+          nacionalidade: m.nacionalidade || "",
+          documento_tipo: m.documento_tipo || "",
+          documento_numero: m.documento_numero || "",
+          status: m.status || "",
+        };
+      }),
+      analyzing: false,
+      cepLoading: false,
+      cepError: "",
+      stepError: "",
+      draftStatus: "",
+      draftOk: null,
+      confirmBusy: false,
+    };
+
+    // Marca lados já enviados (heurística: qualquer doc do tipo)
+    if (state.has_document_upload) {
+      state.uploadedSides.single = true;
+      state.uploadedSides.front = true;
+      state.uploadedSides.back = true;
+    }
+
+    var draftTimer = null;
+    var draftAbort = null;
+
+    function submitUrl() {
+      return functionsUrl + "/fnrh-submit";
+    }
+    function uploadUrl() {
+      return functionsUrl + "/fnrh-document-upload";
+    }
+
+    function collectDraftBody() {
+      var body = {
+        hospede_id: guestId,
+        guest_id: guestId,
+        token: token,
+        action: "draft",
+        flow_version: "v2",
+        hospede_nome: state.hospede_nome,
+        nome_social: state.nome_social,
+        documento_tipo: state.documento_tipo,
+        documento_numero: state.documento_numero,
+        documento: state.documento_numero || state.documento,
+        data_nascimento: state.data_nascimento || null,
+        nacionalidade: state.nacionalidade,
+        cep: state.cep,
+        logradouro: state.logradouro,
+        numero: state.numero,
+        complemento: state.complemento,
+        bairro: state.bairro,
+        cidade: state.cidade,
+        uf: state.uf,
+        pais: state.pais,
+        endereco_estrangeiro: state.endereco_estrangeiro,
+        telefone: state.telefone,
+        email: state.email,
+        procedencia: state.procedencia,
+        destino: state.destino,
+        motivo_viagem: state.motivo_viagem,
+        meio_transporte: state.meio_transporte,
+        placa_veiculo: state.placa_veiculo,
+        cor_veiculo: state.cor_veiculo,
+        modelo_veiculo: state.modelo_veiculo,
+        terms_version: termsVersion,
+        privacy_notice_version: privacyVersion,
+        // Não persistir aceite como true via autosave até o usuário marcar na etapa
+        data_confirmed: false,
+        privacy_accepted: false,
+      };
+      return body;
+    }
+
+    function doDraft() {
+      if (draftAbort) draftAbort.abort();
+      draftAbort = new AbortController();
+      fetch(submitUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(collectDraftBody()),
+        signal: draftAbort.signal,
+      })
+        .then(function (r) {
+          return r.json();
+        })
+        .then(function (res) {
+          if (res.ok) {
+            state.draftStatus = "Rascunho salvo às " + formatTime(new Date()) + ".";
+            state.draftOk = true;
+          } else {
+            state.draftStatus = res.error || "Não foi possível salvar o rascunho.";
+            state.draftOk = false;
+          }
+          updateDraftStatusEl();
+        })
+        .catch(function (e) {
+          if (e && e.name === "AbortError") return;
+          state.draftStatus = "Erro de rede ao salvar rascunho.";
+          state.draftOk = false;
+          updateDraftStatusEl();
+        });
+    }
+
+    function scheduleDraft() {
+      if (draftTimer) clearTimeout(draftTimer);
+      draftTimer = setTimeout(doDraft, DEBOUNCE_MS);
+    }
+
+    function updateDraftStatusEl() {
+      var el = document.getElementById("v2-draft-status");
+      if (!el) return;
+      el.textContent = state.draftStatus || "";
+      el.className =
+        "draft-status" +
+        (state.draftOk === true ? " is-ok" : state.draftOk === false ? " is-err" : " muted");
+    }
+
+    function syncStateFromDom() {
+      var root = document.getElementById("v2-step-body");
+      if (!root) return;
+      root.querySelectorAll("[data-field]").forEach(function (el) {
+        var key = el.getAttribute("data-field");
+        if (!key) return;
+        if (el.type === "checkbox") {
+          state[key] = !!el.checked;
+        } else {
+          state[key] = el.value;
+        }
+      });
+      root.querySelectorAll("[data-minor-field]").forEach(function (el) {
+        var idx = parseInt(el.getAttribute("data-minor-index"), 10);
+        var key = el.getAttribute("data-minor-field");
+        if (isNaN(idx) || !state.minors[idx] || !key) return;
+        state.minors[idx][key] = el.value;
+      });
+    }
+
+    function validateCurrentStep() {
+      var id = STEPS[state.stepIndex].id;
+      state.stepError = "";
+
+      if (id === "documento") {
+        if (!hasText(state.documento_tipo)) {
+          state.stepError = "Selecione o tipo de documento.";
+          return false;
+        }
+        if (!hasText(state.documento_numero)) {
+          state.stepError = "Informe o número do documento.";
+          return false;
+        }
+        if (!hasText(state.data_nascimento)) {
+          state.stepError = "Informe a data de nascimento.";
+          return false;
+        }
+        if (!state.has_document_upload) {
+          if (needsTwoSides(state.documento_tipo)) {
+            if (!state.uploadedSides.front || !state.uploadedSides.back) {
+              state.stepError = "Envie a foto da frente e do verso do documento.";
+              return false;
+            }
+          } else if (!state.uploadedSides.single && !state.uploadedSides.front) {
+            state.stepError = "Envie uma foto ou arquivo do documento.";
+            return false;
+          }
+        }
+        return true;
+      }
+
+      if (id === "confira_dados") {
+        if (!hasText(state.hospede_nome)) {
+          state.stepError = "Nome completo é obrigatório.";
+          return false;
+        }
+        if (!hasText(state.data_nascimento)) {
+          state.stepError = "Data de nascimento é obrigatória.";
+          return false;
+        }
+        if (!hasText(state.nacionalidade)) {
+          state.stepError = "Nacionalidade é obrigatória.";
+          return false;
+        }
+        if (!hasText(state.telefone)) {
+          state.stepError = "Telefone é obrigatório.";
+          return false;
+        }
+        if (!hasText(state.email)) {
+          state.stepError = "E-mail é obrigatório.";
+          return false;
+        }
+        return true;
+      }
+
+      if (id === "endereco") {
+        if (isBrazilResident(state)) {
+          if (digitsOnly(state.cep).length !== 8) {
+            state.stepError = "Informe um CEP válido com 8 dígitos.";
+            return false;
+          }
+          if (
+            !hasText(state.logradouro) ||
+            !hasText(state.numero) ||
+            !hasText(state.bairro) ||
+            !hasText(state.cidade) ||
+            String(state.uf || "").trim().length !== 2
+          ) {
+            state.stepError = "Complete logradouro, número, bairro, cidade e UF.";
+            return false;
+          }
+        } else if (!hasText(state.endereco_estrangeiro)) {
+          state.stepError = "Informe o endereço completo no exterior.";
+          return false;
+        }
+        return true;
+      }
+
+      if (id === "viagem") {
+        if (!hasText(state.motivo_viagem)) {
+          state.stepError = "Selecione o motivo da viagem.";
+          return false;
+        }
+        if (!hasText(state.meio_transporte)) {
+          state.stepError = "Selecione o meio de transporte.";
+          return false;
+        }
+        if (!hasText(state.procedencia)) {
+          state.stepError = "Informe a procedência.";
+          return false;
+        }
+        if (!hasText(state.destino)) {
+          state.stepError = "Informe o destino.";
+          return false;
+        }
+        var meio = String(state.meio_transporte).toLowerCase();
+        if ((meio === "carro" || meio === "automovel" || meio === "veiculo") && !hasText(state.placa_veiculo)) {
+          state.stepError = "Informe a placa do veículo.";
+          return false;
+        }
+        return true;
+      }
+
+      if (id === "hospedes_menores") {
+        for (var i = 0; i < state.minors.length; i++) {
+          var m = state.minors[i];
+          if (!hasText(m.minor_relation)) {
+            state.stepError = "Informe o parentesco de cada menor.";
+            return false;
+          }
+          if (m.minor_relation === "outro" && !hasText(m.minor_relation_other)) {
+            state.stepError = "Descreva o parentesco (outro) do menor.";
+            return false;
+          }
+          if (!hasText(m.minor_accompaniment)) {
+            state.stepError = "Informe como o menor está acompanhado.";
+            return false;
+          }
+        }
+        return true;
+      }
+
+      if (id === "aceite") {
+        if (!state.data_confirmed || !state.privacy_accepted) {
+          state.stepError = "Marque as duas declarações para concluir.";
+          return false;
+        }
+        return true;
+      }
+
+      return true;
+    }
+
+    function goNext() {
+      syncStateFromDom();
+      if (!validateCurrentStep()) {
+        render();
+        return;
+      }
+      var stepId = STEPS[state.stepIndex].id;
+      if (stepId === "aceite") {
+        confirmAndFinish();
+        return;
+      }
+      if (stepId === "concluido") return;
+      scheduleDraft();
+      state.stepIndex += 1;
+      state.stepError = "";
+      render();
+    }
+
+    function goBack() {
+      syncStateFromDom();
+      if (state.stepIndex > 0 && STEPS[state.stepIndex].id !== "concluido") {
+        state.stepIndex -= 1;
+        state.stepError = "";
+        render();
+      }
+    }
+
+    function applyOcrSuggestions(fields) {
+      if (!fields || typeof fields !== "object") return;
+      var map = {
+        hospede_nome: "hospede_nome",
+        nome: "hospede_nome",
+        data_nascimento: "data_nascimento",
+        documento_numero: "documento_numero",
+        documento: "documento_numero",
+        nacionalidade: "nacionalidade",
+        orgao_emissor: "orgao_emissor",
+        cep: "cep",
+        logradouro: "logradouro",
+        bairro: "bairro",
+        cidade: "cidade",
+        uf: "uf",
+      };
+      Object.keys(map).forEach(function (k) {
+        if (hasText(fields[k]) && !hasText(state[map[k]])) {
+          state[map[k]] = String(fields[k]).trim();
+        }
+      });
+      if (hasText(fields.data_nascimento)) {
+        state.data_nascimento = String(fields.data_nascimento).slice(0, 10);
+      }
+    }
+
+    function uploadDocument(file, side) {
+      if (!file) return;
+      state.analyzing = true;
+      state.stepError = "";
+      render();
+
+      var fd = new FormData();
+      fd.append("guest_id", guestId);
+      fd.append("token", token);
+      fd.append("document_type", state.documento_tipo || "other");
+      fd.append("document_subject", "guest");
+      fd.append("side", side || "single");
+      fd.append("file", file, file.name || "documento");
+
+      fetch(uploadUrl(), { method: "POST", body: fd })
+        .then(function (r) {
+          return r.json().then(function (j) {
+            return { okHttp: r.ok, body: j };
+          });
+        })
+        .then(function (res) {
+          state.analyzing = false;
+          if (!res.body || !res.body.ok) {
+            state.stepError = (res.body && res.body.error) || "Falha no envio do documento.";
+            render();
+            return;
+          }
+          state.has_document_upload = true;
+          state.uploadedSides[side || "single"] = true;
+          applyOcrSuggestions(res.body.suggested_fields);
+          scheduleDraft();
+          render();
+        })
+        .catch(function () {
+          state.analyzing = false;
+          state.stepError = "Erro de conexão ao enviar o documento.";
+          render();
+        });
+    }
+
+    function lookupCep() {
+      var cep = digitsOnly(state.cep);
+      if (cep.length !== 8) {
+        state.cepError = "CEP deve ter 8 dígitos.";
+        render();
+        return;
+      }
+      state.cepLoading = true;
+      state.cepError = "";
+      render();
+      fetch("https://viacep.com.br/ws/" + cep + "/json/")
+        .then(function (r) {
+          return r.json();
+        })
+        .then(function (j) {
+          state.cepLoading = false;
+          if (j.erro) {
+            state.cepError = "CEP não encontrado.";
+            render();
+            return;
+          }
+          state.logradouro = j.logradouro || state.logradouro;
+          state.bairro = j.bairro || state.bairro;
+          state.cidade = j.localidade || state.cidade;
+          state.uf = j.uf || state.uf;
+          state.pais = "Brasil";
+          state.endereco_estrangeiro = "";
+          scheduleDraft();
+          render();
+        })
+        .catch(function () {
+          state.cepLoading = false;
+          state.cepError = "Não foi possível consultar o CEP.";
+          render();
+        });
+    }
+
+    function confirmAndFinish() {
+      syncStateFromDom();
+      if (!validateCurrentStep()) {
+        render();
+        return;
+      }
+      state.confirmBusy = true;
+      state.stepError = "";
+      render();
+
+      var body = {
+        hospede_id: guestId,
+        guest_id: guestId,
+        token: token,
+        action: "confirm",
+        flow_version: "v2",
+        confirm_own: true,
+        hospede_nome: state.hospede_nome,
+        nome_social: state.nome_social,
+        documento_tipo: state.documento_tipo,
+        documento_numero: state.documento_numero,
+        documento: state.documento_numero || state.documento,
+        data_nascimento: state.data_nascimento || null,
+        nacionalidade: state.nacionalidade,
+        cep: state.cep,
+        logradouro: state.logradouro,
+        numero: state.numero,
+        complemento: state.complemento,
+        bairro: state.bairro,
+        cidade: state.cidade,
+        uf: state.uf,
+        pais: state.pais,
+        endereco_estrangeiro: state.endereco_estrangeiro,
+        telefone: state.telefone,
+        email: state.email,
+        procedencia: state.procedencia,
+        destino: state.destino,
+        motivo_viagem: state.motivo_viagem,
+        meio_transporte: state.meio_transporte,
+        placa_veiculo: state.placa_veiculo,
+        cor_veiculo: state.cor_veiculo,
+        modelo_veiculo: state.modelo_veiculo,
+        data_confirmed: true,
+        privacy_accepted: true,
+        terms_version: termsVersion,
+        privacy_notice_version: privacyVersion,
+        confirm_minors: state.minors.map(function (m) {
+          return {
+            guest_id: m.guest_id,
+            hospede_nome: m.nome,
+            data_nascimento: m.data_nascimento || null,
+            nacionalidade: m.nacionalidade || state.nacionalidade,
+            documento_tipo: m.documento_tipo || "",
+            documento_numero: m.documento_numero || "",
+            minor_relation: m.minor_relation,
+            minor_relation_other: m.minor_relation_other,
+            minor_accompaniment: m.minor_accompaniment,
+            data_confirmed: true,
+            privacy_accepted: true,
+            terms_version: termsVersion,
+            privacy_notice_version: privacyVersion,
+          };
+        }),
+      };
+
+      fetch(submitUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+        .then(function (r) {
+          return r.json();
+        })
+        .then(function (res) {
+          state.confirmBusy = false;
+          if (res.ok) {
+            state.stepIndex = STEPS.length - 1;
+            state.stepError = "";
+            render();
+          } else {
+            var detail = "";
+            if (res.details && Array.isArray(res.details.missing) && res.details.missing.length) {
+              detail = " Faltando: " + res.details.missing.join(", ") + ".";
+            }
+            state.stepError = (res.error || "Falha ao confirmar.") + detail;
+            render();
+          }
+        })
+        .catch(function () {
+          state.confirmBusy = false;
+          state.stepError = "Erro de conexão. Tente novamente.";
+          render();
+        });
+    }
+
+    function progressPct() {
+      // concluído = 100%; demais etapas proporcionais
+      if (STEPS[state.stepIndex].id === "concluido") return 100;
+      return Math.round(((state.stepIndex + 1) / (STEPS.length - 1)) * 100);
+    }
+
+    function renderShell(bodyHtml, navOpts) {
+      navOpts = navOpts || {};
+      var apt =
+        meta.apartamento
+          ? '<p class="muted meta-line">Apartamento ' + escapeHtml(meta.apartamento) + "</p>"
+          : "";
+      var step = STEPS[state.stepIndex];
+      var analyzing =
+        state.analyzing
+          ? '<div class="analyzing" role="status" aria-live="polite">Analisando documento…</div>'
+          : "";
+      var err = state.stepError
+        ? '<p class="error" id="v2-step-error">' + escapeHtml(state.stepError) + "</p>"
+        : "";
+
+      var backBtn =
+        navOpts.hideBack || state.stepIndex === 0 || step.id === "concluido"
+          ? ""
+          : '<button type="button" class="btn secondary" id="v2-back">Voltar</button>';
+      var nextLabel =
+        step.id === "aceite"
+          ? state.confirmBusy
+            ? "Confirmando…"
+            : "Confirmar check-in"
+          : "Continuar";
+      var nextBtn =
+        step.id === "concluido"
+          ? ""
+          : '<button type="button" class="btn primary" id="v2-next"' +
+            (state.confirmBusy || state.analyzing ? " disabled" : "") +
+            ">" +
+            escapeHtml(nextLabel) +
+            "</button>";
+
+      app.innerHTML = [
+        '<div class="v2-wrap">',
+        "  <h1>Check-in digital</h1>",
+        '  <p class="muted">Yes Hotel · FNRH 2.0</p>',
+        apt,
+        '  <div class="progress" aria-label="Progresso">',
+        '    <div class="progress-bar" style="width:' + progressPct() + '%"></div>',
+        "  </div>",
+        '  <p class="step-label">Etapa ' +
+          (step.id === "concluido" ? STEPS.length : state.stepIndex + 1) +
+          " de " +
+          STEPS.length +
+          " · " +
+          escapeHtml(step.label) +
+          "</p>",
+        analyzing,
+        '  <div id="v2-step-body">' + bodyHtml + "</div>",
+        err,
+        '  <div class="draft-status muted" id="v2-draft-status" aria-live="polite"></div>',
+        '  <div class="nav-row">' + backBtn + nextBtn + "</div>",
+        "</div>",
+      ].join("");
+
+      updateDraftStatusEl();
+
+      var back = document.getElementById("v2-back");
+      if (back) back.addEventListener("click", goBack);
+      var next = document.getElementById("v2-next");
+      if (next) next.addEventListener("click", goNext);
+
+      var body = document.getElementById("v2-step-body");
+      if (body) {
+        body.querySelectorAll("[data-field], [data-minor-field]").forEach(function (el) {
+          el.addEventListener("input", function () {
+            syncStateFromDom();
+            if (el.getAttribute("data-field") === "meio_transporte") {
+              render();
+              return;
+            }
+            if (el.getAttribute("data-field") === "documento_tipo") {
+              render();
+              return;
+            }
+            if (el.getAttribute("data-minor-field") === "minor_relation") {
+              render();
+              return;
+            }
+            if (el.getAttribute("data-field") === "pais") {
+              render();
+              return;
+            }
+            scheduleDraft();
+          });
+          el.addEventListener("change", function () {
+            syncStateFromDom();
+            scheduleDraft();
+          });
+        });
+      }
+
+      bindStepHandlers();
+    }
+
+    function bindStepHandlers() {
+      var step = STEPS[state.stepIndex].id;
+
+      if (step === "documento") {
+        var fileFront = document.getElementById("doc-file-front");
+        var fileBack = document.getElementById("doc-file-back");
+        var fileSingle = document.getElementById("doc-file-single");
+        if (fileFront) {
+          fileFront.addEventListener("change", function () {
+            syncStateFromDom();
+            if (fileFront.files && fileFront.files[0]) uploadDocument(fileFront.files[0], "front");
+          });
+        }
+        if (fileBack) {
+          fileBack.addEventListener("change", function () {
+            syncStateFromDom();
+            if (fileBack.files && fileBack.files[0]) uploadDocument(fileBack.files[0], "back");
+          });
+        }
+        if (fileSingle) {
+          fileSingle.addEventListener("change", function () {
+            syncStateFromDom();
+            if (fileSingle.files && fileSingle.files[0]) uploadDocument(fileSingle.files[0], "single");
+          });
+        }
+      }
+
+      if (step === "endereco") {
+        var btnCep = document.getElementById("btn-cep");
+        if (btnCep) {
+          btnCep.addEventListener("click", function () {
+            syncStateFromDom();
+            lookupCep();
+          });
+        }
+        var cepInput = document.querySelector('[data-field="cep"]');
+        if (cepInput) {
+          cepInput.addEventListener("blur", function () {
+            syncStateFromDom();
+            if (digitsOnly(state.cep).length === 8) lookupCep();
+          });
+        }
+      }
+    }
+
+    function renderDocumento() {
+      var two = needsTwoSides(state.documento_tipo);
+      var uploadBlock = "";
+      if (!state.documento_tipo) {
+        uploadBlock = '<p class="muted">Selecione o tipo de documento para enviar a foto.</p>';
+      } else if (two) {
+        uploadBlock = [
+          '<label class="file-label">Frente do documento *',
+          '  <input type="file" id="doc-file-front" accept="image/*,application/pdf" capture="environment" />',
+          state.uploadedSides.front
+            ? '  <span class="ok-chip">Enviado</span>'
+            : "",
+          "</label>",
+          '<label class="file-label">Verso do documento *',
+          '  <input type="file" id="doc-file-back" accept="image/*,application/pdf" capture="environment" />',
+          state.uploadedSides.back
+            ? '  <span class="ok-chip">Enviado</span>'
+            : "",
+          "</label>",
+        ].join("");
+      } else {
+        uploadBlock = [
+          '<label class="file-label">Foto ou arquivo do documento *',
+          '  <input type="file" id="doc-file-single" accept="image/*,application/pdf" capture="environment" />',
+          state.uploadedSides.single || state.has_document_upload
+            ? '  <span class="ok-chip">Enviado</span>'
+            : "",
+          "</label>",
+        ].join("");
+      }
+
+      return [
+        '<p class="banner">Envie uma foto legível do documento. Usamos isso para validar sua identidade no hotel.</p>',
+        "<label>Tipo de documento *</label>",
+        '<select data-field="documento_tipo">',
+        '<option value="">Selecione…</option>',
+        optionHtml(DOC_TYPES, state.documento_tipo),
+        "</select>",
+        "<label>Número do documento *</label>",
+        '<input data-field="documento_numero" inputmode="text" autocomplete="off" value="' +
+          escapeHtml(state.documento_numero) +
+          '" />',
+        "<label>Data de nascimento *</label>",
+        '<input data-field="data_nascimento" type="date" value="' +
+          escapeHtml(state.data_nascimento) +
+          '" />',
+        uploadBlock,
+        flags.ocr_enabled
+          ? '<p class="muted tip">Se a leitura automática estiver disponível, sugerimos campos após o envio — você pode corrigir.</p>'
+          : "",
+      ].join("");
+    }
+
+    function renderConfiraDados() {
+      return [
+        '<p class="banner">Confira e complete seus dados. Corrija o que estiver errado.</p>',
+        "<label>Nome completo *</label>",
+        '<input data-field="hospede_nome" autocomplete="name" value="' +
+          escapeHtml(state.hospede_nome) +
+          '" />',
+        "<label>Nome social (opcional)</label>",
+        '<input data-field="nome_social" value="' + escapeHtml(state.nome_social) + '" />',
+        "<label>Data de nascimento *</label>",
+        '<input data-field="data_nascimento" type="date" value="' +
+          escapeHtml(state.data_nascimento) +
+          '" />',
+        "<label>Nacionalidade *</label>",
+        '<input data-field="nacionalidade" placeholder="ex.: Brasileira" value="' +
+          escapeHtml(state.nacionalidade) +
+          '" />',
+        "<label>Telefone *</label>",
+        '<input data-field="telefone" type="tel" autocomplete="tel" placeholder="(00) 00000-0000" value="' +
+          escapeHtml(state.telefone) +
+          '" />',
+        "<label>E-mail *</label>",
+        '<input data-field="email" type="email" autocomplete="email" value="' +
+          escapeHtml(state.email) +
+          '" />',
+      ].join("");
+    }
+
+    function renderEndereco() {
+      var br = isBrazilResident(state);
+      var foreignToggle =
+        '<label class="check-inline">' +
+        '<input type="checkbox" id="toggle-foreign"' +
+        (!br ? " checked" : "") +
+        " /> Resido fora do Brasil / sem CEP brasileiro" +
+        "</label>";
+
+      var brBlock = [
+        "<label>CEP *</label>",
+        '<div class="cep-row">',
+        '  <input data-field="cep" inputmode="numeric" maxlength="9" placeholder="00000-000" value="' +
+          escapeHtml(state.cep) +
+          '" />',
+        '  <button type="button" class="btn secondary compact" id="btn-cep"' +
+          (state.cepLoading ? " disabled" : "") +
+          ">" +
+          (state.cepLoading ? "…" : "Buscar") +
+          "</button>",
+        "</div>",
+        state.cepError ? '<p class="error">' + escapeHtml(state.cepError) + "</p>" : "",
+        "<label>Logradouro *</label>",
+        '<input data-field="logradouro" value="' + escapeHtml(state.logradouro) + '" />',
+        "<label>Número *</label>",
+        '<input data-field="numero" value="' + escapeHtml(state.numero) + '" />',
+        "<label>Complemento</label>",
+        '<input data-field="complemento" value="' + escapeHtml(state.complemento) + '" />',
+        "<label>Bairro *</label>",
+        '<input data-field="bairro" value="' + escapeHtml(state.bairro) + '" />',
+        "<label>Cidade *</label>",
+        '<input data-field="cidade" value="' + escapeHtml(state.cidade) + '" />',
+        "<label>UF *</label>",
+        '<input data-field="uf" maxlength="2" placeholder="MS" value="' +
+          escapeHtml(state.uf) +
+          '" />',
+        '<input type="hidden" data-field="pais" value="Brasil" />',
+      ].join("");
+
+      var foreignBlock = [
+        '<input type="hidden" data-field="pais" value="' +
+          escapeHtml(state.pais && state.pais !== "Brasil" ? state.pais : "Exterior") +
+          '" />',
+        "<label>Endereço completo no exterior *</label>",
+        '<textarea data-field="endereco_estrangeiro" rows="4" placeholder="Rua, número, cidade, país">' +
+          escapeHtml(state.endereco_estrangeiro) +
+          "</textarea>",
+      ].join("");
+
+      var html = [
+        '<p class="banner">Endereço residencial. No Brasil, comece pelo CEP.</p>',
+        foreignToggle,
+        br ? brBlock : foreignBlock,
+      ].join("");
+
+      // bind toggle after renderShell — use setTimeout microtask via bindStepHandlers extension
+      setTimeout(function () {
+        var t = document.getElementById("toggle-foreign");
+        if (!t) return;
+        t.addEventListener("change", function () {
+          if (t.checked) {
+            state.pais = "Exterior";
+            state.cep = "";
+          } else {
+            state.pais = "Brasil";
+            state.endereco_estrangeiro = "";
+          }
+          render();
+        });
+      }, 0);
+
+      return html;
+    }
+
+    function renderViagem() {
+      var isCar = String(state.meio_transporte || "").toLowerCase() === "carro";
+      var vehicle = "";
+      if (isCar) {
+        vehicle = [
+          "<label>Placa do veículo *</label>",
+          '<input data-field="placa_veiculo" placeholder="ABC1D23" value="' +
+            escapeHtml(state.placa_veiculo) +
+            '" />',
+          "<label>Cor do veículo</label>",
+          '<input data-field="cor_veiculo" value="' + escapeHtml(state.cor_veiculo) + '" />',
+          "<label>Modelo do veículo</label>",
+          '<input data-field="modelo_veiculo" value="' + escapeHtml(state.modelo_veiculo) + '" />',
+        ].join("");
+      }
+      return [
+        "<label>Motivo da viagem *</label>",
+        '<select data-field="motivo_viagem">',
+        '<option value="">Selecione…</option>',
+        optionHtml(MOTIVO_OPTIONS, state.motivo_viagem),
+        "</select>",
+        "<label>Meio de transporte *</label>",
+        '<select data-field="meio_transporte">',
+        '<option value="">Selecione…</option>',
+        optionHtml(TRANSPORTE_OPTIONS, state.meio_transporte),
+        "</select>",
+        vehicle,
+        "<label>Procedência (de onde vem) *</label>",
+        '<input data-field="procedencia" value="' + escapeHtml(state.procedencia) + '" />',
+        "<label>Destino (para onde segue) *</label>",
+        '<input data-field="destino" value="' + escapeHtml(state.destino) + '" />',
+      ].join("");
+    }
+
+    function renderMenores() {
+      if (!state.minors.length) {
+        return (
+          '<p class="banner">Não há menores vinculados a você nesta reserva. Toque em Continuar.</p>' +
+          '<p class="muted">Se houver crianças no grupo, elas devem estar cadastradas com você como responsável.</p>'
+        );
+      }
+      return (
+        '<p class="banner">Confirme o parentesco e o acompanhamento de cada menor sob sua responsabilidade.</p>' +
+        state.minors
+          .map(function (m, idx) {
+            var other =
+              m.minor_relation === "outro"
+                ? "<label>Descreva o parentesco *</label>" +
+                  '<input data-minor-field="minor_relation_other" data-minor-index="' +
+                  idx +
+                  '" value="' +
+                  escapeHtml(m.minor_relation_other) +
+                  '" />'
+                : "";
+            return [
+              '<div class="minor-card">',
+              "  <h2>" + escapeHtml(m.nome || "Menor") + "</h2>",
+              m.data_nascimento
+                ? '  <p class="muted">Nascimento: ' + escapeHtml(m.data_nascimento) + "</p>"
+                : "",
+              "  <label>Parentesco *</label>",
+              '  <select data-minor-field="minor_relation" data-minor-index="' + idx + '">',
+              '  <option value="">Selecione…</option>',
+              optionHtml(RELATION_OPTIONS, m.minor_relation),
+              "  </select>",
+              other,
+              "  <label>Acompanhamento *</label>",
+              '  <select data-minor-field="minor_accompaniment" data-minor-index="' + idx + '">',
+              '  <option value="">Selecione…</option>',
+              optionHtml(ACCOMPANIMENT_OPTIONS, m.minor_accompaniment),
+              "  </select>",
+              "</div>",
+            ].join("");
+          })
+          .join("")
+      );
+    }
+
+    function renderRevisao() {
+      var addr = isBrazilResident(state)
+        ? [
+            state.logradouro,
+            state.numero ? "nº " + state.numero : "",
+            state.complemento,
+            state.bairro,
+            state.cidade,
+            state.uf,
+            state.cep ? "CEP " + state.cep : "",
+          ]
+            .filter(Boolean)
+            .join(", ")
+        : state.endereco_estrangeiro || state.endereco || "—";
+
+      var minorsHtml = state.minors.length
+        ? "<dt>Menores</dt><dd>" +
+          state.minors
+            .map(function (m) {
+              return (
+                escapeHtml(m.nome || "Menor") +
+                " (" +
+                escapeHtml(labelOf(RELATION_OPTIONS, m.minor_relation)) +
+                ")"
+              );
+            })
+            .join("; ") +
+          "</dd>"
+        : "";
+
+      return [
+        '<p class="banner">Revise tudo antes do aceite final.</p>',
+        '<dl class="review">',
+        "<dt>Nome</dt><dd>" + escapeHtml(state.hospede_nome) + "</dd>",
+        "<dt>Documento</dt><dd>" +
+          escapeHtml(labelOf(DOC_TYPES, state.documento_tipo)) +
+          " · " +
+          escapeHtml(state.documento_numero) +
+          "</dd>",
+        "<dt>Nascimento</dt><dd>" + escapeHtml(state.data_nascimento || "—") + "</dd>",
+        "<dt>Nacionalidade</dt><dd>" + escapeHtml(state.nacionalidade || "—") + "</dd>",
+        "<dt>Contato</dt><dd>" +
+          escapeHtml(state.telefone) +
+          " · " +
+          escapeHtml(state.email) +
+          "</dd>",
+        "<dt>Endereço</dt><dd>" + escapeHtml(addr) + "</dd>",
+        "<dt>Viagem</dt><dd>" +
+          escapeHtml(labelOf(MOTIVO_OPTIONS, state.motivo_viagem)) +
+          " · " +
+          escapeHtml(labelOf(TRANSPORTE_OPTIONS, state.meio_transporte)) +
+          "</dd>",
+        "<dt>Procedência / destino</dt><dd>" +
+          escapeHtml(state.procedencia) +
+          " → " +
+          escapeHtml(state.destino) +
+          "</dd>",
+        minorsHtml,
+        "</dl>",
+        '<button type="button" class="btn secondary" id="v2-edit-start">Corrigir desde o início</button>',
+      ].join("");
+    }
+
+    function renderAceite() {
+      return [
+        '<p class="banner">Leia e marque as duas declarações. Nenhuma vem pré-marcada.</p>',
+        '<label class="check-block">',
+        '  <input type="checkbox" data-field="data_confirmed"' +
+          (state.data_confirmed ? " checked" : "") +
+          " />",
+        "  <span>Declaro que os dados informados nesta ficha estão corretos e completos.</span>",
+        "</label>",
+        '<label class="check-block">',
+        '  <input type="checkbox" data-field="privacy_accepted"' +
+          (state.privacy_accepted ? " checked" : "") +
+          " />",
+        "  <span>Li e aceito o aviso de privacidade e o tratamento dos meus dados para fins de hospedagem.</span>",
+        "</label>",
+        '<p class="muted versions">Versão dos termos: <code>' +
+          escapeHtml(termsVersion) +
+          "</code><br/>Versão do aviso de privacidade: <code>" +
+          escapeHtml(privacyVersion) +
+          "</code></p>",
+      ].join("");
+    }
+
+    function renderConcluido() {
+      return [
+        '<div class="success-panel">',
+        "  <h2>Check-in concluído</h2>",
+        "  <p>Sua ficha de registro (FNRH) foi <strong>confirmada</strong> com sucesso.</p>",
+        "  <p>As credenciais de acesso e demais orientações seguem as regras do hotel e são enviadas quando estiverem prontas — " +
+          "não há envio imediato de senha só por concluir esta etapa.</p>",
+        '  <p class="muted">Se precisar de ajuda, fale com a recepção do Yes Hotel.</p>',
+        "</div>",
+      ].join("");
+    }
+
+    function render() {
+      var id = STEPS[state.stepIndex].id;
+      var body = "";
+      if (id === "documento") body = renderDocumento();
+      else if (id === "confira_dados") body = renderConfiraDados();
+      else if (id === "endereco") body = renderEndereco();
+      else if (id === "viagem") body = renderViagem();
+      else if (id === "hospedes_menores") body = renderMenores();
+      else if (id === "revisao") body = renderRevisao();
+      else if (id === "aceite") body = renderAceite();
+      else body = renderConcluido();
+
+      renderShell(body);
+
+      if (id === "revisao") {
+        var edit = document.getElementById("v2-edit-start");
+        if (edit) {
+          edit.addEventListener("click", function () {
+            state.stepIndex = 0;
+            state.stepError = "";
+            render();
+          });
+        }
+      }
+    }
+
+    render();
+    setTimeout(doDraft, 400);
+  }
+
+  global.YesHotelFnrhCheckinV2 = { start: start, STEPS: STEPS };
+})(typeof window !== "undefined" ? window : this);
