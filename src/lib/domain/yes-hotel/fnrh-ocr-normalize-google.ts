@@ -1,6 +1,12 @@
 /**
  * Normalização Google Vision DOCUMENT_TEXT_DETECTION → campos canônicos FNRH v2.
- * Texto livre é sugestão. Não inventa CPF. Reusa política de confidence existente.
+ *
+ * Identificadores documentais canônicos:
+ * - Brasileiro: CPF
+ * - Estrangeiro: Passaporte
+ *
+ * CNH/RG/CIN são apenas fonte visual; registro CNH/RG nunca vira documento_numero.
+ * Placeholder `other` do upload NÃO vira documento_tipo.
  */
 
 import {
@@ -12,6 +18,8 @@ import type { FnrhOcrSuggestedFields } from "./fnrh-ocr-port.ts";
 
 /** Confidence conservadora para heurística de texto (MEDIUM → preenche + review). */
 export const GOOGLE_OCR_HEURISTIC_CONFIDENCE = 0.7;
+
+const CANONICAL_DOC_TYPES = new Set(["cpf", "passport"]);
 
 function putField(
   out: NormalizedOcrResult,
@@ -82,7 +90,7 @@ function findLabeledValue(text: string, labels: RegExp): string {
  * - formato explícito com rótulo CPF / Cadastro de Pessoas Físicas, OU
  * - máscara ###.###.###-## com contexto CPF na mesma linha;
  * - e checksum válido.
- * Nunca usa 11 dígitos soltos sem rótulo.
+ * Nunca usa 11 dígitos soltos sem rótulo (ex.: registro CNH).
  */
 export function extractExplicitValidCpf(fullText: string): string | null {
   const text = String(fullText || "");
@@ -103,40 +111,63 @@ export function extractExplicitValidCpf(fullText: string): string | null {
   return null;
 }
 
+/**
+ * Passaporte só com rótulo claro ou linha MRZ P<.
+ * Não inventa a partir de alfanumérico solto.
+ */
+export function extractExplicitPassportNumber(fullText: string): string | null {
+  const text = String(fullText || "");
+  const patterns: RegExp[] = [
+    /PASSPORT\s*(?:NO|N[ºO]|NUMBER)[:\s#]+([A-Z0-9]{6,12})/i,
+    /N[UÚ]MERO\s+DO\s+PASSAPORTE[:\s#]+([A-Z0-9]{6,12})/i,
+    /PASSAPORTE[:\s#]+([A-Z0-9]{6,12})/i,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m?.[1]) {
+      const n = m[1].toUpperCase().replace(/\s+/g, "");
+      // Evita capturar o próprio rótulo (ex.: "PASSAPORTE" sozinho).
+      if (/^[A-Z0-9]{6,12}$/.test(n) && !/^PASSAPORTE?$/i.test(n) && n !== "PASSPORT") {
+        return n;
+      }
+    }
+  }
+  const mrz = text.match(/\bP<[A-Z]{3}[A-Z<]+<<[A-Z<]+/);
+  if (mrz) {
+    // Número costuma estar na linha 2; tenta padrão comum na linha do número
+    for (const line of text.split(/\r?\n/)) {
+      const t = line.trim().toUpperCase();
+      if (/^P</.test(t)) continue;
+      const num = t.match(/^([A-Z0-9]{6,9})/);
+      if (num?.[1] && /[0-9]/.test(num[1])) return num[1];
+    }
+  }
+  for (const line of text.split(/\r?\n/)) {
+    if (!/PASSAPORTE|PASSPORT/i.test(line)) continue;
+    if (/^P</i.test(line.trim())) continue;
+    const m = line.toUpperCase().match(/\b([A-Z]{1,2}[0-9]{6,9})\b/);
+    if (m?.[1] && m[1].length >= 6 && m[1].length <= 12) return m[1];
+  }
+  return null;
+}
+
+function looksLikePassportDocument(text: string): boolean {
+  return /PASSAPORTE|PASSPORT|P<[A-Z]{3}/i.test(text);
+}
+
 function extractName(text: string): string {
   const labeled = findLabeledValue(
     text,
-    /(?:NOME(?:\s+\/\s+NAME)?|NOME\s+COMPLETO|NOME\s+E\s+SOBRENOME)[:\s]+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-ZÁÉÍÓÚÂÊÔÃÕÇ\s']{4,80})/i,
+    /(?:NOME(?:\s+\/\s+NAME)?|NOME\s+COMPLETO|NOME\s+E\s+SOBRENOME|SURNAME\/GIVEN\s+NAMES?)[:\s]+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-ZÁÉÍÓÚÂÊÔÃÕÇ\s']{4,80})/i,
   );
   if (labeled) return labeled.replace(/\s+/g, " ").trim().toUpperCase();
   return "";
 }
 
-function extractDocNumber(text: string, requestedType: string): string {
-  if (requestedType === "passport") {
-    const p =
-      findLabeledValue(text, /(?:PASSPORT\s*NO|N[UÚ]MERO\s+DO\s+PASSAPORTE|PASSPORT)[:\s]*([A-Z0-9]{6,12})/i) ||
-      findLabeledValue(text, /\bP[< ]([A-Z]{3}[A-Z0-9]{6,9})\b/);
-    return p.toUpperCase();
-  }
-  if (requestedType === "cnh") {
-    return findLabeledValue(
-      text,
-      /(?:N[UÚ]MERO\s+DE\s+REGISTRO|REGISTRO|N[ºO]\s*REGISTRO)[:\s]*([0-9]{9,12})/i,
-    );
-  }
-  if (requestedType === "rg") {
-    return findLabeledValue(
-      text,
-      /(?:RG|IDENTIDADE|REGISTRO\s+GERAL)[:\s]*([0-9.\-Xx]{5,20})/i,
-    );
-  }
-  return "";
-}
-
 /**
  * Normaliza texto OCR Google → suggested_fields FNRH.
- * pages_processed: 1 se houver texto útil, senão 0.
+ * Prioridade: CPF válido → passaporte claro → nenhum identificador.
+ * Nunca promove other/cnh/rg como documento_tipo.
  */
 export function normalizeGoogleVisionText(input: {
   fullText?: string | null;
@@ -160,8 +191,10 @@ export function normalizeGoogleVisionText(input: {
   putField(out, "hospede_nome", name, conf);
 
   const dobRaw =
-    findLabeledValue(text, /(?:DATA\s+DE\s+NASCIMENTO|NASCIMENTO|DATE\s+OF\s+BIRTH|DOB)[:\s]*([0-9]{2}[\/\-.][0-9]{2}[\/\-.][0-9]{4})/i) ||
-    "";
+    findLabeledValue(
+      text,
+      /(?:DATA\s+DE\s+NASCIMENTO|NASCIMENTO|DATE\s+OF\s+BIRTH|DOB)[:\s]*([0-9]{2}[\/\-.][0-9]{2}[\/\-.][0-9]{4})/i,
+    ) || "";
   putField(out, "data_nascimento", normalizeDateBr(dobRaw), conf);
 
   const sexRaw = findLabeledValue(text, /(?:SEXO|SEX|G[EÊ]NERO)[:\s]*([A-Za-z]{1,12})/i);
@@ -173,29 +206,32 @@ export function normalizeGoogleVisionText(input: {
   );
   putField(out, "nacionalidade", nat ? nat.toUpperCase() : "", conf);
 
-  const validadeRaw = findLabeledValue(
-    text,
-    /(?:VALIDADE|DATE\s+OF\s+EXPIRY|EXPIRY|EXPIRA)[:\s]*([0-9]{2}[\/\-.][0-9]{2}[\/\-.][0-9]{4})/i,
-  );
-  putField(out, "documento_validade", normalizeDateBr(validadeRaw), conf);
-
-  const docNum = extractDocNumber(text, requested);
-  putField(out, "documento_numero", docNum, conf);
-
+  // 1) CPF válido explícito → canônico brasileiro (mesmo em foto de CNH/RG/CIN)
   const cpf = extractExplicitValidCpf(text);
   if (cpf) {
-    // Só promove CPF a documento_numero quando o tipo pedido é CPF (nunca inventa).
-    if (requested === "cpf" && !out.suggested_fields.documento_numero) {
-      putField(out, "documento_numero", cpf, conf);
-    }
+    putField(out, "documento_tipo", "cpf", conf);
+    putField(out, "documento_numero", cpf, conf);
     out.suggested_fields.cpf = cpf;
     out.confidence.cpf = conf;
     out.field_bands.cpf = classifyOcrConfidence(conf);
     if (!out.needs_review_fields.includes("cpf")) out.needs_review_fields.push("cpf");
+    return out;
   }
 
-  if (requested) {
-    putField(out, "documento_tipo", requested, conf);
+  // 2) Passaporte claramente identificado → canônico estrangeiro
+  const passport = extractExplicitPassportNumber(text);
+  const passportDoc =
+    looksLikePassportDocument(text) || requested === "passport";
+  if (passport && passportDoc) {
+    putField(out, "documento_tipo", "passport", conf);
+    putField(out, "documento_numero", passport, conf);
+    return out;
+  }
+
+  // 3) Sem identificador seguro — não inventar; não promover other/cnh/rg
+  if (CANONICAL_DOC_TYPES.has(requested)) {
+    // Só ecoa tipo canônico pedido se já houver número (não inventa número).
+    // Sem CPF/passaporte extraído, não força documento_tipo.
   }
 
   return out;

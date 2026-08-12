@@ -19,12 +19,8 @@
   ];
 
   var DOC_TYPES = [
-    { value: "cpf", label: "CPF" },
-    { value: "rg", label: "RG" },
-    { value: "cnh", label: "CNH" },
-    { value: "passport", label: "Passaporte" },
-    { value: "birth_certificate", label: "Certidão de nascimento" },
-    { value: "other", label: "Outro" },
+    { value: "cpf", label: "Brasileiro — CPF" },
+    { value: "passport", label: "Estrangeiro — Passaporte" },
   ];
 
   var MOTIVO_OPTIONS = [
@@ -85,7 +81,25 @@
   }
 
   function needsTwoSides(docType) {
+    // Jornada canônica: CPF / passaporte (documento físico CNH/RG é só fonte).
+    // Mantido por compatibilidade; não é o caminho normal document-first.
     return docType === "rg" || docType === "cnh";
+  }
+
+  function isCanonicalDocType(docType) {
+    return docType === "cpf" || docType === "passport";
+  }
+
+  function normalizeDocumentoTipo(raw) {
+    var t = String(raw || "").trim().toLowerCase();
+    if (isCanonicalDocType(t)) return t;
+    return "";
+  }
+
+  function documentoNumeroLabel(docType) {
+    if (docType === "passport") return "Passaporte *";
+    if (docType === "cpf") return "CPF *";
+    return "Número do documento *";
   }
 
   function labelOf(options, value) {
@@ -149,7 +163,7 @@
 
     var state = {
       stepIndex: 0,
-      documento_tipo: pre.documento_tipo || "",
+      documento_tipo: normalizeDocumentoTipo(pre.documento_tipo),
       documento_numero: pre.documento_numero || pre.documento || "",
       documento: pre.documento || pre.documento_numero || "",
       data_nascimento: pre.data_nascimento ? String(pre.data_nascimento).slice(0, 10) : "",
@@ -191,7 +205,7 @@
           minor_relation_other: m.minor_relation_other || "",
           minor_accompaniment: m.minor_accompaniment || "",
           nacionalidade: m.nacionalidade || "",
-          documento_tipo: m.documento_tipo || "",
+          documento_tipo: normalizeDocumentoTipo(m.documento_tipo),
           documento_numero: m.documento_numero || "",
           status: m.status || "",
         };
@@ -203,6 +217,7 @@
       stepError: "",
       ocrBanner: "",
       fieldOrigin: Object.assign({}, data.field_provenance || {}),
+      dirtyManualFields: {},
       reviewFields: {},
       docPreviewUrl: "",
       docPreviewName: "",
@@ -264,6 +279,7 @@
         // Não persistir aceite como true via autosave até o usuário marcar na etapa
         data_confirmed: false,
         privacy_accepted: false,
+        dirty_manual_fields: Object.keys(state.dirtyManualFields || {}),
       };
       return body;
     }
@@ -312,6 +328,14 @@
         (state.draftOk === true ? " is-ok" : state.draftOk === false ? " is-err" : " muted");
     }
 
+    function markDirtyManual(key) {
+      if (!key) return;
+      state.dirtyManualFields = state.dirtyManualFields || {};
+      state.dirtyManualFields[key] = true;
+      state.fieldOrigin = state.fieldOrigin || {};
+      state.fieldOrigin[key] = "manual";
+    }
+
     function syncStateFromDom() {
       var root = document.getElementById("v2-step-body");
       if (!root) return;
@@ -323,11 +347,13 @@
         if (el.type === "checkbox") {
           state[key] = nextVal;
         } else {
+          if (key === "documento_tipo") {
+            nextVal = normalizeDocumentoTipo(nextVal);
+          }
           state[key] = nextVal;
         }
         if (String(prevVal == null ? "" : prevVal) !== String(nextVal == null ? "" : nextVal)) {
-          state.fieldOrigin = state.fieldOrigin || {};
-          state.fieldOrigin[key] = "manual";
+          markDirtyManual(key);
         }
       });
       root.querySelectorAll("[data-minor-field]").forEach(function (el) {
@@ -520,19 +546,33 @@
         documento: "documento_numero",
         documento_tipo: "documento_tipo",
         nacionalidade: "nacionalidade",
-        orgao_emissor: "orgao_emissor",
-        pais_emissor: "pais_emissor",
         sexo: "sexo",
-        documento_validade: "documento_validade",
+        cpf: "documento_numero",
       };
       var applied = 0;
       Object.keys(map).forEach(function (k) {
         var target = map[k];
         if (!hasText(fields[k])) return;
         state.fieldOrigin = state.fieldOrigin || {};
-        // manual > ocr > hits: nunca sobrescreve correção manual do hóspede
-        if (state.fieldOrigin[target] === "manual") return;
+        // manual > ocr: só bloqueia se o hóspede já preencheu valor canônico
+        if (state.fieldOrigin[target] === "manual" && hasText(state[target])) {
+          if (!(target === "documento_tipo" && !isCanonicalDocType(state[target]))) {
+            return;
+          }
+        }
         var val = String(fields[k]).trim();
+        if (target === "documento_tipo") {
+          val = normalizeDocumentoTipo(val);
+          if (!val) return;
+        }
+        if (k === "cpf") {
+          // CPF canônico: tipo + número
+          if (state.fieldOrigin.documento_tipo !== "manual") {
+            state.documento_tipo = "cpf";
+            state.fieldOrigin.documento_tipo = "ocr";
+          }
+          val = val.replace(/\D/g, "");
+        }
         if (target === "data_nascimento") val = val.slice(0, 10);
         state[target] = val;
         if (target === "documento_numero") state.documento = val;
@@ -544,10 +584,11 @@
         applied += 1;
       });
       if (applied > 0) {
-        state.ocrBanner = "Encontramos estes dados no seu documento. Confira e corrija se necessário.";
+        state.ocrBanner =
+          "Encontramos estes dados no seu documento. Confira e corrija se necessário.";
       } else {
         state.ocrBanner =
-          "Não conseguimos ler todos os dados automaticamente. Você pode preenchê-los na próxima etapa.";
+          "Alguns dados não foram identificados. Confira e complete os campos abaixo.";
       }
     }
 
@@ -661,6 +702,12 @@
           state.uf = j.uf || state.uf;
           state.pais = "Brasil";
           state.endereco_estrangeiro = "";
+          markDirtyManual("cep");
+          markDirtyManual("logradouro");
+          markDirtyManual("bairro");
+          markDirtyManual("cidade");
+          markDirtyManual("uf");
+          markDirtyManual("pais");
           scheduleDraft();
           render();
         })
@@ -780,8 +827,9 @@
           : "";
       var step = STEPS[state.stepIndex];
       // Feedback de processamento fica no card do documento (próximo ao preview no mobile).
+      // Na Etapa 2 o banner OCR fica só dentro de renderConfiraDados (evita duplicata).
       var ocrBanner =
-        state.ocrBanner && !state.analyzing
+        state.ocrBanner && !state.analyzing && step.id !== "confira_dados"
           ? '<div class="banner" role="status">' + escapeHtml(state.ocrBanner) + "</div>"
           : "";
       var err = state.stepError
@@ -1049,21 +1097,28 @@
     }
 
     function renderConfiraDados() {
+      var bannerText =
+        state.ocrBanner ||
+        "Alguns dados não foram identificados. Confira e complete os campos abaixo.";
+      var numLabel = documentoNumeroLabel(state.documento_tipo);
       return [
-        '<p class="banner">Encontramos estes dados no seu documento. Confira e corrija se necessário.</p>',
+        // Banner único: só aqui na Etapa 2 (shell não duplica ocrBanner nesta etapa)
+        '<p class="banner" role="status">' + escapeHtml(bannerText) + "</p>",
         "<label>Nome completo *</label>",
         '<input data-field="hospede_nome" autocomplete="name" value="' +
           escapeHtml(state.hospede_nome) +
           '" />',
         "<label>Nome social (opcional)</label>",
         '<input data-field="nome_social" value="' + escapeHtml(state.nome_social) + '" />',
-        "<label>Tipo de documento *</label>",
+        "<label>Identificação *</label>",
         '<select data-field="documento_tipo">',
         '<option value="">Selecione…</option>',
         optionHtml(DOC_TYPES, state.documento_tipo),
         "</select>",
-        "<label>Número do documento *</label>",
-        '<input data-field="documento_numero" inputmode="text" autocomplete="off" value="' +
+        "<label>" + escapeHtml(numLabel) + "</label>",
+        '<input data-field="documento_numero" inputmode="' +
+          (state.documento_tipo === "cpf" ? "numeric" : "text") +
+          '" autocomplete="off" value="' +
           escapeHtml(state.documento_numero) +
           '" />',
         "<label>Data de nascimento *</label>",

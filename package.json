@@ -37,6 +37,7 @@
     "test:yes:fnrh-provenance-confirm": "tsx scripts/test-fnrh-provenance-confirm.ts",
     "test:yes:fnrh-azure-ocr": "tsx scripts/test-fnrh-azure-ocr.ts",
     "test:yes:fnrh-google-vision-ocr": "tsx scripts/test-fnrh-google-vision-ocr.ts",
+    "test:yes:fnrh-ocr-cpf-passport": "tsx scripts/test-fnrh-ocr-cpf-passport.ts",
     "test:yes:fnrh-token-transport": "tsx scripts/test-fnrh-token-transport.ts",
     "test:yes:guest-access-welcome": "tsx scripts/test-guest-access-welcome-messages.ts",
     "test:yes:first-room-access-transaction": "tsx scripts/test-first-room-access-transaction.ts",

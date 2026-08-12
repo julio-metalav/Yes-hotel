@@ -7,6 +7,7 @@
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isFnrhOcrEnabled } from "../../../src/lib/domain/yes-hotel/fnrh-checkin-v2-policy.ts";
+import { buildOcrPersistPatch } from "../../../src/lib/domain/yes-hotel/fnrh-ocr-apply-suggestions.ts";
 import {
   FNRH_OCR_MAX_ATTEMPTS_PER_GUEST_JOURNEY,
   resolveFnrhOcrModelMeta,
@@ -21,6 +22,7 @@ import {
   type FnrhOcrProviderName,
   type FnrhOcrResult,
 } from "../../../src/lib/domain/yes-hotel/fnrh-ocr-port.ts";
+import type { FnrhFieldProvenanceMap } from "../../../src/lib/domain/yes-hotel/fnrh-field-provenance.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -482,6 +484,49 @@ Deno.serve(async (req: Request) => {
     console.warn("[fnrh-document-upload] metadata_sanitized ocr merge failed");
   }
 
+  // Persistência server-side das sugestões OCR (retomável sem depender do JS).
+  let ocrPersistedFields: string[] = [];
+  if (ocrSuccess && suggestedCount > 0 && docGuestId === row.hospede_id) {
+    const { data: fnrhCurrent, error: fnrhErr } = await admin
+      .from("fnrh_hospedes")
+      .select(
+        "id, hospede_nome, data_nascimento, nacionalidade, sexo, documento_tipo, documento_numero, documento, field_provenance, status",
+      )
+      .eq("id", row.id)
+      .maybeSingle();
+    if (fnrhErr || !fnrhCurrent) {
+      console.warn("[fnrh-document-upload] ocr persist load failed");
+    } else {
+      const current = fnrhCurrent as Record<string, unknown>;
+      const patch = buildOcrPersistPatch({
+        currentRow: current,
+        currentProvenance: (current.field_provenance as FnrhFieldProvenanceMap | null) ?? {},
+        suggested: ocr.suggested_fields ?? {},
+      });
+      if (patch.appliedKeys.length > 0) {
+        const { error: persistErr } = await admin
+          .from("fnrh_hospedes")
+          .update({
+            ...patch.update,
+            field_provenance: patch.fieldProvenance,
+            updated_at: new Date().toISOString(),
+            status: String(current.status || "rascunho") === "pendente" ? "rascunho" : current.status,
+            flow_version: "v2",
+            fnrh_lifecycle_status: "draft",
+          })
+          .eq("id", row.id);
+        if (persistErr) {
+          console.warn("[fnrh-document-upload] ocr persist update failed");
+        } else {
+          ocrPersistedFields = patch.appliedKeys;
+          console.info(
+            `[fnrh-document-upload] ocr persisted fields=${ocrPersistedFields.length} keys=${ocrPersistedFields.join(",")}`,
+          );
+        }
+      }
+    }
+  }
+
   return jsonResponse({
     ok: true,
     document_id: documentId,
@@ -493,6 +538,7 @@ Deno.serve(async (req: Request) => {
     provenance: ocr.provenance ?? "ocr",
     ocr_skipped: ocr.skipped === true,
     ocr_reason: ocr.reason ?? null,
+    ocr_persisted_fields: ocrPersistedFields,
     provider: ocrProvider,
     model: ocrModel,
   });
