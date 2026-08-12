@@ -364,6 +364,65 @@
       });
     }
 
+    function hasLinkedMinors() {
+      return Array.isArray(state.minors) && state.minors.length > 0;
+    }
+
+    /** Etapas exibidas na jornada (pula Hóspedes se não houver menores). */
+    function isStepVisible(stepId) {
+      if (stepId === "hospedes_menores" && !hasLinkedMinors()) return false;
+      return true;
+    }
+
+    function visibleSteps() {
+      return STEPS.filter(function (s) {
+        return isStepVisible(s.id);
+      });
+    }
+
+    function visibleStepMeta() {
+      var vis = visibleSteps();
+      var currentId = STEPS[state.stepIndex] ? STEPS[state.stepIndex].id : "";
+      var visualIndex = 0;
+      for (var i = 0; i < vis.length; i++) {
+        if (vis[i].id === currentId) {
+          visualIndex = i;
+          break;
+        }
+      }
+      return { steps: vis, visualIndex: visualIndex, total: vis.length };
+    }
+
+    /** Avança/volta no índice lógico STEPS, pulando etapas invisíveis. */
+    function nextVisibleStepIndex(fromIndex, direction) {
+      var i = fromIndex + direction;
+      while (i >= 0 && i < STEPS.length) {
+        if (isStepVisible(STEPS[i].id)) return i;
+        i += direction;
+      }
+      return fromIndex;
+    }
+
+    /** Evita stepIndex em etapa pulada (reload / navegação). */
+    function ensureVisibleStepIndex() {
+      if (!STEPS[state.stepIndex]) {
+        state.stepIndex = 0;
+        return;
+      }
+      if (isStepVisible(STEPS[state.stepIndex].id)) return;
+      var forward = nextVisibleStepIndex(state.stepIndex, 1);
+      if (forward !== state.stepIndex && isStepVisible(STEPS[forward].id)) {
+        state.stepIndex = forward;
+        return;
+      }
+      var backward = nextVisibleStepIndex(state.stepIndex, -1);
+      if (backward !== state.stepIndex && isStepVisible(STEPS[backward].id)) {
+        state.stepIndex = backward;
+        return;
+      }
+      state.stepIndex = 0;
+    }
+
     function documentUploadComplete() {
       if (!state.has_document_upload) return false;
       if (needsTwoSides(state.documento_tipo)) {
@@ -520,7 +579,7 @@
       }
       if (stepId === "concluido") return;
       scheduleDraft();
-      state.stepIndex += 1;
+      state.stepIndex = nextVisibleStepIndex(state.stepIndex, 1);
       state.stepError = "";
       render();
     }
@@ -528,7 +587,7 @@
     function goBack() {
       syncStateFromDom();
       if (state.stepIndex > 0 && STEPS[state.stepIndex].id !== "concluido") {
-        state.stepIndex -= 1;
+        state.stepIndex = nextVisibleStepIndex(state.stepIndex, -1);
         state.stepError = "";
         render();
       }
@@ -814,13 +873,18 @@
     }
 
     function progressPct() {
-      // concluído = 100%; demais etapas proporcionais
+      // concluído = 100%; demais etapas proporcionais às etapas VISÍVEIS
+      ensureVisibleStepIndex();
+      var meta = visibleStepMeta();
       if (STEPS[state.stepIndex].id === "concluido") return 100;
-      return Math.round(((state.stepIndex + 1) / (STEPS.length - 1)) * 100);
+      var denom = Math.max(1, meta.total - 1);
+      return Math.round(((meta.visualIndex + 1) / denom) * 100);
     }
 
     function renderShell(bodyHtml, navOpts) {
       navOpts = navOpts || {};
+      ensureVisibleStepIndex();
+      var stepMeta = visibleStepMeta();
       var apt =
         meta.apartamento
           ? '<p class="muted meta-line">Apartamento ' + escapeHtml(meta.apartamento) + "</p>"
@@ -856,6 +920,9 @@
             escapeHtml(nextLabel) +
             "</button>";
 
+      var visualNum =
+        step.id === "concluido" ? stepMeta.total : stepMeta.visualIndex + 1;
+
       app.innerHTML = [
         '<div class="v2-wrap">',
         "  <h1>Check-in digital</h1>",
@@ -865,9 +932,9 @@
         '    <div class="progress-bar" style="width:' + progressPct() + '%"></div>',
         "  </div>",
         '  <p class="step-label">Etapa ' +
-          (step.id === "concluido" ? STEPS.length : state.stepIndex + 1) +
+          visualNum +
           " de " +
-          STEPS.length +
+          stepMeta.total +
           " · " +
           escapeHtml(step.label) +
           "</p>",
@@ -1382,15 +1449,15 @@
       return [
         '<div class="success-panel">',
         "  <h2>Check-in concluído</h2>",
-        "  <p>Sua ficha de registro (FNRH) foi <strong>confirmada</strong> com sucesso.</p>",
-        "  <p>As credenciais de acesso e demais orientações seguem as regras do hotel e são enviadas quando estiverem prontas — " +
-          "não há envio imediato de senha só por concluir esta etapa.</p>",
-        '  <p class="muted">Se precisar de ajuda, fale com a recepção do Yes Hotel.</p>',
+        "  <p>Sua ficha de registro (FNRH) foi confirmada com sucesso.</p>",
+        "  <p>As credenciais de acesso e demais orientações serão enviadas em breve.</p>",
+        "  <p>Seja bem-vindo(a) ao Yes Hotel.</p>",
         "</div>",
       ].join("");
     }
 
     function render() {
+      ensureVisibleStepIndex();
       var id = STEPS[state.stepIndex].id;
       var body = "";
       if (id === "documento") body = renderDocumento();

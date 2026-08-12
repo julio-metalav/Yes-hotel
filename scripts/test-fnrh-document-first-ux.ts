@@ -201,4 +201,55 @@ ok("CSS document-first presente");
   ok("feedback OCR: upload/OCR/final + botão + a11y + sem % falsa");
 }
 
+// Skip etapa Hóspedes vazia + texto final (A–I)
+{
+  assert.match(js, /function hasLinkedMinors\(\)/);
+  assert.match(js, /function isStepVisible\(stepId\)/);
+  assert.match(js, /function visibleSteps\(\)/);
+  assert.match(js, /function nextVisibleStepIndex\(/);
+  assert.match(js, /function ensureVisibleStepIndex\(\)/);
+  assert.match(js, /stepId === "hospedes_menores" && !hasLinkedMinors\(\)/);
+  assert.match(js, /state\.stepIndex = nextVisibleStepIndex\(state\.stepIndex, 1\)/);
+  assert.match(js, /state\.stepIndex = nextVisibleStepIndex\(state\.stepIndex, -1\)/);
+  assert.match(js, /stepMeta\.total/);
+  assert.match(js, /stepMeta\.visualIndex/);
+  // A/B: sem menores a etapa é invisível; navegação usa nextVisible (Viagem→Revisão)
+  ok("A/B. skip hospedes_menores + Viagem→Revisão via nextVisible");
+
+  // C: numeração visual recalculada
+  assert.match(js, /visualNum/);
+  assert.match(js, /visibleStepMeta\(\)/);
+  ok("C. numeração visual dinâmica");
+
+  // D/E: com menor a etapa permanece no STEPS e renderMenores valida parentesco
+  assert.match(js, /id: "hospedes_menores"/);
+  assert.match(js, /function renderMenores\(\)/);
+  assert.match(js, /Confirme o parentesco e o acompanhamento de cada menor/);
+  assert.match(js, /Informe o parentesco de cada menor/);
+  ok("D/E. com menor etapa e regras preservadas");
+
+  // F: reload não fica em step inválido
+  assert.match(js, /ensureVisibleStepIndex\(\)/);
+  assert.match(js, /function render\(\) \{\s*\r?\n\s*ensureVisibleStepIndex\(\)/);
+  ok("F. ensureVisibleStepIndex no render (reload seguro)");
+
+  // G/H: texto final novo; antigo removido
+  const concluido = js.slice(js.indexOf("function renderConcluido()"), js.indexOf("function render()"));
+  assert.match(concluido, /Check-in concluído/);
+  assert.match(concluido, /Sua ficha de registro \(FNRH\) foi confirmada com sucesso\./);
+  assert.match(concluido, /As credenciais de acesso e demais orientações serão enviadas em breve\./);
+  assert.match(concluido, /Seja bem-vindo\(a\) ao Yes Hotel\./);
+  assert.doesNotMatch(
+    concluido,
+    /não há envio imediato de senha só por concluir esta etapa/,
+  );
+  assert.doesNotMatch(concluido, /Se precisar de ajuda, fale com a recepção/);
+  assert.doesNotMatch(concluido, /seguem as regras do hotel e são enviadas quando estiverem prontas/);
+  ok("G/H. texto final novo; texto antigo removido");
+
+  // I: sem alteração de acesso/pagamento/TTLock neste arquivo
+  assert.doesNotMatch(js, /ttlock|pagarme|liberar.?acesso|gerar.?senha/i);
+  ok("I. sem regra de acesso/pagamento/TTLock no UI FNRH");
+}
+
 console.log("\nPASS test-fnrh-document-first-ux\n");
