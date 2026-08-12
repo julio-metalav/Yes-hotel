@@ -55,18 +55,21 @@ function seedRepo() {
         external_reservation_id: "HITS-1",
         classificacao_comissionamento: "nao_comissionada",
         pagamento_status: "pendente",
+        reservation_balance_due: 1700,
       },
       {
         id: RESERVA_COM,
         external_reservation_id: "HITS-2",
         classificacao_comissionamento: "comissionada",
         pagamento_status: "pendente",
+        reservation_balance_due: 1700,
       },
       {
         id: RESERVA_DESC,
         external_reservation_id: "HITS-3",
         classificacao_comissionamento: "desconhecida",
         pagamento_status: "pendente",
+        reservation_balance_due: 1700,
       },
     ],
     pixCustomers: [{ reservaId: RESERVA_OK, customer: pixCustomer }],
@@ -474,6 +477,9 @@ async function main() {
     const pag = [...state.pagamentos.values()][0]!;
     assert.equal(pag.sincronizacao_hits_status, "aguardando_registro_hits");
     assert.equal(pag.pago_em, fixturePaidChargeResponse.paid_at);
+    const reservaApos = state.reservas.get(RESERVA_OK)!;
+    assert.equal(reservaApos.reservation_balance_due, 0);
+    assert.equal(reservaApos.pagamento_status, "pago");
     ok("webhook nao confia no payload; paid so apos GET S2S");
 
     const dup = await svc.processWebhook(mentiroso);
@@ -565,7 +571,7 @@ async function main() {
     return { repo, state };
   }
 
-  for (const st of ["paid", "refunded", "chargeback"] as const) {
+  for (const st of ["refunded", "chargeback"] as const) {
     const { repo } = seedBlocking(st);
     let calls = 0;
     const svc = new CobrancaPagarmeService({
@@ -592,6 +598,125 @@ async function main() {
     if (!r.ok) assert.equal(r.error.code, "obrigacao_ja_paga");
     assert.equal(calls, 0);
     ok(`${st} anterior bloqueia nova cobranca`);
+  }
+
+  // paid sem saldo restante → bloqueia (saldo_zerado / obrigacao)
+  {
+    const { repo, state } = seedBlocking("paid");
+    state.reservas.get(RESERVA_OK)!.reservation_balance_due = 0;
+    let calls = 0;
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: () => {
+              calls += 1;
+              return true;
+            },
+            body: fixturePaymentLinkResponse,
+          },
+        ]) as never,
+      ),
+    });
+    const r = await svc.criar({
+      reservaId: RESERVA_OK,
+      metodo: "cartao",
+      valorCentavos: 100,
+      operadorUserId: OPERATOR,
+    });
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.ok(
+        r.error.code === "saldo_zerado" || r.error.code === "obrigacao_ja_paga",
+        r.error.code,
+      );
+    }
+    assert.equal(calls, 0);
+    ok("paid + saldo 0 bloqueia nova cobranca");
+  }
+
+  // paid com saldo restante → permite segunda cobrança (parcial)
+  {
+    const { repo, state } = seedBlocking("paid");
+    state.reservas.get(RESERVA_OK)!.reservation_balance_due = 500;
+    let calls = 0;
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: (u, m) => {
+              if (m === "POST" && u.includes("/paymentlinks")) {
+                calls += 1;
+                return true;
+              }
+              return false;
+            },
+            body: fixturePaymentLinkResponse,
+          },
+        ]) as never,
+      ),
+    });
+    const r = await svc.criar({
+      reservaId: RESERVA_OK,
+      metodo: "cartao",
+      valorCentavos: 30_000,
+      operadorUserId: OPERATOR,
+    });
+    assert.equal(r.ok, true);
+    assert.equal(calls, 1);
+    assert.equal(state.cobrancas.size, 2);
+    ok("paid + saldo restante permite segunda cobranca");
+  }
+
+  // amount acima do saldo → rejeitado mesmo se frontend adulterar
+  {
+    const { repo } = seedRepo();
+    let calls = 0;
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: () => {
+              calls += 1;
+              return true;
+            },
+            body: fixturePaymentLinkResponse,
+          },
+        ]) as never,
+      ),
+    });
+    const r = await svc.criar({
+      reservaId: RESERVA_OK,
+      metodo: "cartao",
+      valorCentavos: 170_001,
+      operadorUserId: OPERATOR,
+    });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, "valor_acima_saldo");
+    assert.equal(calls, 0);
+    ok("amount acimaado acima do saldo rejeitado no backend");
+  }
+
+  // saldo null → nao gera
+  {
+    const { repo, state } = seedRepo();
+    state.reservas.get(RESERVA_OK)!.reservation_balance_due = null;
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(createMockPagarmeFetch([]) as never),
+    });
+    const r = await svc.criar({
+      reservaId: RESERVA_OK,
+      metodo: "cartao",
+      valorCentavos: 100,
+      operadorUserId: OPERATOR,
+    });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.error.code, "saldo_indisponivel");
+    ok("saldo null bloqueia cobranca");
   }
 
   for (const st of ["failed", "expired", "canceled"] as const) {
@@ -1725,9 +1850,11 @@ async function main() {
     assert.equal(pag.cobranca_id, PAGARME_FIXTURE_COBRANCA_ID);
     assert.equal(pag.sincronizacao_hits_status, "aguardando_registro_hits");
     assert.equal(pag.valor_centavos_recebido, 170_000);
-    assert.deepEqual(state.reservas.get(RESERVA_OK), reservaAntes);
-    assert.equal(state.reservas.get(RESERVA_OK)!.pagamento_status, "pendente");
-    ok("PL cartao pre-IDs: candidate via data.code; paid+IDs+1 pagamento; HITS pendente");
+    const reservaApos = state.reservas.get(RESERVA_OK)!;
+    assert.equal(reservaApos.reservation_balance_due, 0);
+    assert.equal(reservaApos.pagamento_status, "pago");
+    assert.notDeepEqual(reservaApos, reservaAntes);
+    ok("PL cartao pre-IDs: candidate via data.code; paid+IDs+1 pagamento; saldo liquidado");
 
     const dup = await svc.processWebhook(fixtureWebhookChargePaid);
     assert.equal(dup.ok, true);
@@ -1740,6 +1867,58 @@ async function main() {
     assert.equal(state.pagamentos.size, 1);
     assert.equal(state.cobrancas.get(PAGARME_FIXTURE_COBRANCA_ID)!.status, "paid");
     ok("PL cartao pre-IDs: reprocesso idempotente (1 webhook, 1 pagamento, GET nao repete)");
+  }
+
+  // Pagamento parcial: saldo restante > 0 → reserva continua pendente
+  {
+    const { repo, state } = seedRepo();
+    state.reservas.get(RESERVA_OK)!.reservation_balance_due = 500;
+    state.cobrancas.set(PAGARME_FIXTURE_COBRANCA_ID, {
+      id: PAGARME_FIXTURE_COBRANCA_ID,
+      reserva_id: RESERVA_OK,
+      external_reservation_id: "HITS-1",
+      metodo: "cartao",
+      valor_centavos: 200_00,
+      moeda: "BRL",
+      idempotency_key: "yh-parcial",
+      status: "pending",
+      pagarme_payment_link_id: PAGARME_FIXTURE_PAYMENT_LINK_ID,
+      pagarme_payment_link_url: PAGARME_FIXTURE_LINK_URL,
+      pagarme_order_id: PAGARME_FIXTURE_ORDER_ID,
+      pagarme_charge_id: PAGARME_FIXTURE_CHARGE_ID,
+      pix_qr_code: null,
+      pix_qr_code_url: null,
+      expira_em: null,
+      pagarme_status_raw: "pending",
+      requer_revisao_operacional: false,
+      requer_revisao_motivo: null,
+      requer_revisao_detectado_em: null,
+      criado_por_user_id: OPERATOR,
+    });
+    const svc = new CobrancaPagarmeService({
+      repo,
+      client: homologClient(
+        createMockPagarmeFetch([
+          {
+            match: (u, m) => m === "GET" && u.includes(`/charges/${PAGARME_FIXTURE_CHARGE_ID}`),
+            body: {
+              ...fixturePaidChargeResponse,
+              amount: 20000,
+              paid_amount: 20000,
+              payment_method: "credit_card",
+            },
+          },
+        ]) as never,
+      ),
+    });
+    const r = await svc.processWebhook(fixtureWebhookChargePaid);
+    assert.equal(r.ok, true);
+    if (r.ok) assert.equal(r.data.payment_registered, true);
+    const reserva = state.reservas.get(RESERVA_OK)!;
+    assert.equal(reserva.reservation_balance_due, 300);
+    assert.equal(reserva.pagamento_status, "pendente");
+    assert.equal(state.cobrancas.get(PAGARME_FIXTURE_COBRANCA_ID)!.status, "paid");
+    ok("pagamento parcial nao marca reserva como paga se saldo restante > 0");
   }
 
   console.log(`\n[test-cobranca-pagarme-service] ${passed} assertions OK\n`);

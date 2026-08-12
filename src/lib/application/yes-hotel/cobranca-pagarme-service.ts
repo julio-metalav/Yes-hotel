@@ -16,8 +16,6 @@ import {
   createPagarmeClient,
   extractWebhookHints,
   isChargebackEvent,
-  isCobrancaStatusBloqueante,
-  isObrigacaoLiquidadaOuContenciosa,
   isYesHotelCobrancaUuid,
   mapStatusAfterRemoteCreate,
   mapWebhookEventToRevisaoMotivo,
@@ -28,6 +26,10 @@ import {
   type PagarmePixCustomer,
   type RevisaoMotivo,
 } from "../../integrations/pagarme/index.ts";
+import {
+  parseReservationBalanceDue,
+  validateChargeAmountAgainstBalance,
+} from "../../domain/yes-hotel/pagarme-payment-ui.ts";
 
 export type CobrancaAdminAction = "classificar_comissionamento" | "criar" | "cancelar";
 
@@ -37,6 +39,8 @@ export interface ReservaCobrancaRow {
   classificacao_comissionamento: ClassificacaoComissionamento;
   pagamento_status: string;
   hospede_principal?: string | null;
+  /** Saldo operacional em reais (coluna reservation_balance_due). */
+  reservation_balance_due?: number | null;
 }
 
 export interface CobrancaPagarmeRow {
@@ -131,6 +135,17 @@ export interface CobrancaPagarmeRepository {
     | { ok: true; pagamento: PagamentoPagarmeRow }
     | { ok: false; conflict: true }
   >;
+  /**
+   * Após pagamento Pagar.me confirmado: decrementa reservation_balance_due.
+   * Se saldo restante <= 0, marca pagamento_status=pago (espelho operacional até HITS).
+   */
+  applyPagarmePaymentToReservationBalance(input: {
+    reservaId: string;
+    paidCentavos: number;
+  }): Promise<{
+    reservation_balance_due: number | null;
+    pagamento_status: string;
+  } | null>;
   resolvePixCustomer?(reservaId: string): Promise<PagarmePixCustomer | null>;
 }
 
@@ -301,9 +316,33 @@ export class CobrancaPagarmeService {
       return err("reserva_ja_paga", "Reserva ja marcada como paga no HITS/painel.", 409);
     }
 
-    // Gate de obrigação corrente (além do índice parcial no banco).
+    // Valida amount contra saldo operacional atual (nunca confiar só no frontend).
+    const amountVsBalance = validateChargeAmountAgainstBalance({
+      amountCentavos: valor,
+      balanceDue: reserva.reservation_balance_due,
+    });
+    if (!amountVsBalance.ok) {
+      const http =
+        amountVsBalance.reason === "valor_acima_saldo" ||
+        amountVsBalance.reason === "saldo_zerado"
+          ? 409
+          : 400;
+      return err(amountVsBalance.reason, amountVsBalance.message, http);
+    }
+
+    // Gate: cobrança ativa (created/pending/processing) → reusa sem novo Pagar.me.
+    const active = await this.repo.findActiveCobrancaByReserva(reserva.id);
+    if (active) {
+      return {
+        ok: true,
+        data: { cobranca: publicCobrancaView(active), reused_existing: true },
+      };
+    }
+
+    // Contencioso (refunded/chargeback) bloqueia nova cobrança.
+    // paid com saldo restante > 0 permite segunda cobrança (parcial).
     const blocking = await this.repo.findBlockingCobrancaByReserva(reserva.id);
-    if (blocking && isObrigacaoLiquidadaOuContenciosa(blocking.status)) {
+    if (blocking && (blocking.status === "refunded" || blocking.status === "chargeback")) {
       return err(
         "obrigacao_ja_paga",
         `Ja existe cobranca Pagar.me em status ${blocking.status} para esta reserva. Nova cobranca bloqueada neste checkpoint.`,
@@ -311,12 +350,16 @@ export class CobrancaPagarmeService {
         { cobranca_id: blocking.id, status: blocking.status },
       );
     }
-    if (blocking && isCobrancaStatusBloqueante(blocking.status)) {
-      // created/pending/processing — devolver a existente sem chamar Pagar.me.
-      return {
-        ok: true,
-        data: { cobranca: publicCobrancaView(blocking), reused_existing: true },
-      };
+    if (blocking && blocking.status === "paid") {
+      const bal = parseReservationBalanceDue(reserva.reservation_balance_due);
+      if (!bal.ok || bal.centavos <= 0) {
+        return err(
+          "obrigacao_ja_paga",
+          `Ja existe cobranca Pagar.me em status paid para esta reserva. Nova cobranca bloqueada neste checkpoint.`,
+          409,
+          { cobranca_id: blocking.id, status: blocking.status },
+        );
+      }
     }
 
     let pixCustomer: PagarmePixCustomer | null = null;
@@ -349,7 +392,7 @@ export class CobrancaPagarmeService {
     });
 
     if (!insertResult.ok && insertResult.conflict) {
-      const existing = await this.repo.findBlockingCobrancaByReserva(reserva.id);
+      const existing = await this.repo.findActiveCobrancaByReserva(reserva.id);
       if (!existing) {
         return err(
           "conflito_cobranca_ativa",
@@ -357,15 +400,7 @@ export class CobrancaPagarmeService {
           409,
         );
       }
-      if (isObrigacaoLiquidadaOuContenciosa(existing.status)) {
-        return err(
-          "obrigacao_ja_paga",
-          `Ja existe cobranca Pagar.me em status ${existing.status} para esta reserva. Nova cobranca bloqueada neste checkpoint.`,
-          409,
-          { cobranca_id: existing.id, status: existing.status },
-        );
-      }
-      // NÃO chamar Pagar.me na segunda tentativa.
+      // NÃO chamar Pagar.me na segunda tentativa (idempotência / race).
       return {
         ok: true,
         data: { cobranca: publicCobrancaView(existing), reused_existing: true },
@@ -826,6 +861,14 @@ export class CobrancaPagarmeService {
               sincronizacao_hits_status: "aguardando_registro_hits",
             });
             paymentRegistered = pay.ok === true || pay.conflict === true;
+            // Decrementa saldo operacional local (HITS permanece fonte oficial futura).
+            // Não assume que 1 cobrança paid = reserva paga se saldo restante > 0.
+            if (paymentRegistered) {
+              await this.repo.applyPagarmePaymentToReservationBalance({
+                reservaId: cobranca.reserva_id,
+                paidCentavos: snapshot.paidAmountCentavos!,
+              });
+            }
           } else if (
             snapshot.statusNormalized === "failed" ||
             snapshot.statusNormalized === "canceled" ||

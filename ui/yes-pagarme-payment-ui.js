@@ -157,7 +157,10 @@
       });
     }
 
-    if (cobranca && status === "paid") {
+    var balanceParsed = parseReservationBalanceDue(input.reservationBalanceDue);
+    var balanceAllowsMoreCharge = balanceParsed.ok && balanceParsed.centavos > 0;
+
+    if (cobranca && status === "paid" && !balanceAllowsMoreCharge) {
       return baseState({
         kind: "pago_pagarme_hits_pendente",
         listaLabel: "Pago no Pagar.me",
@@ -228,7 +231,9 @@
 
     if (classif === "nao_comissionada") {
       var hint = null;
-      if (cobranca && RETRYABLE[status]) {
+      if (cobranca && status === "paid" && balanceAllowsMoreCharge) {
+        hint = "Pagamento parcial confirmado. Gere cobrança do saldo restante.";
+      } else if (cobranca && RETRYABLE[status]) {
         if (status === "canceled") hint = "Última cobrança cancelada";
         else if (status === "expired") hint = "Última cobrança expirou";
         else hint = "Última tentativa falhou";
@@ -242,7 +247,7 @@
         variant: "warn",
         ctaKind: "pagarme_cobrar",
         ctaLabel: hint ? "Nova cobrança" : "Gerar e enviar link de pagamento",
-        cobranca: cobranca,
+        cobranca: cobranca && status === "paid" ? null : cobranca,
         showValorInput: true,
         showGerarCartao: true,
         hintAnterior: hint,
@@ -275,6 +280,66 @@
     var centavos = Math.round(n * 100);
     if (!isFinite(centavos) || centavos <= 0) return { ok: false, reason: "centavos" };
     return { ok: true, centavos: centavos };
+  }
+
+  /** Converte reservation_balance_due (reais) → centavos. null/invalid ≠ 0. */
+  function parseReservationBalanceDue(balanceDue) {
+    if (balanceDue == null || balanceDue === "") return { ok: false, reason: "null" };
+    var n =
+      typeof balanceDue === "number"
+        ? balanceDue
+        : Number(String(balanceDue).trim().replace(/\s/g, "").replace(",", "."));
+    if (!isFinite(n) || isNaN(n)) return { ok: false, reason: "invalid" };
+    var centavos = Math.round(n * 100);
+    if (!isFinite(centavos) || Math.floor(centavos) !== centavos) {
+      return { ok: false, reason: "invalid" };
+    }
+    return { ok: true, centavos: centavos };
+  }
+
+  function resolveChargePrefillCentavos(balanceDue) {
+    var bal = parseReservationBalanceDue(balanceDue);
+    if (!bal.ok || bal.centavos <= 0) return null;
+    return bal.centavos;
+  }
+
+  function validateChargeAmountAgainstBalance(input) {
+    input = input || {};
+    var bal = parseReservationBalanceDue(input.balanceDue);
+    if (!bal.ok) {
+      return {
+        ok: false,
+        reason: bal.reason === "null" ? "saldo_indisponivel" : "saldo_invalido",
+        message:
+          "Saldo da reserva indisponível. Atualize os dados da reserva antes de gerar a cobrança.",
+      };
+    }
+    if (bal.centavos <= 0) {
+      return {
+        ok: false,
+        reason: "saldo_zerado",
+        message: "Reserva sem saldo pendente. Não é possível gerar cobrança.",
+      };
+    }
+    var amount = Number(input.amountCentavos);
+    if (!isFinite(amount) || Math.floor(amount) !== amount || amount <= 0) {
+      return {
+        ok: false,
+        reason: "valor_invalido",
+        message: "valor_centavos deve ser inteiro > 0.",
+      };
+    }
+    if (amount > bal.centavos) {
+      return {
+        ok: false,
+        reason: "valor_acima_saldo",
+        message:
+          "Valor acima do saldo pendente (máximo " +
+          formatCentavosToBRL(bal.centavos) +
+          ").",
+      };
+    }
+    return { ok: true, balanceCentavos: bal.centavos };
   }
 
   function formatCentavosToBRL(centavos) {
@@ -342,6 +407,27 @@
       return {
         title: "Pagamento já confirmado.",
         detail: msg || "Atualize o painel para ver o status.",
+        ambiguous: false,
+      };
+    }
+    if (code === "saldo_indisponivel" || code === "saldo_invalido") {
+      return {
+        title: "Saldo da reserva indisponível.",
+        detail: msg || "Atualize os dados da reserva antes de gerar a cobrança.",
+        ambiguous: false,
+      };
+    }
+    if (code === "saldo_zerado") {
+      return {
+        title: "Reserva sem saldo pendente.",
+        detail: msg || "Não é possível gerar cobrança de R$ 0,00.",
+        ambiguous: false,
+      };
+    }
+    if (code === "valor_acima_saldo") {
+      return {
+        title: "Valor acima do saldo pendente.",
+        detail: msg || "Informe um valor menor ou igual ao saldo da reserva.",
         ambiguous: false,
       };
     }
@@ -506,6 +592,9 @@
     isPagarmeDirectPaymentBadgeType: isPagarmeDirectPaymentBadgeType,
     resolvePagarmeModalPresentation: resolvePagarmeModalPresentation,
     parseBRLToCentavos: parseBRLToCentavos,
+    parseReservationBalanceDue: parseReservationBalanceDue,
+    resolveChargePrefillCentavos: resolveChargePrefillCentavos,
+    validateChargeAmountAgainstBalance: validateChargeAmountAgainstBalance,
     formatCentavosToBRL: formatCentavosToBRL,
     formatBRLInputDisplay: formatBRLInputDisplay,
     toBRLInputEditValue: toBRLInputEditValue,

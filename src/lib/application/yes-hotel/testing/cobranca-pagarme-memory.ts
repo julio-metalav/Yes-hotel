@@ -9,8 +9,8 @@ import type {
   PagamentoPagarmeRow,
   ReservaCobrancaRow,
 } from "../cobranca-pagarme-service.ts";
-import type { PagarmePixCustomer } from "../../../integrations/pagarme.ts";
-import { isYesHotelCobrancaUuid } from "../../../integrations/pagarme.ts";
+import type { PagarmePixCustomer } from "../../../integrations/pagarme/index.ts";
+import { isYesHotelCobrancaUuid } from "../../../integrations/pagarme/index.ts";
 
 export interface MemoryCobrancaState {
   reservas: Map<string, ReservaCobrancaRow>;
@@ -100,10 +100,7 @@ export function createMemoryCobrancaRepo(
           c.reserva_id === row.reserva_id &&
           (c.status === "created" ||
             c.status === "pending" ||
-            c.status === "processing" ||
-            c.status === "paid" ||
-            c.status === "refunded" ||
-            c.status === "chargeback"),
+            c.status === "processing"),
       );
       if (blocking) return { ok: false, conflict: true, code: "23505" };
 
@@ -209,6 +206,40 @@ export function createMemoryCobrancaRepo(
       };
       state.pagamentos.set(pagamento.id, pagamento);
       return { ok: true, pagamento };
+    },
+
+    async applyPagarmePaymentToReservationBalance(input) {
+      const row = state.reservas.get(input.reservaId);
+      if (!row) return null;
+      const paid = Number(input.paidCentavos);
+      if (!Number.isInteger(paid) || paid <= 0) return null;
+      const raw = row.reservation_balance_due;
+      if (raw == null || raw === ("" as unknown)) {
+        return {
+          reservation_balance_due: null,
+          pagamento_status: row.pagamento_status,
+        };
+      }
+      const n = typeof raw === "number" ? raw : Number(raw);
+      if (!Number.isFinite(n)) {
+        return {
+          reservation_balance_due: row.reservation_balance_due ?? null,
+          pagamento_status: row.pagamento_status,
+        };
+      }
+      const balCentavos = Math.round(n * 100);
+      const remainingCentavos = Math.max(0, balCentavos - paid);
+      const remainingReais = Number((remainingCentavos / 100).toFixed(2));
+      const updated: ReservaCobrancaRow = {
+        ...row,
+        reservation_balance_due: remainingReais,
+        pagamento_status: remainingCentavos <= 0 ? "pago" : row.pagamento_status,
+      };
+      state.reservas.set(input.reservaId, updated);
+      return {
+        reservation_balance_due: updated.reservation_balance_due ?? null,
+        pagamento_status: updated.pagamento_status,
+      };
     },
 
     async resolvePixCustomer(reservaId) {

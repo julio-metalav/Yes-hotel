@@ -195,6 +195,8 @@ export function resolvePaymentUiState(input: {
   cobrancas?: PagarmeCobrancaUiRow[] | null;
   pagamentos?: PagarmePagamentoUiRow[] | null;
   perfilUsuario?: string | null;
+  /** Saldo operacional (reais). Fonte: reservation_balance_due. */
+  reservationBalanceDue?: unknown;
 }): PagarmePaymentUiState {
   const perfil = String(input.perfilUsuario ?? "")
     .trim()
@@ -241,7 +243,11 @@ export function resolvePaymentUiState(input: {
     });
   }
 
-  if (cobranca && status === "paid") {
+  const balanceParsed = parseReservationBalanceDue(input.reservationBalanceDue);
+  const balanceAllowsMoreCharge = balanceParsed.ok && balanceParsed.centavos > 0;
+
+  // Cobrança paga: se ainda há saldo operacional, permitir nova cobrança (parcial).
+  if (cobranca && status === "paid" && !balanceAllowsMoreCharge) {
     return baseState({
       kind: "pago_pagarme_hits_pendente",
       listaLabel: "Pago no Pagar.me",
@@ -311,14 +317,17 @@ export function resolvePaymentUiState(input: {
   }
 
   if (classif === "nao_comissionada") {
-    const hint =
-      cobranca && RETRYABLE.has(status)
-        ? status === "canceled"
+    let hint: string | null = null;
+    if (cobranca && status === "paid" && balanceAllowsMoreCharge) {
+      hint = "Pagamento parcial confirmado. Gere cobrança do saldo restante.";
+    } else if (cobranca && RETRYABLE.has(status)) {
+      hint =
+        status === "canceled"
           ? "Última cobrança cancelada"
           : status === "expired"
             ? "Última cobrança expirou"
-            : "Última tentativa falhou"
-        : null;
+            : "Última tentativa falhou";
+    }
     return baseState({
       kind: hint ? "nova_tentativa" : "cobrar",
       listaLabel: hint ? "Nova cobrança" : "Gerar e enviar link de pagamento",
@@ -328,7 +337,7 @@ export function resolvePaymentUiState(input: {
       variant: "warn",
       ctaKind: "pagarme_cobrar",
       ctaLabel: hint ? "Nova cobrança" : "Gerar e enviar link de pagamento",
-      cobranca,
+      cobranca: cobranca && status === "paid" ? null : cobranca,
       showValorInput: true,
       showGerarCartao: true,
       hintAnterior: hint,
@@ -366,6 +375,72 @@ export function parseBRLToCentavos(
   const centavos = Math.round(n * 100);
   if (!Number.isInteger(centavos) || centavos <= 0) return { ok: false, reason: "centavos" };
   return { ok: true, centavos };
+}
+
+/** Converte reservation_balance_due (reais) → centavos. null/invalid ≠ 0. */
+export function parseReservationBalanceDue(
+  balanceDue: unknown,
+): { ok: true; centavos: number } | { ok: false; reason: "null" | "invalid" } {
+  if (balanceDue == null || balanceDue === "") return { ok: false, reason: "null" };
+  const n =
+    typeof balanceDue === "number"
+      ? balanceDue
+      : Number(String(balanceDue).trim().replace(/\s/g, "").replace(",", "."));
+  if (!Number.isFinite(n) || Number.isNaN(n)) return { ok: false, reason: "invalid" };
+  const centavos = Math.round(n * 100);
+  if (!Number.isInteger(centavos)) return { ok: false, reason: "invalid" };
+  return { ok: true, centavos };
+}
+
+/** Prefill do modal: saldo > 0 em centavos; null se indisponível/zero. */
+export function resolveChargePrefillCentavos(balanceDue: unknown): number | null {
+  const bal = parseReservationBalanceDue(balanceDue);
+  if (!bal.ok || bal.centavos <= 0) return null;
+  return bal.centavos;
+}
+
+/**
+ * Valida amount da cobrança contra saldo operacional da reserva.
+ * Backend e frontend devem usar a mesma regra.
+ */
+export function validateChargeAmountAgainstBalance(input: {
+  amountCentavos: number;
+  balanceDue: unknown;
+}):
+  | { ok: true; balanceCentavos: number }
+  | { ok: false; reason: string; message: string } {
+  const bal = parseReservationBalanceDue(input.balanceDue);
+  if (!bal.ok) {
+    return {
+      ok: false,
+      reason: bal.reason === "null" ? "saldo_indisponivel" : "saldo_invalido",
+      message:
+        "Saldo da reserva indisponível. Atualize os dados da reserva antes de gerar a cobrança.",
+    };
+  }
+  if (bal.centavos <= 0) {
+    return {
+      ok: false,
+      reason: "saldo_zerado",
+      message: "Reserva sem saldo pendente. Não é possível gerar cobrança.",
+    };
+  }
+  const amount = Number(input.amountCentavos);
+  if (!Number.isInteger(amount) || amount <= 0) {
+    return {
+      ok: false,
+      reason: "valor_invalido",
+      message: "valor_centavos deve ser inteiro > 0.",
+    };
+  }
+  if (amount > bal.centavos) {
+    return {
+      ok: false,
+      reason: "valor_acima_saldo",
+      message: `Valor acima do saldo pendente (máximo ${formatCentavosToBRL(bal.centavos)}).`,
+    };
+  }
+  return { ok: true, balanceCentavos: bal.centavos };
 }
 
 export function formatCentavosToBRL(centavos: number): string {
@@ -553,6 +628,27 @@ export function mapPagarmeAdminError(input: {
     return {
       title: "Pagamento já confirmado.",
       detail: msg || "Atualize o painel para ver o status.",
+      ambiguous: false,
+    };
+  }
+  if (code === "saldo_indisponivel" || code === "saldo_invalido") {
+    return {
+      title: "Saldo da reserva indisponível.",
+      detail: msg || "Atualize os dados da reserva antes de gerar a cobrança.",
+      ambiguous: false,
+    };
+  }
+  if (code === "saldo_zerado") {
+    return {
+      title: "Reserva sem saldo pendente.",
+      detail: msg || "Não é possível gerar cobrança de R$ 0,00.",
+      ambiguous: false,
+    };
+  }
+  if (code === "valor_acima_saldo") {
+    return {
+      title: "Valor acima do saldo pendente.",
+      detail: msg || "Informe um valor menor ou igual ao saldo da reserva.",
       ambiguous: false,
     };
   }
