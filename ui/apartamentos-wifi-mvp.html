@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yes Hotel — Wi-Fi dos apartamentos</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=51" />
+    <style>
+      .wifi-page { max-width: 920px; margin: 0 auto; padding: 1.25rem; }
+      .wifi-page h1 { font-size: 1.35rem; margin: 0 0 0.35rem; }
+      .wifi-page .lead { color: #555; margin: 0 0 1rem; font-size: 0.95rem; }
+      .wifi-table { width: 100%; border-collapse: collapse; background: #fff; }
+      .wifi-table th, .wifi-table td { border-bottom: 1px solid #e5e5e5; padding: 0.55rem 0.4rem; text-align: left; vertical-align: middle; }
+      .wifi-table input { width: 100%; max-width: 220px; padding: 0.35rem 0.45rem; }
+      .wifi-actions { display: flex; gap: 0.4rem; align-items: center; }
+      .wifi-msg { margin-top: 0.75rem; font-size: 0.9rem; }
+      .wifi-msg.ok { color: #0a7a32; }
+      .wifi-msg.err { color: #b42318; }
+    </style>
+  </head>
+  <body class="op-body checkin-view">
+    <div id="access-state" class="op-access hidden" aria-live="polite"></div>
+    <div id="content-panel" class="op-app hidden">
+      <aside class="yes-sidebar" aria-label="Áreas operacionais">
+        <div class="yes-sidebar-brand">
+          <img src="./assets/yes-hotel-logo.png" alt="Yes Hotel" width="153" height="89" />
+        </div>
+        <nav aria-label="Navegação principal">
+          <span class="yes-sidebar-label">Áreas operacionais</span>
+          <a href="./checkin-operacional-mvp.html"><span>Operação</span></a>
+          <a href="./cafe-da-manha-mvp.html"><span>Café da manhã</span></a>
+          <a class="active" href="./apartamentos-wifi-mvp.html" aria-current="page"><span>Wi-Fi aptos</span></a>
+        </nav>
+      </aside>
+      <div class="yes-workspace">
+        <main class="wifi-page">
+          <h1>Wi-Fi por apartamento</h1>
+          <p class="lead">
+            Cadastre a rede e a senha de cada unidade. Campos opcionais — se vazios, a
+            mensagem de boas-vindas omite o bloco Wi-Fi.
+          </p>
+          <div id="wifi-list"></div>
+          <p id="wifi-msg" class="wifi-msg" role="status"></p>
+        </main>
+      </div>
+    </div>
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script defer src="./yes-supabase-config.js"></script>
+    <script defer src="./yes-supabase-auth.js"></script>
+    <script defer src="./apartamentos-wifi-mvp.js"></script>
+  </body>
+</html>

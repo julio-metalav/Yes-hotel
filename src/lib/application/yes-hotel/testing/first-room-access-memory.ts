@@ -322,7 +322,7 @@ export class InMemoryUnitOfWork implements UnitOfWorkPort {
           idempotency_key: o.idempotency_key,
           status: "pending",
           attempts: 0,
-          available_at: now,
+          available_at: o.available_at ?? now,
           processed_at: null,
           last_error: null,
           created_at: now,

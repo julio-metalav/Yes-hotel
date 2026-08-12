@@ -17,8 +17,14 @@ import {
 } from "../_shared/comunicacao-operacional/guest-multichannel.ts";
 import { outboundWhatsappTransacional } from "../_shared/comunicacao-operacional/outbound-whatsapp.ts";
 import { maskEmailForLog, previewCorpo, registrarOperacionalComunicacaoEnvio } from "../_shared/comunicacao-operacional/registro-envio.ts";
-import { buildFnrhPreenchimentoUrl, maskFnrhTokensInText } from "../_shared/fnrh-public-link.ts";
 import { formatTtlockPasscodeForGuest } from "../_shared/ttlock-credential-format.ts";
+import {
+  buildGuestAccessReadyMessage,
+  formatCheckinDateLabelPtBr,
+  guestFirstName,
+  isBeforeCheckinActivationHour,
+  resolveParkingSpot,
+} from "../../../src/lib/domain/yes-hotel/guest-access-messages.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -258,36 +264,46 @@ Deno.serve(async (req: Request) => {
     }, 400);
   }
 
-  const fnrhPublicEnv = Deno.env.get("FNRH_PUBLIC_BASE_URL");
-  const { data: fnrhList } = await admin
-    .from("fnrh_hospedes")
-    .select("id, link_token")
-    .eq("reserva_id", reservaId);
-  const links = (fnrhList ?? []).map(
-    (r: { id: string; link_token: string }) =>
-      buildFnrhPreenchimentoUrl(r.id, r.link_token, {
-        envValue: fnrhPublicEnv,
-        version: 2,
-      }),
-  );
-  const linksText = links.length > 0
-    ? links.map((url: string, i: number) => `${i + 1}. ${url}`).join("\n")
-    : "(nenhum link FNRH)";
-
-  const r = reserva as { apartamento?: string };
+  const r = reserva as {
+    apartamento?: string;
+    hospede_principal?: string;
+    check_in_previsto?: string;
+  };
   // PIN técnico (passcode) permanece sem "#"; apresentação ao hóspede inclui # só como instrução.
-  const guestPass = formatTtlockPasscodeForGuest(passcode);
-  const msg =
-    `Olá, sua reserva está pronta.\n\n${guestPass.guestBlock}\n\n` +
-    `Para agilizar seu check-in, preencha seus dados:\n${linksText}`;
-  const html = `
-    <p>Olá, sua reserva está pronta.</p>
-    ${guestPass.guestBlockHtml}
-    <p>Para agilizar seu check-in${r.apartamento ? ` no apartamento ${String(r.apartamento).replace(/</g, "&lt;")}` : ""}, preencha seus dados pelos links abaixo:</p>
-    <ul>${links.map((url: string) => `<li><a href="${url}">Abrir formulário FNRH</a></li>`).join("")}</ul>
-    ${links.length === 0 ? "<p>(Nenhum link FNRH pendente.)</p>" : ""}
-    <p>Obrigado!</p>
-  `;
+  // Mensagem canônica guest_access_ready (sem Wi-Fi / FNRH / cobrança).
+  if (!passcode || !String(passcode).trim()) {
+    await admin.from("operacional_reserva_eventos").insert({
+      reserva_id: reservaId,
+      tipo: "falha_enviar_credenciais",
+      titulo: "Falha técnica — credencial ausente",
+      detalhe: JSON.stringify({
+        origem: origemRegistro,
+        motivo: "sem_credencial_valida_para_guest_access_ready",
+      }),
+    });
+    return jsonResponse({
+      ok: false,
+      error: "Credencial TTLock ausente; mensagem de acesso não enviada.",
+    }, 409);
+  }
+
+  const apt = String(r.apartamento ?? "").trim();
+  const checkin = r.check_in_previsto
+    ? `${String(r.check_in_previsto).slice(0, 10)}T13:00:00-04:00`
+    : new Date().toISOString();
+  const nowDt = new Date();
+  const accessMsg = buildGuestAccessReadyMessage({
+    guest_first_name: guestFirstName(r.hospede_principal),
+    apartment_number: apt || "—",
+    passcode: String(passcode),
+    parking_spot: resolveParkingSpot({ apartment_number: apt }),
+    checkin_date_label: formatCheckinDateLabelPtBr(checkin),
+    before_activation: isBeforeCheckinActivationHour(checkin, nowDt),
+  });
+  // Garante helper de formatação carregado (evita tree-shake acidental em Deno).
+  void formatTtlockPasscodeForGuest;
+  const msg = accessMsg.body;
+  const html = accessMsg.body_html;
 
   const now = new Date().toISOString();
   // Mesma senha (passcode) + mesmos links FNRH nos dois canais — sem duplicar recurso.
@@ -324,10 +340,10 @@ Deno.serve(async (req: Request) => {
         reserva_id: reservaId,
         conversa_id: null,
         hospede_id: hospedeIdEnvio || null,
-        proposito: "senha_acesso",
+        proposito: "guest_access_ready",
         canal: "email",
         destinatario_mascara: maskEmailForLog(emailTo),
-        corpo_preview: previewCorpo(maskFnrhTokensInText(msg)),
+        corpo_preview: previewCorpo(msg),
         status: "enviada",
         provider: "resend",
         provider_message_id: null,
@@ -341,10 +357,10 @@ Deno.serve(async (req: Request) => {
         reserva_id: reservaId,
         conversa_id: null,
         hospede_id: hospedeIdEnvio || null,
-        proposito: "senha_acesso",
+        proposito: "guest_access_ready",
         canal: "email",
         destinatario_mascara: maskEmailForLog(emailTo),
-        corpo_preview: previewCorpo(maskFnrhTokensInText(msg)),
+        corpo_preview: previewCorpo(msg),
         status: "falha",
         provider: "resend",
         provider_message_id: null,
@@ -367,7 +383,7 @@ Deno.serve(async (req: Request) => {
         hospedeId: hospedeIdEnvio,
         telefoneRaw: whatsappTo,
         text: msg,
-        proposito: "senha_acesso",
+        proposito: "guest_access_ready",
       });
       if (wResult.ok) {
         whatsappAttempt = { status: "enviado" };

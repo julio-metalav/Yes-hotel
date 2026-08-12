@@ -36,10 +36,27 @@ export function createSupabaseFirstRoomAccessPorts(
           .eq("id", reservationId)
           .maybeSingle();
         const external = String(r?.external_reservation_id ?? "").trim();
+        const apartment_number = String(r?.apartamento ?? "—");
+        let wifi_ssid: string | null = null;
+        let wifi_password: string | null = null;
+        const aptNum = apartment_number.trim();
+        if (aptNum && aptNum !== "—") {
+          const { data: apt } = await client
+            .from("apartamentos")
+            .select("wifi_ssid, wifi_password")
+            .eq("numero", aptNum)
+            .maybeSingle();
+          wifi_ssid = apt?.wifi_ssid != null ? String(apt.wifi_ssid) : null;
+          wifi_password = apt?.wifi_password != null ? String(apt.wifi_password) : null;
+        }
         return {
-          apartment_number: String(r?.apartamento ?? "—"),
+          apartment_number,
           reservation_code: external || "—",
           guest_main_name: String(r?.hospede_principal ?? "hóspede"),
+          // Sem campo de vaga dedicado: usa o número do apartamento.
+          parking_spot: aptNum && aptNum !== "—" ? aptNum : null,
+          wifi_ssid,
+          wifi_password,
         };
       },
     },

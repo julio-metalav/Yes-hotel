@@ -13,6 +13,10 @@ import { buildWelcomePendingMessage } from "../../domain/yes-hotel/access-grace-
 import { evaluateReservationPendingState } from "../../domain/yes-hotel/reservation-pending-state.ts";
 import type { FirstRoomAccessCommitCommand } from "./first-room-access-commit.ts";
 import { enqueueInternalFirstAccessMessage } from "./enqueue-internal-first-access.ts";
+import {
+  enqueueGuestFirstAccessWelcomeMessages,
+  pendingMessageAvailableAt,
+} from "./enqueue-guest-first-access-welcome.ts";
 import type { FirstRoomAccessPorts } from "./first-room-access-ports.ts";
 import type {
   AccessMethodPersisted,
@@ -89,6 +93,27 @@ function resultFromExistingEvent(
   return { status, event_id: eventId, ...extra };
 }
 
+async function resolveDisplayContext(
+  ports: FirstRoomAccessPorts,
+  reservationId: string,
+): Promise<{
+  apartment_number: string;
+  reservation_code: string;
+  guest_main_name: string;
+  parking_spot?: string | null;
+  wifi_ssid?: string | null;
+  wifi_password?: string | null;
+}> {
+  if (ports.reservationDisplay) {
+    return ports.reservationDisplay.getContext(reservationId);
+  }
+  return {
+    apartment_number: "—",
+    reservation_code: reservationId.slice(0, 8),
+    guest_main_name: "hóspede",
+  };
+}
+
 /** Opções efêmeras — nunca entram no evento persistido. */
 export type ProcessFirstRoomAccessOptions = {
   /** Senha só em memória para correlação; descartar após o processamento. */
@@ -122,13 +147,8 @@ export async function processFirstRoomAccessEvent(
         : null;
       if (tol && ports.accessOutboxQueue && existing.reservation_id) {
         // Reconciliação idempotente: repara outbox ausente sem reabrir tolerância.
-        const ctx = ports.reservationDisplay
-          ? await ports.reservationDisplay.getContext(existing.reservation_id)
-          : {
-              apartment_number: "—",
-              reservation_code: "—",
-              guest_main_name: "hóspede",
-            };
+        const ctx = await resolveDisplayContext(ports, existing.reservation_id);
+        const nowIso = ports.clock.now().toISOString();
         await enqueueInternalFirstAccessMessage({
           queue: ports.accessOutboxQueue,
           reservation_id: existing.reservation_id,
@@ -140,7 +160,20 @@ export async function processFirstRoomAccessEvent(
           payment_pending: tol.current_payment_pending,
           fnrh_pending: tol.current_fnrh_pending,
           grace_started: true,
-          nowIso: ports.clock.now().toISOString(),
+          nowIso,
+        });
+        await enqueueGuestFirstAccessWelcomeMessages({
+          queue: ports.accessOutboxQueue,
+          reservation_id: existing.reservation_id,
+          credential_id: existing.credential_id,
+          access_event_id: existing.id,
+          tolerance_id: tol.id,
+          guest_main_name: ctx.guest_main_name,
+          apartment_number: ctx.apartment_number,
+          parking_spot: ctx.parking_spot,
+          wifi_ssid: ctx.wifi_ssid,
+          wifi_password: ctx.wifi_password,
+          nowIso,
         });
         if (tol.pending_payment_at_start || tol.pending_fnrh_at_start) {
           const welcome = buildWelcomePendingMessage({
@@ -148,6 +181,7 @@ export async function processFirstRoomAccessEvent(
             fnrh_pending: tol.pending_fnrh_at_start,
           });
           if (welcome) {
+            const pendingAt = pendingMessageAvailableAt(nowIso);
             await ports.accessOutboxQueue.enqueue({
               event_type: "guest_welcome_pending",
               channel: "whatsapp",
@@ -161,7 +195,7 @@ export async function processFirstRoomAccessEvent(
               idempotency_key: `welcome:${existing.credential_id}:${tol.grace_started_at}`,
               status: "pending",
               attempts: 0,
-              available_at: ports.clock.now().toISOString(),
+              available_at: pendingAt,
               processed_at: null,
               last_error: null,
             });
@@ -178,7 +212,7 @@ export async function processFirstRoomAccessEvent(
               idempotency_key: `welcome:${existing.credential_id}:${tol.grace_started_at}:email`,
               status: "pending",
               attempts: 0,
-              available_at: ports.clock.now().toISOString(),
+              available_at: pendingAt,
               processed_at: null,
               last_error: null,
             });
@@ -190,6 +224,36 @@ export async function processFirstRoomAccessEvent(
           tolerance_id: tol.id,
           suspension_due_at: tol.suspension_due_at,
           pending_reasons: tol.pending_snapshot,
+        });
+      }
+      if (ports.accessOutboxQueue && existing.reservation_id) {
+        const ctx = await resolveDisplayContext(ports, existing.reservation_id);
+        const nowIso = ports.clock.now().toISOString();
+        await enqueueInternalFirstAccessMessage({
+          queue: ports.accessOutboxQueue,
+          reservation_id: existing.reservation_id,
+          credential_id: existing.credential_id,
+          tolerance_id: null,
+          apartment_number: ctx.apartment_number,
+          reservation_code: ctx.reservation_code,
+          guest_main_name: ctx.guest_main_name,
+          payment_pending: false,
+          fnrh_pending: false,
+          grace_started: false,
+          nowIso,
+        });
+        await enqueueGuestFirstAccessWelcomeMessages({
+          queue: ports.accessOutboxQueue,
+          reservation_id: existing.reservation_id,
+          credential_id: existing.credential_id,
+          access_event_id: existing.id,
+          tolerance_id: null,
+          guest_main_name: ctx.guest_main_name,
+          apartment_number: ctx.apartment_number,
+          parking_spot: ctx.parking_spot,
+          wifi_ssid: ctx.wifi_ssid,
+          wifi_password: ctx.wifi_password,
+          nowIso,
         });
       }
       return resultFromExistingEvent(existing.id, "processed_no_pending");
@@ -373,13 +437,8 @@ export async function processFirstRoomAccessEvent(
         ports.accessOutboxQueue &&
         correlation.reservation_id
       ) {
-        const ctx = ports.reservationDisplay
-          ? await ports.reservationDisplay.getContext(correlation.reservation_id)
-          : {
-              apartment_number: "—",
-              reservation_code: correlation.reservation_id.slice(0, 8),
-              guest_main_name: "hóspede",
-            };
+        const ctx = await resolveDisplayContext(ports, correlation.reservation_id);
+        const nowIso = ports.clock.now().toISOString();
         await enqueueInternalFirstAccessMessage({
           queue: ports.accessOutboxQueue,
           reservation_id: correlation.reservation_id,
@@ -391,7 +450,20 @@ export async function processFirstRoomAccessEvent(
           payment_pending: false,
           fnrh_pending: false,
           grace_started: false,
-          nowIso: ports.clock.now().toISOString(),
+          nowIso,
+        });
+        await enqueueGuestFirstAccessWelcomeMessages({
+          queue: ports.accessOutboxQueue,
+          reservation_id: correlation.reservation_id,
+          credential_id: correlation.credential_id ?? null,
+          access_event_id: noPending.event_id ?? null,
+          tolerance_id: null,
+          guest_main_name: ctx.guest_main_name,
+          apartment_number: ctx.apartment_number,
+          parking_spot: ctx.parking_spot,
+          wifi_ssid: ctx.wifi_ssid,
+          wifi_password: ctx.wifi_password,
+          nowIso,
         });
       }
       return noPending;
@@ -453,6 +525,8 @@ export async function processFirstRoomAccessEvent(
     };
     assertNoPasswordLeak(outboxPayload);
 
+    const pendingAt = pendingMessageAvailableAt(ports.clock.now().toISOString());
+
     const result = await ports.uow.commitFirstRoomAccess({
       decision: "grace_started",
       event: eventWrite,
@@ -476,13 +550,12 @@ export async function processFirstRoomAccessEvent(
         template: "access_grace_welcome",
         payload: outboxPayload,
         idempotency_key: `welcome:${correlation.credential_id}:${grace.grace_started_at}`,
+        available_at: pendingAt,
       },
     });
     assertNoPasswordLeak(result);
     if (result.status === "grace_started" && ports.presencialDiferidoAudit && ppdAutorizado) {
-      const ctxApt = ports.reservationDisplay
-        ? await ports.reservationDisplay.getContext(correlation.reservation_id)
-        : null;
+      const ctxApt = await resolveDisplayContext(ports, correlation.reservation_id);
       await ports.presencialDiferidoAudit.persistFirstAccessOutcome({
         reservation_id: correlation.reservation_id,
         autorizado: true,
@@ -491,7 +564,7 @@ export async function processFirstRoomAccessEvent(
         first_access_at: input.occurred_at,
         deadline_iso: ppdEfetivado ? grace.suspension_due_at ?? null : null,
         now_iso: ports.clock.now().toISOString(),
-        apartment_number: ctxApt?.apartment_number ?? null,
+        apartment_number: ctxApt.apartment_number ?? null,
       });
     }
     if (
@@ -499,13 +572,8 @@ export async function processFirstRoomAccessEvent(
       ports.accessOutboxQueue &&
       correlation.reservation_id
     ) {
-      const ctx = ports.reservationDisplay
-        ? await ports.reservationDisplay.getContext(correlation.reservation_id)
-        : {
-            apartment_number: "—",
-            reservation_code: "—",
-            guest_main_name: "hóspede",
-          };
+      const ctx = await resolveDisplayContext(ports, correlation.reservation_id);
+      const nowIso = ports.clock.now().toISOString();
       await enqueueInternalFirstAccessMessage({
         queue: ports.accessOutboxQueue,
         reservation_id: correlation.reservation_id,
@@ -518,9 +586,22 @@ export async function processFirstRoomAccessEvent(
         fnrh_pending: pending.fnrh_pending,
         grace_started: true,
         presencial_diferido_efetivado: ppdEfetivado,
-        nowIso: ports.clock.now().toISOString(),
+        nowIso,
       });
-      // Canal e-mail complementar (idempotente); ausência de e-mail tratada no dispatcher.
+      await enqueueGuestFirstAccessWelcomeMessages({
+        queue: ports.accessOutboxQueue,
+        reservation_id: correlation.reservation_id,
+        credential_id: correlation.credential_id ?? null,
+        access_event_id: result.event_id ?? null,
+        tolerance_id: result.tolerance_id ?? null,
+        guest_main_name: ctx.guest_main_name,
+        apartment_number: ctx.apartment_number,
+        parking_spot: ctx.parking_spot,
+        wifi_ssid: ctx.wifi_ssid,
+        wifi_password: ctx.wifi_password,
+        nowIso,
+      });
+      // Canal e-mail complementar (idempotente); após welcome (~1 min).
       await ports.accessOutboxQueue.enqueue({
         event_type: "guest_welcome_pending",
         channel: "email",
@@ -534,7 +615,7 @@ export async function processFirstRoomAccessEvent(
         idempotency_key: `welcome:${correlation.credential_id}:${grace.grace_started_at}:email`,
         status: "pending",
         attempts: 0,
-        available_at: ports.clock.now().toISOString(),
+        available_at: pendingAt,
         processed_at: null,
         last_error: null,
       });

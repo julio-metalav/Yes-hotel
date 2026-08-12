@@ -229,20 +229,37 @@ Deno.serve(async (req: Request) => {
   });
 });
 
+import {
+  isFinanceiroLiberadoParaAcesso,
+} from "../../../src/lib/domain/yes-hotel/guest-access-messages.ts";
+
 /**
- * Quando FNRH fecha por último: se pagamento já estiver ok e senha não enviada,
+ * Quando FNRH fecha por último: se financeiro liberado para acesso e senha não enviada,
  * dispara o fluxo existente send-senha (automático). Idempotente via senha_enviada_em.
  */
 async function maybeDispararLiberacaoPorRequisitos(reservaId: string): Promise<void> {
   try {
     const { data: reserva } = await admin
       .from("operacional_reservas")
-      .select("id, pagamento_status, senha_enviada_em, acesso_liberado")
+      .select("id, pagamento_status, senha_enviada_em, acesso_liberado, classificacao_comissionamento, status_reserva")
       .eq("id", reservaId)
       .maybeSingle();
     if (!reserva) return;
+    const statusReserva = String(
+      (reserva as { status_reserva?: string }).status_reserva ?? "",
+    ).toLowerCase();
+    if (statusReserva.includes("cancel")) return;
     if ((reserva as { senha_enviada_em?: string | null }).senha_enviada_em) return;
-    if ((reserva as { pagamento_status?: string }).pagamento_status !== "pago") return;
+
+    if (
+      !isFinanceiroLiberadoParaAcesso({
+        pagamento_status: (reserva as { pagamento_status?: string }).pagamento_status,
+        classificacao_comissionamento: (reserva as { classificacao_comissionamento?: string })
+          .classificacao_comissionamento,
+      })
+    ) {
+      return;
+    }
 
     if (!(reserva as { acesso_liberado?: boolean }).acesso_liberado) {
       await admin
