@@ -62,6 +62,8 @@
     "test:hits-edge:deno-imports": "tsx scripts/test-hits-edge-deno-imports.ts",
     "test:reservation-financial-classification": "tsx scripts/test-reservation-financial-classification.ts",
 
+    "test:hits-fnrh-panel-financial-ui": "tsx scripts/test-hits-fnrh-panel-financial-ui.ts",
+    "test:ver-panel-operacional": "tsx scripts/test-ver-panel-operacional.ts",
     "test:ui-static-js": "node --check ui/checkin-operacional-mvp.js && node --check ui/yes-arrivals-policy.js && node --check ui/yes-access-tolerance-policy.js && node --check ui/yes-cafe-policy.js && node --check ui/cafe-da-manha-mvp.js && node --check ui/yes-checkin-panel-presentation.js",
     "test:checkin-panel-presentation": "tsx scripts/test-checkin-panel-presentation.ts",
     "test:yes:cafe-operacional": "tsx scripts/test-cafe-operacional.ts",

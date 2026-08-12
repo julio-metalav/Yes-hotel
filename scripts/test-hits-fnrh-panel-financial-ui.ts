@@ -44,17 +44,14 @@ const panel = readFileSync(resolve("ui/checkin-operacional-mvp.js"), "utf8");
 const html = readFileSync(resolve("ui/checkin-operacional-mvp.html"), "utf8");
 const finJs = readFileSync(resolve("ui/yes-reservation-financial.js"), "utf8");
 
-// 15–16 hóspedes HITS read-only / sem adicionar acompanhante no fluxo HITS
-assert.match(panel, /hitsGuestsReadonly/);
+assert.match(panel, /compositionReadonly/);
 assert.match(panel, /Corrigir contato/);
-assert.doesNotMatch(
-  panel.slice(panel.indexOf("hitsGuestsReadonly"), panel.indexOf("hitsGuestsReadonly") + 800),
-  /showHeaderAdd:\s*true/,
-);
+assert.doesNotMatch(panel, /Adicionar acompanhante/);
 
 // 20–22 UI
 assert.match(panel, /buildOrigemComercialHtml/);
 assert.match(panel, /Situação atual/);
+assert.match(panel, /Origem da reserva/);
 assert.match(panel, /Cobrança Pagar\.me fica no card Situação/);
 assert.match(html, /yes-reservation-financial\.js/);
 assert.match(finJs, /Pendente \(comissionado\)/);
