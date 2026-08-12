@@ -42,7 +42,11 @@ export function shouldApplySuggestedValue(input: {
     input.currentValue == null ||
     (typeof input.currentValue === "string" && input.currentValue.trim() === "");
   if (empty) return true;
-  if (!input.currentOrigin) return false;
+  // Sem provenance conhecida (ex.: prefill legado): OCR/hits podem sobrescrever;
+  // manual explícito nunca é sobrescrito por origem mais fraca.
+  if (!input.currentOrigin) {
+    return PRIORITY[input.suggestedOrigin] > PRIORITY.legacy;
+  }
   return PRIORITY[input.suggestedOrigin] > PRIORITY[input.currentOrigin];
 }
 

@@ -197,12 +197,16 @@
         };
       }),
       analyzing: false,
+      analyzingPhase: "",
       cepLoading: false,
       cepError: "",
       stepError: "",
       ocrBanner: "",
-      fieldOrigin: {},
+      fieldOrigin: Object.assign({}, data.field_provenance || {}),
       reviewFields: {},
+      docPreviewUrl: "",
+      docPreviewName: "",
+      showConfiraCta: false,
       draftStatus: "",
       draftOk: null,
       confirmBusy: false,
@@ -211,8 +215,6 @@
     // Marca lados já enviados (heurística: qualquer doc do tipo)
     if (state.has_document_upload) {
       state.uploadedSides.single = true;
-      state.uploadedSides.front = true;
-      state.uploadedSides.back = true;
     }
 
     var draftTimer = null;
@@ -316,10 +318,16 @@
       root.querySelectorAll("[data-field]").forEach(function (el) {
         var key = el.getAttribute("data-field");
         if (!key) return;
+        var nextVal = el.type === "checkbox" ? !!el.checked : el.value;
+        var prevVal = state[key];
         if (el.type === "checkbox") {
-          state[key] = !!el.checked;
+          state[key] = nextVal;
         } else {
-          state[key] = el.value;
+          state[key] = nextVal;
+        }
+        if (String(prevVal == null ? "" : prevVal) !== String(nextVal == null ? "" : nextVal)) {
+          state.fieldOrigin = state.fieldOrigin || {};
+          state.fieldOrigin[key] = "manual";
         }
       });
       root.querySelectorAll("[data-minor-field]").forEach(function (el) {
@@ -330,33 +338,30 @@
       });
     }
 
+    function documentUploadComplete() {
+      if (!state.has_document_upload) return false;
+      if (needsTwoSides(state.documento_tipo)) {
+        return !!(state.uploadedSides.front && state.uploadedSides.back);
+      }
+      return !!(state.uploadedSides.single || state.uploadedSides.front || state.has_document_upload);
+    }
+
+    function needsVersoAfterOcr() {
+      return needsTwoSides(state.documento_tipo) && !!state.uploadedSides.front && !state.uploadedSides.back;
+    }
+
     function validateCurrentStep() {
       var id = STEPS[state.stepIndex].id;
       state.stepError = "";
 
       if (id === "documento") {
-        if (!hasText(state.documento_tipo)) {
-          state.stepError = "Selecione o tipo de documento.";
-          return false;
-        }
-        if (!hasText(state.documento_numero)) {
-          state.stepError = "Informe o número do documento.";
-          return false;
-        }
-        if (!hasText(state.data_nascimento)) {
-          state.stepError = "Informe a data de nascimento.";
-          return false;
-        }
         if (!state.has_document_upload) {
-          if (needsTwoSides(state.documento_tipo)) {
-            if (!state.uploadedSides.front || !state.uploadedSides.back) {
-              state.stepError = "Envie a foto da frente e do verso do documento.";
-              return false;
-            }
-          } else if (!state.uploadedSides.single && !state.uploadedSides.front) {
-            state.stepError = "Envie uma foto ou arquivo do documento.";
-            return false;
-          }
+          state.stepError = "Envie uma foto ou arquivo do documento para continuar.";
+          return false;
+        }
+        if (needsVersoAfterOcr()) {
+          state.stepError = "Este documento precisa da foto do verso. Envie o verso para continuar.";
+          return false;
         }
         return true;
       }
@@ -364,6 +369,14 @@
       if (id === "confira_dados") {
         if (!hasText(state.hospede_nome)) {
           state.stepError = "Nome completo é obrigatório.";
+          return false;
+        }
+        if (!hasText(state.documento_tipo)) {
+          state.stepError = "Selecione o tipo de documento.";
+          return false;
+        }
+        if (!hasText(state.documento_numero)) {
+          state.stepError = "Informe o número do documento.";
           return false;
         }
         if (!hasText(state.data_nascimento)) {
@@ -380,6 +393,11 @@
         }
         if (!hasText(state.email)) {
           state.stepError = "E-mail é obrigatório.";
+          return false;
+        }
+        if (needsTwoSides(state.documento_tipo) && !(state.uploadedSides.front && state.uploadedSides.back)) {
+          state.stepError =
+            "Este documento exige frente e verso. Volte à etapa Documento e envie o verso.";
           return false;
         }
         return true;
@@ -511,12 +529,13 @@
       Object.keys(map).forEach(function (k) {
         var target = map[k];
         if (!hasText(fields[k])) return;
-        // manual > ocr: só preenche se vazio (correção do hóspede prevalece)
-        if (hasText(state[target])) return;
+        state.fieldOrigin = state.fieldOrigin || {};
+        // manual > ocr > hits: nunca sobrescreve correção manual do hóspede
+        if (state.fieldOrigin[target] === "manual") return;
         var val = String(fields[k]).trim();
         if (target === "data_nascimento") val = val.slice(0, 10);
         state[target] = val;
-        state.fieldOrigin = state.fieldOrigin || {};
+        if (target === "documento_numero") state.documento = val;
         state.fieldOrigin[target] = "ocr";
         if (review.indexOf(k) >= 0 || review.indexOf(target) >= 0) {
           state.reviewFields = state.reviewFields || {};
@@ -525,21 +544,41 @@
         applied += 1;
       });
       if (applied > 0) {
-        state.ocrBanner = "Encontramos seus dados. Confira antes de continuar.";
-      } else if (meta.ocr_skipped === false && meta.ok === false) {
+        state.ocrBanner = "Encontramos estes dados no seu documento. Confira e corrija se necessário.";
+      } else {
         state.ocrBanner =
-          "Não conseguimos preencher automaticamente. Você pode continuar informando os dados.";
-      } else if (meta.ocr_skipped === true && meta.ocr_reason && meta.ocr_reason !== "ocr_provider_unavailable") {
-        state.ocrBanner =
-          "Não conseguimos preencher automaticamente. Você pode continuar informando os dados.";
+          "Não conseguimos ler todos os dados automaticamente. Você pode preenchê-los na próxima etapa.";
+      }
+    }
+
+    function setDocPreview(file) {
+      if (state.docPreviewUrl) {
+        try {
+          URL.revokeObjectURL(state.docPreviewUrl);
+        } catch (_e) {
+          /* ignore */
+        }
+      }
+      state.docPreviewUrl = "";
+      state.docPreviewName = file && file.name ? String(file.name) : "";
+      if (file && file.type && String(file.type).indexOf("image/") === 0) {
+        try {
+          state.docPreviewUrl = URL.createObjectURL(file);
+        } catch (_e2) {
+          state.docPreviewUrl = "";
+        }
       }
     }
 
     function uploadDocument(file, side) {
       if (!file) return;
+      var uploadSide = side || "front";
+      setDocPreview(file);
       state.analyzing = true;
+      state.analyzingPhase = "upload";
       state.stepError = "";
       state.ocrBanner = "";
+      state.showConfiraCta = false;
       render();
 
       var fd = new FormData();
@@ -547,8 +586,17 @@
       fd.append("token", token);
       fd.append("document_type", state.documento_tipo || "other");
       fd.append("document_subject", "guest");
-      fd.append("side", side || "single");
+      fd.append("side", uploadSide);
       fd.append("file", file, file.name || "documento");
+
+      // Transição visual: após iniciar o POST, mostrar fase OCR
+      window.setTimeout(function () {
+        if (state.analyzing && state.analyzingPhase === "upload") {
+          state.analyzingPhase = "ocr";
+          var el = document.querySelector(".analyzing");
+          if (el) el.textContent = "Documento recebido. Lendo os dados…";
+        }
+      }, 450);
 
       fetch(uploadUrl(), { method: "POST", body: fd })
         .then(function (r) {
@@ -558,28 +606,30 @@
         })
         .then(function (res) {
           state.analyzing = false;
+          state.analyzingPhase = "";
           if (!res.body || !res.body.ok) {
             state.stepError = (res.body && res.body.error) || "Falha no envio do documento.";
             render();
             return;
           }
           state.has_document_upload = true;
-          state.uploadedSides[side || "single"] = true;
+          state.uploadedSides[uploadSide] = true;
+          if (uploadSide === "single") state.uploadedSides.front = true;
           applyOcrSuggestions(res.body.suggested_fields, {
             needs_review_fields: res.body.needs_review_fields,
             ocr_skipped: res.body.ocr_skipped,
             ocr_reason: res.body.ocr_reason,
             ok: res.body.ok,
           });
-          if (!state.ocrBanner && res.body.ocr_skipped) {
-            // OCR off / noop: upload ok sem auto-preenchimento
-            state.ocrBanner = "";
+          if (!needsVersoAfterOcr()) {
+            state.showConfiraCta = true;
           }
           scheduleDraft();
           render();
         })
         .catch(function () {
           state.analyzing = false;
+          state.analyzingPhase = "";
           state.stepError = "Erro de conexão ao enviar o documento.";
           render();
         });
@@ -732,7 +782,13 @@
       var step = STEPS[state.stepIndex];
       var analyzing =
         state.analyzing
-          ? '<div class="analyzing" role="status" aria-live="polite">Lendo seu documento…</div>'
+          ? '<div class="analyzing" role="status" aria-live="polite">' +
+            escapeHtml(
+              state.analyzingPhase === "ocr"
+                ? "Documento recebido. Lendo os dados…"
+                : "Enviando documento…",
+            ) +
+            "</div>"
           : "";
       var ocrBanner =
         state.ocrBanner && !state.analyzing
@@ -829,25 +885,38 @@
       var step = STEPS[state.stepIndex].id;
 
       if (step === "documento") {
-        var fileFront = document.getElementById("doc-file-front");
-        var fileBack = document.getElementById("doc-file-back");
-        var fileSingle = document.getElementById("doc-file-single");
-        if (fileFront) {
-          fileFront.addEventListener("change", function () {
-            syncStateFromDom();
-            if (fileFront.files && fileFront.files[0]) uploadDocument(fileFront.files[0], "front");
+        function wireHidden(inputId, side) {
+          var input = document.getElementById(inputId);
+          if (!input) return;
+          input.addEventListener("change", function () {
+            if (input.files && input.files[0]) uploadDocument(input.files[0], side);
+            input.value = "";
           });
         }
-        if (fileBack) {
-          fileBack.addEventListener("change", function () {
-            syncStateFromDom();
-            if (fileBack.files && fileBack.files[0]) uploadDocument(fileBack.files[0], "back");
+        wireHidden("doc-camera-front", "front");
+        wireHidden("doc-file-front", "front");
+        wireHidden("doc-camera-back", "back");
+        wireHidden("doc-file-back", "back");
+
+        function wireTrigger(btnId, inputId) {
+          var btn = document.getElementById(btnId);
+          var input = document.getElementById(inputId);
+          if (!btn || !input) return;
+          btn.addEventListener("click", function () {
+            input.click();
           });
         }
-        if (fileSingle) {
-          fileSingle.addEventListener("change", function () {
-            syncStateFromDom();
-            if (fileSingle.files && fileSingle.files[0]) uploadDocument(fileSingle.files[0], "single");
+        wireTrigger("btn-doc-camera", "doc-camera-front");
+        wireTrigger("btn-doc-file", "doc-file-front");
+        wireTrigger("btn-doc-camera-back", "doc-camera-back");
+        wireTrigger("btn-doc-file-back", "doc-file-back");
+        wireTrigger("btn-doc-retake-camera", "doc-camera-front");
+        wireTrigger("btn-doc-retake-file", "doc-file-front");
+
+        var confira = document.getElementById("btn-goto-confira");
+        if (confira) {
+          confira.addEventListener("click", function () {
+            goNext();
           });
         }
       }
@@ -871,38 +940,87 @@
     }
 
     function renderDocumento() {
-      var two = needsTwoSides(state.documento_tipo);
-      var uploadBlock = "";
-      if (!state.documento_tipo) {
-        uploadBlock = '<p class="muted">Selecione o tipo de documento para enviar a foto.</p>';
-      } else if (two) {
-        uploadBlock = [
-          '<label class="file-label">Frente do documento *',
-          '  <input type="file" id="doc-file-front" accept="image/*,application/pdf" capture="environment" />',
-          state.uploadedSides.front
-            ? '  <span class="ok-chip">Enviado</span>'
+      var needVerso = needsVersoAfterOcr();
+      var hasAny =
+        !!(state.has_document_upload || state.uploadedSides.front || state.uploadedSides.single);
+
+      var previewBlock = "";
+      if (state.docPreviewUrl || state.docPreviewName || hasAny) {
+        previewBlock = [
+          '<div class="doc-preview-card">',
+          state.docPreviewUrl
+            ? '  <img class="doc-preview-img" src="' +
+              escapeHtml(state.docPreviewUrl) +
+              '" alt="Pré-visualização do documento" />'
             : "",
-          "</label>",
-          '<label class="file-label">Verso do documento *',
-          '  <input type="file" id="doc-file-back" accept="image/*,application/pdf" capture="environment" />',
-          state.uploadedSides.back
-            ? '  <span class="ok-chip">Enviado</span>'
+          '  <div class="doc-preview-meta">',
+          '    <span class="ok-chip">Documento enviado ✓</span>',
+          state.docPreviewName
+            ? '    <p class="muted doc-preview-name">' + escapeHtml(state.docPreviewName) + "</p>"
             : "",
-          "</label>",
-        ].join("");
-      } else {
-        uploadBlock = [
-          '<label class="file-label">Foto ou arquivo do documento *',
-          '  <input type="file" id="doc-file-single" accept="image/*,application/pdf" capture="environment" />',
-          state.uploadedSides.single || state.has_document_upload
-            ? '  <span class="ok-chip">Enviado</span>'
-            : "",
-          "</label>",
+          "  </div>",
+          '  <div class="doc-retake-row">',
+          '    <button type="button" class="btn secondary compact" id="btn-doc-retake-camera">Tirar outra foto</button>',
+          '    <button type="button" class="btn secondary compact" id="btn-doc-retake-file">Trocar arquivo</button>',
+          "  </div>",
+          "</div>",
         ].join("");
       }
 
+      var primaryCapture = needVerso
+        ? [
+            '<button type="button" class="doc-cta doc-cta--primary" id="btn-doc-camera-back">',
+            '  <span class="doc-cta__icon" aria-hidden="true">📷</span>',
+            "  <span class=\"doc-cta__title\">Tirar foto do verso</span>",
+            '  <span class="doc-cta__hint">Use a câmera do celular</span>',
+            "</button>",
+            '<button type="button" class="doc-cta doc-cta--secondary" id="btn-doc-file-back">',
+            "  <span class=\"doc-cta__title\">Enviar verso do documento</span>",
+            '  <span class="doc-cta__hint">Escolha uma imagem ou PDF já salvo</span>',
+            "</button>",
+          ].join("")
+        : [
+            '<button type="button" class="doc-cta doc-cta--primary" id="btn-doc-camera">',
+            '  <span class="doc-cta__icon" aria-hidden="true">📷</span>',
+            "  <span class=\"doc-cta__title\">Tirar foto do documento</span>",
+            '  <span class="doc-cta__hint">Use a câmera do celular</span>',
+            "</button>",
+            '<button type="button" class="doc-cta doc-cta--secondary" id="btn-doc-file">',
+            "  <span class=\"doc-cta__title\">Enviar foto ou arquivo</span>",
+            '  <span class="doc-cta__hint">Escolha uma imagem ou PDF já salvo no aparelho</span>',
+            "</button>",
+          ].join("");
+
+      var confiraCta =
+        state.showConfiraCta && !needVerso && !state.analyzing
+          ? '<button type="button" class="btn primary doc-confira-cta" id="btn-goto-confira">Conferir meus dados</button>'
+          : "";
+
       return [
-        '<p class="banner">Envie uma foto legível do documento. Usamos isso para validar sua identidade no hotel.</p>',
+        '<p class="banner">Tire uma foto legível do seu documento. Vamos ler os dados automaticamente para agilizar seu check-in.</p>',
+        // Inputs ocultos: câmera (capture) e arquivo (sem capture)
+        '<input type="file" id="doc-camera-front" class="sr-only-file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true" />',
+        '<input type="file" id="doc-file-front" class="sr-only-file" accept="image/*,application/pdf" tabindex="-1" aria-hidden="true" />',
+        '<input type="file" id="doc-camera-back" class="sr-only-file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true" />',
+        '<input type="file" id="doc-file-back" class="sr-only-file" accept="image/*,application/pdf" tabindex="-1" aria-hidden="true" />',
+        previewBlock,
+        needVerso
+          ? '<p class="banner">Identificamos um documento que precisa do <strong>verso</strong>. Envie a segunda foto.</p>'
+          : "",
+        '<div class="doc-cta-stack">' + primaryCapture + "</div>",
+        confiraCta,
+      ].join("");
+    }
+
+    function renderConfiraDados() {
+      return [
+        '<p class="banner">Encontramos estes dados no seu documento. Confira e corrija se necessário.</p>',
+        "<label>Nome completo *</label>",
+        '<input data-field="hospede_nome" autocomplete="name" value="' +
+          escapeHtml(state.hospede_nome) +
+          '" />',
+        "<label>Nome social (opcional)</label>",
+        '<input data-field="nome_social" value="' + escapeHtml(state.nome_social) + '" />',
         "<label>Tipo de documento *</label>",
         '<select data-field="documento_tipo">',
         '<option value="">Selecione…</option>',
@@ -912,26 +1030,6 @@
         '<input data-field="documento_numero" inputmode="text" autocomplete="off" value="' +
           escapeHtml(state.documento_numero) +
           '" />',
-        "<label>Data de nascimento *</label>",
-        '<input data-field="data_nascimento" type="date" value="' +
-          escapeHtml(state.data_nascimento) +
-          '" />',
-        uploadBlock,
-        flags.ocr_enabled
-          ? '<p class="muted tip">Se a leitura automática estiver disponível, sugerimos campos após o envio — você pode corrigir.</p>'
-          : "",
-      ].join("");
-    }
-
-    function renderConfiraDados() {
-      return [
-        '<p class="banner">Confira e complete seus dados. Corrija o que estiver errado.</p>',
-        "<label>Nome completo *</label>",
-        '<input data-field="hospede_nome" autocomplete="name" value="' +
-          escapeHtml(state.hospede_nome) +
-          '" />',
-        "<label>Nome social (opcional)</label>",
-        '<input data-field="nome_social" value="' + escapeHtml(state.nome_social) + '" />',
         "<label>Data de nascimento *</label>",
         '<input data-field="data_nascimento" type="date" value="' +
           escapeHtml(state.data_nascimento) +
