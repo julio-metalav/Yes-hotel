@@ -16,6 +16,7 @@
     "test:yes:credential-release": "tsx scripts/test-credential-release-policy.ts",
     "test:yes:fnrh-public-link": "tsx scripts/test-fnrh-public-link.ts",
     "test:yes:guest-multichannel": "tsx scripts/test-guest-multichannel.ts",
+    "test:yes:fnrh-auto-send-reservation-created": "tsx scripts/test-fnrh-auto-send-reservation-created.ts",
     "test:yes:payment-link-send": "tsx scripts/test-payment-link-send.ts",
     "test:yes:ttlock-timezone": "tsx scripts/test-ttlock-timezone-and-credentials.ts",
     "test:yes:lifecycle-update-validity": "tsx scripts/test-lifecycle-update-validity.ts",

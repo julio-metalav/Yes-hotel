@@ -2,7 +2,8 @@
  * Serviço de sincronização de reservas (mock ou real via ReservationSourcePort).
  * Idempotente. Não interpreta ausência em página como cancelamento.
  * Modo real bloqueado enquanto HITS_INTEGRATION_ENABLED != true.
- * Sync de leitura/persistência não dispara cobrança, DigiSac, senha, TTLock ou FNRH.
+ * Persistência do sync não dispara cobrança, DigiSac, senha ou TTLock.
+ * Após create operacional, a Edge pode orquestrar FNRH (reserva_criada) sem bloquear o sync.
  */
 
 import { detectReservationChanges } from "../../domain/yes-hotel/reservation-sync-diff.ts";
@@ -53,6 +54,8 @@ export type SyncReservationsResult = {
   cancelled: number;
   events: number;
   errors: number;
+  /** IDs operacionais criados neste run (para orquestração pós-sync, ex. FNRH). */
+  createdReservationIds: string[];
   stopped_reason?: string;
   error?: string;
 };
@@ -106,6 +109,7 @@ export async function syncReservationsFromSource(input: {
   let errors = 0;
   let cursor: string | null = null;
   let stopped_reason: string | undefined;
+  const createdReservationIds: string[] = [];
 
   try {
     while (pages < maxPages) {
@@ -135,8 +139,11 @@ export async function syncReservationsFromSource(input: {
         processed += 1;
         try {
           await processOne(reservation, input.repo, dryRun, nowIso, {
-            onCreated: () => {
+            onCreated: (operacionalId) => {
               created += 1;
+              if (operacionalId && operacionalId !== "dry-run") {
+                createdReservationIds.push(operacionalId);
+              }
             },
             onUpdated: () => {
               updated += 1;
@@ -206,6 +213,7 @@ export async function syncReservationsFromSource(input: {
       cancelled,
       events,
       errors,
+      createdReservationIds,
       stopped_reason,
     };
   } catch (e) {
@@ -228,6 +236,7 @@ export async function syncReservationsFromSource(input: {
       cancelled,
       events,
       errors: errors + 1,
+      createdReservationIds,
       error: msg,
     };
   }
@@ -250,6 +259,7 @@ function emptyResult(
     cancelled: 0,
     events: 0,
     errors: 0,
+    createdReservationIds: [],
     error,
   };
 }
@@ -260,7 +270,7 @@ async function processOne(
   dryRun: boolean,
   nowIso: string,
   counters: {
-    onCreated: () => void;
+    onCreated: (operacionalId: string) => void;
     onUpdated: () => void;
     onUnchanged: () => void;
     onCancelled: () => void;
@@ -271,7 +281,7 @@ async function processOne(
   const changeEvents = detectReservationChanges(previous, reservation);
   const result = await repo.upsertFromSynced(reservation, changeEvents, { dryRun, nowIso });
 
-  if (result.created) counters.onCreated();
+  if (result.created) counters.onCreated(result.operacionalId);
   else if (changeEvents.length === 0) counters.onUnchanged();
   else counters.onUpdated();
 
