@@ -9,6 +9,16 @@
  * Independente de elegibilidade de acesso:
  * pendente_comissionado permanece financeiramente pendente, mas está
  * financeiramente liberado para acesso (não gera Pagar.me).
+ *
+ * Ordem defensiva (comissão):
+ * 1) B2BRESERVAS → comissionada
+ * 2) canal OTA explícito (lista fechada) → comissionada
+ * 3) Booking Engine / Motor / Particular → direta (não comissionada)
+ * 4) gestor/canal vazios → direta manual HITS (não comissionada)
+ * 5) desconhecido → não comissionada (nunca assumir comissionada)
+ *
+ * PROIBIDO: matching frágil por substring "booking" (ex.: includes) ou regex
+ * que confunda Booking Engine com Booking OTA.
  */
 
 export type FinancialStatusVisible =
@@ -23,6 +33,15 @@ export type ClassificacaoComissionamento =
 
 export type SyncedPaymentStatus = "pago" | "pendente" | "parcial" | "desconhecido";
 
+export type ClassificationReason =
+  | "b2b_channel_manager"
+  | "ota_channel"
+  | "ota_channel_id"
+  | "booking_engine_direta"
+  | "particular_motor"
+  | "manual_hits_direta"
+  | "default_nao_comissionada";
+
 /** IDs/códigos estáveis conhecidos — expandir quando HITS confirmar catálogo. */
 export const KNOWN_OTA_CHANNEL_IDS = {
   // Reservado: sem IDs oficiais autenticados no contrato atual.
@@ -30,12 +49,38 @@ export const KNOWN_OTA_CHANNEL_IDS = {
 
 const B2B_CHANNEL_MANAGERS = new Set(["B2BRESERVAS"]);
 
-const OTA_NAME_PATTERNS: Array<{ id: string; re: RegExp }> = [
-  { id: "booking", re: /\bbooking(?:\.com)?\b/i },
-  { id: "expedia", re: /\bexpedia\b/i },
-  { id: "hotels_com", re: /\bhotels\.?\s*com\b/i },
-  { id: "airbnb", re: /\bairbnb\b/i },
-];
+/**
+ * Canais OTA reconhecidos nesta fase (lista fechada).
+ * Tokens após upperCompact (sem acento/espaço; ponto e barra preservados).
+ * NÃO incluir BOOKINGENGINE.
+ */
+const OTA_EXACT_TOKENS = new Set([
+  "BOOKING",
+  "BOOKING.COM",
+  "BOOKINGCOM",
+  "EXPEDIA",
+  "EXPEDIA/HOTELS.COM",
+  "EXPEDIA/HOTELSCOM",
+  "EXPEDIAHOTELS.COM",
+  "EXPEDIAHOTELSCOM",
+  "HOTELS.COM",
+  "HOTELSCOM",
+  "AIRBNB",
+]);
+
+const OTA_TOKEN_TO_ID: Record<string, string> = {
+  BOOKING: "booking",
+  "BOOKING.COM": "booking",
+  BOOKINGCOM: "booking",
+  EXPEDIA: "expedia",
+  "EXPEDIA/HOTELS.COM": "expedia",
+  "EXPEDIA/HOTELSCOM": "expedia",
+  "EXPEDIAHOTELS.COM": "expedia",
+  EXPEDIAHOTELSCOM: "expedia",
+  "HOTELS.COM": "hotels_com",
+  HOTELSCOM: "hotels_com",
+  AIRBNB: "airbnb",
+};
 
 function normText(v: unknown): string {
   return String(v ?? "")
@@ -44,8 +89,13 @@ function normText(v: unknown): string {
     .trim();
 }
 
-function upperCompact(v: unknown): string {
+/** Compacta para comparação exata: remove espaços; mantém `.` e `/`. */
+export function upperCompact(v: unknown): string {
   return normText(v).toUpperCase().replace(/\s+/g, "");
+}
+
+function trimOrEmpty(v: unknown): string {
+  return String(v ?? "").trim();
 }
 
 export function parseHitsMoney(v: unknown): number | null {
@@ -70,21 +120,31 @@ export function mapPaymentStatusFromBalanceDue(
 export function isB2bChannelManager(channelManager: unknown): boolean {
   const compact = upperCompact(channelManager);
   if (!compact) return false;
-  for (const known of B2B_CHANNEL_MANAGERS) {
-    if (compact === known || compact.includes(known)) return true;
-  }
-  return false;
+  return compact === "B2BRESERVAS" || compact.startsWith("B2BRESERVAS");
+}
+
+/** Booking Engine = motor próprio Omnibees — NUNCA OTA Booking. */
+export function isBookingEngineChannel(value: unknown): boolean {
+  return upperCompact(value) === "BOOKINGENGINE";
+}
+
+export function isMotorDeReservasChannel(value: unknown): boolean {
+  return upperCompact(value) === "MOTORADERESERVAS";
+}
+
+export function matchOtaExactToken(value: unknown): string | null {
+  const compact = upperCompact(value);
+  if (!compact) return null;
+  // Defesa: Booking Engine nunca é OTA.
+  if (compact === "BOOKINGENGINE") return null;
+  if (!OTA_EXACT_TOKENS.has(compact)) return null;
+  return OTA_TOKEN_TO_ID[compact] ?? null;
 }
 
 export function matchOtaFromTexts(texts: unknown[]): string | null {
   for (const raw of texts) {
-    const t = normText(raw);
-    if (!t) continue;
-    for (const p of OTA_NAME_PATTERNS) {
-      // Expedia/Hotels.com composto
-      if (/expedia\s*\/\s*hotels/i.test(t)) return "expedia";
-      if (p.re.test(t)) return p.id;
-    }
+    const id = matchOtaExactToken(raw);
+    if (id) return id;
   }
   return null;
 }
@@ -96,6 +156,29 @@ export function matchOtaFromChannelId(channelId: unknown): string | null {
   return known[id] ?? null;
 }
 
+export function isDirectBookingEngineOrMotor(input: {
+  channelManager?: unknown;
+  salesChannel?: unknown;
+  companyName?: unknown;
+  billingEntity?: unknown;
+  groupName?: unknown;
+}): boolean {
+  const channels = [
+    input.salesChannel,
+    input.companyName,
+    input.billingEntity,
+    input.groupName,
+  ];
+  for (const c of channels) {
+    if (isBookingEngineChannel(c)) return true;
+    if (isMotorDeReservasChannel(c)) return true;
+  }
+  const blobs = channels.map(normText).join(" | ").toLowerCase();
+  if (/\bparticular\b/.test(blobs)) return true;
+  return false;
+}
+
+/** @deprecated prefer isDirectBookingEngineOrMotor — mantido para espelho UI. */
 export function isParticularMotorReservation(input: {
   channelManager?: unknown;
   salesChannel?: unknown;
@@ -103,25 +186,26 @@ export function isParticularMotorReservation(input: {
   billingEntity?: unknown;
   groupName?: unknown;
 }): boolean {
-  const blobs = [
-    input.channelManager,
-    input.salesChannel,
-    input.companyName,
-    input.billingEntity,
-    input.groupName,
-  ].map(normText);
-  const joined = blobs.join(" | ").toLowerCase();
-  const hasMotor = /motor\s+de\s+reservas/.test(joined);
-  const hasParticular = /\bparticular\b/.test(joined);
-  // Particular vendido pelo site/motor próprio.
-  if (hasParticular && hasMotor) return true;
-  if (hasParticular && /sem\s+documento/.test(joined)) return true;
-  if (hasMotor && hasParticular) return true;
-  // Canal só "Motor de Reservas" sem OTA/B2B → particular operacional.
-  if (hasMotor && !isB2bChannelManager(input.channelManager) && !matchOtaFromTexts(blobs)) {
-    return true;
-  }
-  return false;
+  return isDirectBookingEngineOrMotor(input);
+}
+
+export function isManualHitsDirectReservation(input: {
+  channelManager?: unknown;
+  salesChannel?: unknown;
+  companyName?: unknown;
+  billingEntity?: unknown;
+  groupName?: unknown;
+  reservationChannelId?: unknown;
+  integrator?: unknown;
+}): boolean {
+  const manager = trimOrEmpty(input.channelManager) || trimOrEmpty(input.integrator);
+  const channel =
+    trimOrEmpty(input.salesChannel) ||
+    trimOrEmpty(input.companyName) ||
+    trimOrEmpty(input.billingEntity) ||
+    trimOrEmpty(input.groupName);
+  const channelId = trimOrEmpty(input.reservationChannelId);
+  return !manager && !channel && !channelId;
 }
 
 export function classifyCommissionFromHits(input: {
@@ -134,61 +218,82 @@ export function classifyCommissionFromHits(input: {
   integrator?: unknown;
 }): {
   classificacao: Exclude<ClassificacaoComissionamento, "desconhecida">;
-  reason:
-    | "b2b_channel_manager"
-    | "ota_channel"
-    | "ota_channel_id"
-    | "particular_motor"
-    | "default_nao_comissionada";
+  reason: ClassificationReason;
   matchedOtaId: string | null;
+  originKind: "b2b" | "ota" | "booking_engine" | "motor_particular" | "manual_hits" | "unknown";
 } {
+  // 2) B2B
   if (isB2bChannelManager(input.channelManager ?? input.integrator)) {
     return {
       classificacao: "comissionada",
       reason: "b2b_channel_manager",
       matchedOtaId: null,
+      originKind: "b2b",
     };
   }
 
+  // Preferir ID estável quando existir.
   const byId = matchOtaFromChannelId(input.reservationChannelId);
   if (byId) {
     return {
       classificacao: "comissionada",
       reason: "ota_channel_id",
       matchedOtaId: byId,
+      originKind: "ota",
     };
   }
 
-  const texts = [
+  // 3) OTA explícita (lista fechada; Booking Engine não entra)
+  const channelCandidates = [
     input.salesChannel,
     input.companyName,
     input.billingEntity,
     input.groupName,
-    input.channelManager,
-    input.integrator,
   ];
-  const ota = matchOtaFromTexts(texts);
+  const ota = matchOtaFromTexts(channelCandidates);
   if (ota) {
     return {
       classificacao: "comissionada",
       reason: "ota_channel",
       matchedOtaId: ota,
+      originKind: "ota",
     };
   }
 
-  if (isParticularMotorReservation(input)) {
+  // 4) Booking Engine / Motor / Particular
+  if (channelCandidates.some(isBookingEngineChannel)) {
+    return {
+      classificacao: "nao_comissionada",
+      reason: "booking_engine_direta",
+      matchedOtaId: null,
+      originKind: "booking_engine",
+    };
+  }
+  if (isDirectBookingEngineOrMotor(input)) {
     return {
       classificacao: "nao_comissionada",
       reason: "particular_motor",
       matchedOtaId: null,
+      originKind: "motor_particular",
     };
   }
 
-  // Provider/canal desconhecido + saldo > 0 → Pendente normal (não comissionada).
+  // 5) gestor/canal vazios → direta manual HITS
+  if (isManualHitsDirectReservation(input)) {
+    return {
+      classificacao: "nao_comissionada",
+      reason: "manual_hits_direta",
+      matchedOtaId: null,
+      originKind: "manual_hits",
+    };
+  }
+
+  // 6) desconhecido → nunca assumir comissionada
   return {
     classificacao: "nao_comissionada",
     reason: "default_nao_comissionada",
     matchedOtaId: null,
+    originKind: "unknown",
   };
 }
 
@@ -205,6 +310,7 @@ export function resolveFinancialStatusVisible(input: {
     .trim()
     .toLowerCase();
 
+  // 1) saldo <= 0 / pago → Pago
   const isPaid = pay === "pago" || (balance != null && balance <= 0);
   if (isPaid) return "pago";
 
@@ -233,7 +339,6 @@ export function isFinanceiramenteLiberadoParaAcesso(input: {
   const status = resolveFinancialStatusVisible(input);
   if (status === "pago") return true;
   if (status === "pendente_comissionado") return true;
-  // desconhecida legada: manter liberação defensiva já existente no painel.
   const cls = String(input.classificacao ?? "")
     .trim()
     .toLowerCase();
@@ -292,9 +397,7 @@ export function extractHitsCommercialFields(raw: Record<string, unknown> | null 
   const companyName = trim(r.companyName);
   const requesterCompanyName = trim(r.requesterCompanyName);
   const groupName = trim(r.groupName);
-  // Gestor: preferir integrator (lista HITS); fallback groupName só se parecer gestor.
   const channelManager = integrator ?? null;
-  // Canal de vendas: companyName costuma carregar OTA/agência; requester como fallback.
   const salesChannel = companyName ?? requesterCompanyName ?? groupName ?? null;
   const billingEntity = requesterCompanyName ?? companyName ?? null;
   const reservationChannelId =

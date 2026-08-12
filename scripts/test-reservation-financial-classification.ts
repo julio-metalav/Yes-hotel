@@ -1,11 +1,16 @@
 /**
  * Testes do classificador financeiro HITS + estados Pago/Pendente/Pendente (comissionado).
+ * Inclui Booking Engine vs Booking OTA e reserva manual HITS.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   classifyCommissionFromHits,
+  isBookingEngineChannel,
   isFinanceiramenteLiberadoParaAcesso,
   mapPaymentStatusFromBalanceDue,
+  matchOtaExactToken,
   nextFinancialActionLabel,
   resolveFinancialStatusVisible,
   shouldCreatePagarmeCharge,
@@ -21,7 +26,12 @@ function fin(input: {
 }) {
   const classified =
     input.cls != null
-      ? { classificacao: input.cls as "comissionada" | "nao_comissionada" | "desconhecida" }
+      ? {
+          classificacao: input.cls as "comissionada" | "nao_comissionada" | "desconhecida",
+          reason: "forced" as const,
+          matchedOtaId: null,
+          originKind: "unknown" as const,
+        }
       : classifyCommissionFromHits({
           channelManager: input.channelManager,
           salesChannel: input.salesChannel,
@@ -29,8 +39,7 @@ function fin(input: {
           integrator: input.channelManager,
         });
   const pay =
-    input.pay ??
-    mapPaymentStatusFromBalanceDue(input.balance, "desconhecido");
+    input.pay ?? mapPaymentStatusFromBalanceDue(input.balance, "desconhecido");
   const status = resolveFinancialStatusVisible({
     pagamentoStatus: pay,
     balanceDue: input.balance,
@@ -39,43 +48,85 @@ function fin(input: {
   return { ...classified, pay, status };
 }
 
-// 1. saldo zero + Booking → Pago
+// --- Defesa crítica: Booking Engine ≠ Booking OTA ---
+assert.equal(isBookingEngineChannel("Booking Engine"), true);
+assert.equal(matchOtaExactToken("Booking Engine"), null);
+assert.equal(matchOtaExactToken("Booking"), "booking");
+assert.equal(matchOtaExactToken("Booking.com"), "booking");
+assert.notEqual(matchOtaExactToken("Booking Engine"), matchOtaExactToken("Booking"));
+
+// Proibido padrão includes("booking") no código executável (ignora comentários)
 {
-  const r = fin({ balance: 0, salesChannel: "Booking", channelManager: "Omnibees" });
-  assert.equal(r.status, "pago");
-  assert.equal(r.classificacao, "comissionada");
+  const stripComments = (s: string) =>
+    s
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+  const src = stripComments(
+    readFileSync(resolve("src/lib/domain/yes-hotel/reservation-financial-classification.ts"), "utf8"),
+  );
+  const ui = stripComments(readFileSync(resolve("ui/yes-reservation-financial.js"), "utf8"));
+  assert.doesNotMatch(src, /\.includes\(\s*["']booking["']\s*\)/i);
+  assert.doesNotMatch(src, /\/\\bbooking/i);
+  assert.doesNotMatch(ui, /\.includes\(\s*["']booking["']\s*\)/i);
+  assert.doesNotMatch(ui, /\/\\bbooking/i);
 }
 
-// 2. saldo > 0 + Booking → Pendente (comissionado)
+// 1. Booking OTA + saldo > 0 → Pendente (comissionado)
 {
   const r = fin({ balance: 150, salesChannel: "Booking" });
+  assert.equal(r.classificacao, "comissionada");
   assert.equal(r.status, "pendente_comissionado");
 }
-
-// 3–5 OTAs
-for (const ch of ["Expedia", "Hotels.com", "Airbnb"]) {
-  const r = fin({ balance: 10, salesChannel: ch });
-  assert.equal(r.status, "pendente_comissionado", ch);
-}
-
-// Expedia/Hotels.com composto
 {
-  const r = fin({ balance: 10, salesChannel: "Expedia/Hotels.com" });
+  const r = fin({ balance: 150, salesChannel: "Booking.com", channelManager: "Omnibees" });
   assert.equal(r.status, "pendente_comissionado");
 }
 
-// 6. B2B / tunibraco
+// 2. Omnibees + Booking Engine + saldo > 0 → Pendente, não comissionada
+{
+  const r = fin({
+    balance: 220,
+    channelManager: "Omnibees",
+    salesChannel: "Booking Engine",
+  });
+  assert.equal(r.classificacao, "nao_comissionada");
+  assert.equal(r.reason, "booking_engine_direta");
+  assert.equal(r.originKind, "booking_engine");
+  assert.equal(r.status, "pendente");
+  assert.equal(
+    shouldCreatePagarmeCharge({
+      pagamentoStatus: "pendente",
+      balanceDue: 220,
+      classificacao: "nao_comissionada",
+    }).allowed,
+    true,
+  );
+}
+
+// 3. Booking Engine jamais casa com Booking OTA
+{
+  const engine = classifyCommissionFromHits({
+    channelManager: "Omnibees",
+    salesChannel: "Booking Engine",
+  });
+  const ota = classifyCommissionFromHits({
+    channelManager: "Omnibees",
+    salesChannel: "Booking",
+  });
+  assert.equal(engine.classificacao, "nao_comissionada");
+  assert.equal(ota.classificacao, "comissionada");
+  assert.notEqual(engine.classificacao, ota.classificacao);
+}
+
+// 4. B2B + qualquer canal → Pendente (comissionado)
 {
   const r = fin({
     balance: 200,
     channelManager: "B2BRESERVAS",
     salesChannel: "tunibraco",
   });
-  assert.equal(r.classificacao, "comissionada");
   assert.equal(r.status, "pendente_comissionado");
 }
-
-// 7. B2B / Maringá
 {
   const r = fin({
     balance: 80,
@@ -85,7 +136,26 @@ for (const ch of ["Expedia", "Hotels.com", "Airbnb"]) {
   assert.equal(r.status, "pendente_comissionado");
 }
 
-// 8. Motor / Particular → Pendente
+// 5. manager/channel vazios → Pendente normal (direta manual HITS)
+{
+  const r = fin({ balance: 90, channelManager: "", salesChannel: "" });
+  assert.equal(r.classificacao, "nao_comissionada");
+  assert.equal(r.reason, "manual_hits_direta");
+  assert.equal(r.originKind, "manual_hits");
+  assert.equal(r.status, "pendente");
+}
+
+// 6. Expedia/Hotels.com → Pendente (comissionado)
+{
+  const r = fin({ balance: 10, salesChannel: "Expedia/Hotels.com" });
+  assert.equal(r.status, "pendente_comissionado");
+}
+for (const ch of ["Expedia", "Hotels.com", "Airbnb"]) {
+  const r = fin({ balance: 10, salesChannel: ch });
+  assert.equal(r.status, "pendente_comissionado", ch);
+}
+
+// 7. Motor de Reservas/Particular → Pendente
 {
   const r = fin({
     balance: 300,
@@ -96,17 +166,7 @@ for (const ch of ["Expedia", "Hotels.com", "Airbnb"]) {
   assert.equal(r.status, "pendente");
 }
 
-// 9. saldo zero + B2B → Pago
-{
-  const r = fin({
-    balance: 0,
-    channelManager: "B2BRESERVAS",
-    salesChannel: "tunibraco",
-  });
-  assert.equal(r.status, "pago");
-}
-
-// 10. desconhecido + saldo > 0 → Pendente normal
+// 8. desconhecido → Pendente normal
 {
   const r = fin({
     balance: 50,
@@ -117,19 +177,19 @@ for (const ch of ["Expedia", "Hotels.com", "Airbnb"]) {
   assert.equal(r.status, "pendente");
 }
 
-// 11. Pendente comissionado não bloqueia acesso
+// 9. qualquer origem + saldo zero → Pago
 {
+  assert.equal(fin({ balance: 0, salesChannel: "Booking" }).status, "pago");
   assert.equal(
-    isFinanceiramenteLiberadoParaAcesso({
-      pagamentoStatus: "pendente",
-      balanceDue: 100,
-      classificacao: "comissionada",
-    }),
-    true,
+    fin({ balance: 0, channelManager: "Omnibees", salesChannel: "Booking Engine" }).status,
+    "pago",
   );
+  assert.equal(fin({ balance: 0, channelManager: "B2BRESERVAS", salesChannel: "x" }).status, "pago");
+  assert.equal(fin({ balance: 0, channelManager: "", salesChannel: "" }).status, "pago");
+  assert.equal(mapPaymentStatusFromBalanceDue(0), "pago");
 }
 
-// 12. Pendente comissionado não gera Pagar.me
+// 10. comissionada não gera Pagar.me
 {
   const gate = shouldCreatePagarmeCharge({
     pagamentoStatus: "pendente",
@@ -140,31 +200,16 @@ for (const ch of ["Expedia", "Hotels.com", "Airbnb"]) {
   assert.equal(gate.reason, "comissionada_bloqueada");
 }
 
-// 13. Pendente normal preserva cobrança
+// 11. comissionada não bloqueia acesso
 {
-  const gate = shouldCreatePagarmeCharge({
-    pagamentoStatus: "pendente",
-    balanceDue: 100,
-    classificacao: "nao_comissionada",
-  });
-  assert.equal(gate.allowed, true);
   assert.equal(
     isFinanceiramenteLiberadoParaAcesso({
       pagamentoStatus: "pendente",
       balanceDue: 100,
-      classificacao: "nao_comissionada",
+      classificacao: "comissionada",
     }),
-    false,
+    true,
   );
-}
-
-// 14. saldo → zero na sync → Pago
-{
-  const before = fin({ balance: 90, salesChannel: "Booking" });
-  assert.equal(before.status, "pendente_comissionado");
-  const after = fin({ balance: 0, salesChannel: "Booking" });
-  assert.equal(after.status, "pago");
-  assert.equal(mapPaymentStatusFromBalanceDue(0), "pago");
 }
 
 assert.equal(nextFinancialActionLabel("pendente"), "Gerar e enviar link de pagamento");

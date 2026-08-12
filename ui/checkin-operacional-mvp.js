@@ -5084,7 +5084,58 @@ function buildOrigemComercialHtml(reserva) {
   var manager = String(reserva.channelManager || "").trim();
   var channel = String(reserva.salesChannel || "").trim();
   var billing = String(reserva.billingEntity || "").trim();
+  var finApi =
+    typeof YesReservationFinancial !== "undefined" && YesReservationFinancial
+      ? YesReservationFinancial
+      : null;
+  var isBookingEngine =
+    (finApi && typeof finApi.isBookingEngineChannel === "function"
+      ? finApi.isBookingEngineChannel(channel)
+      : /^booking\s*engine$/i.test(channel)) || false;
+  var isManualHits =
+    (!manager && !channel && !billing) &&
+    (String(reserva.origemExterna || "").toLowerCase() === "hits" ||
+      !!String(reserva.externalReservationId || "").trim());
+  if (isManualHits && finApi && typeof finApi.isManualHitsDirectReservation === "function") {
+    isManualHits = finApi.isManualHitsDirectReservation({
+      channelManager: manager,
+      salesChannel: channel,
+      billingEntity: billing,
+    });
+  } else if (!manager && !channel && !billing) {
+    // Sem origem HITS: não inventar bloco "Reserva direta".
+    isManualHits = false;
+  }
+
+  if (isManualHits) {
+    return (
+      '<div class="reservation-detail-section reservation-detail-origem">' +
+      '<p class="reservation-detail-section-title">Origem / Comercial</p>' +
+      '<dl class="detail-situacao-grid">' +
+      "<div><dt>Origem</dt><dd>Reserva direta</dd></div>" +
+      "</dl></div>"
+    );
+  }
+
+  if (isBookingEngine) {
+    var linesBe = [
+      "<div><dt>Origem</dt><dd>Motor de Reservas</dd></div>",
+      "<div><dt>Canal</dt><dd>Booking Engine</dd></div>",
+    ];
+    if (manager) {
+      linesBe.unshift("<div><dt>Gestor</dt><dd>" + escapeHtml(manager) + "</dd></div>");
+    }
+    return (
+      '<div class="reservation-detail-section reservation-detail-origem">' +
+      '<p class="reservation-detail-section-title">Origem / Comercial</p>' +
+      '<dl class="detail-situacao-grid">' +
+      linesBe.join("") +
+      "</dl></div>"
+    );
+  }
+
   if (!manager && !channel && !billing) return "";
+
   var lines = [];
   if (manager) lines.push("<div><dt>Gestor</dt><dd>" + escapeHtml(manager) + "</dd></div>");
   if (channel) lines.push("<div><dt>Canal</dt><dd>" + escapeHtml(channel) + "</dd></div>");

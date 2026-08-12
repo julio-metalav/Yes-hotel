@@ -1,17 +1,26 @@
 /**
  * Espelho browser do classificador financeiro HITS.
  * Fonte de verdade tipada: src/lib/domain/yes-hotel/reservation-financial-classification.ts
+ *
+ * PROIBIDO: matching frágil por substring booking (includes) ou regex
+ * que confunda Booking Engine com Booking OTA.
  */
 (function (global) {
   "use strict";
 
-  var B2B = { B2BRESERVAS: true };
-  var OTA = [
-    { id: "booking", re: /\bbooking(?:\.com)?\b/i },
-    { id: "expedia", re: /\bexpedia\b/i },
-    { id: "hotels_com", re: /\bhotels\.?\s*com\b/i },
-    { id: "airbnb", re: /\bairbnb\b/i },
-  ];
+  var OTA_EXACT = {
+    BOOKING: "booking",
+    "BOOKING.COM": "booking",
+    BOOKINGCOM: "booking",
+    EXPEDIA: "expedia",
+    "EXPEDIA/HOTELS.COM": "expedia",
+    "EXPEDIA/HOTELSCOM": "expedia",
+    "EXPEDIAHOTELS.COM": "expedia",
+    EXPEDIAHOTELSCOM: "expedia",
+    "HOTELS.COM": "hotels_com",
+    HOTELSCOM: "hotels_com",
+    AIRBNB: "airbnb",
+  };
 
   function normText(v) {
     return String(v == null ? "" : v)
@@ -22,6 +31,10 @@
 
   function upperCompact(v) {
     return normText(v).toUpperCase().replace(/\s+/g, "");
+  }
+
+  function trimOrEmpty(v) {
+    return String(v == null ? "" : v).trim();
   }
 
   function parseHitsMoney(v) {
@@ -36,66 +49,111 @@
   function isB2bChannelManager(channelManager) {
     var compact = upperCompact(channelManager);
     if (!compact) return false;
-    for (var k in B2B) {
-      if (Object.prototype.hasOwnProperty.call(B2B, k)) {
-        if (compact === k || compact.indexOf(k) >= 0) return true;
-      }
-    }
-    return false;
+    return compact === "B2BRESERVAS" || compact.indexOf("B2BRESERVAS") === 0;
+  }
+
+  function isBookingEngineChannel(value) {
+    return upperCompact(value) === "BOOKINGENGINE";
+  }
+
+  function isMotorDeReservasChannel(value) {
+    return upperCompact(value) === "MOTORADERESERVAS";
+  }
+
+  function matchOtaExactToken(value) {
+    var compact = upperCompact(value);
+    if (!compact || compact === "BOOKINGENGINE") return null;
+    return Object.prototype.hasOwnProperty.call(OTA_EXACT, compact) ? OTA_EXACT[compact] : null;
   }
 
   function matchOtaFromTexts(texts) {
     for (var i = 0; i < texts.length; i++) {
-      var t = normText(texts[i]);
-      if (!t) continue;
-      if (/expedia\s*\/\s*hotels/i.test(t)) return "expedia";
-      for (var j = 0; j < OTA.length; j++) {
-        if (OTA[j].re.test(t)) return OTA[j].id;
-      }
+      var id = matchOtaExactToken(texts[i]);
+      if (id) return id;
     }
     return null;
   }
 
-  function isParticularMotorReservation(input) {
-    var blobs = [
-      input.channelManager,
-      input.salesChannel,
-      input.companyName,
-      input.billingEntity,
-      input.groupName,
-    ].map(normText);
-    var joined = blobs.join(" | ").toLowerCase();
-    var hasMotor = /motor\s+de\s+reservas/.test(joined);
-    var hasParticular = /\bparticular\b/.test(joined);
-    if (hasParticular && hasMotor) return true;
-    if (hasParticular && /sem\s+documento/.test(joined)) return true;
-    if (hasMotor && !isB2bChannelManager(input.channelManager) && !matchOtaFromTexts(blobs)) {
-      return true;
+  function isDirectBookingEngineOrMotor(input) {
+    var channels = [input.salesChannel, input.companyName, input.billingEntity, input.groupName];
+    for (var i = 0; i < channels.length; i++) {
+      if (isBookingEngineChannel(channels[i])) return true;
+      if (isMotorDeReservasChannel(channels[i])) return true;
     }
-    return false;
+    var joined = channels.map(normText).join(" | ").toLowerCase();
+    return /\bparticular\b/.test(joined);
+  }
+
+  function isParticularMotorReservation(input) {
+    return isDirectBookingEngineOrMotor(input);
+  }
+
+  function isManualHitsDirectReservation(input) {
+    var manager = trimOrEmpty(input.channelManager) || trimOrEmpty(input.integrator);
+    var channel =
+      trimOrEmpty(input.salesChannel) ||
+      trimOrEmpty(input.companyName) ||
+      trimOrEmpty(input.billingEntity) ||
+      trimOrEmpty(input.groupName);
+    var channelId = trimOrEmpty(input.reservationChannelId);
+    return !manager && !channel && !channelId;
   }
 
   function classifyCommissionFromHits(input) {
     input = input || {};
     if (isB2bChannelManager(input.channelManager || input.integrator)) {
-      return { classificacao: "comissionada", reason: "b2b_channel_manager", matchedOtaId: null };
+      return {
+        classificacao: "comissionada",
+        reason: "b2b_channel_manager",
+        matchedOtaId: null,
+        originKind: "b2b",
+      };
     }
-    var texts = [
+    var channelCandidates = [
       input.salesChannel,
       input.companyName,
       input.billingEntity,
       input.groupName,
-      input.channelManager,
-      input.integrator,
     ];
-    var ota = matchOtaFromTexts(texts);
+    var ota = matchOtaFromTexts(channelCandidates);
     if (ota) {
-      return { classificacao: "comissionada", reason: "ota_channel", matchedOtaId: ota };
+      return {
+        classificacao: "comissionada",
+        reason: "ota_channel",
+        matchedOtaId: ota,
+        originKind: "ota",
+      };
     }
-    if (isParticularMotorReservation(input)) {
-      return { classificacao: "nao_comissionada", reason: "particular_motor", matchedOtaId: null };
+    if (channelCandidates.some(isBookingEngineChannel)) {
+      return {
+        classificacao: "nao_comissionada",
+        reason: "booking_engine_direta",
+        matchedOtaId: null,
+        originKind: "booking_engine",
+      };
     }
-    return { classificacao: "nao_comissionada", reason: "default_nao_comissionada", matchedOtaId: null };
+    if (isDirectBookingEngineOrMotor(input)) {
+      return {
+        classificacao: "nao_comissionada",
+        reason: "particular_motor",
+        matchedOtaId: null,
+        originKind: "motor_particular",
+      };
+    }
+    if (isManualHitsDirectReservation(input)) {
+      return {
+        classificacao: "nao_comissionada",
+        reason: "manual_hits_direta",
+        matchedOtaId: null,
+        originKind: "manual_hits",
+      };
+    }
+    return {
+      classificacao: "nao_comissionada",
+      reason: "default_nao_comissionada",
+      matchedOtaId: null,
+      originKind: "unknown",
+    };
   }
 
   function resolveFinancialStatusVisible(input) {
@@ -162,5 +220,8 @@
     shouldCreatePagarmeCharge: shouldCreatePagarmeCharge,
     isB2bChannelManager: isB2bChannelManager,
     isParticularMotorReservation: isParticularMotorReservation,
+    isBookingEngineChannel: isBookingEngineChannel,
+    isManualHitsDirectReservation: isManualHitsDirectReservation,
+    matchOtaExactToken: matchOtaExactToken,
   };
 })(typeof window !== "undefined" ? window : globalThis);
