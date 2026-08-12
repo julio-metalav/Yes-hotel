@@ -1,10 +1,16 @@
 /**
- * Port OCR FNRH — interface, no-op e factory (Azure | noop).
+ * Port OCR FNRH — interface, no-op e factory (azure | google | noop).
  */
 
 import { AzureDocumentIntelligenceOcrProvider } from "./fnrh-ocr-azure.ts";
 import type { FnrhOcrConfidenceBand } from "./fnrh-ocr-confidence.ts";
-import { FNRH_OCR_AZURE_API_VERSION, FNRH_OCR_AZURE_MODEL } from "./fnrh-ocr-confidence.ts";
+import {
+  FNRH_OCR_AZURE_API_VERSION,
+  FNRH_OCR_AZURE_MODEL,
+  FNRH_OCR_GOOGLE_API_VERSION,
+  FNRH_OCR_GOOGLE_MODEL,
+} from "./fnrh-ocr-confidence.ts";
+import { GoogleVisionOcrProvider } from "./fnrh-ocr-google-vision.ts";
 import { isFnrhOcrEnabled } from "./fnrh-checkin-v2-policy.ts";
 
 export type FnrhOcrDocumentSide = "front" | "back" | "single";
@@ -32,6 +38,8 @@ export type FnrhOcrSuggestedFields = {
   sexo?: string;
   nacionalidade?: string;
   documento_validade?: string;
+  /** CPF só quando explícito + checksum válido (Google). UI pode ignorar. */
+  cpf?: string;
 };
 
 export type FnrhOcrResult = {
@@ -78,18 +86,35 @@ export class NoopFnrhOcrProvider implements FnrhOcrProvider {
   }
 }
 
+export type FnrhOcrProviderName = "azure" | "google" | "noop";
+
 export type CreateFnrhOcrProviderOptions = {
   enabled?: boolean;
-  /** azure | noop — default azure quando enabled+creds. */
+  /** azure | google | noop */
   provider?: string | null;
   azureEndpoint?: string | null;
   azureKey?: string | null;
+  googleProjectId?: string | null;
+  googleClientEmail?: string | null;
+  googlePrivateKey?: string | null;
   fetchImpl?: typeof fetch;
+  googleAccessTokenProvider?: () => Promise<string>;
 };
 
-export function resolveFnrhOcrProviderName(raw: string | null | undefined): "azure" | "noop" {
+function readEnv(name: string): string | null {
+  if (typeof Deno !== "undefined") {
+    return Deno.env.get(name) ?? null;
+  }
+  if (typeof process !== "undefined") {
+    return process.env?.[name] ?? null;
+  }
+  return null;
+}
+
+export function resolveFnrhOcrProviderName(raw: string | null | undefined): FnrhOcrProviderName {
   const v = String(raw ?? "").trim().toLowerCase();
   if (v === "azure") return "azure";
+  if (v === "google" || v === "google_vision") return "google";
   if (v === "noop" || v === "") return "noop";
   return "noop";
 }
@@ -97,8 +122,8 @@ export function resolveFnrhOcrProviderName(raw: string | null | undefined): "azu
 /**
  * Factory fail-closed:
  * - FNRH_OCR_ENABLED !== "true" → noop
- * - provider != azure → noop
- * - endpoint/key ausentes → noop
+ * - provider desconhecido → noop
+ * - credenciais ausentes → noop
  */
 export function createFnrhOcrProvider(
   enabledOrOpts: boolean | CreateFnrhOcrProviderOptions = false,
@@ -107,47 +132,62 @@ export function createFnrhOcrProvider(
     typeof enabledOrOpts === "boolean" ? { enabled: enabledOrOpts } : enabledOrOpts;
 
   const enabled = opts.enabled === true || isFnrhOcrEnabled(String(opts.enabled));
-  // When called with boolean true from edge, also read env for provider/creds.
   const providerName = resolveFnrhOcrProviderName(
-    opts.provider ??
-      (typeof Deno !== "undefined"
-        ? Deno.env.get("FNRH_OCR_PROVIDER")
-        : typeof process !== "undefined"
-          ? process.env?.FNRH_OCR_PROVIDER
-          : null),
+    opts.provider ?? readEnv("FNRH_OCR_PROVIDER"),
   );
 
-  if (!enabled || providerName !== "azure") {
+  if (!enabled || providerName === "noop") {
     return new NoopFnrhOcrProvider();
   }
 
-  const endpoint =
-    opts.azureEndpoint ??
-    (typeof Deno !== "undefined"
-      ? Deno.env.get("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT")
-      : typeof process !== "undefined"
-        ? process.env?.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
-        : null);
-  const key =
-    opts.azureKey ??
-    (typeof Deno !== "undefined"
-      ? Deno.env.get("AZURE_DOCUMENT_INTELLIGENCE_KEY")
-      : typeof process !== "undefined"
-        ? process.env?.AZURE_DOCUMENT_INTELLIGENCE_KEY
-        : null);
-
-  if (!String(endpoint || "").trim() || !String(key || "").trim()) {
-    return new NoopFnrhOcrProvider();
+  if (providerName === "azure") {
+    const endpoint =
+      opts.azureEndpoint ?? readEnv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT");
+    const key = opts.azureKey ?? readEnv("AZURE_DOCUMENT_INTELLIGENCE_KEY");
+    if (!String(endpoint || "").trim() || !String(key || "").trim()) {
+      return new NoopFnrhOcrProvider();
+    }
+    return new AzureDocumentIntelligenceOcrProvider({
+      endpoint: String(endpoint),
+      key: String(key),
+      model: FNRH_OCR_AZURE_MODEL,
+      apiVersion: FNRH_OCR_AZURE_API_VERSION,
+      fetchImpl: opts.fetchImpl,
+    });
   }
 
-  return new AzureDocumentIntelligenceOcrProvider({
-    endpoint: String(endpoint),
-    key: String(key),
-    model: FNRH_OCR_AZURE_MODEL,
-    apiVersion: FNRH_OCR_AZURE_API_VERSION,
-    fetchImpl: opts.fetchImpl,
-  });
+  if (providerName === "google") {
+    const projectId = opts.googleProjectId ?? readEnv("GOOGLE_CLOUD_PROJECT_ID");
+    const clientEmail =
+      opts.googleClientEmail ?? readEnv("GOOGLE_SERVICE_ACCOUNT_EMAIL");
+    const privateKey =
+      opts.googlePrivateKey ?? readEnv("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY");
+    if (
+      !String(projectId || "").trim() ||
+      !String(clientEmail || "").trim() ||
+      !String(privateKey || "").trim()
+    ) {
+      return new NoopFnrhOcrProvider();
+    }
+    return new GoogleVisionOcrProvider({
+      projectId: String(projectId),
+      clientEmail: String(clientEmail),
+      privateKeyPem: String(privateKey),
+      fetchImpl: opts.fetchImpl,
+      accessTokenProvider: opts.googleAccessTokenProvider,
+    });
+  }
+
+  return new NoopFnrhOcrProvider();
 }
 
 // Deno global typing for edge; ignored in Node.
 declare const Deno: { env: { get(key: string): string | undefined } } | undefined;
+
+// Re-export model constants used by edges/tests.
+export {
+  FNRH_OCR_AZURE_API_VERSION,
+  FNRH_OCR_AZURE_MODEL,
+  FNRH_OCR_GOOGLE_API_VERSION,
+  FNRH_OCR_GOOGLE_MODEL,
+};

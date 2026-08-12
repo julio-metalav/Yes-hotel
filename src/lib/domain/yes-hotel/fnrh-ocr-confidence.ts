@@ -38,3 +38,19 @@ export const FNRH_OCR_MAX_ATTEMPTS_PER_GUEST_JOURNEY = 3;
 
 export const FNRH_OCR_AZURE_MODEL = "prebuilt-idDocument";
 export const FNRH_OCR_AZURE_API_VERSION = "2024-11-30";
+
+export const FNRH_OCR_GOOGLE_MODEL = "vision-document-text-detection";
+export const FNRH_OCR_GOOGLE_API_VERSION = "v1";
+
+/** Identidade técnica para telemetria/idempotência (dinâmica por provider). */
+export function resolveFnrhOcrModelMeta(
+  provider: "azure" | "google" | "noop",
+): { model: string; api_version: string } {
+  if (provider === "azure") {
+    return { model: FNRH_OCR_AZURE_MODEL, api_version: FNRH_OCR_AZURE_API_VERSION };
+  }
+  if (provider === "google") {
+    return { model: FNRH_OCR_GOOGLE_MODEL, api_version: FNRH_OCR_GOOGLE_API_VERSION };
+  }
+  return { model: "noop", api_version: "n/a" };
+}

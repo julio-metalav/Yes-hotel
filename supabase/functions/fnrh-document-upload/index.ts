@@ -2,15 +2,14 @@
  * FNRH v2 — upload de documento do hóspede (público via guest_id+token).
  * Multipart FormData preferencial; JSON base64 aceito como fallback.
  * Grava em bucket privado fnrh-documents e operacional_fnrh_documentos.
- * OCR Azure opcional (flag + telemetria/idempotência sem PII).
- * Nunca loga PII, token, blob, key, bytes, signed URL ou Operation-Location.
+ * OCR opcional (google | azure | noop) via flag + telemetria/idempotência sem PII.
+ * Nunca loga PII, token, blob, key, JWT, access token, bytes ou URL assinada.
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isFnrhOcrEnabled } from "../../../src/lib/domain/yes-hotel/fnrh-checkin-v2-policy.ts";
 import {
-  FNRH_OCR_AZURE_API_VERSION,
-  FNRH_OCR_AZURE_MODEL,
   FNRH_OCR_MAX_ATTEMPTS_PER_GUEST_JOURNEY,
+  resolveFnrhOcrModelMeta,
 } from "../../../src/lib/domain/yes-hotel/fnrh-ocr-confidence.ts";
 import {
   canRunNewOcrAttempt,
@@ -19,6 +18,7 @@ import {
 import {
   createFnrhOcrProvider,
   resolveFnrhOcrProviderName,
+  type FnrhOcrProviderName,
   type FnrhOcrResult,
 } from "../../../src/lib/domain/yes-hotel/fnrh-ocr-port.ts";
 
@@ -133,12 +133,17 @@ async function resolveFnrhByToken(
     null;
 }
 
-function skippedOcrResult(reason: string, provider: string, model: string): FnrhOcrResult {
+function skippedOcrResult(
+  reason: string,
+  provider: FnrhOcrProviderName,
+  model: string,
+  apiVersion: string,
+): FnrhOcrResult {
   return {
     ok: true,
     provider,
     model,
-    api_version: FNRH_OCR_AZURE_API_VERSION,
+    api_version: apiVersion,
     suggested_fields: {},
     confidence: {},
     field_bands: {},
@@ -365,13 +370,15 @@ Deno.serve(async (req: Request) => {
   }
 
   const configuredProvider = resolveFnrhOcrProviderName(Deno.env.get("FNRH_OCR_PROVIDER"));
-  const model = FNRH_OCR_AZURE_MODEL;
+  const modelMeta = resolveFnrhOcrModelMeta(configuredProvider);
+  const model = modelMeta.model;
+  const apiVersionDefault = modelMeta.api_version;
   const priorAttempts = await countGuestOcrAttempts(docGuestId);
   const hasSuccessfulIdempotentHit = await hasIdempotentOcrSuccess({
     documentId,
     guestId: docGuestId,
     contentHash,
-    provider: configuredProvider === "azure" ? "azure" : "noop",
+    provider: configuredProvider,
     model,
   });
   const gate = canRunNewOcrAttempt({
@@ -384,8 +391,9 @@ Deno.serve(async (req: Request) => {
   if (!gate.allowed) {
     ocr = skippedOcrResult(
       gate.reason ?? "ocr_skipped",
-      configuredProvider === "azure" ? "azure" : "noop",
+      configuredProvider,
       model,
+      apiVersionDefault,
     );
   } else {
     const provider = createFnrhOcrProvider({
@@ -393,6 +401,9 @@ Deno.serve(async (req: Request) => {
       provider: Deno.env.get("FNRH_OCR_PROVIDER"),
       azureEndpoint: Deno.env.get("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"),
       azureKey: Deno.env.get("AZURE_DOCUMENT_INTELLIGENCE_KEY"),
+      googleProjectId: Deno.env.get("GOOGLE_CLOUD_PROJECT_ID"),
+      googleClientEmail: Deno.env.get("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
+      googlePrivateKey: Deno.env.get("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY"),
     });
     ocr = await provider.extract({
       bytes,
@@ -408,12 +419,18 @@ Deno.serve(async (req: Request) => {
   }
 
   const ocrSuccess = ocr.ok === true && ocr.skipped !== true;
-  const ocrProvider = ocr.provider || (configuredProvider === "azure" ? "azure" : "noop");
+  const ocrProvider = ocr.provider || configuredProvider;
   const ocrModel = ocr.model || model;
-  const ocrApiVersion = ocr.api_version || FNRH_OCR_AZURE_API_VERSION;
+  const ocrApiVersion = ocr.api_version || apiVersionDefault;
   const pagesProcessed = Number.isFinite(ocr.pages_processed) ? Number(ocr.pages_processed) : 0;
   const analyzedAt = ocr.analyzed_at || new Date().toISOString();
   const needsReview = Array.isArray(ocr.needs_review_fields) ? ocr.needs_review_fields : [];
+  const suggestedCount = Object.keys(ocr.suggested_fields ?? {}).length;
+
+  // Metadados sanitizados apenas (sem PII / secrets / texto OCR).
+  console.info(
+    `[fnrh-document-upload] ocr provider=${ocrProvider} model=${ocrModel} success=${ocrSuccess} skipped=${ocr.skipped === true} fields=${suggestedCount} reason=${ocr.reason ?? "none"} duration_ms=${ocr.duration_ms ?? 0}`,
+  );
 
   const { error: runErr } = await admin.from("operacional_fnrh_ocr_runs").insert({
     reservation_id: row.reserva_id,

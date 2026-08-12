@@ -33,6 +33,7 @@
     "test:yes:fnrh-legacy-lifecycle-compat": "tsx scripts/test-fnrh-legacy-lifecycle-compat.ts",
     "test:yes:fnrh-checkin-digital-v2": "tsx scripts/test-fnrh-checkin-digital-v2.ts",
     "test:yes:fnrh-azure-ocr": "tsx scripts/test-fnrh-azure-ocr.ts",
+    "test:yes:fnrh-google-vision-ocr": "tsx scripts/test-fnrh-google-vision-ocr.ts",
     "test:yes:fnrh-token-transport": "tsx scripts/test-fnrh-token-transport.ts",
     "test:yes:guest-access-welcome": "tsx scripts/test-guest-access-welcome-messages.ts",
     "test:yes:first-room-access-transaction": "tsx scripts/test-first-room-access-transaction.ts",
