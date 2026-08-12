@@ -244,15 +244,21 @@ export class SupabaseReservationSyncRepository implements ReservationSyncReposit
             nome: g.name || "",
             email,
             telefone: phone,
-            documento: "",
-            nacionalidade: "",
-            sexo: "",
+            documento: g.documentNumber || "",
+            nacionalidade: g.nationality || "",
+            sexo: g.gender || "",
+            data_nascimento: g.birthDate ? String(g.birthDate).slice(0, 10) : null,
             endereco_logradouro: "",
             cidade: "",
             estado: "",
-            pais: "",
+            pais: g.nationality || "",
             cep: "",
-            raw_payload: { simulated: true },
+            raw_payload: {
+              simulated: true,
+              documentType: g.documentType ?? null,
+              birthDate: g.birthDate ?? null,
+              gender: g.gender ?? null,
+            },
             synced_at: nowIso,
           },
           { onConflict: "provider,external_guest_id" },
@@ -282,7 +288,7 @@ export class SupabaseReservationSyncRepository implements ReservationSyncReposit
     updated: boolean;
     eventsWritten: number;
   } | null> {
-    const pmsFields = {
+    const pmsFields: Record<string, unknown> = {
       apartamento: reservation.apartmentCode || "",
       hospede_principal: reservation.mainGuestName || "",
       check_in_previsto: reservation.checkIn,
@@ -294,15 +300,34 @@ export class SupabaseReservationSyncRepository implements ReservationSyncReposit
       external_reservation_id: reservation.externalReservationId,
       total_hospedes_hits: reservation.totalGuests,
       meal_plan_desc: reservation.mealPlanDesc ?? null,
+      channel_manager: reservation.channelManager ?? null,
+      sales_channel: reservation.salesChannel ?? null,
+      billing_entity: reservation.billingEntity ?? null,
+      reservation_channel_id: reservation.reservationChannelId ?? null,
+      reservation_balance_due: reservation.reservationBalanceDue,
+      reservation_total_amount: reservation.reservationTotalAmount,
       updated_at: nowIso,
     };
 
     const { data: existing } = await this.client
       .from("operacional_reservas")
-      .select("id")
+      .select("id, classificacao_comissionamento_origem")
       .eq("origem_externa", ORIGEM)
       .eq("external_reservation_id", reservation.externalReservationId)
       .maybeSingle();
+
+    const canWriteHitsClassif =
+      reservation.classificacaoComissionamento === "comissionada" ||
+      reservation.classificacaoComissionamento === "nao_comissionada";
+    const existingOrigem = String(
+      (existing as { classificacao_comissionamento_origem?: string } | null)
+        ?.classificacao_comissionamento_origem ?? "",
+    );
+    if (canWriteHitsClassif && existingOrigem !== "manual_operador") {
+      pmsFields.classificacao_comissionamento = reservation.classificacaoComissionamento;
+      pmsFields.classificacao_comissionamento_origem = "hits_campo";
+      pmsFields.classificacao_comissionamento_atualizado_em = nowIso;
+    }
 
     let operacionalId: string;
     let created = false;
@@ -314,6 +339,11 @@ export class SupabaseReservationSyncRepository implements ReservationSyncReposit
       if (error) return null;
       operacionalId = String(existing.id);
     } else {
+      if (canWriteHitsClassif) {
+        pmsFields.classificacao_comissionamento = reservation.classificacaoComissionamento;
+        pmsFields.classificacao_comissionamento_origem = "hits_campo";
+        pmsFields.classificacao_comissionamento_atualizado_em = nowIso;
+      }
       const { data: ins, error } = await this.client
         .from("operacional_reservas")
         .insert({
@@ -337,7 +367,7 @@ export class SupabaseReservationSyncRepository implements ReservationSyncReposit
       seen.add(gid);
       const phone = g.phone ?? (g.isPrincipal ? reservation.phone : null) ?? "";
       const email = g.email ?? (g.isPrincipal ? reservation.email : null) ?? "";
-      const hospedePayload = {
+      const hospedePayload: Record<string, unknown> = {
         reserva_id: operacionalId,
         nome: g.name || "",
         principal: g.isPrincipal,
@@ -347,6 +377,8 @@ export class SupabaseReservationSyncRepository implements ReservationSyncReposit
         removed_from_reservation: false,
         updated_at: nowIso,
       };
+      if (g.birthDate) hospedePayload.data_nascimento = String(g.birthDate).slice(0, 10);
+      if (g.isMinor === true || g.isMinor === false) hospedePayload.is_minor = g.isMinor;
 
       const { data: hop } = await this.client
         .from("operacional_hospedes")

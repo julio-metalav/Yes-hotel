@@ -14,6 +14,11 @@ export type SyncedGuest = {
   isMinor: boolean | null;
   phone: string | null;
   email: string | null;
+  birthDate?: string | null;
+  gender?: string | null;
+  nationality?: string | null;
+  documentType?: string | null;
+  documentNumber?: string | null;
 };
 
 export type SyncedReservation = {
@@ -38,6 +43,17 @@ export type SyncedReservation = {
   paymentStatus: SyncedPaymentStatus;
   phone: string | null;
   email: string | null;
+  /** Gestor de canal HITS (`integrator`). */
+  channelManager: string | null;
+  /** Canal de vendas/origem (companyName / sales channel). */
+  salesChannel: string | null;
+  /** Empresa/solicitante de faturamento. */
+  billingEntity: string | null;
+  reservationChannelId: string | null;
+  reservationBalanceDue: number | null;
+  reservationTotalAmount: number | null;
+  /** Classificação derivada no sync (hits_campo). */
+  classificacaoComissionamento: "nao_comissionada" | "comissionada" | null;
   /** Snapshot sanitizado (sem tokens/senhas). */
   rawSanitized: Record<string, unknown> | null;
 };

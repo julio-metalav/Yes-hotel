@@ -9,6 +9,7 @@ export interface HitsMockReservationListItem {
   status?: number | string | null;
   reservationIntegrationId?: string | null;
   reservationChannelId?: number | string | null;
+  integrator?: string | null;
 }
 
 export interface HitsMockReservationRoom {
@@ -34,6 +35,11 @@ export interface HitsMockReservationGuest {
   main?: boolean | null;
   federalRegistrationNumber?: string | null;
   documentType?: string | null;
+  gender?: string | null;
+  birthDate?: string | null;
+  mainDocType?: string | null;
+  docCpfCnpjPassport?: string | null;
+  addressCountry?: string | null;
 }
 
 export interface HitsMockReservationDetail {
@@ -47,4 +53,11 @@ export interface HitsMockReservationDetail {
   guests?: HitsMockReservationGuest[];
   status?: number | string | null;
   notes?: unknown[];
+  integrator?: string | null;
+  companyName?: string | null;
+  requesterCompanyName?: string | null;
+  groupName?: string | null;
+  reservationChannelId?: number | string | null;
+  reservationTotalAmount?: number | string | null;
+  reservationBalanceDue?: number | string | null;
 }

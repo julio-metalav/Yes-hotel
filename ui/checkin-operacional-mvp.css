@@ -644,6 +644,28 @@ html {
   font-size: 12px;
 }
 
+.checkin-view .detail-situacao-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px 16px;
+  margin: 8px 0 4px;
+}
+
+.checkin-view .detail-situacao-grid dt {
+  color: var(--op-muted, #6b7c82);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.checkin-view .detail-situacao-grid dd {
+  margin: 2px 0 0;
+  color: var(--op-text, #132a3a);
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .checkin-view .op-btn {
   display: inline-flex;
   align-items: center;
