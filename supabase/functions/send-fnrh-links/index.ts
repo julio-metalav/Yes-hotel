@@ -119,7 +119,7 @@ Deno.serve(async (req: Request) => {
   const hospedeIds = pendentes.map((r: { hospede_id: string }) => r.hospede_id);
   const { data: hospedes } = await admin
     .from("operacional_hospedes")
-    .select("id, nome, email, whatsapp, tentativas_envio")
+    .select("id, nome, email, whatsapp, tentativas_envio, guest_role")
     .in("id", hospedeIds);
 
   const now = new Date().toISOString();
@@ -133,10 +133,23 @@ Deno.serve(async (req: Request) => {
   let tentativasComWhatsapp = 0;
   let enviadosEmail = 0;
   let enviadosWhatsapp = 0;
+  let skippedMinors = 0;
   const erros: string[] = [];
 
   for (const p of pendentes as { id: string; hospede_id: string; link_token: string; hospede_nome: string }[]) {
-    const hospede = (hospedes as { id: string; nome: string; email: string; whatsapp: string; tentativas_envio?: number }[] | null)?.find((h) => h.id === p.hospede_id);
+    const hospede = (hospedes as {
+      id: string;
+      nome: string;
+      email: string;
+      whatsapp: string;
+      tentativas_envio?: number;
+      guest_role?: string | null;
+    }[] | null)?.find((h) => h.id === p.hospede_id);
+    // Menores não recebem link próprio — confirmação via responsável.
+    if (hospede?.guest_role === "minor") {
+      skippedMinors++;
+      continue;
+    }
     const email = (hospede?.email ?? "").trim();
     const whatsapp = (hospede?.whatsapp ?? "").trim();
     const nome = (hospede?.nome ?? p.hospede_nome ?? "Hóspede").trim();
@@ -256,6 +269,7 @@ Deno.serve(async (req: Request) => {
       enviados,
       enviados_email: enviadosEmail,
       enviados_whatsapp: enviadosWhatsapp,
+      skipped_minors: skippedMinors,
       erros: erros.length,
       tentativas_com_email: tentativasComEmail,
       tentativas_com_whatsapp: tentativasComWhatsapp,
@@ -265,9 +279,10 @@ Deno.serve(async (req: Request) => {
     }),
   });
 
+  const adultosPendentes = pendentes.length - skippedMinors;
   const houveTentativa = tentativasComEmail > 0 || tentativasComWhatsapp > 0;
   const nenhumEnviadoAposTentativa =
-    pendentes.length > 0 &&
+    adultosPendentes > 0 &&
     enviados === 0 &&
     (houveTentativa || erros.length > 0);
 
@@ -279,6 +294,7 @@ Deno.serve(async (req: Request) => {
       enviados,
       enviados_email: enviadosEmail,
       enviados_whatsapp: enviadosWhatsapp,
+      skipped_minors: skippedMinors,
       erros: erros.length ? erros : undefined,
       pendentes: pendentes.length,
       ...(nenhumEnviadoAposTentativa

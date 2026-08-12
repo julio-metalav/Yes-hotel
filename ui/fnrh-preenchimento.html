@@ -2,28 +2,202 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>FNRH — Yes Hotel (pré-preenchimento)</title>
   <style>
+    :root {
+      --yh-bg: #f4f7fb;
+      --yh-surface: #ffffff;
+      --yh-ink: #1a2332;
+      --yh-muted: #5b677a;
+      --yh-border: #d5dde8;
+      --yh-primary: #1a5f9e;
+      --yh-primary-press: #144a7a;
+      --yh-secondary: #5c6b7a;
+      --yh-ok: #0a7a4a;
+      --yh-err: #b42318;
+      --yh-banner: #e8f1fa;
+      --yh-banner-border: #b7cfe6;
+      --yh-progress: #1a5f9e;
+      --yh-radius: 10px;
+      --yh-shadow: 0 1px 2px rgba(26, 35, 50, 0.06);
+    }
     * { box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 1rem; }
-    h1 { font-size: 1.25rem; margin-bottom: 0.5rem; }
-    .muted { color: #666; font-size: 0.9rem; }
-    .banner { background: #e7f1ff; border: 1px solid #b6d4fe; border-radius: 8px; padding: 0.65rem 0.85rem; margin-bottom: 1rem; font-size: 0.9rem; }
-    .draft-status { font-size: 0.85rem; margin-top: 0.5rem; min-height: 1.25rem; }
-    .draft-status.is-ok { color: #0a6; }
-    .draft-status.is-err { color: #c00; }
-    label { display: block; margin-top: 0.75rem; font-weight: 500; }
-    input, textarea { width: 100%; padding: 0.5rem; margin-top: 0.25rem; border: 1px solid #ccc; border-radius: 4px; }
-    textarea { min-height: 60px; resize: vertical; }
-    button { margin-top: 1rem; padding: 0.6rem 1.2rem; background: #0d6efd; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
-    button.secondary { background: #6c757d; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-    .error { color: #c00; margin-top: 0.5rem; }
-    .success { color: #0a0; margin-top: 0.5rem; }
-    #signatureCanvas { border: 1px solid #ccc; border-radius: 4px; cursor: crosshair; touch-action: none; max-width: 100%; }
+    body {
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 1rem;
+      padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+      background: linear-gradient(180deg, #e9eef5 0%, var(--yh-bg) 40%, #eef2f7 100%);
+      color: var(--yh-ink);
+      min-height: 100vh;
+      line-height: 1.45;
+    }
+    #app { max-width: 560px; margin: 0 auto; }
+    .v2-wrap, .legacy-wrap {
+      background: var(--yh-surface);
+      border: 1px solid var(--yh-border);
+      border-radius: var(--yh-radius);
+      padding: 1.1rem 1rem 1.25rem;
+      box-shadow: var(--yh-shadow);
+    }
+    h1 { font-size: 1.35rem; margin: 0 0 0.25rem; font-weight: 700; letter-spacing: -0.02em; }
+    h2 { font-size: 1.05rem; margin: 0 0 0.35rem; }
+    .muted { color: var(--yh-muted); font-size: 0.9rem; }
+    .meta-line { margin: 0.35rem 0 0.75rem; }
+    .step-label { font-size: 0.88rem; color: var(--yh-muted); margin: 0.5rem 0 0.85rem; }
+    .banner {
+      background: var(--yh-banner);
+      border: 1px solid var(--yh-banner-border);
+      border-radius: 8px;
+      padding: 0.7rem 0.85rem;
+      margin-bottom: 1rem;
+      font-size: 0.92rem;
+    }
+    .progress {
+      height: 6px;
+      background: #e2e8f0;
+      border-radius: 99px;
+      overflow: hidden;
+      margin-top: 0.75rem;
+    }
+    .progress-bar {
+      height: 100%;
+      background: var(--yh-progress);
+      border-radius: 99px;
+      transition: width 0.25s ease;
+    }
+    label { display: block; margin-top: 0.85rem; font-weight: 600; font-size: 0.92rem; }
+    input, textarea, select {
+      width: 100%;
+      padding: 0.7rem 0.75rem;
+      margin-top: 0.3rem;
+      border: 1px solid var(--yh-border);
+      border-radius: 8px;
+      font-size: 1rem;
+      background: #fff;
+      color: var(--yh-ink);
+    }
+    input:focus, textarea:focus, select:focus {
+      outline: 2px solid rgba(26, 95, 158, 0.35);
+      border-color: var(--yh-primary);
+    }
+    textarea { min-height: 72px; resize: vertical; }
+    .btn, button {
+      margin-top: 0.75rem;
+      padding: 0.75rem 1.15rem;
+      background: var(--yh-primary);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    .btn.primary { background: var(--yh-primary); }
+    .btn.primary:active { background: var(--yh-primary-press); }
+    .btn.secondary, button.secondary { background: var(--yh-secondary); }
+    .btn.compact { margin-top: 0.3rem; padding: 0.65rem 0.85rem; white-space: nowrap; }
+    button:disabled, .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .nav-row {
+      display: flex;
+      gap: 0.65rem;
+      margin-top: 1.1rem;
+      flex-wrap: wrap;
+    }
+    .nav-row .btn { flex: 1; min-width: 120px; margin-top: 0; }
+    .draft-status { font-size: 0.85rem; margin-top: 0.65rem; min-height: 1.25rem; }
+    .draft-status.is-ok { color: var(--yh-ok); }
+    .draft-status.is-err { color: var(--yh-err); }
+    .error { color: var(--yh-err); margin-top: 0.65rem; font-size: 0.92rem; }
+    .success { color: var(--yh-ok); margin-top: 0.5rem; }
+    .success-panel {
+      background: #eef8f2;
+      border: 1px solid #b7e0c6;
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .success-panel h2 { color: var(--yh-ok); }
+    .analyzing {
+      background: #fff8e8;
+      border: 1px solid #e6d4a8;
+      color: #6a5418;
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      margin-bottom: 0.85rem;
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+    .file-label {
+      display: block;
+      margin-top: 0.85rem;
+      padding: 0.85rem;
+      border: 1px dashed var(--yh-border);
+      border-radius: 8px;
+      background: #f8fafc;
+      font-weight: 600;
+    }
+    .file-label input { margin-top: 0.5rem; padding: 0.35rem 0; border: none; background: transparent; }
+    .ok-chip {
+      display: inline-block;
+      margin-top: 0.4rem;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--yh-ok);
+      background: #e6f6ee;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+    }
+    .cep-row { display: flex; gap: 0.5rem; align-items: flex-start; }
+    .cep-row input { flex: 1; }
+    .check-inline, .check-block {
+      display: flex;
+      gap: 0.65rem;
+      align-items: flex-start;
+      font-weight: 500;
+      margin-top: 0.85rem;
+    }
+    .check-inline input, .check-block input {
+      width: auto;
+      margin-top: 0.2rem;
+      flex-shrink: 0;
+    }
+    .minor-card {
+      border: 1px solid var(--yh-border);
+      border-radius: 8px;
+      padding: 0.85rem;
+      margin-top: 0.85rem;
+      background: #fafbfd;
+    }
+    .review { margin: 0; }
+    .review dt {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--yh-muted);
+      margin-top: 0.75rem;
+    }
+    .review dd { margin: 0.15rem 0 0; font-weight: 500; }
+    .versions { margin-top: 1rem; font-size: 0.82rem; }
+    .versions code {
+      font-size: 0.78rem;
+      background: #eef2f7;
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+    }
+    .tip { margin-top: 0.75rem; }
+    #signatureCanvas {
+      border: 1px solid var(--yh-border);
+      border-radius: 4px;
+      cursor: crosshair;
+      touch-action: none;
+      max-width: 100%;
+      background: #fff;
+      display: block;
+      width: 100%;
+    }
     .signature-label { margin-top: 1rem; }
-    .actions-confirm { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #ddd; }
+    .actions-confirm { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--yh-border); }
   </style>
 </head>
 <body>
@@ -32,6 +206,7 @@
   </div>
 
   <script src="./yes-supabase-config.js"></script>
+  <script src="./fnrh-checkin-v2.js"></script>
   <script>
     (function () {
       var DEBOUNCE_MS = 850;
@@ -42,14 +217,15 @@
       var params = new URLSearchParams(window.location.search);
       var guestId = params.get("guest_id") || params.get("guest-id");
       var token = params.get("token");
+      var app = document.getElementById("app");
 
       if (!guestId || !token) {
-        document.getElementById("app").innerHTML = "<p class=\"error\">Link inválido. São necessários guest_id (id da FNRH) e token na URL.</p>";
+        app.innerHTML = "<p class=\"error\">Link inválido. São necessários guest_id (id da FNRH) e token na URL.</p>";
         return;
       }
 
       if (!functionsUrl) {
-        document.getElementById("app").innerHTML = "<p class=\"error\">Configuração do sistema não encontrada.</p>";
+        app.innerHTML = "<p class=\"error\">Configuração do sistema não encontrada.</p>";
         return;
       }
 
@@ -62,7 +238,7 @@
 
       function escapeHtml(s) {
         var div = document.createElement("div");
-        div.textContent = s;
+        div.textContent = s == null ? "" : String(s);
         return div.innerHTML;
       }
 
@@ -78,21 +254,40 @@
         .then(function (data) {
           if (data.error) throw new Error(data.error);
           if (data.fechado) {
-            document.getElementById("app").innerHTML = "<h1>FNRH</h1><p class=\"success\">" + escapeHtml(data.message || "Concluído.") + "</p>";
+            app.innerHTML =
+              '<div class="legacy-wrap"><h1>FNRH</h1><p class="success">' +
+              escapeHtml(data.message || "Concluído.") +
+              "</p></div>";
             return;
           }
-          renderForm(data);
+
+          var flow = String(data.flow_version || "").toLowerCase();
+          if (flow === "v2" && window.YesHotelFnrhCheckinV2 && typeof window.YesHotelFnrhCheckinV2.start === "function") {
+            window.YesHotelFnrhCheckinV2.start({
+              appEl: app,
+              guestId: guestId,
+              token: token,
+              functionsUrl: functionsUrl,
+              data: data,
+            });
+            return;
+          }
+
+          // flow_version=legacy (ou ausência de módulo v2): formulário com canvas
+          renderLegacyForm(data);
         })
         .catch(function (err) {
-          document.getElementById("app").innerHTML = "<h1>FNRH</h1><p class=\"error\">" + escapeHtml(err.message || "Erro ao carregar.") + "</p>";
+          app.innerHTML =
+            '<div class="legacy-wrap"><h1>FNRH</h1><p class="error">' +
+            escapeHtml(err.message || "Erro ao carregar.") +
+            "</p></div>";
         });
 
-      function renderForm(data) {
+      function renderLegacyForm(data) {
         var pre = data.preenchido || {};
         var principal = !!data.principal;
         var meta = data.meta || {};
         var aptLine = meta.apartamento ? "Apartamento " + escapeHtml(meta.apartamento) + " · " : "";
-        var app = document.getElementById("app");
         var lprBlock = "";
         if (principal) {
           lprBlock = [
@@ -108,6 +303,7 @@
         if (data.status === "rascunho") statusHint = " Você tem um rascunho salvo — continue de onde parou.";
 
         app.innerHTML = [
+          '<div class="legacy-wrap">',
           "<h1>FNRH — Ficha de registro (Yes Hotel)</h1>",
           "<div class=\"banner\">Esta página é a <strong>etapa do hotel</strong> para reunir seus dados. Depois, o hotel poderá enviar à ficha oficial (MTur/SNRHos) quando integrado." + statusHint + "</div>",
           "<p class=\"muted\">" + aptLine + "Revise os dados já conhecidos pelo hotel, complete o que faltar e confirme ao final.</p>",
@@ -131,7 +327,8 @@
           "    <div id=\"formMessage\"></div>",
           "    <button type=\"submit\" id=\"submitBtn\">Confirmar e enviar FNRH</button>",
           "  </div>",
-          "</form>"
+          "</form>",
+          "</div>"
         ].join("");
 
         var form = document.getElementById("fnrh-form");
@@ -144,8 +341,10 @@
 
         function getPos(e) {
           var rect = canvas.getBoundingClientRect();
+          var scaleX = canvas.width / rect.width;
+          var scaleY = canvas.height / rect.height;
           var ev = e.touches ? e.touches[0] : e;
-          return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+          return { x: (ev.clientX - rect.left) * scaleX, y: (ev.clientY - rect.top) * scaleY };
         }
         canvas.addEventListener("mousedown", function (e) { drawing = true; var p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); scheduleDraftSoon(); });
         canvas.addEventListener("mousemove", function (e) { if (!drawing) return; var p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); scheduleDraftSoon(); });
@@ -186,6 +385,7 @@
             hospede_id: guestId,
             token: token,
             action: "draft",
+            flow_version: "legacy",
             hospede_nome: fd.get("hospede_nome") || "",
             documento: fd.get("documento") || "",
             data_nascimento: fd.get("data_nascimento") || null,
@@ -267,6 +467,7 @@
             hospede_id: guestId,
             token: token,
             action: "confirm",
+            flow_version: "legacy",
             hospede_nome: hospede_nome,
             documento: documento,
             data_nascimento: fd.get("data_nascimento") || null,
@@ -291,7 +492,7 @@
             .then(function (r) { return r.json(); })
             .then(function (res) {
               if (res.ok) {
-                app.innerHTML = "<h1>FNRH</h1><p class=\"success\">" + escapeHtml(res.message || "FNRH confirmada.") + "</p>";
+                app.innerHTML = '<div class="legacy-wrap"><h1>FNRH</h1><p class="success">' + escapeHtml(res.message || "FNRH confirmada.") + "</p></div>";
               } else {
                 msgEl.innerHTML = "<p class=\"error\">" + escapeHtml(res.error || "Falha ao confirmar.") + "</p>";
                 btn.disabled = false;
