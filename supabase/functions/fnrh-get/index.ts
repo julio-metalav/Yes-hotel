@@ -16,7 +16,9 @@ import { isFnrhLifecycleComplete } from "../../../src/lib/domain/yes-hotel/fnrh-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  // POST: guest_id+token no body (evita token em access log de query string).
+  // GET legado: ainda aceito para compatibilidade de links antigos.
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -147,12 +149,26 @@ function fechadoPayload(st: string, lifecycle: string | null): Response {
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  if (req.method !== "GET") return jsonResponse({ error: "Método não permitido." }, 405);
+  if (req.method !== "GET" && req.method !== "POST") {
+    return jsonResponse({ error: "Método não permitido." }, 405);
+  }
 
   const url = new URL(req.url);
-  const reservaId = url.searchParams.get("reserva_id")?.trim();
-  const guestId = url.searchParams.get("guest_id")?.trim();
-  const token = url.searchParams.get("token")?.trim();
+  let reservaId = url.searchParams.get("reserva_id")?.trim() || "";
+  let guestId = url.searchParams.get("guest_id")?.trim() || "";
+  let token = url.searchParams.get("token")?.trim() || "";
+
+  // Preferência: credenciais no body (POST) — não aparecem na query do access log.
+  if (req.method === "POST") {
+    try {
+      const body = (await req.json()) as Record<string, unknown>;
+      if (!reservaId) reservaId = str(body.reserva_id);
+      if (!guestId) guestId = str(body.guest_id ?? body.hospede_id);
+      if (!token) token = str(body.token);
+    } catch {
+      return jsonResponse({ error: "Body JSON inválido." }, 400);
+    }
+  }
 
   if (reservaId) {
     const { data: reserva, error: errReserva } = await admin

@@ -200,6 +200,9 @@
       cepLoading: false,
       cepError: "",
       stepError: "",
+      ocrBanner: "",
+      fieldOrigin: {},
+      reviewFields: {},
       draftStatus: "",
       draftOk: null,
       confirmBusy: false,
@@ -487,29 +490,48 @@
       }
     }
 
-    function applyOcrSuggestions(fields) {
+    function applyOcrSuggestions(fields, meta) {
       if (!fields || typeof fields !== "object") return;
+      meta = meta || {};
+      var review = Array.isArray(meta.needs_review_fields) ? meta.needs_review_fields : [];
       var map = {
         hospede_nome: "hospede_nome",
         nome: "hospede_nome",
         data_nascimento: "data_nascimento",
         documento_numero: "documento_numero",
         documento: "documento_numero",
+        documento_tipo: "documento_tipo",
         nacionalidade: "nacionalidade",
         orgao_emissor: "orgao_emissor",
-        cep: "cep",
-        logradouro: "logradouro",
-        bairro: "bairro",
-        cidade: "cidade",
-        uf: "uf",
+        pais_emissor: "pais_emissor",
+        sexo: "sexo",
+        documento_validade: "documento_validade",
       };
+      var applied = 0;
       Object.keys(map).forEach(function (k) {
-        if (hasText(fields[k]) && !hasText(state[map[k]])) {
-          state[map[k]] = String(fields[k]).trim();
+        var target = map[k];
+        if (!hasText(fields[k])) return;
+        // manual > ocr: só preenche se vazio (correção do hóspede prevalece)
+        if (hasText(state[target])) return;
+        var val = String(fields[k]).trim();
+        if (target === "data_nascimento") val = val.slice(0, 10);
+        state[target] = val;
+        state.fieldOrigin = state.fieldOrigin || {};
+        state.fieldOrigin[target] = "ocr";
+        if (review.indexOf(k) >= 0 || review.indexOf(target) >= 0) {
+          state.reviewFields = state.reviewFields || {};
+          state.reviewFields[target] = true;
         }
+        applied += 1;
       });
-      if (hasText(fields.data_nascimento)) {
-        state.data_nascimento = String(fields.data_nascimento).slice(0, 10);
+      if (applied > 0) {
+        state.ocrBanner = "Encontramos seus dados. Confira antes de continuar.";
+      } else if (meta.ocr_skipped === false && meta.ok === false) {
+        state.ocrBanner =
+          "Não conseguimos preencher automaticamente. Você pode continuar informando os dados.";
+      } else if (meta.ocr_skipped === true && meta.ocr_reason && meta.ocr_reason !== "ocr_provider_unavailable") {
+        state.ocrBanner =
+          "Não conseguimos preencher automaticamente. Você pode continuar informando os dados.";
       }
     }
 
@@ -517,6 +539,7 @@
       if (!file) return;
       state.analyzing = true;
       state.stepError = "";
+      state.ocrBanner = "";
       render();
 
       var fd = new FormData();
@@ -542,7 +565,16 @@
           }
           state.has_document_upload = true;
           state.uploadedSides[side || "single"] = true;
-          applyOcrSuggestions(res.body.suggested_fields);
+          applyOcrSuggestions(res.body.suggested_fields, {
+            needs_review_fields: res.body.needs_review_fields,
+            ocr_skipped: res.body.ocr_skipped,
+            ocr_reason: res.body.ocr_reason,
+            ok: res.body.ok,
+          });
+          if (!state.ocrBanner && res.body.ocr_skipped) {
+            // OCR off / noop: upload ok sem auto-preenchimento
+            state.ocrBanner = "";
+          }
           scheduleDraft();
           render();
         })
@@ -700,7 +732,11 @@
       var step = STEPS[state.stepIndex];
       var analyzing =
         state.analyzing
-          ? '<div class="analyzing" role="status" aria-live="polite">Analisando documento…</div>'
+          ? '<div class="analyzing" role="status" aria-live="polite">Lendo seu documento…</div>'
+          : "";
+      var ocrBanner =
+        state.ocrBanner && !state.analyzing
+          ? '<div class="banner" role="status">' + escapeHtml(state.ocrBanner) + "</div>"
           : "";
       var err = state.stepError
         ? '<p class="error" id="v2-step-error">' + escapeHtml(state.stepError) + "</p>"
@@ -741,6 +777,7 @@
           escapeHtml(step.label) +
           "</p>",
         analyzing,
+        ocrBanner,
         '  <div id="v2-step-body">' + bodyHtml + "</div>",
         err,
         '  <div class="draft-status muted" id="v2-draft-status" aria-live="polite"></div>',
