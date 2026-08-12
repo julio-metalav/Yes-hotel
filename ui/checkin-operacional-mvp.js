@@ -796,6 +796,7 @@ function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows, enviosRo
     apartamento: (r.apartamento || "").trim(),
     hospedePrincipal: (r.hospede_principal || "").trim(),
     externalReservationId: extId,
+    origemExterna: (r.origem_externa || "").trim() || null,
     checkInPrevisto: checkIn ? (typeof checkIn === "string" ? checkIn.slice(0, 10) : checkIn) : "",
     checkOutPrevisto: checkOut ? (typeof checkOut === "string" ? checkOut.slice(0, 10) : checkOut) : "",
     pagamento: mapPagamentoStatusFromDb(r.pagamento_status),
@@ -812,6 +813,18 @@ function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows, enviosRo
     ),
     classificacaoComissionamentoOrigem: (r.classificacao_comissionamento_origem || "").trim() || null,
     classificacaoComissionamentoAtualizadoEm: r.classificacao_comissionamento_atualizado_em || null,
+    channelManager: (r.channel_manager || "").trim() || null,
+    salesChannel: (r.sales_channel || "").trim() || null,
+    billingEntity: (r.billing_entity || "").trim() || null,
+    reservationChannelId: r.reservation_channel_id != null ? String(r.reservation_channel_id).trim() || null : null,
+    reservationBalanceDue:
+      r.reservation_balance_due == null || r.reservation_balance_due === ""
+        ? null
+        : Number(r.reservation_balance_due),
+    reservationTotalAmount:
+      r.reservation_total_amount == null || r.reservation_total_amount === ""
+        ? null
+        : Number(r.reservation_total_amount),
     cobrancasPagarme: [],
     pagamentosPagarme: [],
     pagamentoPresencialDiferidoAutorizado: !!r.pagamento_presencial_diferido_autorizado,
@@ -1825,12 +1838,60 @@ function getNaoIdentificados(reserva) {
   return reserva.hospedes.filter((h) => !hasIdentificacaoMinima(h));
 }
 
+function resolveFinancialUi(reserva) {
+  const api =
+    typeof YesReservationFinancial !== "undefined" && YesReservationFinancial
+      ? YesReservationFinancial
+      : null;
+  const input = {
+    pagamentoStatus: reserva.pagamento,
+    balanceDue: reserva.reservationBalanceDue,
+    classificacao: reserva.classificacaoComissionamento,
+  };
+  if (api && typeof api.resolveFinancialStatusVisible === "function") {
+    const status = api.resolveFinancialStatusVisible(input);
+    return {
+      status: status,
+      label:
+        typeof api.financialStatusLabel === "function"
+          ? api.financialStatusLabel(status)
+          : status,
+      accessOk:
+        typeof api.isFinanceiramenteLiberadoParaAcesso === "function"
+          ? api.isFinanceiramenteLiberadoParaAcesso(input)
+          : reserva.pagamento === "pago",
+      nextAction:
+        typeof api.nextFinancialActionLabel === "function"
+          ? api.nextFinancialActionLabel(status)
+          : null,
+    };
+  }
+  if (reserva.pagamento === "pago") {
+    return { status: "pago", label: "Pago", accessOk: true, nextAction: null };
+  }
+  if (reserva.classificacaoComissionamento === "comissionada") {
+    return {
+      status: "pendente_comissionado",
+      label: "Pendente (comissionado)",
+      accessOk: true,
+      nextAction: "Regularizar pagamento no HITS",
+    };
+  }
+  return {
+    status: "pendente",
+    label: "Pendente",
+    accessOk: false,
+    nextAction: "Gerar e enviar link de pagamento",
+  };
+}
+
 function isPagamentoOk(reserva) {
-  if (reserva.pagamento === "pago") return true;
-  const cls = String(reserva.classificacaoComissionamento || "").trim();
-  // Não cobrar hóspede → financeiro liberado para acesso.
-  if (cls === "comissionada" || cls === "desconhecida") return true;
-  return false;
+  return resolveFinancialUi(reserva).accessOk === true;
+}
+
+function isPagamentoPendenteOperacional(reserva) {
+  const st = resolveFinancialUi(reserva).status;
+  return st === "pendente" || st === "pendente_comissionado";
 }
 
 function isFnrhCompleta(reserva) {
@@ -1957,7 +2018,12 @@ function getProximaAcaoReserva(reserva) {
     return "Enviar confirmações e FNRHs";
   }
   if (enviados > 0) return "Aguardar confirmação das FNRHs";
-  if (!isPagamentoOk(reserva)) return "Regularizar pagamento";
+  if (!isPagamentoOk(reserva) && resolveFinancialUi(reserva).status === "pendente") {
+    return "Gerar e enviar link de pagamento";
+  }
+  if (resolveFinancialUi(reserva).status === "pendente_comissionado") {
+    return "Regularizar pagamento no HITS";
+  }
   if (isProntaParaLiberarAcesso(reserva)) return "Liberar acesso";
   if (acessoLiberadoEfetivo(reserva) && !reserva.entrouNoApto) return "Aguardar entrada no apartamento";
   if (isCheckinConcluido(reserva)) return "Check-in concluído";
@@ -2398,10 +2464,21 @@ function listaProximaAcaoOperacional(reserva) {
 function linhaFluxoResumo(reserva) {
   const total = getHospedesTotal(reserva);
   const confirmadas = getFnrhConfirmadas(reserva);
-  const pago = isPagamentoOk(reserva);
+  const finUi = resolveFinancialUi(reserva);
+  const pago = finUi.status === "pago";
 
-  const pagClass = pago ? "op-flux-pag op-flux-pag--paid" : "op-flux-pag op-flux-pag--unpaid";
-  const pagText = pago ? "PAGO" : "NÃO PAGO";
+  const pagClass =
+    pago
+      ? "op-flux-pag op-flux-pag--paid"
+      : finUi.status === "pendente_comissionado"
+        ? "op-flux-pag op-flux-pag--unpaid"
+        : "op-flux-pag op-flux-pag--unpaid";
+  const pagText =
+    finUi.status === "pago"
+      ? "PAGO"
+      : finUi.status === "pendente_comissionado"
+        ? "PEND. COMISS."
+        : "NÃO PAGO";
   const pagHtml = `<span class="${pagClass}">${escapeHtml(pagText)}</span>`;
 
   let fnrh;
@@ -2418,7 +2495,7 @@ function linhaFluxoResumo(reserva) {
       rest.unshift("Pagar.me OK");
     } else if (payUi && payUi.kind === "aguardando") {
       rest.unshift("Aguard. pag.");
-    } else if (payUi && payUi.kind === "comissionada") {
+    } else if ((payUi && payUi.kind === "comissionada") || finUi.status === "pendente_comissionado") {
       rest.unshift("Comissionada");
     }
   }
@@ -2756,9 +2833,15 @@ function syncDetailPanelChrome(reserva) {
   if (detailSubtitleElement instanceof HTMLElement) {
     const ci = formatDataBR(reserva.checkInPrevisto);
     const co = formatDataBR(reserva.checkOutPrevisto);
-    const idShort = String(reserva.id || "").trim();
-    const pri = getPrioridadeLabel(getPrioridadeReserva(reserva));
-    const parts = [`${ci} → ${co}`, idShort ? `Reserva ${idShort}` : "", pri ? `Prioridade ${pri}` : ""].filter(Boolean);
+    const idShort = String(reserva.externalReservationId || reserva.id || "").trim();
+    const originBits = [];
+    if (reserva.channelManager) originBits.push(String(reserva.channelManager));
+    if (reserva.salesChannel) originBits.push(String(reserva.salesChannel));
+    const parts = [
+      `${ci} → ${co}`,
+      idShort ? `Reserva ${idShort}` : "",
+      originBits.length ? originBits.join(" · ") : "",
+    ].filter(Boolean);
     detailSubtitleElement.textContent = parts.join(" · ");
   }
 }
@@ -2770,10 +2853,6 @@ let arrivalsPage = 0;
 const ARRIVALS_PAGE_SIZE = 20;
 let arrivalsDatasetCache = null;
 let occupiedSummaryCache = null;
-
-function isPagamentoPendenteOperacional(reserva) {
-  return reserva.pagamento === "pendente" || reserva.pagamento === "parcial";
-}
 
 function recentChangeLabelsFromHistorico(historico) {
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
@@ -4881,16 +4960,42 @@ function buildSituacaoAcaoTopoHtml(
   temBotaoSenhaBackend,
   topContextInnerHtml,
 ) {
-  var st = derivarStatusOperacional(reserva);
+  var fin = resolveFinancialUi(reserva);
+  var confirmados = getFnrhConfirmadas(reserva);
+  var totalH = getHospedesTotal(reserva);
+  var fnrhLabel =
+    totalH > 0
+      ? confirmados +
+        "/" +
+        totalH +
+        (confirmados >= totalH ? " concluída" : confirmados === 0 ? " pendentes" : " pendentes")
+      : "—";
+  var acessoLabel = reserva.entrouNoApto
+    ? "Entrou no apto"
+    : acessoLiberadoEfetivo(reserva)
+      ? "Liberado"
+      : "Aguardando";
+  var nextFin = fin.nextAction;
+  var proxOp = getProximaAcaoReserva(reserva);
+  var nextActionLabel = nextFin || (proxOp && proxOp !== "Regularizar pagamento" ? proxOp : "") || "";
+
   var rec = derivarRecomendacaoOperacional(reserva, ctx);
   var rid = escapeHtml(String(reserva.id));
 
   var primaryRow = "";
   var usedSenhaAsPrimary = false;
   var aguardarChegada = !!(rec && rec.listaLabel === "Aguardar chegada" && !rec.cta);
+  var payUiTopo = resolvePaymentUiForReserva(reserva);
 
   if (!aguardarChegada) {
-    if (enviarLinksBtnHtml && String(enviarLinksBtnHtml).indexOf("detail-enviar-links-btn") !== -1) {
+    if (fin.status === "pendente" && payUiTopo && payUiTopo.ctaKind && payUiTopo.ctaLabel) {
+      primaryRow =
+        '<button type="button" class="primary-button detail-recomendacao-cta-btn" data-recomendacao-cta="' +
+        escapeHtml(payUiTopo.ctaKind) +
+        '">' +
+        escapeHtml(payUiTopo.ctaLabel) +
+        "</button>";
+    } else if (enviarLinksBtnHtml && String(enviarLinksBtnHtml).indexOf("detail-enviar-links-btn") !== -1) {
       primaryRow = enviarLinksBtnHtml;
     } else if (reenviarFnrhTopoBtnHtml && String(reenviarFnrhTopoBtnHtml).indexOf("detail-reenviar-fnrh-topo-btn") !== -1) {
       primaryRow = reenviarFnrhTopoBtnHtml;
@@ -4909,30 +5014,12 @@ function buildSituacaoAcaoTopoHtml(
 
   var secondaryRow = "";
   if (temBotaoSenhaBackend && enviarSenhaBtnHtml && !usedSenhaAsPrimary) {
-    // Reenviar/gerar senha é excepcional quando a próxima ação é aguardar chegada.
     secondaryRow =
       '<details class="detail-mais-acoes">' +
       '<summary class="detail-mais-acoes-sum">Mais ações</summary>' +
       '<div class="detail-mais-acoes-body">' +
       enviarSenhaBtnHtml +
       "</div></details>";
-  }
-
-  var situacaoLinha = escapeHtml(st.label);
-  var situacaoSubHtml = "";
-  var acaoHint = "";
-  var payUiTopo = resolvePaymentUiForReserva(reserva);
-  if (payUiTopo && payUiTopo.kind === "pago_pagarme_hits_pendente") {
-    situacaoLinha = escapeHtml(payUiTopo.situacaoLabel || "Pago no Pagar.me");
-    if (payUiTopo.situacaoSubtexto) {
-      situacaoSubHtml =
-        '<p class="detail-situacao-sub">' + escapeHtml(payUiTopo.situacaoSubtexto) + "</p>";
-    }
-  } else {
-    acaoHint =
-      rec.listaLabel && String(rec.listaLabel).trim() && rec.listaLabel !== "—"
-        ? escapeHtml(rec.listaLabel)
-        : "";
   }
 
   var contatoPanelHtml = "";
@@ -4956,13 +5043,15 @@ function buildSituacaoAcaoTopoHtml(
   }
 
   var acaoBlock = "";
-  if (primaryRow || secondaryRow) {
+  if (primaryRow || secondaryRow || nextActionLabel) {
     acaoBlock =
-      '<p class="detail-acao-kicker">Ação</p>' +
-      '<div class="detail-top-actions">' +
-      (primaryRow || "") +
-      secondaryRow +
-      "</div>" +
+      '<p class="detail-acao-kicker">Próxima ação</p>' +
+      (nextActionLabel
+        ? '<p class="detail-acao-hint">' + escapeHtml(nextActionLabel) + "</p>"
+        : "") +
+      (primaryRow || secondaryRow
+        ? '<div class="detail-top-actions">' + (primaryRow || "") + secondaryRow + "</div>"
+        : "") +
       contatoPanelHtml;
   }
 
@@ -4973,15 +5062,50 @@ function buildSituacaoAcaoTopoHtml(
 
   return (
     '<div class="reservation-detail-section reservation-detail-top-hero">' +
-    '<p class="detail-situacao-kicker">Situação</p>' +
-    '<p class="detail-situacao-valor">' +
-    situacaoLinha +
-    "</p>" +
-    situacaoSubHtml +
-    (acaoHint ? '<p class="detail-acao-hint">' + acaoHint + "</p>" : "") +
+    '<p class="detail-situacao-kicker">Situação atual</p>' +
+    '<dl class="detail-situacao-grid">' +
+    "<div><dt>Pagamento</dt><dd>" +
+    escapeHtml(fin.label) +
+    "</dd></div>" +
+    "<div><dt>FNRH</dt><dd>" +
+    escapeHtml(fnrhLabel) +
+    "</dd></div>" +
+    "<div><dt>Acesso</dt><dd>" +
+    escapeHtml(acessoLabel) +
+    "</dd></div>" +
+    "</dl>" +
     acaoBlock +
     contextBlock +
     "</div>"
+  );
+}
+
+function buildOrigemComercialHtml(reserva) {
+  var manager = String(reserva.channelManager || "").trim();
+  var channel = String(reserva.salesChannel || "").trim();
+  var billing = String(reserva.billingEntity || "").trim();
+  if (!manager && !channel && !billing) return "";
+  var lines = [];
+  if (manager) lines.push("<div><dt>Gestor</dt><dd>" + escapeHtml(manager) + "</dd></div>");
+  if (channel) lines.push("<div><dt>Canal</dt><dd>" + escapeHtml(channel) + "</dd></div>");
+  if (billing && billing !== channel && billing !== manager) {
+    lines.push("<div><dt>Faturamento</dt><dd>" + escapeHtml(billing) + "</dd></div>");
+  }
+  var isParticular =
+    /motor\s+de\s+reservas/i.test(channel + " " + manager) || /\bparticular\b/i.test(channel);
+  if (isParticular && !manager) {
+    lines = [
+      "<div><dt>Origem</dt><dd>" + escapeHtml(channel || "Motor de Reservas") + "</dd></div>",
+      "<div><dt>Tipo</dt><dd>Particular</dd></div>",
+    ];
+  }
+  if (!lines.length) return "";
+  return (
+    '<div class="reservation-detail-section reservation-detail-origem">' +
+    '<p class="reservation-detail-section-title">Origem / Comercial</p>' +
+    '<dl class="detail-situacao-grid">' +
+    lines.join("") +
+    "</dl></div>"
   );
 }
 
@@ -5336,8 +5460,17 @@ function renderDetail(reserva) {
   const prontos = getProntosParaEnvio(reserva);
 
   const Ppres = getPanelPresentation();
-  const guestMgmt =
-    Ppres && typeof Ppres.presentGuestManagementEntry === "function"
+  const hitsGuestsReadonly =
+    String(reserva.origemExterna || "").toLowerCase() === "hits" ||
+    !!String(reserva.externalReservationId || "").trim();
+  const guestMgmt = hitsGuestsReadonly
+    ? {
+        mode: "readonly",
+        label: "",
+        showHeaderAdd: false,
+        showPerGuestManage: false,
+      }
+    : Ppres && typeof Ppres.presentGuestManagementEntry === "function"
       ? Ppres.presentGuestManagementEntry(hospedes.length)
       : {
           mode: hospedes.length <= 1 ? "add" : "manage",
@@ -5376,11 +5509,17 @@ function renderDetail(reserva) {
         PAINEL_DATA_SOURCE !== PAINEL_DATA_SOURCE_BACKEND && onlyConfirmarEnviado
           ? `<button type="button" class="secondary-button guest-confirmar-fnrh-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Simular confirmação (demo)</button>`
           : "";
-      const setPrincipalBtn = !h.principal
-        ? `<button type="button" class="guest-link-btn guest-set-principal-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Definir como principal</button>`
-        : "";
-      const removeBtn = `<button type="button" class="guest-link-btn guest-remove-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Remover</button>`;
-      const compositionActions = `<div class="guest-detail-composition">${setPrincipalBtn}${setPrincipalBtn ? " " : ""}${removeBtn}</div>`;
+      const setPrincipalBtn =
+        !hitsGuestsReadonly && !h.principal
+          ? `<button type="button" class="guest-link-btn guest-set-principal-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Definir como principal</button>`
+          : "";
+      const removeBtn = hitsGuestsReadonly
+        ? ""
+        : `<button type="button" class="guest-link-btn guest-remove-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-guest-index="${index}">Remover</button>`;
+      const compositionActions =
+        setPrincipalBtn || removeBtn
+          ? `<div class="guest-detail-composition">${setPrincipalBtn}${setPrincipalBtn && removeBtn ? " " : ""}${removeBtn}</div>`
+          : "";
 
       const canalLabel = getCanalEnvioLabel(h.ultimoEnvioCanal || null);
       const enviadoEm = h.ultimoEnvioEm || null;
@@ -5437,7 +5576,7 @@ function renderDetail(reserva) {
             <div><dt>E-mail</dt><dd>${emailVal || "—"}</dd></div>
             <div><dt>WhatsApp</dt><dd>${waDisplay || "—"}</dd></div>
           </dl>
-          <button type="button" class="secondary-button guest-edit-toggle-btn" data-guest-index="${index}">Editar dados</button>`;
+          <button type="button" class="secondary-button guest-edit-toggle-btn" data-guest-index="${index}">Corrigir contato</button>`;
       const editBlock = `
           <div class="guest-detail-edit-fields${readOnly ? " hidden" : ""}" data-guest-edit="${index}">
             <div class="guest-detail-contact-row guest-detail-name-edit">
@@ -5635,8 +5774,8 @@ function renderDetail(reserva) {
 
   detailBodyElement.innerHTML = `
     ${situacaoAcaoTopoHtml}
+    ${buildOrigemComercialHtml(reserva)}
     ${toleranciaAcoesHtml}
-    ${buildPagarmeDetailSectionHtml(reserva)}
     ${localModeDetailHtml}
     ${ttlockSectionHtml}
     ${eventosSimuladosHtml}
@@ -6464,40 +6603,9 @@ async function submitPagarmeCriarCartao(reservaId) {
 }
 
 function buildPagarmeDetailSectionHtml(reserva) {
-  if (!isPagarmeUiEnabledInPainel()) return "";
-  const payUi = resolvePaymentUiForReserva(reserva);
-  if (!payUi || payUi.kind === "none" || payUi.kind === "hidden_perfil") return "";
-  if (isPagamentoOk(reserva) && payUi.kind === "none") return "";
-
-  const mod =
-    payUi.variant === "amber"
-      ? "warn"
-      : payUi.variant === "success"
-        ? "success"
-        : payUi.variant === "danger"
-          ? "danger"
-          : payUi.variant === "info"
-            ? "info"
-            : "warn";
-
-  return (
-    '<div class="reservation-detail-section reservation-detail-pagarme reservation-detail-recomendacao--' +
-    escapeHtml(mod) +
-    '" id="detail-pagarme-section">' +
-    '<p class="reservation-detail-section-title">Cobrança Pagar.me</p>' +
-    '<p class="reservation-detail-recomendacao-texto">' +
-    escapeHtml(payUi.detalheTexto || payUi.listaLabel || "") +
-    "</p>" +
-    (payUi.hintAnterior
-      ? '<p class="modal-pagarme-hint-soft">' + escapeHtml(payUi.hintAnterior) + "</p>"
-      : "") +
-    '<div class="reservation-detail-recomendacao-cta">' +
-    '<button type="button" class="primary-button" id="detail-pagarme-open-btn" data-reserva-id="' +
-    escapeHtml(String(reserva.id)) +
-    '">' +
-    escapeHtml(payUi.ctaLabel || "Ver cobrança") +
-    "</button></div></div>"
-  );
+  // Cobrança Pagar.me fica no card Situação (única ocorrência). Evita duplicar CTA.
+  void reserva;
+  return "";
 }
 
 async function backendEnviarSenha(reservaId, email, whatsapp, options) {

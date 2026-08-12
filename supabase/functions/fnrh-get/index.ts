@@ -12,6 +12,11 @@ import {
   isFnrhOcrEnabled,
 } from "../../../src/lib/domain/yes-hotel/fnrh-checkin-v2-policy.ts";
 import { isFnrhLifecycleComplete } from "../../../src/lib/domain/yes-hotel/fnrh-completion-policy.ts";
+import {
+  mergeFieldProvenance,
+  shouldApplySuggestedValue,
+  type FnrhFieldProvenanceMap,
+} from "../../../src/lib/domain/yes-hotel/fnrh-field-provenance.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -238,7 +243,9 @@ Deno.serve(async (req: Request) => {
 
     const { data: hospede } = await admin
       .from("operacional_hospedes")
-      .select("principal, nome, email, whatsapp, guest_role, responsible_guest_id, is_minor, data_nascimento")
+      .select(
+        "principal, nome, email, whatsapp, guest_role, responsible_guest_id, is_minor, data_nascimento, pms_external_guest_id",
+      )
       .eq("id", hospedeOperacionalId)
       .maybeSingle();
     const h = hospede as {
@@ -250,6 +257,7 @@ Deno.serve(async (req: Request) => {
       responsible_guest_id?: string | null;
       is_minor?: boolean | null;
       data_nascimento?: string | null;
+      pms_external_guest_id?: string | null;
     } | null;
 
     const { data: resv } = await admin
@@ -276,7 +284,7 @@ Deno.serve(async (req: Request) => {
       ? `Saída prevista ${String(rv.check_out_previsto).slice(0, 10)}`
       : "";
 
-    const preenchido = {
+    const preenchido: Record<string, unknown> = {
       hospede_nome: pick(row.hospede_nome, pick(h?.nome, nomeHotel)),
       nome_social: pick(row.nome_social, ""),
       sexo: pick(row.sexo, ""),
@@ -313,6 +321,60 @@ Deno.serve(async (req: Request) => {
       minor_relation_other: pick(row.minor_relation_other, ""),
       minor_accompaniment: pick(row.minor_accompaniment, ""),
     };
+
+    // Pré-preenchimento HITS via espelho PMS (não sobrescreve manual/ocr/confirmado).
+    let fieldProvenance: FnrhFieldProvenanceMap =
+      ((row.field_provenance as FnrhFieldProvenanceMap | null) ?? {}) as FnrhFieldProvenanceMap;
+    const pmsExt = str(h?.pms_external_guest_id);
+    if (pmsExt && row.data_confirmed !== true) {
+      const { data: pmsGuest } = await admin
+        .from("pms_hospedes")
+        .select("nome, email, telefone, documento, nacionalidade, sexo, data_nascimento")
+        .eq("provider", "hits")
+        .eq("external_guest_id", pmsExt)
+        .maybeSingle();
+      const pg = pmsGuest as {
+        nome?: string | null;
+        email?: string | null;
+        telefone?: string | null;
+        documento?: string | null;
+        nacionalidade?: string | null;
+        sexo?: string | null;
+        data_nascimento?: string | null;
+      } | null;
+      if (pg) {
+        const hitsSuggestions: Array<{ field: string; value: unknown }> = [
+          { field: "hospede_nome", value: pg.nome },
+          { field: "email", value: pg.email },
+          { field: "telefone", value: pg.telefone },
+          { field: "documento", value: pg.documento },
+          { field: "documento_numero", value: pg.documento },
+          { field: "nacionalidade", value: pg.nacionalidade },
+          { field: "sexo", value: pg.sexo },
+          { field: "data_nascimento", value: pg.data_nascimento },
+        ];
+        const hitsProv: FnrhFieldProvenanceMap = {};
+        for (const s of hitsSuggestions) {
+          const val = s.value == null ? "" : String(s.value).trim();
+          if (!val) continue;
+          const currentOrigin = fieldProvenance[s.field] ?? null;
+          if (
+            !shouldApplySuggestedValue({
+              currentValue: preenchido[s.field],
+              currentOrigin,
+              suggestedOrigin: "hits",
+            })
+          ) {
+            continue;
+          }
+          preenchido[s.field] = val;
+          hitsProv[s.field] = "hits";
+        }
+        if (Object.keys(hitsProv).length > 0) {
+          fieldProvenance = mergeFieldProvenance(fieldProvenance, hitsProv);
+        }
+      }
+    }
 
     const { data: docs } = await admin
       .from("operacional_fnrh_documentos")
@@ -398,7 +460,7 @@ Deno.serve(async (req: Request) => {
       fnrh_lifecycle_status: lifecycle,
       terms_version: FNRH_TERMS_VERSION,
       privacy_notice_version: FNRH_PRIVACY_NOTICE_VERSION,
-      field_provenance: (row.field_provenance as Record<string, unknown>) ?? {},
+      field_provenance: fieldProvenance,
       identity_verification_status: row.identity_verification_status ?? "not_required",
       document_verification_status: row.document_verification_status ?? "not_required",
       face_verification_status: row.face_verification_status ?? "not_required",

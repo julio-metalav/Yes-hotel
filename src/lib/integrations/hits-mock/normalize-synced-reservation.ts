@@ -9,6 +9,11 @@ import type {
   SyncedReservation,
   SyncedReservationStatus,
 } from "../../domain/yes-hotel/synced-reservation.ts";
+import {
+  classifyCommissionFromHits,
+  extractHitsCommercialFields,
+  mapPaymentStatusFromBalanceDue,
+} from "../../domain/yes-hotel/reservation-financial-classification.ts";
 import type { HitsMockReservationDetail } from "./types.ts";
 
 function trimOrNull(v: unknown): string | null {
@@ -36,8 +41,11 @@ function mapPayment(detail: HitsMockReservationDetail): SyncedPaymentStatus {
   if (sim === "pago" || sim === "pendente" || sim === "parcial" || sim === "desconhecido") {
     return sim;
   }
-  // Sem sinal de pagamento no mock → desconhecido (nunca inventar "pendente").
-  return "desconhecido";
+  const fromBalance = mapPaymentStatusFromBalanceDue(
+    (detail as Record<string, unknown>).reservationBalanceDue,
+    "desconhecido",
+  );
+  return fromBalance;
 }
 
 function sanitizeRaw(detail: HitsMockReservationDetail): Record<string, unknown> {
@@ -67,14 +75,24 @@ export function normalizeHitsMockDetailToSynced(
   const apartmentCode = normalizeApartment(room?.code ?? null);
 
   const guestsRaw = detail.guests ?? [];
-  const guests: SyncedGuest[] = guestsRaw.map((g, idx) => ({
-    externalGuestId: trimOrNull(g.idEntity),
-    name: trimOrNull(g.name) ?? "",
-    isPrincipal: g.main === true || (idx === 0 && !guestsRaw.some((x) => x.main === true)),
-    isMinor: null,
-    phone: trimOrNull(g.contactPhone),
-    email: trimOrNull(g.contactMail),
-  }));
+  const guests: SyncedGuest[] = guestsRaw.map((g, idx) => {
+    const gRec = g as Record<string, unknown>;
+    return {
+      externalGuestId: trimOrNull(g.idEntity),
+      name: trimOrNull(g.name) ?? "",
+      isPrincipal: g.main === true || (idx === 0 && !guestsRaw.some((x) => x.main === true)),
+      isMinor: null,
+      phone: trimOrNull(g.contactPhone),
+      email: trimOrNull(g.contactMail),
+      birthDate: trimOrNull(gRec.birthDate),
+      gender: trimOrNull(gRec.gender),
+      nationality: trimOrNull(gRec.addressCountry),
+      documentType: trimOrNull(gRec.documentType ?? gRec.mainDocType),
+      documentNumber: trimOrNull(
+        gRec.docCpfCnpjPassport ?? gRec.federalRegistrationNumber,
+      ),
+    };
+  });
 
   const principal =
     guests.find((g) => g.isPrincipal) ??
@@ -96,6 +114,19 @@ export function normalizeHitsMockDetailToSynced(
     (room as { mealPlanDesc?: string | null } | undefined)?.mealPlanDesc,
   );
 
+  const commercial = extractHitsCommercialFields(
+    detail as unknown as Record<string, unknown>,
+  );
+  const classified = classifyCommissionFromHits({
+    channelManager: commercial.channelManager,
+    salesChannel: commercial.salesChannel,
+    companyName: commercial.companyName,
+    billingEntity: commercial.billingEntity,
+    groupName: commercial.groupName,
+    reservationChannelId: commercial.reservationChannelId,
+    integrator: commercial.integrator,
+  });
+
   return {
     provider: "hits",
     externalReservationId,
@@ -114,6 +145,13 @@ export function normalizeHitsMockDetailToSynced(
     paymentStatus: mapPayment(detail),
     phone: principal.phone ?? trimOrNull(detail.contact2),
     email: principal.email ?? trimOrNull(detail.contact1),
+    channelManager: commercial.channelManager,
+    salesChannel: commercial.salesChannel,
+    billingEntity: commercial.billingEntity,
+    reservationChannelId: commercial.reservationChannelId,
+    reservationBalanceDue: commercial.reservationBalanceDue,
+    reservationTotalAmount: commercial.reservationTotalAmount,
+    classificacaoComissionamento: classified.classificacao,
     rawSanitized: sanitizeRaw(detail),
   };
 }

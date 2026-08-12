@@ -67,6 +67,13 @@ function baseReservation(patch: Partial<SyncedReservation> = {}): SyncedReservat
     paymentStatus: "pago",
     phone: "+55 67 99999-0001",
     email: "marina@example.com",
+    channelManager: null,
+    salesChannel: null,
+    billingEntity: null,
+    reservationChannelId: null,
+    reservationBalanceDue: null,
+    reservationTotalAmount: null,
+    classificacaoComissionamento: null,
     rawSanitized: { simulated: true },
     ...patch,
   };
