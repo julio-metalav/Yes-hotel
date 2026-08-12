@@ -320,9 +320,10 @@ export function resolvePresencialDiferidoUiLabel(
 }
 
 export const PRESENCIAL_DIFERIDO_INTERNAL_MSG =
-  "Primeiro acesso realizado. Pagamento presencial diferido ativo. Regularização obrigatória até 09:00 de amanhã.";
+  "Apto — hóspede entrou no apartamento. Pagamento presencial diferido ativo. Cobrar até 09h no café da manhã. Valor: confirmar no HITS. Após receber, regularizar no HITS.";
 
+/** @deprecated Preferir guest_payment_deferred_breakfast (domínio). */
 export const PRESENCIAL_DIFERIDO_WELCOME_MSG =
-  "Bem-vindo ao Yes Hotel. O pagamento presencial da sua reserva foi autorizado com prazo até 09:00 de amanhã. Regularize até esse horário para evitar a suspensão das senhas de acesso.";
+  "O pagamento da sua hospedagem deverá ser realizado presencialmente durante o café da manhã, até às 09h.";
 
 export { YES_HOTEL_TIMEZONE };

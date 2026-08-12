@@ -28,12 +28,6 @@ const MSG_FNRH_ONLY =
 const MSG_BOTH =
   "Bem-vindo ao Yes Hotel. O pagamento e o preenchimento das fichas de hóspedes ainda estão pendentes. Regularize em até 1 hora para evitar a suspensão temporária das senhas de acesso ao quarto e aos portões.";
 
-const MSG_PRESENCIAL_DIFERIDO_PAYMENT =
-  "Bem-vindo ao Yes Hotel. O pagamento presencial da sua reserva foi autorizado com prazo até 09:00 de amanhã. Regularize até esse horário para evitar a suspensão das senhas de acesso.";
-
-const MSG_PRESENCIAL_DIFERIDO_BOTH =
-  "Bem-vindo ao Yes Hotel. O pagamento presencial foi autorizado com prazo até 09:00 de amanhã e ainda existem fichas de hóspedes pendentes. Regularize até esse horário para evitar a suspensão das senhas de acesso.";
-
 const MSG_RESTORED =
   "As pendências da sua reserva foram regularizadas e seus acessos foram restabelecidos.";
 
@@ -49,24 +43,23 @@ export type AccessGraceMessage = {
 };
 
 /**
- * Gera texto de boas-vindas com pendências. Retorna null se não houver pendência.
+ * Gera texto de pendências pós-welcome (tolerância 1h / FNRH).
+ * Quando PPD está efetivado, a cobrança presencial vai em
+ * guest_payment_deferred_breakfast — não misturar aqui.
+ * Retorna null se não houver pendência a tratar neste template.
  */
 export function buildWelcomePendingMessage(
   input: BuildAccessGraceMessageInput,
 ): AccessGraceMessage | null {
-  if (!input.payment_pending && !input.fnrh_pending) {
+  const paymentForThisTemplate =
+    input.payment_pending && !input.presencial_diferido_efetivado;
+  if (!paymentForThisTemplate && !input.fnrh_pending) {
     return null;
   }
-  if (input.presencial_diferido_efetivado && input.payment_pending) {
-    if (input.fnrh_pending) {
-      return { kind: "welcome_payment_and_fnrh", body: MSG_PRESENCIAL_DIFERIDO_BOTH };
-    }
-    return { kind: "welcome_payment_only", body: MSG_PRESENCIAL_DIFERIDO_PAYMENT };
-  }
-  if (input.payment_pending && input.fnrh_pending) {
+  if (paymentForThisTemplate && input.fnrh_pending) {
     return { kind: "welcome_payment_and_fnrh", body: MSG_BOTH };
   }
-  if (input.payment_pending) {
+  if (paymentForThisTemplate) {
     return { kind: "welcome_payment_only", body: MSG_PAYMENT_ONLY };
   }
   return { kind: "welcome_fnrh_only", body: MSG_FNRH_ONLY };
@@ -93,6 +86,11 @@ export type BuildInternalFirstAccessMessageInput = {
   grace_started: boolean;
   /** Exceção efetiva: não usa tolerância padrão de 1h. */
   presencial_diferido_efetivado?: boolean;
+  /**
+   * Label de valor já resolvido (ex.: "R$ 420,00" ou "confirmar no HITS").
+   * Nunca inventar na UI — resolver antes com resolvePpdChargeAmount.
+   */
+  charge_valor_label?: string | null;
 };
 
 /**
@@ -112,10 +110,17 @@ export function buildInternalFirstAccessMessage(
   if (pendencias.length === 0) {
     body = `Hóspede entrou no apto ${apt}. Reserva ${res}, ${guest}. Sem pendências.`;
   } else if (input.presencial_diferido_efetivado && input.payment_pending) {
+    const valor =
+      String(input.charge_valor_label || "").trim() || "confirmar no HITS";
     body =
-      `Primeiro acesso realizado. Hóspede entrou no apto ${apt}. Reserva ${res}, ${guest}. ` +
-      "Pagamento presencial diferido ativo. Tolerância padrão de 1 hora NÃO se aplica. " +
-      "Regularização obrigatória até 09:00 de amanhã.";
+      `Apto ${apt} — ${guest} entrou no apartamento. ` +
+      "Pagamento presencial diferido ativo. " +
+      "Cobrar até 09h no café da manhã. " +
+      `Valor: ${valor}. ` +
+      "Após receber, regularizar no HITS.";
+    if (input.fnrh_pending) {
+      body += " FNRH ainda pendente.";
+    }
   } else {
     const list = pendencias.join(" e ");
     body = `Hóspede entrou no apto ${apt}. Reserva ${res}, ${guest}. Pendências: ${list}.`;

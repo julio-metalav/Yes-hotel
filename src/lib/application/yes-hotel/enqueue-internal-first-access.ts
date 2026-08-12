@@ -18,6 +18,8 @@ export type EnqueueInternalFirstAccessInput = {
   fnrh_pending: boolean;
   grace_started: boolean;
   presencial_diferido_efetivado?: boolean;
+  /** Já resolvido; "confirmar no HITS" se sem fonte confiável. */
+  charge_valor_label?: string | null;
   nowIso: string;
 };
 
@@ -32,6 +34,7 @@ export async function enqueueInternalFirstAccessMessage(
     fnrh_pending: input.fnrh_pending,
     grace_started: input.grace_started,
     presencial_diferido_efetivado: input.presencial_diferido_efetivado === true,
+    charge_valor_label: input.charge_valor_label ?? null,
   });
   return input.queue.enqueue({
     event_type: "internal_first_access",
