@@ -219,6 +219,34 @@
       var token = params.get("token");
       var app = document.getElementById("app");
 
+      function sessionKeyFor(gid) {
+        return "yh_fnrh_token_v1_" + String(gid || "");
+      }
+
+      function stripTokenFromAddressBar() {
+        try {
+          var u = new URL(window.location.href);
+          if (!u.searchParams.has("token")) return;
+          u.searchParams.delete("token");
+          var q = u.searchParams.toString();
+          window.history.replaceState({}, "", u.pathname + (q ? "?" + q : "") + u.hash);
+        } catch (_) {}
+      }
+
+      // Link legado traz ?token= uma vez → guarda em sessionStorage e remove da URL.
+      if (guestId && token) {
+        try {
+          sessionStorage.setItem(sessionKeyFor(guestId), token);
+        } catch (_) {}
+        stripTokenFromAddressBar();
+      } else if (guestId && !token) {
+        try {
+          token = sessionStorage.getItem(sessionKeyFor(guestId)) || "";
+        } catch (_) {
+          token = "";
+        }
+      }
+
       if (!guestId || !token) {
         app.innerHTML = "<p class=\"error\">Link inválido. São necessários guest_id (id da FNRH) e token na URL.</p>";
         return;
@@ -229,8 +257,13 @@
         return;
       }
 
-      function getFormDataUrl() {
-        return functionsUrl + "/fnrh-get?guest_id=" + encodeURIComponent(guestId) + "&token=" + encodeURIComponent(token);
+      function fetchFnrhGet() {
+        // POST body: token fora da query string (access log da Edge).
+        return fetch(functionsUrl + "/fnrh-get", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ guest_id: guestId, token: token }),
+        });
       }
       function getSubmitUrl() {
         return functionsUrl + "/fnrh-submit";
@@ -246,7 +279,7 @@
         return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
       }
 
-      fetch(getFormDataUrl())
+      fetchFnrhGet()
         .then(function (r) {
           if (r.status === 404) throw new Error("Link inválido ou expirado.");
           return r.json();

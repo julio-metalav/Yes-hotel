@@ -2,11 +2,25 @@
  * FNRH v2 — upload de documento do hóspede (público via guest_id+token).
  * Multipart FormData preferencial; JSON base64 aceito como fallback.
  * Grava em bucket privado fnrh-documents e operacional_fnrh_documentos.
- * Nunca loga PII, token, blob ou signed URL.
+ * OCR Azure opcional (flag + telemetria/idempotência sem PII).
+ * Nunca loga PII, token, blob, key, bytes, signed URL ou Operation-Location.
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isFnrhOcrEnabled } from "../../../src/lib/domain/yes-hotel/fnrh-checkin-v2-policy.ts";
-import { createFnrhOcrProvider } from "../../../src/lib/domain/yes-hotel/fnrh-ocr-port.ts";
+import {
+  FNRH_OCR_AZURE_API_VERSION,
+  FNRH_OCR_AZURE_MODEL,
+  FNRH_OCR_MAX_ATTEMPTS_PER_GUEST_JOURNEY,
+} from "../../../src/lib/domain/yes-hotel/fnrh-ocr-confidence.ts";
+import {
+  canRunNewOcrAttempt,
+  sha256HexOfBytes,
+} from "../../../src/lib/domain/yes-hotel/fnrh-ocr-idempotency.ts";
+import {
+  createFnrhOcrProvider,
+  resolveFnrhOcrProviderName,
+  type FnrhOcrResult,
+} from "../../../src/lib/domain/yes-hotel/fnrh-ocr-port.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -117,6 +131,77 @@ async function resolveFnrhByToken(
     .maybeSingle();
   return (byHospedeId as { id: string; reserva_id: string; hospede_id: string; status: string } | null) ??
     null;
+}
+
+function skippedOcrResult(reason: string, provider: string, model: string): FnrhOcrResult {
+  return {
+    ok: true,
+    provider,
+    model,
+    api_version: FNRH_OCR_AZURE_API_VERSION,
+    suggested_fields: {},
+    confidence: {},
+    field_bands: {},
+    needs_review_fields: [],
+    provenance: "ocr",
+    skipped: true,
+    reason,
+    pages_processed: 0,
+    analyzed_at: new Date().toISOString(),
+  };
+}
+
+async function countGuestOcrAttempts(guestId: string): Promise<number> {
+  const { count, error } = await admin
+    .from("operacional_fnrh_ocr_runs")
+    .select("id", { count: "exact", head: true })
+    .eq("guest_id", guestId)
+    .eq("skipped", false);
+  if (error) {
+    console.warn("[fnrh-document-upload] ocr attempts count failed");
+    return 0;
+  }
+  return count ?? 0;
+}
+
+async function hasIdempotentOcrSuccess(input: {
+  documentId: string;
+  guestId: string;
+  contentHash: string;
+  provider: string;
+  model: string;
+}): Promise<boolean> {
+  const { data: byDoc, error: docErr } = await admin
+    .from("operacional_fnrh_ocr_runs")
+    .select("id")
+    .eq("document_id", input.documentId)
+    .eq("provider", input.provider)
+    .eq("model", input.model)
+    .eq("content_hash", input.contentHash)
+    .eq("success", true)
+    .limit(1)
+    .maybeSingle();
+  if (docErr) {
+    console.warn("[fnrh-document-upload] ocr idempotent doc lookup failed");
+  } else if (byDoc) {
+    return true;
+  }
+
+  const { data: byGuest, error: guestErr } = await admin
+    .from("operacional_fnrh_ocr_runs")
+    .select("id")
+    .eq("guest_id", input.guestId)
+    .eq("provider", input.provider)
+    .eq("model", input.model)
+    .eq("content_hash", input.contentHash)
+    .eq("success", true)
+    .limit(1)
+    .maybeSingle();
+  if (guestErr) {
+    console.warn("[fnrh-document-upload] ocr idempotent guest lookup failed");
+    return false;
+  }
+  return !!byGuest;
 }
 
 Deno.serve(async (req: Request) => {
@@ -254,43 +339,144 @@ Deno.serve(async (req: Request) => {
         bytes: bytes.byteLength,
       },
     })
-    .select("id, storage_ref")
+    .select("id, storage_ref, metadata_sanitized")
     .maybeSingle();
 
   if (insErr || !inserted) {
     console.warn("[fnrh-document-upload] insert documento failed");
-    // Best-effort cleanup sem logar path completo sensível além do necessário
     await admin.storage.from(BUCKET).remove([objectPath]).catch(() => {});
     return jsonResponse({ ok: false, error: "Falha ao registrar documento." }, 500);
   }
 
+  const documentId = (inserted as { id: string }).id;
+  const contentHash = await sha256HexOfBytes(bytes);
   const ocrEnabled = isFnrhOcrEnabled(Deno.env.get("FNRH_OCR_ENABLED"));
-  let suggested_fields: Record<string, string> = {};
-  let confidence: Record<string, number> = {};
-  let provenance: "ocr" | null = null;
-  let ocr_skipped = true;
 
-  if (ocrEnabled) {
-    const provider = createFnrhOcrProvider(true);
-    const ocr = await provider.extract({
+  if (!ocrEnabled) {
+    return jsonResponse({
+      ok: true,
+      document_id: documentId,
+      storage_ref: objectPath,
+      suggested_fields: {},
+      confidence: {},
+      provenance: null,
+      ocr_skipped: true,
+    });
+  }
+
+  const configuredProvider = resolveFnrhOcrProviderName(Deno.env.get("FNRH_OCR_PROVIDER"));
+  const model = FNRH_OCR_AZURE_MODEL;
+  const priorAttempts = await countGuestOcrAttempts(docGuestId);
+  const hasSuccessfulIdempotentHit = await hasIdempotentOcrSuccess({
+    documentId,
+    guestId: docGuestId,
+    contentHash,
+    provider: configuredProvider === "azure" ? "azure" : "noop",
+    model,
+  });
+  const gate = canRunNewOcrAttempt({
+    priorAttempts,
+    maxAttempts: FNRH_OCR_MAX_ATTEMPTS_PER_GUEST_JOURNEY,
+    hasSuccessfulIdempotentHit,
+  });
+
+  let ocr: FnrhOcrResult;
+  if (!gate.allowed) {
+    ocr = skippedOcrResult(
+      gate.reason ?? "ocr_skipped",
+      configuredProvider === "azure" ? "azure" : "noop",
+      model,
+    );
+  } else {
+    const provider = createFnrhOcrProvider({
+      enabled: true,
+      provider: Deno.env.get("FNRH_OCR_PROVIDER"),
+      azureEndpoint: Deno.env.get("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"),
+      azureKey: Deno.env.get("AZURE_DOCUMENT_INTELLIGENCE_KEY"),
+    });
+    ocr = await provider.extract({
+      bytes,
       storage_ref: objectPath,
       document_type: documentType,
       side: sidePart === "front" || sidePart === "back" || sidePart === "single" ? sidePart : "single",
       mime_type: mimeType,
+      document_id: documentId,
+      reservation_id: row.reserva_id,
+      guest_id: docGuestId,
+      content_hash: contentHash,
     });
-    suggested_fields = (ocr.suggested_fields ?? {}) as Record<string, string>;
-    confidence = ocr.confidence ?? {};
-    provenance = ocr.provenance;
-    ocr_skipped = ocr.skipped === true;
+  }
+
+  const ocrSuccess = ocr.ok === true && ocr.skipped !== true;
+  const ocrProvider = ocr.provider || (configuredProvider === "azure" ? "azure" : "noop");
+  const ocrModel = ocr.model || model;
+  const ocrApiVersion = ocr.api_version || FNRH_OCR_AZURE_API_VERSION;
+  const pagesProcessed = Number.isFinite(ocr.pages_processed) ? Number(ocr.pages_processed) : 0;
+  const analyzedAt = ocr.analyzed_at || new Date().toISOString();
+  const needsReview = Array.isArray(ocr.needs_review_fields) ? ocr.needs_review_fields : [];
+
+  const { error: runErr } = await admin.from("operacional_fnrh_ocr_runs").insert({
+    reservation_id: row.reserva_id,
+    guest_id: docGuestId,
+    document_id: documentId,
+    content_hash: contentHash,
+    provider: ocrProvider,
+    model: ocrModel,
+    api_version: ocrApiVersion,
+    pages_processed: pagesProcessed,
+    success: ocrSuccess,
+    skipped: ocr.skipped === true,
+    duration_ms: ocr.duration_ms ?? null,
+    document_type: documentType,
+    error_code: ocr.reason ?? null,
+  });
+  if (runErr) {
+    console.warn("[fnrh-document-upload] ocr run insert failed");
+  }
+
+  const prevMeta =
+    (inserted as { metadata_sanitized?: Record<string, unknown> | null }).metadata_sanitized &&
+      typeof (inserted as { metadata_sanitized?: unknown }).metadata_sanitized === "object"
+      ? { ...(inserted as { metadata_sanitized: Record<string, unknown> }).metadata_sanitized }
+      : {
+        side: sidePart,
+        mime_type: mimeType,
+        bytes: bytes.byteLength,
+      };
+
+  const { error: metaErr } = await admin
+    .from("operacional_fnrh_documentos")
+    .update({
+      metadata_sanitized: {
+        ...prevMeta,
+        ocr: {
+          provider: ocrProvider,
+          model: ocrModel,
+          skipped: ocr.skipped === true,
+          success: ocrSuccess,
+          pages_processed: pagesProcessed,
+          analyzed_at: analyzedAt,
+          needs_review_fields: needsReview,
+        },
+      },
+    })
+    .eq("id", documentId);
+  if (metaErr) {
+    console.warn("[fnrh-document-upload] metadata_sanitized ocr merge failed");
   }
 
   return jsonResponse({
     ok: true,
-    document_id: (inserted as { id: string }).id,
+    document_id: documentId,
     storage_ref: objectPath,
-    suggested_fields,
-    confidence,
-    provenance,
-    ocr_skipped,
+    suggested_fields: ocr.suggested_fields ?? {},
+    confidence: ocr.confidence ?? {},
+    field_bands: ocr.field_bands ?? {},
+    needs_review_fields: needsReview,
+    provenance: ocr.provenance ?? "ocr",
+    ocr_skipped: ocr.skipped === true,
+    ocr_reason: ocr.reason ?? null,
+    provider: ocrProvider,
+    model: ocrModel,
   });
 });
