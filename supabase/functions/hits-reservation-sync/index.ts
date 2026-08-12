@@ -1,5 +1,5 @@
 /**
- * Edge: sync manual de reservas HITS (mock).
+ * Edge: sync manual de reservas HITS (mock | real preparado).
  *
  * dry-run default → zero escrita, contadores would*.
  * Persistência Supabase só com:
@@ -8,11 +8,19 @@
  *   HITS_RESERVATION_SCHEMA_READY=true
  *   dry_run=false
  *
- * Modo real bloqueado se HITS_INTEGRATION_ENABLED != true.
- * Sem cron. Sem rede HITS real nesta fase.
+ * Modo real:
+ *   - HITS_INTEGRATION_ENABLED === true
+ *   - credenciais/contexto presentes
+ *   - NÃO ativar em produção sem smoke controlado
+ *
+ * Body smoke opcional (limites seguros):
+ *   date_from, date_to (YYYY-MM-DD)
+ *   max_pages (1..50, default 50)
+ *   max_reservations (1..100; omitido = sem hard-cap além da paginação)
+ *
+ * Sync de leitura/persistência NÃO dispara: cobrança, DigiSac, senha, TTLock, FNRH, escrita HITS.
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { HitsMockReservationSource } from "../../../src/lib/integrations/hits-mock/hits-mock-reservation-source.ts";
 import {
   getReservationSyncFlags,
   syncReservationsFromSource,
@@ -22,6 +30,8 @@ import {
   InMemoryReservationSyncRepository,
 } from "../../../src/lib/application/yes-hotel/reservation-sync-repository.ts";
 import { SupabaseReservationSyncRepository } from "../../../src/lib/infrastructure/supabase/yes-hotel/supabase-reservation-sync-repository.ts";
+import { resolveHitsReservationSource } from "../../../src/lib/integrations/hits/resolve-hits-reservation-source.ts";
+import type { HitsConfig } from "../../../src/lib/integrations/hits/config.ts";
 import { constantTimeEqual } from "../../../src/lib/integrations/ttlock/access-ingest/constant-time.ts";
 
 const corsHeaders = {
@@ -34,6 +44,10 @@ const corsHeaders = {
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const syncToken = (Deno.env.get("HITS_RESERVATION_SYNC_TOKEN") ?? "").trim();
+
+/** Cap duro no body — evita sync acidental do universo. */
+const MAX_RESERVATIONS_BODY_CAP = 100;
+const MAX_PAGES_BODY_CAP = 50;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -69,6 +83,54 @@ function denoEnv(): Record<string, string | undefined> {
   return env;
 }
 
+/** Config HITS a partir de Deno.env (Edge não usa process.env). */
+function hitsConfigFromDenoEnv(): HitsConfig {
+  const read = (name: string): string => String(Deno.env.get(name) ?? "").trim();
+  const integrationEnabled = read("HITS_INTEGRATION_ENABLED") === "true";
+  const checkinEnabled = read("HITS_CHECKIN_ENABLED") === "true";
+  const timeoutRaw = read("HITS_REQUEST_TIMEOUT_MS");
+  const timeoutN = Number(timeoutRaw);
+  const requestTimeoutMs =
+    Number.isFinite(timeoutN) && timeoutN >= 1000 && timeoutN <= 120_000
+      ? Math.floor(timeoutN)
+      : 12_000;
+  const scopesRaw = read("HITS_AUTHORIZE_SCOPES");
+  const scopes = scopesRaw
+    ? scopesRaw.split(",").map((s) => s.trim()).filter(Boolean)
+    : ["WebCheckIn"];
+  return {
+    apiBaseUrl: (read("HITS_API_BASE_URL") || "https://api.hitspms.net").replace(/\/+$/, ""),
+    sharedAccessSecret: read("HITS_SHARED_ACCESS_SECRET"),
+    propertyId: read("HITS_PROPERTY_ID"),
+    integrationEnabled,
+    checkinEnabled: integrationEnabled && checkinEnabled,
+    requestTimeoutMs,
+    apiVersion: read("HITS_API_VERSION") || "1",
+    tenantName: read("HITS_TENANT_NAME"),
+    propertyCode: read("HITS_PROPERTY_CODE"),
+    partnerUserId: read("HITS_PARTNER_USER_ID"),
+    clientId: read("HITS_CLIENT_ID"),
+    languageCode: read("HITS_LANGUAGE_CODE") || "pt-BR",
+    scopes,
+    authContractStatus: "verified",
+    checkInBodyContractStatus: "unverified",
+  };
+}
+
+function parseOptionalYmd(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  return s;
+}
+
+function parsePositiveInt(v: unknown, max: number): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return Math.min(max, Math.floor(n));
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -89,6 +151,13 @@ Deno.serve(async (req: Request) => {
 
   const dryRun = body.dry_run !== false;
   const flags = getReservationSyncFlags(denoEnv());
+  const dateFrom = parseOptionalYmd(body.date_from);
+  const dateTo = parseOptionalYmd(body.date_to);
+  const maxPages = parsePositiveInt(body.max_pages, MAX_PAGES_BODY_CAP) ?? 50;
+  const maxReservations = parsePositiveInt(
+    body.max_reservations,
+    MAX_RESERVATIONS_BODY_CAP,
+  );
 
   if (!flags.syncEnabled) {
     return json({ ok: false, error: "sync_disabled", dryRun, mode: flags.mode }, 403);
@@ -96,6 +165,26 @@ Deno.serve(async (req: Request) => {
 
   if (flags.mode === "real" && !flags.hitsIntegrationEnabled) {
     return json({ ok: false, error: "hits_real_blocked", dryRun, mode: flags.mode }, 403);
+  }
+
+  const resolved = resolveHitsReservationSource({
+    flags,
+    hitsConfig: hitsConfigFromDenoEnv(),
+    mockPageSize: flags.batchSize,
+    maxReservations,
+  });
+  if (!resolved.ok) {
+    return json(
+      {
+        ok: false,
+        error: resolved.error,
+        message: resolved.message,
+        dryRun,
+        mode: flags.mode,
+        source_kind: "real",
+      },
+      403,
+    );
   }
 
   if (!dryRun) {
@@ -116,10 +205,7 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  const source = new HitsMockReservationSource({
-    pageSize: flags.batchSize,
-    scenario: "baseline",
-  });
+  const source = resolved.source;
 
   try {
     if (dryRun) {
@@ -129,12 +215,21 @@ Deno.serve(async (req: Request) => {
         repo,
         flags,
         dryRun: true,
+        maxPages,
+        maxReservations,
+        dateFrom,
+        dateTo,
       });
       return json({
         ok: result.ok,
         mode: result.mode,
+        source_kind: resolved.kind,
         dryRun: true,
         persistence: "dry_run_no_writes",
+        date_from: dateFrom,
+        date_to: dateTo,
+        max_pages: maxPages,
+        max_reservations: maxReservations,
         wouldCreate: result.created,
         wouldUpdate: result.updated,
         wouldCancel: result.cancelled,
@@ -157,6 +252,10 @@ Deno.serve(async (req: Request) => {
       repo,
       flags,
       dryRun: false,
+      maxPages,
+      maxReservations,
+      dateFrom,
+      dateTo,
     });
 
     const partial = result.errors > 0 && result.processed > result.errors;
@@ -164,8 +263,13 @@ Deno.serve(async (req: Request) => {
       ok: result.ok,
       partial: partial || undefined,
       mode: result.mode,
+      source_kind: resolved.kind,
       dryRun: false,
       persistence: "supabase",
+      date_from: dateFrom,
+      date_to: dateTo,
+      max_pages: maxPages,
+      max_reservations: maxReservations,
       created: result.created,
       updated: result.updated,
       cancelled: result.cancelled,

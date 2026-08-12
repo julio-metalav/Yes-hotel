@@ -129,7 +129,14 @@ export function isBookingEngineChannel(value: unknown): boolean {
 }
 
 export function isMotorDeReservasChannel(value: unknown): boolean {
-  return upperCompact(value) === "MOTORADERESERVAS";
+  const compact = upperCompact(value);
+  if (!compact) return false;
+  // "Motor de Reservas" → MOTORADERESERVAS (espaços removidos).
+  if (compact === "MOTORADERESERVAS") return true;
+  // Forma colada sem "de".
+  if (compact === "MOTORRESERVAS") return true;
+  // Texto original defensivo (sem depender só do compact).
+  return /^motor\s+de\s+reservas$/i.test(normText(value));
 }
 
 export function matchOtaExactToken(value: unknown): string | null {
@@ -338,11 +345,9 @@ export function isFinanceiramenteLiberadoParaAcesso(input: {
 }): boolean {
   const status = resolveFinancialStatusVisible(input);
   if (status === "pago") return true;
+  // Pendente (comissionado) libera acesso; não é "Pago".
   if (status === "pendente_comissionado") return true;
-  const cls = String(input.classificacao ?? "")
-    .trim()
-    .toLowerCase();
-  if (cls === "desconhecida") return true;
+  // desconhecida NÃO libera automaticamente.
   return false;
 }
 

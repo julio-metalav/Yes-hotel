@@ -57,7 +57,11 @@
   }
 
   function isMotorDeReservasChannel(value) {
-    return upperCompact(value) === "MOTORADERESERVAS";
+    var compact = upperCompact(value);
+    if (!compact) return false;
+    if (compact === "MOTORADERESERVAS") return true;
+    if (compact === "MOTORRESERVAS") return true;
+    return /^motor\s+de\s+reservas$/i.test(normText(value));
   }
 
   function matchOtaExactToken(value) {
@@ -186,10 +190,8 @@
   function isFinanceiramenteLiberadoParaAcesso(input) {
     var status = resolveFinancialStatusVisible(input);
     if (status === "pago" || status === "pendente_comissionado") return true;
-    var cls = String((input && input.classificacao) || "")
-      .trim()
-      .toLowerCase();
-    return cls === "desconhecida";
+    // desconhecida NÃO libera automaticamente.
+    return false;
   }
 
   function nextFinancialActionLabel(status) {

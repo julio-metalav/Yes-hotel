@@ -50,3 +50,17 @@ export * from "./types";
 export * from "./fixtures";
 export * from "./mapper";
 export * from "./preview";
+export {
+  normalizeHitsDetailToSynced,
+  mergeHitsListFieldsIntoDetail,
+} from "./normalize-hits-detail-to-synced";
+export {
+  HitsReservationSource,
+  assertHitsRealSourceReady,
+  type HitsReservationSourceOptions,
+} from "./hits-reservation-source";
+export {
+  resolveHitsReservationSource,
+  type ResolveHitsReservationSourceInput,
+  type ResolveHitsReservationSourceResult,
+} from "./resolve-hits-reservation-source";

@@ -294,11 +294,14 @@ export function buildGuestFirstAccessWelcomeMessage(
 
 /**
  * Financeiro liberado para acesso (não usa pagamento_status cru sozinho).
- * comissionada / desconhecida → não cobra hóspede → liberado para acesso.
+ * - pago → liberado
+ * - comissionada (pendente no HITS) → liberado para acesso, sem Pagar.me
+ * - desconhecida → NÃO libera automaticamente
  */
 export function isFinanceiroLiberadoParaAcesso(input: {
   pagamento_status?: string | null;
   classificacao_comissionamento?: string | null;
+  reservation_balance_due?: number | null;
 }): boolean {
   const pay = String(input.pagamento_status ?? "")
     .trim()
@@ -307,7 +310,7 @@ export function isFinanceiroLiberadoParaAcesso(input: {
   const cls = String(input.classificacao_comissionamento ?? "")
     .trim()
     .toLowerCase();
-  if (cls === "comissionada" || cls === "desconhecida") return true;
+  if (cls === "comissionada") return true;
   return false;
 }
 

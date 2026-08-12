@@ -7,13 +7,13 @@ import {
   getHitsConfig,
   hitsConfigStatus,
   type HitsConfig,
-} from "./config";
-import { HitsError, assertNoSensitiveLeak } from "./errors";
+} from "./config.ts";
+import { HitsError, assertNoSensitiveLeak } from "./errors.ts";
 import {
   createHitsTransport,
   type HitsFetch,
   type HitsTransport,
-} from "./transport";
+} from "./transport.ts";
 import type {
   HitsAccessSecret,
   HitsAccessToken,
@@ -28,7 +28,7 @@ import type {
   ListReservationsParams,
   HitsAuthResponse,
   HitsReservationDetail,
-} from "./types";
+} from "./types.ts";
 
 export interface HitsClientOptions {
   config?: HitsConfig;

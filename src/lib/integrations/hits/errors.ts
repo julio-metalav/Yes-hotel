@@ -3,7 +3,7 @@
  * Nunca incluir shared secret, token ou Authorization em message/details.
  */
 
-import type { HitsApiErrorShape, HitsHttpErrorCode } from "./types";
+import type { HitsApiErrorShape, HitsHttpErrorCode } from "./types.ts";
 
 const SENSITIVE_SUBSTRINGS = [
   "bearer ",

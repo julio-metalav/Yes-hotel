@@ -1,7 +1,8 @@
 /**
- * Serviço de sincronização de reservas (HITS mock nesta fase).
+ * Serviço de sincronização de reservas (mock ou real via ReservationSourcePort).
  * Idempotente. Não interpreta ausência em página como cancelamento.
  * Modo real bloqueado enquanto HITS_INTEGRATION_ENABLED != true.
+ * Sync de leitura/persistência não dispara cobrança, DigiSac, senha, TTLock ou FNRH.
  */
 
 import { detectReservationChanges } from "../../domain/yes-hotel/reservation-sync-diff.ts";
@@ -62,12 +63,22 @@ export async function syncReservationsFromSource(input: {
   flags?: ReservationSyncFlags;
   dryRun?: boolean;
   maxPages?: number;
+  /** Limite duro de reservas processadas (smoke controlado). */
+  maxReservations?: number | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
   nowIso?: string;
 }): Promise<SyncReservationsResult> {
   const flags = input.flags ?? getReservationSyncFlags();
   const dryRun = input.dryRun !== false; // default true
   const nowIso = input.nowIso ?? new Date().toISOString();
-  const maxPages = input.maxPages ?? 50;
+  const maxPages = Math.max(1, Math.min(50, input.maxPages ?? 50));
+  const maxReservations =
+    input.maxReservations != null &&
+    Number.isFinite(input.maxReservations) &&
+    input.maxReservations > 0
+      ? Math.floor(input.maxReservations)
+      : null;
 
   if (!flags.syncEnabled) {
     return emptyResult(dryRun, flags.mode, "sync_disabled");
@@ -98,13 +109,29 @@ export async function syncReservationsFromSource(input: {
 
   try {
     while (pages < maxPages) {
+      const remaining =
+        maxReservations != null ? Math.max(0, maxReservations - processed) : null;
+      if (remaining === 0) {
+        stopped_reason = "max_reservations";
+        break;
+      }
+      const pageSize =
+        remaining != null
+          ? Math.min(flags.batchSize, remaining)
+          : flags.batchSize;
       const page = await input.source.listReservations({
         cursor,
-        pageSize: flags.batchSize,
+        pageSize,
+        dateFrom: input.dateFrom ?? null,
+        dateTo: input.dateTo ?? null,
       });
       pages += 1;
 
       for (const reservation of page.items) {
+        if (maxReservations != null && processed >= maxReservations) {
+          stopped_reason = "max_reservations";
+          break;
+        }
         processed += 1;
         try {
           await processOne(reservation, input.repo, dryRun, nowIso, {
@@ -136,6 +163,8 @@ export async function syncReservationsFromSource(input: {
           });
         }
       }
+
+      if (stopped_reason === "max_reservations") break;
 
       if (!page.hasMore || !page.nextCursor) {
         stopped_reason = "no_more_pages";
