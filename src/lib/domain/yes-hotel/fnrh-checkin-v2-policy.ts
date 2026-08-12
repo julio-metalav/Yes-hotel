@@ -105,16 +105,16 @@ function isBrazilResident(draft: FnrhCheckinV2Draft): boolean {
 export function validateDocumentoStep(draft: FnrhCheckinV2Draft): FnrhCheckinV2Validation {
   const missing: string[] = [];
   const errors: string[] = [];
+  // Document-first: a etapa Documento exige upload; tipo/número/nascimento vão para Confira dados.
   if (!draft.is_minor && !draft.has_document_upload) missing.push("document_upload");
-  if (!hasText(draft.documento_tipo) && !hasText(draft.documento)) missing.push("documento_tipo");
-  if (!hasText(draft.documento_numero) && !hasText(draft.documento)) missing.push("documento_numero");
-  if (!hasText(draft.data_nascimento)) missing.push("data_nascimento");
   return { ok: missing.length === 0 && errors.length === 0, missing, errors };
 }
 
 export function validateConfiraDadosStep(draft: FnrhCheckinV2Draft): FnrhCheckinV2Validation {
   const missing: string[] = [];
   if (!hasText(draft.hospede_nome)) missing.push("hospede_nome");
+  if (!hasText(draft.documento_tipo) && !hasText(draft.documento)) missing.push("documento_tipo");
+  if (!hasText(draft.documento_numero) && !hasText(draft.documento)) missing.push("documento_numero");
   if (!hasText(draft.data_nascimento)) missing.push("data_nascimento");
   if (!hasText(draft.nacionalidade)) missing.push("nacionalidade");
   if (!draft.is_minor) {

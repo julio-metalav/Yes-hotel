@@ -85,13 +85,19 @@ function adultDraft(partial: Partial<FnrhCheckinV2Draft> = {}): FnrhCheckinV2Dra
 async function main() {
   console.log("\n=== FNRH check-in digital v2 (A–L) ===\n");
 
-  // A — adulto: documento obrigatório
+  // A — adulto: documento obrigatório (upload); tipo/número/nascimento na etapa Confira dados
   {
     const missing = validateDocumentoStep(adultDraft({ has_document_upload: false }));
     assert.equal(missing.ok, false);
     assert.ok(missing.missing.includes("document_upload"));
     assert.equal(validateDocumentoStep(adultDraft()).ok, true);
-    ok("A adulto exige upload de documento");
+    assert.equal(
+      validateDocumentoStep(
+        adultDraft({ documento_tipo: "", documento_numero: "", data_nascimento: "" }),
+      ).ok,
+      true,
+    );
+    ok("A adulto exige upload de documento (sem tipo/número/nascimento na etapa 1)");
   }
 
   // B — adulto: dados pessoais + contato
@@ -100,7 +106,11 @@ async function main() {
     assert.equal(bad.ok, false);
     assert.ok(bad.missing.includes("email"));
     assert.ok(bad.missing.includes("telefone"));
-    ok("B adulto exige telefone e e-mail");
+    const badDoc = validateConfiraDadosStep(
+      adultDraft({ documento_tipo: "", documento_numero: "", documento: "" }),
+    );
+    assert.equal(badDoc.ok, false);
+    ok("B adulto exige telefone, e-mail e documento na etapa Confira dados");
   }
 
   // C — endereço CEP-first BR
