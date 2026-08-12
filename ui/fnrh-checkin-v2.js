@@ -589,12 +589,11 @@
       fd.append("side", uploadSide);
       fd.append("file", file, file.name || "documento");
 
-      // Transição visual: após iniciar o POST, mostrar fase OCR
+      // Transição visual: após iniciar o POST, mostrar fase OCR (re-render para botão + preview)
       window.setTimeout(function () {
         if (state.analyzing && state.analyzingPhase === "upload") {
           state.analyzingPhase = "ocr";
-          var el = document.querySelector(".analyzing");
-          if (el) el.textContent = "Documento recebido. Lendo os dados…";
+          render();
         }
       }, 450);
 
@@ -780,16 +779,7 @@
           ? '<p class="muted meta-line">Apartamento ' + escapeHtml(meta.apartamento) + "</p>"
           : "";
       var step = STEPS[state.stepIndex];
-      var analyzing =
-        state.analyzing
-          ? '<div class="analyzing" role="status" aria-live="polite">' +
-            escapeHtml(
-              state.analyzingPhase === "ocr"
-                ? "Documento recebido. Lendo os dados…"
-                : "Enviando documento…",
-            ) +
-            "</div>"
-          : "";
+      // Feedback de processamento fica no card do documento (próximo ao preview no mobile).
       var ocrBanner =
         state.ocrBanner && !state.analyzing
           ? '<div class="banner" role="status">' + escapeHtml(state.ocrBanner) + "</div>"
@@ -802,12 +792,13 @@
         navOpts.hideBack || state.stepIndex === 0 || step.id === "concluido"
           ? ""
           : '<button type="button" class="btn secondary" id="v2-back">Voltar</button>';
-      var nextLabel =
-        step.id === "aceite"
-          ? state.confirmBusy
-            ? "Confirmando…"
-            : "Confirmar check-in"
-          : "Continuar";
+      var nextLabel = "Continuar";
+      if (step.id === "aceite") {
+        nextLabel = state.confirmBusy ? "Confirmando…" : "Confirmar check-in";
+      } else if (state.analyzing) {
+        nextLabel =
+          state.analyzingPhase === "ocr" ? "Lendo documento…" : "Enviando documento…";
+      }
       var nextBtn =
         step.id === "concluido"
           ? ""
@@ -832,7 +823,6 @@
           " · " +
           escapeHtml(step.label) +
           "</p>",
-        analyzing,
         ocrBanner,
         '  <div id="v2-step-body">' + bodyHtml + "</div>",
         err,
@@ -943,9 +933,47 @@
       var needVerso = needsVersoAfterOcr();
       var hasAny =
         !!(state.has_document_upload || state.uploadedSides.front || state.uploadedSides.single);
+      var analyzing = !!state.analyzing;
+      var phase = state.analyzingPhase || "";
+
+      var previewChip = "";
+      var processStatus = "";
+      if (analyzing && phase === "upload") {
+        previewChip = '<span class="doc-chip doc-chip--busy">Enviando…</span>';
+        processStatus = [
+          '<div class="doc-process-status" role="status" aria-live="polite">',
+          '  <div class="doc-process-status__row">',
+          '    <span class="doc-spinner" aria-hidden="true"></span>',
+          '    <span class="doc-process-status__title">Enviando documento…</span>',
+          "  </div>",
+          '  <p class="doc-process-status__hint">Aguarde um instante.</p>',
+          "</div>",
+        ].join("");
+      } else if (analyzing) {
+        previewChip = '<span class="doc-chip doc-chip--busy">Documento recebido · lendo dados…</span>';
+        processStatus = [
+          '<div class="doc-process-status" role="status" aria-live="polite">',
+          '  <div class="doc-process-status__row">',
+          '    <span class="doc-spinner" aria-hidden="true"></span>',
+          '    <span class="doc-process-status__title">Lendo documento…</span>',
+          "  </div>",
+          '  <p class="doc-process-status__hint">Estamos identificando seus dados automaticamente. Isso pode levar alguns segundos.</p>',
+          "</div>",
+        ].join("");
+      } else if (hasAny || state.docPreviewUrl || state.docPreviewName) {
+        previewChip = '<span class="ok-chip">Documento enviado ✓</span>';
+        if (state.showConfiraCta && !needVerso) {
+          processStatus = [
+            '<div class="doc-process-status doc-process-status--done" role="status" aria-live="polite">',
+            '  <p class="doc-process-status__title">Leitura concluída ✓</p>',
+            '  <p class="doc-process-status__hint">Confira os dados identificados antes de continuar.</p>',
+            "</div>",
+          ].join("");
+        }
+      }
 
       var previewBlock = "";
-      if (state.docPreviewUrl || state.docPreviewName || hasAny) {
+      if (state.docPreviewUrl || state.docPreviewName || hasAny || analyzing) {
         previewBlock = [
           '<div class="doc-preview-card">',
           state.docPreviewUrl
@@ -954,45 +982,53 @@
               '" alt="Pré-visualização do documento" />'
             : "",
           '  <div class="doc-preview-meta">',
-          '    <span class="ok-chip">Documento enviado ✓</span>',
+          previewChip,
           state.docPreviewName
             ? '    <p class="muted doc-preview-name">' + escapeHtml(state.docPreviewName) + "</p>"
             : "",
           "  </div>",
-          '  <div class="doc-retake-row">',
-          '    <button type="button" class="btn secondary compact" id="btn-doc-retake-camera">Tirar outra foto</button>',
-          '    <button type="button" class="btn secondary compact" id="btn-doc-retake-file">Trocar arquivo</button>',
-          "  </div>",
+          processStatus,
+          analyzing
+            ? ""
+            : [
+                '  <div class="doc-retake-row">',
+                '    <button type="button" class="btn secondary compact" id="btn-doc-retake-camera">Tirar outra foto</button>',
+                '    <button type="button" class="btn secondary compact" id="btn-doc-retake-file">Trocar arquivo</button>',
+                "  </div>",
+              ].join(""),
           "</div>",
         ].join("");
       }
 
-      var primaryCapture = needVerso
-        ? [
-            '<button type="button" class="doc-cta doc-cta--primary" id="btn-doc-camera-back">',
-            '  <span class="doc-cta__icon" aria-hidden="true">📷</span>',
-            "  <span class=\"doc-cta__title\">Tirar foto do verso</span>",
-            '  <span class="doc-cta__hint">Use a câmera do celular</span>',
-            "</button>",
-            '<button type="button" class="doc-cta doc-cta--secondary" id="btn-doc-file-back">',
-            "  <span class=\"doc-cta__title\">Enviar verso do documento</span>",
-            '  <span class="doc-cta__hint">Escolha uma imagem ou PDF já salvo</span>',
-            "</button>",
-          ].join("")
-        : [
-            '<button type="button" class="doc-cta doc-cta--primary" id="btn-doc-camera">',
-            '  <span class="doc-cta__icon" aria-hidden="true">📷</span>',
-            "  <span class=\"doc-cta__title\">Tirar foto do documento</span>",
-            '  <span class="doc-cta__hint">Use a câmera do celular</span>',
-            "</button>",
-            '<button type="button" class="doc-cta doc-cta--secondary" id="btn-doc-file">',
-            "  <span class=\"doc-cta__title\">Enviar foto ou arquivo</span>",
-            '  <span class="doc-cta__hint">Escolha uma imagem ou PDF já salvo no aparelho</span>',
-            "</button>",
-          ].join("");
+      var primaryCapture =
+        analyzing
+          ? ""
+          : needVerso
+            ? [
+                '<button type="button" class="doc-cta doc-cta--primary" id="btn-doc-camera-back">',
+                '  <span class="doc-cta__icon" aria-hidden="true">📷</span>',
+                "  <span class=\"doc-cta__title\">Tirar foto do verso</span>",
+                '  <span class="doc-cta__hint">Use a câmera do celular</span>',
+                "</button>",
+                '<button type="button" class="doc-cta doc-cta--secondary" id="btn-doc-file-back">',
+                "  <span class=\"doc-cta__title\">Enviar verso do documento</span>",
+                '  <span class="doc-cta__hint">Escolha uma imagem ou PDF já salvo</span>',
+                "</button>",
+              ].join("")
+            : [
+                '<button type="button" class="doc-cta doc-cta--primary" id="btn-doc-camera">',
+                '  <span class="doc-cta__icon" aria-hidden="true">📷</span>',
+                "  <span class=\"doc-cta__title\">Tirar foto do documento</span>",
+                '  <span class="doc-cta__hint">Use a câmera do celular</span>',
+                "</button>",
+                '<button type="button" class="doc-cta doc-cta--secondary" id="btn-doc-file">',
+                "  <span class=\"doc-cta__title\">Enviar foto ou arquivo</span>",
+                '  <span class="doc-cta__hint">Escolha uma imagem ou PDF já salvo no aparelho</span>',
+                "</button>",
+              ].join("");
 
       var confiraCta =
-        state.showConfiraCta && !needVerso && !state.analyzing
+        state.showConfiraCta && !needVerso && !analyzing
           ? '<button type="button" class="btn primary doc-confira-cta" id="btn-goto-confira">Conferir meus dados</button>'
           : "";
 
@@ -1004,10 +1040,10 @@
         '<input type="file" id="doc-camera-back" class="sr-only-file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true" />',
         '<input type="file" id="doc-file-back" class="sr-only-file" accept="image/*,application/pdf" tabindex="-1" aria-hidden="true" />',
         previewBlock,
-        needVerso
+        needVerso && !analyzing
           ? '<p class="banner">Identificamos um documento que precisa do <strong>verso</strong>. Envie a segunda foto.</p>'
           : "",
-        '<div class="doc-cta-stack">' + primaryCapture + "</div>",
+        primaryCapture ? '<div class="doc-cta-stack">' + primaryCapture + "</div>" : "",
         confiraCta,
       ].join("");
     }

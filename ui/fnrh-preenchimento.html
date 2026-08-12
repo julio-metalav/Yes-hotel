@@ -128,6 +128,61 @@
       font-weight: 600;
       font-size: 0.92rem;
     }
+    .doc-chip {
+      display: inline-block;
+      font-size: 0.86rem;
+      font-weight: 700;
+      padding: 0.28rem 0.55rem;
+      border-radius: 999px;
+    }
+    .doc-chip--busy {
+      background: #fff4d6;
+      color: #6a5418;
+      border: 1px solid #e6d4a8;
+    }
+    .doc-process-status {
+      margin-top: 0.75rem;
+      padding: 0.75rem 0.85rem;
+      border-radius: 10px;
+      background: #fff8e8;
+      border: 1px solid #e6d4a8;
+      color: #5c4a16;
+    }
+    .doc-process-status--done {
+      background: #eef8f2;
+      border-color: #b7e0c6;
+      color: #1f6b3a;
+    }
+    .doc-process-status__row {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+    }
+    .doc-process-status__title {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .doc-process-status__hint {
+      margin: 0.4rem 0 0;
+      font-size: 0.88rem;
+      font-weight: 500;
+      line-height: 1.4;
+      opacity: 0.92;
+    }
+    .doc-spinner {
+      width: 1.05rem;
+      height: 1.05rem;
+      border: 2px solid rgba(106, 84, 24, 0.25);
+      border-top-color: #6a5418;
+      border-radius: 50%;
+      flex-shrink: 0;
+      animation: doc-spin 0.8s linear infinite;
+    }
+    @keyframes doc-spin {
+      to { transform: rotate(360deg); }
+    }
     .file-label {
       display: block;
       margin-top: 0.85rem;
