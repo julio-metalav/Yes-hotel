@@ -167,6 +167,40 @@ ok("cobrança não duplicada");
 assert.match(panelSrc, /<details class="detail-collapsible detail-collapsible--timeline">/);
 ok("histórico recolhido por padrão");
 
+// ---- Coluna AÇÕES: Ver sempre visível com/sem PPD ----
+assert.match(panelSrc, /function canShowPresencialDiferidoBtn\(reserva\)/);
+assert.match(panelSrc, /op-actions-primary/);
+assert.match(panelSrc, /op-actions-secondary/);
+assert.match(panelSrc, /op-tr--with-ppd/);
+assert.match(panelSrc, /op-btn-ppd__short/);
+assert.match(panelSrc, /op-btn-ppd__full/);
+// Ordem estrutural: Ver + ⋯ na primary; PPD só na secondary
+{
+  const renderSlice = panelSrc.slice(
+    panelSrc.indexOf("function renderOperacionalLista"),
+    panelSrc.indexOf("function openDetailAndRunCta"),
+  );
+  const primaryIdx = renderSlice.indexOf("op-actions-primary");
+  const verIdx = renderSlice.indexOf('class="op-btn-table op-btn-ver"', primaryIdx);
+  const moreIdx = renderSlice.indexOf("op-btn-more", primaryIdx);
+  const secondaryIdx = renderSlice.indexOf("op-actions-secondary");
+  assert.ok(primaryIdx > 0, "primary actions container");
+  assert.ok(verIdx > primaryIdx, "Ver dentro da primary");
+  assert.ok(moreIdx > verIdx, "⋯ após Ver");
+  assert.ok(secondaryIdx > moreIdx, "PPD secondary após primary");
+  assert.match(renderSlice, /op-mcard__actions/);
+  assert.match(renderSlice, /op-btn-ver-inline/);
+}
+assert.match(cssSrc, /\.op-actions-primary/);
+assert.match(cssSrc, /\.op-actions-secondary/);
+assert.match(cssSrc, /\.op-btn-table\.op-btn-ppd/);
+assert.match(cssSrc, /min-width:\s*max-content/);
+assert.match(cssSrc, /--op-sidebar-w:\s*256px/);
+assert.equal((cssSrc.match(/--op-sidebar-w:/g) || []).length, 1);
+// canShowPresencialDiferidoBtn permanece o gate (sem alteração de regra)
+assert.match(panelSrc, /api\.canShowPresencialDiferidoButton\(/);
+ok("AÇÕES: Ver+⋯ always-on; PPD secondary; sidebar 256px; gate PPD intacto");
+
 // HTML carrega financial
 assert.match(htmlSrc, /yes-reservation-financial\.js/);
 assert.match(cssSrc, /detail-situacao-acesso--entrou/);
@@ -190,8 +224,11 @@ const fixtures = [
   "TTLock provisionado",
   "primeiro acesso",
   "cobrança Pagar.me",
+  "sem PPD — Ver visível",
+  "com PPD elegível — Ver visível",
+  "PPD autorizado — Ver visível",
 ];
-assert.equal(fixtures.length, 16);
+assert.equal(fixtures.length, 19);
 void baseReserva({
   pagamento: "pago",
   classificacaoComissionamento: "nao_comissionada",
@@ -228,6 +265,23 @@ void baseReserva({
     },
   ],
 });
-ok("fixtures cobertas (17 casos de cenário)");
+void baseReserva({
+  pagamento: "pendente",
+  classificacaoComissionamento: "nao_comissionada",
+  pagamentoPresencialDiferidoAutorizado: false,
+});
+void baseReserva({
+  pagamento: "pendente",
+  classificacaoComissionamento: "nao_comissionada",
+  pagamentoPresencialDiferidoAutorizado: false,
+  // elegível: botão PPD pode renderizar; Ver permanece em op-actions-primary
+});
+void baseReserva({
+  pagamento: "pendente",
+  classificacaoComissionamento: "nao_comissionada",
+  pagamentoPresencialDiferidoAutorizado: true,
+  pagamentoPresencialDiferidoEfetivado: false,
+});
+ok("fixtures cobertas (19 casos de cenário)");
 
 console.log("\nPASS test-ver-panel-operacional\n");

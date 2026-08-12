@@ -2582,7 +2582,7 @@ function renderOperacionalLista() {
       const statusBadgeHtml = renderOperacionalStatusBadgeHtml(status, reserva.id);
       const ppdLabel = presencialDiferidoLabelForReserva(reserva);
       const ppdBtn = canShowPresencialDiferidoBtn(reserva)
-        ? `<button type="button" class="op-btn-table op-btn-ppd" data-id="${rid}" data-ppd="1" title="Autorizar pagamento presencial diferido">Pagto presencial diferido</button>`
+        ? `<button type="button" class="op-btn-table op-btn-ppd" data-id="${rid}" data-ppd="1" title="Autorizar pagamento presencial diferido" aria-label="Pagamento presencial diferido"><span class="op-btn-ppd__short">PPD</span><span class="op-btn-ppd__full">Pagto presencial diferido</span></button>`
         : "";
       const ppdStateHtml = ppdLabel
         ? `<div class="op-ppd-state">${escapeHtml(ppdLabel)}</div>`
@@ -2591,7 +2591,7 @@ function renderOperacionalLista() {
         proxInfo.cta && proxInfo.cta.kind
           ? `<button type="button" class="op-next-action-btn" data-id="${rid}" data-cta-kind="${escapeHtml(proxInfo.cta.kind)}" title="${titleAttrEscape(prox)}">${escapeHtml(prox)}</button>`
           : `<span class="${proxCls}">${escapeHtml(prox)}</span>`;
-      return `<tr class="op-tr" data-id="${rid}" tabindex="0" role="row">
+      return `<tr class="op-tr${ppdBtn ? " op-tr--with-ppd" : ""}" data-id="${rid}" tabindex="0" role="row">
         <td class="op-td op-td--apt"><span class="op-apt-num">${escapeHtml(String(reserva.apartamento || "—"))}</span></td>
         <td class="op-td op-td--guest">
           <span class="op-guest-name" title="${guestTitle}">${escapeHtml(guestName)}</span>
@@ -2606,9 +2606,11 @@ function renderOperacionalLista() {
         <td class="op-td op-td--next">${proxHtml}</td>
         <td class="op-td op-td--actions">
           <div class="op-actions-cell">
-            ${ppdBtn}
-            <button type="button" class="op-btn-table op-btn-ver" data-id="${rid}">Ver</button>
-            <button type="button" class="op-btn-icon op-btn-more" data-id="${rid}" title="Detalhes" aria-label="Abrir detalhes">⋯</button>
+            <div class="op-actions-primary">
+              <button type="button" class="op-btn-table op-btn-ver" data-id="${rid}">Ver</button>
+              <button type="button" class="op-btn-icon op-btn-more" data-id="${rid}" title="Detalhes" aria-label="Abrir detalhes">⋯</button>
+            </div>
+            ${ppdBtn ? `<div class="op-actions-secondary">${ppdBtn}</div>` : ""}
           </div>
         </td>
       </tr>`;
@@ -2628,6 +2630,9 @@ function renderOperacionalLista() {
       const mGuest = reserva.hospedePrincipal || "—";
       const mGuestTitle = titleAttrEscape(mGuest);
       const statusBadgeHtml = renderOperacionalStatusBadgeHtml(status, reserva.id);
+      const ppdBtnM = canShowPresencialDiferidoBtn(reserva)
+        ? `<span class="op-btn-table op-btn-ppd op-btn-ppd--mcard" role="button" tabindex="0" data-id="${rid}" data-ppd="1" data-stop="1" title="Autorizar pagamento presencial diferido" aria-label="Pagamento presencial diferido"><span class="op-btn-ppd__short">PPD</span><span class="op-btn-ppd__full">Pagto presencial diferido</span></span>`
+        : "";
       const proxMobileHtml =
         proxInfoM.cta && proxInfoM.cta.kind
           ? `<button type="button" class="op-next-action-btn op-next-action-btn--mcard" data-id="${rid}" data-cta-kind="${escapeHtml(proxInfoM.cta.kind)}" data-stop="1">${escapeHtml(prox)}</button>`
@@ -2642,7 +2647,10 @@ function renderOperacionalLista() {
         <div class="op-mcard__flux">${linhaFluxoResumo(reserva)}</div>
         <div class="op-mcard__row5">
           ${proxMobileHtml}
-          <span class="op-btn-table op-btn-ver-inline" data-stop="1">Ver</span>
+          <span class="op-mcard__actions">
+            ${ppdBtnM}
+            <span class="op-btn-table op-btn-ver-inline" data-stop="1">Ver</span>
+          </span>
         </div>
       </button>`;
     })
@@ -2719,6 +2727,23 @@ function renderOperacionalLista() {
         e.stopPropagation();
         const kind = ctaBtn.getAttribute("data-cta-kind") || "";
         if (kind) openDetailAndRunCta(id, kind);
+        return;
+      }
+      const ppdBtn = e.target && e.target.closest ? e.target.closest("[data-ppd]") : null;
+      if (ppdBtn) {
+        e.stopPropagation();
+        e.preventDefault();
+        if (ppdBtn.getAttribute("data-busy") === "1") return;
+        const rid = ppdBtn.getAttribute("data-id") || id;
+        ppdBtn.setAttribute("data-busy", "1");
+        marcarPagamentoPresencialDiferido(rid).then(function (res) {
+          if (!res.ok) {
+            ppdBtn.removeAttribute("data-busy");
+            window.alert("Não foi possível autorizar pagamento presencial diferido: " + (res.error || ""));
+            return;
+          }
+          renderOperacionalLista();
+        });
         return;
       }
       if (e.target.closest && e.target.closest("[data-stop]")) {

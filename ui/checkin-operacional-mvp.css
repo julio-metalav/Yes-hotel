@@ -1067,12 +1067,12 @@ html {
 }
 
 .checkin-view .op-col-apt { width: 7%; }
-.checkin-view .op-col-guest { width: 19%; }
+.checkin-view .op-col-guest { width: 18%; }
 .checkin-view .op-col-period { width: 13%; }
-.checkin-view .op-col-flux { width: 17%; }
-.checkin-view .op-col-status { width: 18%; }
-.checkin-view .op-col-next { width: 20%; }
-.checkin-view .op-col-actions { width: 6%; }
+.checkin-view .op-col-flux { width: 16%; }
+.checkin-view .op-col-status { width: 17%; }
+.checkin-view .op-col-next { width: 18%; }
+.checkin-view .op-col-actions { width: 11%; }
 
 .checkin-view .op-th {
   position: sticky;
@@ -1113,6 +1113,12 @@ html {
   min-height: var(--op-row-h);
   border-bottom: 1px solid var(--op-border);
   transition: background 0.12s ease;
+}
+
+/* PPD secundário abaixo de Ver/⋯: permite crescer sem cortar ações. */
+.checkin-view .op-tr.op-tr--with-ppd {
+  height: auto;
+  min-height: var(--op-row-h);
 }
 
 .checkin-view .op-tr:hover {
@@ -1321,11 +1327,36 @@ html {
   color: var(--op-text-muted);
 }
 
+.checkin-view .op-td--actions {
+  overflow: visible;
+  vertical-align: middle;
+}
+
 .checkin-view .op-actions-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Ver + ⋯ sempre na linha principal — nunca comprimidos pelo PPD. */
+.checkin-view .op-actions-primary {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 2px;
+  flex: 0 0 auto;
+  min-width: max-content;
+}
+
+.checkin-view .op-actions-secondary {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .checkin-view .op-btn-table.op-btn-ver,
@@ -1333,6 +1364,7 @@ html {
   height: 32px;
   min-height: 32px;
   width: 32px;
+  flex: 0 0 auto;
   padding: 0;
   border: none;
   border-radius: 8px;
@@ -1344,6 +1376,7 @@ html {
 
 .checkin-view .op-btn-table.op-btn-ver {
   width: auto;
+  min-width: 32px;
   padding: 0 8px;
 }
 
@@ -1352,6 +1385,52 @@ html {
   background: var(--op-muted);
   color: var(--op-blue);
   border: none;
+}
+
+/* PPD secundário: compacto, não empurra Ver para fora. */
+.checkin-view .op-btn-table.op-btn-ppd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  max-width: 100%;
+  height: auto;
+  min-height: 22px;
+  padding: 2px 6px;
+  border: 1px solid rgba(22, 74, 84, 0.18);
+  border-radius: 6px;
+  background: rgba(22, 74, 84, 0.04);
+  color: var(--op-blue);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.checkin-view .op-btn-table.op-btn-ppd:hover {
+  background: rgba(22, 74, 84, 0.1);
+  border-color: rgba(22, 74, 84, 0.28);
+}
+
+.checkin-view .op-btn-ppd__short {
+  display: none;
+}
+
+.checkin-view .op-btn-ppd__full {
+  display: inline;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 1440px) {
+  .checkin-view .op-btn-ppd__short {
+    display: inline;
+  }
+  .checkin-view .op-btn-ppd__full {
+    display: none;
+  }
 }
 
 /* Mobile cards */
@@ -1410,6 +1489,33 @@ html {
 .checkin-view .op-mcard__flux {
   color: var(--op-text-muted);
   font-size: 11px;
+}
+
+.checkin-view .op-mcard__row5 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.checkin-view .op-mcard__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.checkin-view .op-mcard__actions .op-btn-ver-inline {
+  flex: 0 0 auto;
+}
+
+.checkin-view .op-btn-ppd--mcard .op-btn-ppd__short {
+  display: inline;
+}
+
+.checkin-view .op-btn-ppd--mcard .op-btn-ppd__full {
+  display: none;
 }
 
 /* Empty / skeleton */
@@ -1641,12 +1747,12 @@ html {
   }
 
   .checkin-view .op-col-apt { width: 6%; }
-  .checkin-view .op-col-guest { width: 18%; }
+  .checkin-view .op-col-guest { width: 17%; }
   .checkin-view .op-col-period { width: 11%; }
   .checkin-view .op-col-flux { width: 14%; }
-  .checkin-view .op-col-status { width: 17%; }
+  .checkin-view .op-col-status { width: 16%; }
   .checkin-view .op-col-next { width: 22%; }
-  .checkin-view .op-col-actions { width: 12%; }
+  .checkin-view .op-col-actions { width: 14%; }
 
   .checkin-view .op-th,
   .checkin-view .op-td {
