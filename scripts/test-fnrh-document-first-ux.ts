@@ -174,4 +174,27 @@ assert.match(html, /\.doc-cta--primary/);
 assert.match(html, /\.sr-only-file/);
 ok("CSS document-first presente");
 
+// Feedback visual OCR (A–I)
+{
+  assert.match(js, /Enviando documento…/);
+  assert.match(js, /Lendo documento…/);
+  assert.match(
+    js,
+    /Estamos identificando seus dados automaticamente\. Isso pode levar alguns segundos\./,
+  );
+  assert.match(js, /state\.confirmBusy \|\| state\.analyzing \? " disabled"/);
+  assert.match(js, /state\.analyzingPhase === "ocr" \? "Lendo documento…" : "Enviando documento…"/);
+  assert.match(js, /Leitura concluída ✓/);
+  assert.match(js, /Conferir meus dados/);
+  assert.match(js, /Documento recebido · lendo dados…/);
+  assert.match(js, /role="status"/);
+  assert.match(js, /aria-live="polite"/);
+  assert.doesNotMatch(js, /%\s*completo|progresso:\s*\d|percentComplete|fakeProgress/i);
+  assert.doesNotMatch(js, /eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/);
+  assert.match(html, /\.doc-process-status/);
+  assert.match(html, /\.doc-spinner/);
+  assert.match(html, /@keyframes doc-spin/);
+  ok("feedback OCR: upload/OCR/final + botão + a11y + sem % falsa");
+}
+
 console.log("\nPASS test-fnrh-document-first-ux\n");
