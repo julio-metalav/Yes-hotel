@@ -1,9 +1,11 @@
-# Azure Document Intelligence — FNRH OCR
+# Azure Document Intelligence — FNRH OCR (alternativa)
 
 Modelo: `prebuilt-idDocument`  
 API: `2024-11-30`
 
-## Secrets (Supabase Edge — nunca no Git)
+Provider preferencial atual (quando secrets Google estão no Supabase): **Google Vision** — ver `docs/FNRH_GOOGLE_VISION_OCR.md`.
+
+## Secrets Azure (Supabase Edge — nunca no Git)
 
 ```
 FNRH_OCR_ENABLED=false
