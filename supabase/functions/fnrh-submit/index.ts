@@ -18,6 +18,7 @@ import {
 } from "../../../src/lib/domain/yes-hotel/fnrh-checkin-v2-policy.ts";
 import { buildConfirmationProof } from "../../../src/lib/domain/yes-hotel/fnrh-confirmation-snapshot.ts";
 import {
+  buildConfirmFieldProvenance,
   mergeFieldProvenance,
   type FnrhFieldProvenanceMap,
 } from "../../../src/lib/domain/yes-hotel/fnrh-field-provenance.ts";
@@ -515,6 +516,8 @@ async function confirmV2Guest(input: {
     minor_accompaniment?: string | null;
   }>;
   previousState: Record<string, unknown>;
+  /** Provenance final já mergeado (existente + alterações manuais do confirm). */
+  fieldProvenance: FnrhFieldProvenanceMap;
   confirmedIp: string | null;
   confirmedUa: string | null;
   now: string;
@@ -589,6 +592,8 @@ async function confirmV2Guest(input: {
     schema_version: proof.schema_version,
     confirmed_ip: input.confirmedIp,
     confirmed_user_agent: input.confirmedUa,
+    // Persistência obrigatória do mapa final (não pode sumir no confirm).
+    field_provenance: input.fieldProvenance,
   };
 
   const { error: updateErr } = await admin.from("fnrh_hospedes").update(update).eq("id", input.fnrhId);
@@ -618,6 +623,7 @@ async function confirmV2Guest(input: {
       confirmation_source: input.confirmationSource,
       snapshot_hash: proof.snapshot_hash,
       flow_version: "v2",
+      field_provenance_keys: Object.keys(input.fieldProvenance),
     },
   });
 
@@ -820,6 +826,12 @@ Deno.serve(async (req: Request) => {
       }
 
       const docs = await loadGuestDocsForSnapshot(row.hospede_id, row.reserva_id);
+      const fieldProvenance = buildConfirmFieldProvenance({
+        existing: (rowData.field_provenance as FnrhFieldProvenanceMap | null) ?? {},
+        previousValues: rowData,
+        submittedBody: body,
+        fieldKeys: V2_DRAFT_KEYS,
+      });
       const result = await confirmV2Guest({
         fnrhId: row.id,
         reservaId: row.reserva_id,
@@ -833,6 +845,7 @@ Deno.serve(async (req: Request) => {
           fnrh_lifecycle_status: row.fnrh_lifecycle_status ?? null,
           flow_version: row.flow_version ?? null,
         },
+        fieldProvenance,
         confirmedIp,
         confirmedUa,
         now,
@@ -925,6 +938,12 @@ Deno.serve(async (req: Request) => {
       }
 
       const minorDocs = await loadGuestDocsForSnapshot(minorGuestId, row.reserva_id);
+      const fieldProvenance = buildConfirmFieldProvenance({
+        existing: (mf.field_provenance as FnrhFieldProvenanceMap | null) ?? {},
+        previousValues: mf,
+        submittedBody: minorPayload,
+        fieldKeys: V2_DRAFT_KEYS,
+      });
       const result = await confirmV2Guest({
         fnrhId: String(mf.id),
         reservaId: row.reserva_id,
@@ -937,6 +956,7 @@ Deno.serve(async (req: Request) => {
           status: mf.status,
           fnrh_lifecycle_status: mf.fnrh_lifecycle_status ?? null,
         },
+        fieldProvenance,
         confirmedIp,
         confirmedUa,
         now,

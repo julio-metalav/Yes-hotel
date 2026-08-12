@@ -13,6 +13,7 @@ import {
 } from "../../../src/lib/domain/yes-hotel/fnrh-checkin-v2-policy.ts";
 import { isFnrhLifecycleComplete } from "../../../src/lib/domain/yes-hotel/fnrh-completion-policy.ts";
 import {
+  isFnrhLockedAgainstHitsPrefill,
   mergeFieldProvenance,
   shouldApplySuggestedValue,
   type FnrhFieldProvenanceMap,
@@ -326,7 +327,12 @@ Deno.serve(async (req: Request) => {
     let fieldProvenance: FnrhFieldProvenanceMap =
       ((row.field_provenance as FnrhFieldProvenanceMap | null) ?? {}) as FnrhFieldProvenanceMap;
     const pmsExt = str(h?.pms_external_guest_id);
-    if (pmsExt && row.data_confirmed !== true) {
+    const lockedAgainstHits = isFnrhLockedAgainstHitsPrefill({
+      dataConfirmed: row.data_confirmed,
+      status: row.status,
+      lifecycleStatus: row.fnrh_lifecycle_status,
+    });
+    if (pmsExt && !lockedAgainstHits) {
       const { data: pmsGuest } = await admin
         .from("pms_hospedes")
         .select("nome, email, telefone, documento, nacionalidade, sexo, data_nascimento")

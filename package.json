@@ -32,6 +32,7 @@
     "test:yes:fnrh-roles-completion": "tsx scripts/test-fnrh-roles-completion.ts",
     "test:yes:fnrh-legacy-lifecycle-compat": "tsx scripts/test-fnrh-legacy-lifecycle-compat.ts",
     "test:yes:fnrh-checkin-digital-v2": "tsx scripts/test-fnrh-checkin-digital-v2.ts",
+    "test:yes:fnrh-provenance-confirm": "tsx scripts/test-fnrh-provenance-confirm.ts",
     "test:yes:fnrh-azure-ocr": "tsx scripts/test-fnrh-azure-ocr.ts",
     "test:yes:fnrh-google-vision-ocr": "tsx scripts/test-fnrh-google-vision-ocr.ts",
     "test:yes:fnrh-token-transport": "tsx scripts/test-fnrh-token-transport.ts",
