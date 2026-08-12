@@ -212,6 +212,34 @@ for (const ch of ["Expedia", "Hotels.com", "Airbnb"]) {
   );
 }
 
+// 12. desconhecida NÃO libera acesso financeiro
+{
+  assert.equal(
+    isFinanceiramenteLiberadoParaAcesso({
+      pagamentoStatus: "pendente",
+      balanceDue: 100,
+      classificacao: "desconhecida",
+    }),
+    false,
+  );
+  assert.equal(
+    isFinanceiramenteLiberadoParaAcesso({
+      pagamentoStatus: "pendente",
+      balanceDue: null,
+      classificacao: "desconhecida",
+    }),
+    false,
+  );
+}
+
+// 13. Motor de Reservas = direta (não comissionada)
+{
+  const r = fin({ balance: 80, salesChannel: "Motor de Reservas" });
+  assert.equal(r.classificacao, "nao_comissionada");
+  assert.equal(r.originKind, "motor_particular");
+  assert.equal(r.status, "pendente");
+}
+
 assert.equal(nextFinancialActionLabel("pendente"), "Gerar e enviar link de pagamento");
 assert.equal(nextFinancialActionLabel("pendente_comissionado"), "Regularizar pagamento no HITS");
 assert.equal(nextFinancialActionLabel("pago"), null);

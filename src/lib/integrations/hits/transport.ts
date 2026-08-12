@@ -7,7 +7,7 @@ import {
   HitsApiError,
   isRetryableStatus,
   sanitizeUnknown,
-} from "./errors";
+} from "./errors.ts";
 
 export interface HitsTransportRequest {
   method: "GET" | "POST" | "PUT" | "DELETE";

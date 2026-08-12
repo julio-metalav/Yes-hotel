@@ -57,7 +57,10 @@
     "test:hits-mock:room-change": "tsx scripts/test-hits-mock-to-yes-room-change.ts",
     "test:hits-mock:cancel": "tsx scripts/test-hits-mock-to-yes-cancel.ts",
     "test:hits-reservation-sync-chegadas": "tsx scripts/test-hits-reservation-sync-chegadas.ts",
+    "test:hits-real-reservation-source": "tsx scripts/test-hits-real-reservation-source.ts",
     "test:hits-edge:deno-imports": "tsx scripts/test-hits-edge-deno-imports.ts",
+    "test:reservation-financial-classification": "tsx scripts/test-reservation-financial-classification.ts",
+
     "test:ui-static-js": "node --check ui/checkin-operacional-mvp.js && node --check ui/yes-arrivals-policy.js && node --check ui/yes-access-tolerance-policy.js && node --check ui/yes-cafe-policy.js && node --check ui/cafe-da-manha-mvp.js && node --check ui/yes-checkin-panel-presentation.js",
     "test:checkin-panel-presentation": "tsx scripts/test-checkin-panel-presentation.ts",
     "test:yes:cafe-operacional": "tsx scripts/test-cafe-operacional.ts",

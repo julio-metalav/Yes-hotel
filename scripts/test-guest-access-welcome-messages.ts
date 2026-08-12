@@ -138,7 +138,7 @@ async function main() {
         pagamento_status: "pendente",
         classificacao_comissionamento: "desconhecida",
       }),
-      true,
+      false,
     );
     assert.equal(
       isFinanceiroLiberadoParaAcesso({
@@ -147,7 +147,7 @@ async function main() {
       }),
       false,
     );
-    ok("financeiro liberado (pago/comissionada/desconhecida)");
+    ok("financeiro liberado (pago/comissionada; desconhecida não libera)");
   }
 
   {
