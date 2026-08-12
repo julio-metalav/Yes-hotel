@@ -619,8 +619,29 @@ html {
 }
 
 .checkin-view .op-toolbar__period {
-  width: 160px;
+  width: 140px;
   flex-shrink: 0;
+}
+
+.checkin-view .op-period-custom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.checkin-view .op-period-custom.hidden {
+  display: none;
+}
+
+.checkin-view .op-toolbar__period-date {
+  width: 138px;
+  flex-shrink: 0;
+}
+
+.checkin-view .op-period-custom__sep {
+  color: var(--op-muted, #6b7c82);
+  font-size: 12px;
 }
 
 .checkin-view .op-btn {

@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=51" />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=52" />
   </head>
   <body class="op-body checkin-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -190,12 +190,23 @@
                   <option value="nao_entrou">Não entrou</option>
                   <option value="entrou">Concluído</option>
                 </select>
-                <select id="op-period" class="op-field op-toolbar__period" aria-label="Período do check-in">
-                  <option value="all">Todo o período</option>
-                  <option value="checkin_today">Check-in hoje</option>
-                  <option value="checkin_week">Próximos 7 dias</option>
-                  <option value="checkin_month">Mês atual</option>
+                <select id="op-period" class="op-field op-toolbar__period" aria-label="Período operacional do check-in">
+                  <option value="hoje" selected>Hoje</option>
+                  <option value="ontem">Ontem</option>
+                  <option value="7dias">7 dias</option>
+                  <option value="este_mes">Este mês</option>
+                  <option value="periodo">Período</option>
                 </select>
+                <div id="op-period-custom" class="op-period-custom hidden" hidden>
+                  <label class="sr-only" for="op-period-from">Data inicial</label>
+                  <input type="date" id="op-period-from" class="op-field op-toolbar__period-date" aria-label="Data inicial do período" />
+                  <span class="op-period-custom__sep" aria-hidden="true">–</span>
+                  <label class="sr-only" for="op-period-to">Data final</label>
+                  <input type="date" id="op-period-to" class="op-field op-toolbar__period-date" aria-label="Data final do período" />
+                  <button type="button" class="op-btn op-btn--secondary" id="op-period-apply" aria-label="Aplicar período">
+                    Aplicar
+                  </button>
+                </div>
                 <a
                   href="./importar-reservas-mvp.html"
                   id="op-import-link"
@@ -439,6 +450,6 @@
     <script defer src="./yes-checkin-panel-presentation.js?v=3"></script>
     <script defer src="./yes-pagarme-payment-ui.js?v=5"></script>
     <script defer src="./yes-pagamento-presencial-diferido-ui.js?v=1"></script>
-    <script defer src="./checkin-operacional-mvp.js?v=50"></script>
+    <script defer src="./checkin-operacional-mvp.js?v=51"></script>
   </body>
 </html>

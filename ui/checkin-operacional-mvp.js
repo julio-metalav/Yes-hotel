@@ -67,9 +67,83 @@ const opOccupiedDrawer = document.querySelector("#op-occupied-drawer");
 const opOccupiedList = document.querySelector("#op-occupied-list");
 
 /* ---------- Utils (data/hora, formatação) ---------- */
-function todayStr() {
-  const d = new Date();
-  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+/** Fuso operacional do painel. */
+const OP_HOTEL_TZ = "America/Campo_Grande";
+/** Dia operacional inicia às 07:00 locais. Antes disso, “hoje” ainda é o dia civil anterior. */
+const OP_DAY_START_HOUR = 7;
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function addDaysYmd(ymd, days) {
+  const m = String(ymd || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return "";
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days));
+  return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
+}
+
+/** Partes civis no fuso do hotel (America/Campo_Grande). */
+function hotelLocalParts(now) {
+  const d = now instanceof Date ? now : new Date();
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: OP_HOTEL_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = fmt.formatToParts(d);
+  const get = (type) => parts.find((p) => p.type === type)?.value || "";
+  return {
+    ymd: `${get("year")}-${get("month")}-${get("day")}`,
+    hour: Number(get("hour")),
+    minute: Number(get("minute")),
+  };
+}
+
+/**
+ * Data operacional YYYY-MM-DD:
+ * - a partir de 07:00 = dia civil atual;
+ * - 00:00–06:59 = dia civil anterior.
+ */
+function resolveOperationalTodayYmd(now) {
+  const { ymd, hour } = hotelLocalParts(now || new Date());
+  if (hour < OP_DAY_START_HOUR) return addDaysYmd(ymd, -1);
+  return ymd;
+}
+
+function todayStr(now) {
+  return resolveOperationalTodayYmd(now || new Date());
+}
+
+function resolvePeriodRangeYmd(periodo, opts) {
+  const o = opts || {};
+  const today = resolveOperationalTodayYmd(o.now || new Date());
+  const yesterday = addDaysYmd(today, -1);
+  if (periodo === "hoje") return { from: today, to: today };
+  if (periodo === "ontem") return { from: yesterday, to: yesterday };
+  if (periodo === "7dias") return { from: addDaysYmd(today, -6), to: today };
+  if (periodo === "este_mes") {
+    const from = `${today.slice(0, 7)}-01`;
+    return { from, to: today };
+  }
+  if (periodo === "periodo") {
+    let from = String(o.fromYmd || "").slice(0, 10);
+    let to = String(o.toYmd || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      return { from: today, to: today };
+    }
+    if (from > to) {
+      const tmp = from;
+      from = to;
+      to = tmp;
+    }
+    return { from, to };
+  }
+  return { from: today, to: today };
 }
 
 function getPanelPresentation() {
@@ -1102,58 +1176,126 @@ async function principalTtlockTodosProvisionadosParaReserva(supabase, reservaId)
   return true;
 }
 
-async function loadReservasFromBackend() {
+async function loadReservasFromBackend(loadOpts) {
   const supabase = getSupabase();
   if (!supabase) return [];
-  const { data: reservasRows, error: errReservas } = await supabase
-    .from("operacional_reservas")
-    .select("*")
-    .order("created_at", { ascending: true });
-  if (errReservas || !Array.isArray(reservasRows)) return [];
-  const ttlockCritico = await fetchReservaIdsComTtlockPendenteCritico(supabase);
-  const principalTtlockOk = await fetchReservaIdsPrincipalTtlockTodosProvisionados(supabase);
-  const out = [];
-  for (const r of reservasRows) {
-    const { data: hospedesRows } = await supabase
+  const opts = loadOpts || {};
+  const period = opts.periodo || periodoAtivo || "hoje";
+  const range = resolvePeriodRangeYmd(period, {
+    fromYmd: opts.fromYmd != null ? opts.fromYmd : periodoCustomFrom,
+    toYmd: opts.toYmd != null ? opts.toYmd : periodoCustomTo,
+    now: opts.now,
+  });
+  const today = resolveOperationalTodayYmd(opts.now || new Date());
+
+  // Janela do período (check-in) + estadias em curso (para KPI hospedados / detalhe).
+  const [{ data: periodRows, error: errPeriod }, { data: stayRows, error: errStay }] =
+    await Promise.all([
+      supabase
+        .from("operacional_reservas")
+        .select("*")
+        .gte("check_in_previsto", range.from)
+        .lte("check_in_previsto", range.to)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("operacional_reservas")
+        .select("*")
+        .lte("check_in_previsto", today)
+        .gt("check_out_previsto", today)
+        .order("created_at", { ascending: true }),
+    ]);
+  if (errPeriod && errStay) return [];
+  const byId = new Map();
+  (periodRows || []).forEach((r) => {
+    if (r && r.id) byId.set(String(r.id), r);
+  });
+  (stayRows || []).forEach((r) => {
+    if (r && r.id && !byId.has(String(r.id))) byId.set(String(r.id), r);
+  });
+  const reservasRows = Array.from(byId.values());
+  if (reservasRows.length === 0) return [];
+
+  const ids = reservasRows.map((r) => r.id).filter(Boolean);
+  const [
+    ttlockCritico,
+    principalTtlockOk,
+    hospedesRes,
+    eventosRes,
+    fnrhRes,
+    enviosRes,
+    tolRes,
+    outboxRes,
+  ] = await Promise.all([
+    fetchReservaIdsComTtlockPendenteCritico(supabase),
+    fetchReservaIdsPrincipalTtlockTodosProvisionados(supabase),
+    supabase
       .from("operacional_hospedes")
       .select("*")
-      .eq("reserva_id", r.id)
-      .order("created_at", { ascending: true });
-    const { data: eventosRows } = await supabase
+      .in("reserva_id", ids)
+      .order("created_at", { ascending: true }),
+    supabase
       .from("operacional_reserva_eventos")
       .select("*")
-      .eq("reserva_id", r.id)
-      .order("criado_em", { ascending: false });
-    const { data: fnrhRows } = await supabase
+      .in("reserva_id", ids)
+      .order("criado_em", { ascending: false }),
+    supabase
       .from("fnrh_hospedes")
-      .select("id, hospede_id, status, link_token")
-      .eq("reserva_id", r.id);
-    const { data: enviosRows } = await supabase
+      .select("id, hospede_id, status, link_token, reserva_id")
+      .in("reserva_id", ids),
+    supabase
       .from("operacional_comunicacao_envios")
-      .select("proposito, canal, status, corpo_preview, erro, created_at")
-      .eq("reserva_id", r.id)
-      .order("created_at", { ascending: false })
-      .limit(80);
-    const { data: tolRows } = await supabase
+      .select("reserva_id, proposito, canal, status, corpo_preview, erro, created_at")
+      .in("reserva_id", ids)
+      .order("created_at", { ascending: false }),
+    supabase
       .from("operacional_acesso_tolerancias")
       .select(
-        "id, grace_status, suspension_due_at, current_payment_pending, current_fnrh_pending, last_error",
+        "id, reservation_id, grace_status, suspension_due_at, current_payment_pending, current_fnrh_pending, last_error, created_at",
       )
-      .eq("reservation_id", r.id)
-      .order("created_at", { ascending: false })
-      .limit(1);
-    const { data: outboxFail } = await supabase
+      .in("reservation_id", ids)
+      .order("created_at", { ascending: false }),
+    supabase
       .from("operacional_acesso_outbox")
-      .select("id")
-      .eq("reservation_id", r.id)
+      .select("id, reservation_id")
+      .in("reservation_id", ids)
       .eq("status", "failed")
-      .is("processed_at", null)
-      .limit(1);
-    const internal = mapDbReservaToInternal(r, hospedesRows || [], eventosRows || [], fnrhRows || [], enviosRows || []);
+      .is("processed_at", null),
+  ]);
+
+  function groupByKey(rows, key) {
+    const map = new Map();
+    (rows || []).forEach((row) => {
+      const k = String(row[key] || "");
+      if (!k) return;
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(row);
+    });
+    return map;
+  }
+
+  const hospedesBy = groupByKey(hospedesRes.data || [], "reserva_id");
+  const eventosBy = groupByKey(eventosRes.data || [], "reserva_id");
+  const fnrhBy = groupByKey(fnrhRes.data || [], "reserva_id");
+  const enviosBy = groupByKey(enviosRes.data || [], "reserva_id");
+  const tolBy = groupByKey(tolRes.data || [], "reservation_id");
+  const outboxFailBy = groupByKey(outboxRes.data || [], "reservation_id");
+
+  const out = [];
+  for (const r of reservasRows) {
     const ridKey = String(r.id);
+    const enviosRows = (enviosBy.get(ridKey) || []).slice(0, 80);
+    const tolRows = (tolBy.get(ridKey) || []).slice(0, 1);
+    const outboxFail = outboxFailBy.get(ridKey) || [];
+    const internal = mapDbReservaToInternal(
+      r,
+      hospedesBy.get(ridKey) || [],
+      eventosBy.get(ridKey) || [],
+      fnrhBy.get(ridKey) || [],
+      enviosRows,
+    );
     internal.ttlockBloqueiaLiberado = ttlockCritico.has(ridKey);
     internal.ttlockPrincipalTodosProvisionados = principalTtlockOk.has(ridKey);
-    if (Array.isArray(tolRows) && tolRows[0]) {
+    if (tolRows[0]) {
       internal.acessoTolerancia = {
         id: tolRows[0].id,
         grace_status: tolRows[0].grace_status,
@@ -1164,7 +1306,7 @@ async function loadReservasFromBackend() {
         payment_unconfirmed:
           String(tolRows[0].last_error || "").indexOf("payment_unknown") >= 0 ||
           String(tolRows[0].last_error || "").indexOf("desconhecido") >= 0,
-        communication_failed: Array.isArray(outboxFail) && outboxFail.length > 0,
+        communication_failed: outboxFail.length > 0,
       };
     }
     out.push(internal);
@@ -1962,7 +2104,9 @@ const MAPA_FILTRO_ETAPA = {
 
 /* ---------- Estado de UI (filtro ativo, drawer aberto) ---------- */
 let filtroAtivo = FILTER_ALL;
-let periodoAtivo = "all";
+let periodoAtivo = "hoje";
+let periodoCustomFrom = "";
+let periodoCustomTo = "";
 let buscaLista = "";
 let detailReservaId = null;
 
@@ -1988,26 +2132,16 @@ function filtrarPorBusca(lista, q) {
 }
 
 function filtrarPorPeriodo(lista, periodo) {
-  if (periodo === "all" || !periodo) return lista;
-  const todayYMD = todayStr();
-  const hoje = new Date();
+  if (!periodo) periodo = "hoje";
+  const range = resolvePeriodRangeYmd(periodo, {
+    fromYmd: periodoCustomFrom,
+    toYmd: periodoCustomTo,
+  });
   return lista.filter((r) => {
     const ci = r.checkInPrevisto;
     if (!ci || String(ci).length < 10) return false;
     const ymd = String(ci).slice(0, 10);
-    if (periodo === "checkin_today") return ymd === todayYMD;
-    if (periodo === "checkin_week") {
-      const d = new Date(ymd + "T12:00:00");
-      const start = new Date(todayYMD + "T12:00:00");
-      const end = new Date(start);
-      end.setDate(end.getDate() + 7);
-      return !isNaN(d.getTime()) && d >= start && d <= end;
-    }
-    if (periodo === "checkin_month") {
-      const d = new Date(ymd + "T12:00:00");
-      return !isNaN(d.getTime()) && d.getMonth() === hoje.getMonth() && d.getFullYear() === hoje.getFullYear();
-    }
-    return true;
+    return ymd >= range.from && ymd <= range.to;
   });
 }
 
@@ -6551,11 +6685,57 @@ async function initCheckinOperacional() {
     });
   }
   if (opPeriodSelect instanceof HTMLSelectElement) {
-    opPeriodSelect.addEventListener("change", () => {
-      periodoAtivo = opPeriodSelect.value || "all";
-      renderStatusTabs();
-      renderOperacionalLista();
-    });
+    function syncPeriodCustomVisibility() {
+      const custom = document.querySelector("#op-period-custom");
+      const show = opPeriodSelect.value === "periodo";
+      if (custom) {
+        custom.classList.toggle("hidden", !show);
+        custom.hidden = !show;
+      }
+    }
+    function readCustomDatesIntoState() {
+      const fromEl = document.querySelector("#op-period-from");
+      const toEl = document.querySelector("#op-period-to");
+      periodoCustomFrom =
+        fromEl instanceof HTMLInputElement ? String(fromEl.value || "").slice(0, 10) : "";
+      periodoCustomTo =
+        toEl instanceof HTMLInputElement ? String(toEl.value || "").slice(0, 10) : "";
+      if (periodoAtivo === "periodo" && (!periodoCustomFrom || !periodoCustomTo)) {
+        const today = todayStr();
+        periodoCustomFrom = periodoCustomFrom || today;
+        periodoCustomTo = periodoCustomTo || today;
+        if (fromEl instanceof HTMLInputElement && !fromEl.value) fromEl.value = periodoCustomFrom;
+        if (toEl instanceof HTMLInputElement && !toEl.value) toEl.value = periodoCustomTo;
+      }
+    }
+    function applyPresetPeriodAndReload() {
+      periodoAtivo = opPeriodSelect.value || "hoje";
+      syncPeriodCustomVisibility();
+      if (periodoAtivo === "periodo") {
+        // Datas customizadas só disparam consulta no botão Aplicar.
+        readCustomDatesIntoState();
+        renderStatusTabs();
+        renderOperacionalLista();
+        return;
+      }
+      refreshFromSource().catch(function () {
+        refresh();
+      });
+    }
+    function applyCustomPeriodAndReload() {
+      periodoAtivo = "periodo";
+      if (opPeriodSelect.value !== "periodo") opPeriodSelect.value = "periodo";
+      readCustomDatesIntoState();
+      syncPeriodCustomVisibility();
+      refreshFromSource().catch(function () {
+        refresh();
+      });
+    }
+    if (!opPeriodSelect.value) opPeriodSelect.value = "hoje";
+    periodoAtivo = opPeriodSelect.value || "hoje";
+    syncPeriodCustomVisibility();
+    opPeriodSelect.addEventListener("change", applyPresetPeriodAndReload);
+    document.querySelector("#op-period-apply")?.addEventListener("click", applyCustomPeriodAndReload);
   }
   if (opToolbarStatusSelect instanceof HTMLSelectElement) {
     opToolbarStatusSelect.addEventListener("change", () => {
