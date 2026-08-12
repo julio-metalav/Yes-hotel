@@ -1024,6 +1024,7 @@ function resolvePaymentUiForReserva(reserva) {
   return resolveFn({
     pagamentoStatus: reserva && reserva.pagamento,
     classificacaoComissionamento: reserva && reserva.classificacaoComissionamento,
+    reservationBalanceDue: reserva && reserva.reservationBalanceDue,
     cobrancas: reserva && reserva.cobrancasPagarme,
     pagamentos: reserva && reserva.pagamentosPagarme,
     perfilUsuario: painelOperadorRole || "recepcao",
@@ -6450,15 +6451,42 @@ function renderPagarmeCobrancaModal(reserva) {
   }
 
   if (presentation.showGenerate && payUi.showValorInput) {
-    actionsHtml +=
-      '<div class="modal-pagarme-form">' +
-      '<label for="modal-pagarme-valor">Valor a cobrar</label>' +
-      '<input type="text" id="modal-pagarme-valor" inputmode="decimal" placeholder="R$ 0,00" autocomplete="off" />' +
-      '<p class="modal-pagarme-hint">Somente cartão neste momento. Pix não está disponível.</p>' +
-      '<button type="button" class="op-btn op-btn--primary" id="modal-pagarme-gerar-cartao">' +
-      escapeHtml(presentation.generateLabel || "Gerar link de pagamento") +
-      "</button>" +
-      "</div>";
+    const balanceParsed =
+      api && typeof api.parseReservationBalanceDue === "function"
+        ? api.parseReservationBalanceDue(reserva.reservationBalanceDue)
+        : { ok: false, reason: "api" };
+    const prefillCentavos =
+      api && typeof api.resolveChargePrefillCentavos === "function"
+        ? api.resolveChargePrefillCentavos(reserva.reservationBalanceDue)
+        : null;
+    if (!balanceParsed.ok) {
+      actionsHtml +=
+        '<div class="modal-pagarme-alert modal-pagarme-alert--danger" role="status">' +
+        "Saldo da reserva indisponível. Atualize os dados da reserva antes de gerar a cobrança." +
+        "</div>";
+    } else if (balanceParsed.centavos <= 0) {
+      actionsHtml +=
+        '<div class="modal-pagarme-alert modal-pagarme-alert--amber" role="status">' +
+        "Reserva sem saldo pendente. Não é possível gerar cobrança." +
+        "</div>";
+    } else {
+      const prefillDisplay =
+        prefillCentavos != null && api
+          ? api.formatCentavosToBRL(prefillCentavos)
+          : "";
+      actionsHtml +=
+        '<div class="modal-pagarme-form">' +
+        '<label for="modal-pagarme-valor">Valor a cobrar</label>' +
+        '<input type="text" id="modal-pagarme-valor" inputmode="decimal" placeholder="R$ 0,00" autocomplete="off" value="' +
+        escapeHtml(prefillDisplay) +
+        '" />' +
+        '<p class="modal-pagarme-hint-soft" id="modal-pagarme-parcial-hint" hidden></p>' +
+        '<p class="modal-pagarme-hint">Somente cartão neste momento. Pix não está disponível.</p>' +
+        '<button type="button" class="op-btn op-btn--primary" id="modal-pagarme-gerar-cartao">' +
+        escapeHtml(presentation.generateLabel || "Gerar link de pagamento") +
+        "</button>" +
+        "</div>";
+    }
   }
 
   if (presentation.linkSectionTitle) {
@@ -6544,14 +6572,43 @@ function renderPagarmeCobrancaModal(reserva) {
   });
   const valorInput = bodyEl.querySelector("#modal-pagarme-valor");
   if (valorInput instanceof HTMLInputElement) {
+    const syncPartialHint = function () {
+      const hintEl = bodyEl.querySelector("#modal-pagarme-parcial-hint");
+      if (!(hintEl instanceof HTMLElement) || !api) return;
+      if (typeof api.parseBRLToCentavos !== "function") return;
+      if (typeof api.validateChargeAmountAgainstBalance !== "function") return;
+      if (typeof api.formatCentavosToBRL !== "function") return;
+      const parsed = api.parseBRLToCentavos(valorInput.value);
+      const bal = api.parseReservationBalanceDue
+        ? api.parseReservationBalanceDue(reserva.reservationBalanceDue)
+        : { ok: false };
+      if (!parsed.ok || !bal.ok || bal.centavos <= 0) {
+        hintEl.hidden = true;
+        hintEl.textContent = "";
+        return;
+      }
+      if (parsed.centavos < bal.centavos) {
+        hintEl.hidden = false;
+        hintEl.textContent =
+          "Pagamento parcial. Saldo atual da reserva: " +
+          api.formatCentavosToBRL(bal.centavos) +
+          ".";
+      } else {
+        hintEl.hidden = true;
+        hintEl.textContent = "";
+      }
+    };
     valorInput.addEventListener("blur", function () {
       if (!api || typeof api.formatBRLInputDisplay !== "function") return;
       valorInput.value = api.formatBRLInputDisplay(valorInput.value);
+      syncPartialHint();
     });
     valorInput.addEventListener("focus", function () {
       if (!api || typeof api.toBRLInputEditValue !== "function") return;
       valorInput.value = api.toBRLInputEditValue(valorInput.value);
     });
+    valorInput.addEventListener("input", syncPartialHint);
+    syncPartialHint();
   }
   const gerarBtn = bodyEl.querySelector("#modal-pagarme-gerar-cartao");
   if (gerarBtn) {
@@ -6711,12 +6768,26 @@ async function submitPagarmeClassificar(reservaId, classificacao) {
 async function submitPagarmeCriarCartao(reservaId) {
   if (pagarmeModalBusy) return;
   const api = getPagarmePaymentUiApi();
+  const reserva = getReservaById(reservaId);
   const input = document.getElementById("modal-pagarme-valor");
   const raw = input instanceof HTMLInputElement ? input.value : "";
   const parsed = api ? api.parseBRLToCentavos(raw) : { ok: false, reason: "api" };
   if (!parsed.ok) {
     setPagarmeModalMsg("Informe um valor válido maior que zero (ex.: R$ 1.800,00).", "error");
     return;
+  }
+  if (reserva && api && typeof api.validateChargeAmountAgainstBalance === "function") {
+    const against = api.validateChargeAmountAgainstBalance({
+      amountCentavos: parsed.centavos,
+      balanceDue: reserva.reservationBalanceDue,
+    });
+    if (!against.ok) {
+      setPagarmeModalMsg(
+        (against.message || "Valor inválido em relação ao saldo da reserva."),
+        "error",
+      );
+      return;
+    }
   }
   pagarmeModalBusy = true;
   const gerarBtn = document.getElementById("modal-pagarme-gerar-cartao");

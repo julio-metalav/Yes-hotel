@@ -77,6 +77,7 @@ async function main() {
           external_reservation_id: null,
           classificacao_comissionamento: "desconhecida",
           pagamento_status: "pendente",
+          reservation_balance_due: 1800,
         },
       ],
     });

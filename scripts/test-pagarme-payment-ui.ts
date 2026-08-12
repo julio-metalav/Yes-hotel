@@ -10,12 +10,15 @@ import {
   isSafeHttpsPaymentLinkUrl,
   mapPagarmeAdminError,
   parseBRLToCentavos,
+  parseReservationBalanceDue,
   pickRelevantCobranca,
+  resolveChargePrefillCentavos,
   resolveOperacionalPaymentUi,
   resolvePagarmeModalPresentation,
   resolvePaymentUiState,
   shouldFetchPagarmeCobrancas,
   toBRLInputEditValue,
+  validateChargeAmountAgainstBalance,
 } from "../src/lib/domain/yes-hotel/pagarme-payment-ui";
 
 /** Intl pt-BR usa NBSP entre R$ e o valor; normaliza para assert estável. */
@@ -34,6 +37,7 @@ function baseReserva(
     pagamentoStatus: string;
     classificacaoComissionamento: string;
     perfilUsuario: string;
+    reservationBalanceDue: unknown;
     cobrancas: Parameters<typeof resolvePaymentUiState>[0]["cobrancas"];
   }> = {},
 ) {
@@ -563,6 +567,66 @@ function baseReserva(
     assert.equal(p.showGenerate, false);
     ok("UX J: pagarmeUiEnabled OFF => fail-closed sem controles");
   }
+}
+
+// --- Prefill saldo / validação parcial ---
+{
+  assert.equal(resolveChargePrefillCentavos(10), 1000);
+  assert.equal(normMoneyDisplay(formatCentavosToBRL(1000)), "R$ 10,00");
+  assert.equal(resolveChargePrefillCentavos(250.75), 25075);
+  assert.equal(normMoneyDisplay(formatCentavosToBRL(25075)), "R$ 250,75");
+  assert.equal(resolveChargePrefillCentavos(null), null);
+  assert.equal(resolveChargePrefillCentavos(0), null);
+  ok("A. saldo 10.00 → prefill R$ 10,00 (dinamico)");
+}
+
+{
+  const ok5 = validateChargeAmountAgainstBalance({ amountCentavos: 500, balanceDue: 10 });
+  assert.equal(ok5.ok, true);
+  const ok10 = validateChargeAmountAgainstBalance({ amountCentavos: 1000, balanceDue: 10 });
+  assert.equal(ok10.ok, true);
+  const rej = validateChargeAmountAgainstBalance({ amountCentavos: 1001, balanceDue: 10 });
+  assert.equal(rej.ok, false);
+  if (!rej.ok) assert.equal(rej.reason, "valor_acima_saldo");
+  const zero = validateChargeAmountAgainstBalance({ amountCentavos: 0, balanceDue: 10 });
+  assert.equal(zero.ok, false);
+  const neg = parseBRLToCentavos("-1,00");
+  assert.equal(neg.ok, false);
+  const nullBal = validateChargeAmountAgainstBalance({ amountCentavos: 100, balanceDue: null });
+  assert.equal(nullBal.ok, false);
+  if (!nullBal.ok) assert.equal(nullBal.reason, "saldo_indisponivel");
+  ok("C-H. validacao amount vs saldo (parcial/max/zero/neg/null)");
+}
+
+{
+  const s = baseReserva({
+    classificacaoComissionamento: "comissionada",
+    reservationBalanceDue: 10,
+  });
+  assert.equal(s.kind, "comissionada");
+  assert.equal(s.showGerarCartao, false);
+  ok("I. comissionada bloqueada mesmo com saldo");
+}
+
+{
+  const s = baseReserva({
+    classificacaoComissionamento: "nao_comissionada",
+    reservationBalanceDue: 300,
+    cobrancas: [{ id: "c-paid", status: "paid", metodo: "cartao", valor_centavos: 20000 }],
+  });
+  assert.equal(s.kind, "nova_tentativa");
+  assert.equal(s.showGerarCartao, true);
+  assert.equal(s.showValorInput, true);
+  assert.match(String(s.hintAnterior || ""), /parcial/i);
+  ok("M. paid + saldo restante => pode segunda cobranca");
+}
+
+{
+  assert.equal(parseReservationBalanceDue(10).ok, true);
+  if (parseReservationBalanceDue(10).ok) {
+    assert.equal(parseReservationBalanceDue(10).centavos, 1000);
+  }
+  ok("parseReservationBalanceDue: 10.00 → 1000 centavos");
 }
 
 console.log(`\n[test-pagarme-payment-ui] ${cases} assertions OK`);

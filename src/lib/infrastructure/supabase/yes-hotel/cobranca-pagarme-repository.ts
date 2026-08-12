@@ -14,6 +14,7 @@ import type {
 } from "../../../application/yes-hotel/cobranca-pagarme-service.ts";
 import type { PagarmePixCustomer } from "../../../integrations/pagarme/types.ts";
 import { isYesHotelCobrancaUuid } from "../../../integrations/pagarme/mapper.ts";
+import { parseReservationBalanceDue } from "../../../domain/yes-hotel/pagarme-payment-ui.ts";
 
 /** Subset do client usado pelo repository (Edge jsr ou testes). */
 export type CobrancaPagarmeSupabaseClient = {
@@ -61,7 +62,7 @@ export function createSupabaseCobrancaPagarmeRepository(
       const { data, error } = await admin
         .from("operacional_reservas")
         .select(
-          "id, external_reservation_id, classificacao_comissionamento, pagamento_status, hospede_principal",
+          "id, external_reservation_id, classificacao_comissionamento, pagamento_status, hospede_principal, reservation_balance_due",
         )
         .eq("id", reservaId)
         .maybeSingle();
@@ -80,7 +81,7 @@ export function createSupabaseCobrancaPagarmeRepository(
         })
         .eq("id", input.reservaId)
         .select(
-          "id, external_reservation_id, classificacao_comissionamento, pagamento_status, hospede_principal",
+          "id, external_reservation_id, classificacao_comissionamento, pagamento_status, hospede_principal, reservation_balance_due",
         )
         .single();
       if (error) throw error;
@@ -263,6 +264,58 @@ export function createSupabaseCobrancaPagarmeRepository(
         throw error;
       }
       return { ok: true, pagamento: data as PagamentoPagarmeRow };
+    },
+
+    async applyPagarmePaymentToReservationBalance(input) {
+      const paid = Number(input.paidCentavos);
+      if (!Number.isInteger(paid) || paid <= 0) return null;
+
+      const { data: current, error: readErr } = await admin
+        .from("operacional_reservas")
+        .select("id, reservation_balance_due, pagamento_status")
+        .eq("id", input.reservaId)
+        .maybeSingle();
+      if (readErr) throw readErr;
+      if (!current) return null;
+
+      const bal = parseReservationBalanceDue(current.reservation_balance_due);
+      if (!bal.ok) {
+        // Sem saldo conhecido: não inventar; reserva permanece como está.
+        return {
+          reservation_balance_due:
+            current.reservation_balance_due == null
+              ? null
+              : Number(current.reservation_balance_due),
+          pagamento_status: String(current.pagamento_status ?? ""),
+        };
+      }
+
+      const remainingCentavos = Math.max(0, bal.centavos - paid);
+      const remainingReais = Number((remainingCentavos / 100).toFixed(2));
+      const patch: {
+        reservation_balance_due: number;
+        pagamento_status?: string;
+      } = {
+        reservation_balance_due: remainingReais,
+      };
+      if (remainingCentavos <= 0) {
+        patch.pagamento_status = "pago";
+      }
+
+      const { data: updated, error: updErr } = await admin
+        .from("operacional_reservas")
+        .update(patch)
+        .eq("id", input.reservaId)
+        .select("reservation_balance_due, pagamento_status")
+        .single();
+      if (updErr) throw updErr;
+      return {
+        reservation_balance_due:
+          updated.reservation_balance_due == null
+            ? null
+            : Number(updated.reservation_balance_due),
+        pagamento_status: String(updated.pagamento_status ?? ""),
+      };
     },
 
     async resolvePixCustomer(reservaId): Promise<PagarmePixCustomer | null> {
