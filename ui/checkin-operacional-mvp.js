@@ -2834,14 +2834,8 @@ function syncDetailPanelChrome(reserva) {
     const ci = formatDataBR(reserva.checkInPrevisto);
     const co = formatDataBR(reserva.checkOutPrevisto);
     const idShort = String(reserva.externalReservationId || reserva.id || "").trim();
-    const originBits = [];
-    if (reserva.channelManager) originBits.push(String(reserva.channelManager));
-    if (reserva.salesChannel) originBits.push(String(reserva.salesChannel));
-    const parts = [
-      `${ci} → ${co}`,
-      idShort ? `Reserva ${idShort}` : "",
-      originBits.length ? originBits.join(" · ") : "",
-    ].filter(Boolean);
+    // Origem comercial fica no card dedicado — evita repetição no subtítulo.
+    const parts = [`${ci} → ${co}`, idShort ? `ID ${idShort}` : ""].filter(Boolean);
     detailSubtitleElement.textContent = parts.join(" · ");
   }
 }
