@@ -1684,7 +1684,11 @@ function getNaoIdentificados(reserva) {
 }
 
 function isPagamentoOk(reserva) {
-  return reserva.pagamento === "pago";
+  if (reserva.pagamento === "pago") return true;
+  const cls = String(reserva.classificacaoComissionamento || "").trim();
+  // Não cobrar hóspede → financeiro liberado para acesso.
+  if (cls === "comissionada" || cls === "desconhecida") return true;
+  return false;
 }
 
 function isFnrhCompleta(reserva) {

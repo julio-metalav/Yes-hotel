@@ -10,8 +10,9 @@ import type {
   TtlockAccessRecordSanitized,
 } from "./types.ts";
 
+/** Somente chaves JSON citadas — não a palavra "Senha:" dentro de texto de mensagem. */
 const SENSITIVE_KEY_PATTERN_RE =
-  /["']?(?:keyboardPwd|newKeyboardPwd|password|passwd|senha|secret|token|authorization|apikey|api_key|accessToken|clientSecret)["']?\s*:/i;
+  /"(?:keyboardPwd|newKeyboardPwd|password|passwd|senha|secret|token|authorization|apikey|api_key|accessToken|clientSecret)"\s*:/i;
 
 export function maskLockMac(mac: string | undefined): string | undefined {
   if (!mac) return undefined;

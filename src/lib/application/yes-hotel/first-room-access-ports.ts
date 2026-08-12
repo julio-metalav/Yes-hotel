@@ -244,6 +244,9 @@ export type FirstRoomAccessPorts = {
       apartment_number: string;
       reservation_code: string;
       guest_main_name: string;
+      parking_spot?: string | null;
+      wifi_ssid?: string | null;
+      wifi_password?: string | null;
     }>;
   };
   /** Auditoria pagamento presencial diferido (opcional; fail-soft se ausente). */
