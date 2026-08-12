@@ -277,16 +277,14 @@ function graceWith(occurred: string, autorizado: boolean) {
   assert.equal(d.reason, "reserva_inativa");
 }
 
-// Mensagens DigiSac / welcome
+// Mensagens DigiSac / welcome — PPD usa guest_payment_deferred_breakfast
 {
   const welcome = buildWelcomePendingMessage({
     payment_pending: true,
     fnrh_pending: false,
     presencial_diferido_efetivado: true,
   });
-  assert.ok(welcome);
-  assert.match(welcome!.body, /09:00/);
-  assert.ok(!/1 hora/i.test(welcome!.body));
+  assert.equal(welcome, null);
 
   const internal = buildInternalFirstAccessMessage({
     apartment_number: "34",
@@ -296,10 +294,12 @@ function graceWith(occurred: string, autorizado: boolean) {
     fnrh_pending: false,
     grace_started: true,
     presencial_diferido_efetivado: true,
+    charge_valor_label: "confirmar no HITS",
   });
   assert.match(internal.body, /presencial diferido/i);
-  assert.match(internal.body, /09:00/);
-  assert.match(internal.body, /NÃO se aplica|NAO se aplica|não se aplica/i);
+  assert.match(internal.body, /09h/);
+  assert.match(internal.body, /café da manhã/i);
+  assert.match(internal.body, /HITS/);
 }
 
 // Regressão: sem autorização => 1h

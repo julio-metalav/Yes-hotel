@@ -256,6 +256,58 @@
   background: var(--op-blue);
 }
 
+.cafe-view .breakfast-card.has-ppd-alert {
+  border-color: rgba(180, 90, 20, 0.45);
+  box-shadow: 0 0 0 1px rgba(180, 90, 20, 0.12);
+}
+
+.cafe-view .ppd-cafe-alert {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(180, 90, 20, 0.35);
+  background: rgba(229, 140, 50, 0.12);
+  color: #7a3e0c;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.cafe-view .ppd-cafe-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(180, 90, 20, 0.4);
+  background: rgba(229, 140, 50, 0.2);
+  color: #7a3e0c;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cafe-view .ppd-cafe-badge--mini {
+  margin-top: 4px;
+}
+
+.cafe-view .ppd-cafe-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cafe-view .ppd-cafe-charge,
+.cafe-view .ppd-cafe-hits {
+  font-weight: 600;
+}
+
+.cafe-view .ppd-badge-cell {
+  display: contents;
+}
+
 .cafe-view .badges-cell {
   display: contents;
 }

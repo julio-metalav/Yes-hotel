@@ -289,23 +289,28 @@ export class InMemoryUnitOfWork implements UnitOfWorkPort {
     if (state.outbox.some((m) => m.idempotency_key === o.idempotency_key)) {
       return;
     }
-    if (o.event_type === "guest_welcome_pending") {
+    if (
+      o.event_type === "guest_welcome_pending" ||
+      o.event_type === "guest_payment_deferred_breakfast"
+    ) {
       const payload = o.payload as {
         body?: string;
         payment_pending?: boolean;
         fnrh_pending?: boolean;
       };
-      state.outbox.push({
-        kind: "guest_welcome_pending",
-        reservation_id: o.reservation_id,
-        credential_id: o.credential_id ?? command.correlation?.credential_id ?? "",
-        tolerance_id: toleranceId ?? "",
-        event_id: eventId,
-        payment_pending: Boolean(payload.payment_pending),
-        fnrh_pending: Boolean(payload.fnrh_pending),
-        body: String(payload.body ?? ""),
-        idempotency_key: o.idempotency_key,
-      });
+      if (o.event_type === "guest_welcome_pending") {
+        state.outbox.push({
+          kind: "guest_welcome_pending",
+          reservation_id: o.reservation_id,
+          credential_id: o.credential_id ?? command.correlation?.credential_id ?? "",
+          tolerance_id: toleranceId ?? "",
+          event_id: eventId,
+          payment_pending: Boolean(payload.payment_pending),
+          fnrh_pending: Boolean(payload.fnrh_pending),
+          body: String(payload.body ?? ""),
+          idempotency_key: o.idempotency_key,
+        });
+      }
       const now = command.event.received_at;
       if (!state.accessOutbox.some((r) => r.idempotency_key === o.idempotency_key)) {
         state.accessOutbox.push({

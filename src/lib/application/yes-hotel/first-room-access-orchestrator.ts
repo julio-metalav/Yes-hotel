@@ -10,6 +10,12 @@ import {
   type NormalizedRoomAccessEvent,
 } from "../../domain/yes-hotel/first-room-access-policy.ts";
 import { buildWelcomePendingMessage } from "../../domain/yes-hotel/access-grace-messages.ts";
+import { resolvePpdChargeAmount } from "../../domain/yes-hotel/cafe-ppd-alert.ts";
+import {
+  buildGuestPaymentDeferredBreakfastMessage,
+  guestPaymentDeferredBreakfastIdempotencyKey,
+  GUEST_PAYMENT_DEFERRED_BREAKFAST_EVENT,
+} from "../../domain/yes-hotel/guest-payment-deferred-breakfast.ts";
 import { evaluateReservationPendingState } from "../../domain/yes-hotel/reservation-pending-state.ts";
 import type { FirstRoomAccessCommitCommand } from "./first-room-access-commit.ts";
 import { enqueueInternalFirstAccessMessage } from "./enqueue-internal-first-access.ts";
@@ -17,6 +23,7 @@ import {
   enqueueGuestFirstAccessWelcomeMessages,
   pendingMessageAvailableAt,
 } from "./enqueue-guest-first-access-welcome.ts";
+import { enqueueGuestPaymentDeferredBreakfastMessages } from "./enqueue-guest-payment-deferred-breakfast.ts";
 import type { FirstRoomAccessPorts } from "./first-room-access-ports.ts";
 import type {
   AccessMethodPersisted,
@@ -149,6 +156,10 @@ export async function processFirstRoomAccessEvent(
         // Reconciliação idempotente: repara outbox ausente sem reabrir tolerância.
         const ctx = await resolveDisplayContext(ports, existing.reservation_id);
         const nowIso = ports.clock.now().toISOString();
+        const ppdReplay = Boolean(
+          tol.pending_snapshot.includes("pagamento_presencial_diferido"),
+        );
+        const charge = resolvePpdChargeAmount({});
         await enqueueInternalFirstAccessMessage({
           queue: ports.accessOutboxQueue,
           reservation_id: existing.reservation_id,
@@ -160,6 +171,12 @@ export async function processFirstRoomAccessEvent(
           payment_pending: tol.current_payment_pending,
           fnrh_pending: tol.current_fnrh_pending,
           grace_started: true,
+          presencial_diferido_efetivado: ppdReplay,
+          charge_valor_label: ppdReplay
+            ? charge.source === "none"
+              ? "confirmar no HITS"
+              : charge.displayLabel
+            : null,
           nowIso,
         });
         await enqueueGuestFirstAccessWelcomeMessages({
@@ -179,9 +196,10 @@ export async function processFirstRoomAccessEvent(
           const welcome = buildWelcomePendingMessage({
             payment_pending: tol.pending_payment_at_start,
             fnrh_pending: tol.pending_fnrh_at_start,
+            presencial_diferido_efetivado: ppdReplay,
           });
+          const pendingAt = pendingMessageAvailableAt(nowIso);
           if (welcome) {
-            const pendingAt = pendingMessageAvailableAt(nowIso);
             await ports.accessOutboxQueue.enqueue({
               event_type: "guest_welcome_pending",
               channel: "whatsapp",
@@ -215,6 +233,18 @@ export async function processFirstRoomAccessEvent(
               available_at: pendingAt,
               processed_at: null,
               last_error: null,
+            });
+          }
+          if (ppdReplay && tol.pending_payment_at_start) {
+            await enqueueGuestPaymentDeferredBreakfastMessages({
+              queue: ports.accessOutboxQueue,
+              reservation_id: existing.reservation_id,
+              credential_id: existing.credential_id,
+              access_event_id: existing.id,
+              tolerance_id: tol.id,
+              deadlineIso: tol.suspension_due_at,
+              nowIso,
+              available_at: pendingAt,
             });
           }
         }
@@ -489,13 +519,21 @@ export async function processFirstRoomAccessEvent(
       })();
 
     const ppdEfetivado = grace.grace_mode === "presencial_diferido_09h";
+    const nowIsoCommit = ports.clock.now().toISOString();
+    const deadlineIso = grace.suspension_due_at!;
+    const breakfastMsg = ppdEfetivado
+      ? buildGuestPaymentDeferredBreakfastMessage({
+          deadlineIso,
+          nowIso: nowIsoCommit,
+        })
+      : null;
     const welcome = buildWelcomePendingMessage({
       payment_pending: pending.payment_pending,
       fnrh_pending: pending.fnrh_pending,
       presencial_diferido_efetivado: ppdEfetivado,
     });
-    if (!welcome) {
-      throw new Error("Mensagem de boas-vindas esperada com pendências.");
+    if (!welcome && !breakfastMsg) {
+      throw new Error("Mensagem de pendência esperada com grace_started.");
     }
 
     const itemWrites = [targets.apt, targets.gateExt, targets.gateInt].map((i) => {
@@ -514,18 +552,46 @@ export async function processFirstRoomAccessEvent(
       };
     });
 
-    const outboxPayload = {
-      kind: "guest_welcome_pending",
-      reservation_id: correlation.reservation_id,
-      credential_id: correlation.credential_id,
-      payment_pending: pending.payment_pending,
-      fnrh_pending: pending.fnrh_pending,
-      body: welcome.body,
-      pending_snapshot: grace.pending_snapshot,
-    };
-    assertNoPasswordLeak(outboxPayload);
+    const pendingAt = pendingMessageAvailableAt(nowIsoCommit);
 
-    const pendingAt = pendingMessageAvailableAt(ports.clock.now().toISOString());
+    // UoW exige 1 outbox: FNRH/pagamento 1h OU (PPD-only) café/pagamento.
+    const uowOutbox = welcome
+      ? {
+          event_type: "guest_welcome_pending",
+          channel: "whatsapp" as const,
+          reservation_id: correlation.reservation_id,
+          credential_id: correlation.credential_id,
+          template: "access_grace_welcome",
+          payload: {
+            kind: "guest_welcome_pending",
+            reservation_id: correlation.reservation_id,
+            credential_id: correlation.credential_id,
+            payment_pending: pending.payment_pending,
+            fnrh_pending: pending.fnrh_pending,
+            body: welcome.body,
+            pending_snapshot: grace.pending_snapshot,
+          },
+          idempotency_key: `welcome:${correlation.credential_id}:${grace.grace_started_at}`,
+          available_at: pendingAt,
+        }
+      : {
+          event_type: GUEST_PAYMENT_DEFERRED_BREAKFAST_EVENT,
+          channel: "whatsapp" as const,
+          reservation_id: correlation.reservation_id,
+          credential_id: correlation.credential_id,
+          template: GUEST_PAYMENT_DEFERRED_BREAKFAST_EVENT,
+          payload: {
+            kind: GUEST_PAYMENT_DEFERRED_BREAKFAST_EVENT,
+            body: breakfastMsg!.body,
+            pending_snapshot: grace.pending_snapshot,
+          },
+          idempotency_key: guestPaymentDeferredBreakfastIdempotencyKey(
+            correlation.reservation_id,
+            "whatsapp",
+          ),
+          available_at: pendingAt,
+        };
+    assertNoPasswordLeak(uowOutbox.payload);
 
     const result = await ports.uow.commitFirstRoomAccess({
       decision: "grace_started",
@@ -534,7 +600,7 @@ export async function processFirstRoomAccessEvent(
       grace: {
         first_room_access_at: grace.grace_started_at!,
         grace_started_at: grace.grace_started_at!,
-        suspension_due_at: grace.suspension_due_at!,
+        suspension_due_at: deadlineIso,
         pending_payment: pending.payment_pending,
         pending_fnrh: pending.fnrh_pending,
         pending_snapshot: grace.pending_snapshot,
@@ -542,16 +608,7 @@ export async function processFirstRoomAccessEvent(
         original_valid_until: originalUntil,
       },
       items: itemWrites,
-      outbox: {
-        event_type: "guest_welcome_pending",
-        channel: "whatsapp",
-        reservation_id: correlation.reservation_id,
-        credential_id: correlation.credential_id,
-        template: "access_grace_welcome",
-        payload: outboxPayload,
-        idempotency_key: `welcome:${correlation.credential_id}:${grace.grace_started_at}`,
-        available_at: pendingAt,
-      },
+      outbox: uowOutbox,
     });
     assertNoPasswordLeak(result);
     if (result.status === "grace_started" && ports.presencialDiferidoAudit && ppdAutorizado) {
@@ -562,7 +619,7 @@ export async function processFirstRoomAccessEvent(
         efetivado: ppdEfetivado,
         regra: grace.presencial_diferido?.regra ?? null,
         first_access_at: input.occurred_at,
-        deadline_iso: ppdEfetivado ? grace.suspension_due_at ?? null : null,
+        deadline_iso: ppdEfetivado ? deadlineIso : null,
         now_iso: ports.clock.now().toISOString(),
         apartment_number: ctxApt.apartment_number ?? null,
       });
@@ -574,6 +631,9 @@ export async function processFirstRoomAccessEvent(
     ) {
       const ctx = await resolveDisplayContext(ports, correlation.reservation_id);
       const nowIso = ports.clock.now().toISOString();
+      const charge = resolvePpdChargeAmount({});
+      const chargeLabel =
+        charge.source === "none" ? "confirmar no HITS" : charge.displayLabel;
       await enqueueInternalFirstAccessMessage({
         queue: ports.accessOutboxQueue,
         reservation_id: correlation.reservation_id,
@@ -586,6 +646,7 @@ export async function processFirstRoomAccessEvent(
         fnrh_pending: pending.fnrh_pending,
         grace_started: true,
         presencial_diferido_efetivado: ppdEfetivado,
+        charge_valor_label: ppdEfetivado ? chargeLabel : null,
         nowIso,
       });
       await enqueueGuestFirstAccessWelcomeMessages({
@@ -601,24 +662,38 @@ export async function processFirstRoomAccessEvent(
         wifi_password: ctx.wifi_password,
         nowIso,
       });
-      // Canal e-mail complementar (idempotente); após welcome (~1 min).
-      await ports.accessOutboxQueue.enqueue({
-        event_type: "guest_welcome_pending",
-        channel: "email",
-        reservation_id: correlation.reservation_id,
-        credential_id: correlation.credential_id ?? null,
-        access_event_id: result.event_id ?? null,
-        tolerance_id: result.tolerance_id ?? null,
-        recipient_ref: null,
-        template: "access_grace_welcome",
-        payload: { body: welcome.body, subject: "Yes Hotel — acesso" },
-        idempotency_key: `welcome:${correlation.credential_id}:${grace.grace_started_at}:email`,
-        status: "pending",
-        attempts: 0,
-        available_at: pendingAt,
-        processed_at: null,
-        last_error: null,
-      });
+      if (ppdEfetivado) {
+        await enqueueGuestPaymentDeferredBreakfastMessages({
+          queue: ports.accessOutboxQueue,
+          reservation_id: correlation.reservation_id,
+          credential_id: correlation.credential_id ?? null,
+          access_event_id: result.event_id ?? null,
+          tolerance_id: result.tolerance_id ?? null,
+          deadlineIso,
+          nowIso,
+          available_at: pendingAt,
+        });
+      }
+      // E-mail complementar da pendência 1h/FNRH (não PPD-café).
+      if (welcome) {
+        await ports.accessOutboxQueue.enqueue({
+          event_type: "guest_welcome_pending",
+          channel: "email",
+          reservation_id: correlation.reservation_id,
+          credential_id: correlation.credential_id ?? null,
+          access_event_id: result.event_id ?? null,
+          tolerance_id: result.tolerance_id ?? null,
+          recipient_ref: null,
+          template: "access_grace_welcome",
+          payload: { body: welcome.body, subject: "Yes Hotel — acesso" },
+          idempotency_key: `welcome:${correlation.credential_id}:${grace.grace_started_at}:email`,
+          status: "pending",
+          attempts: 0,
+          available_at: pendingAt,
+          processed_at: null,
+          last_error: null,
+        });
+      }
     }
     return result;
   } catch (e) {

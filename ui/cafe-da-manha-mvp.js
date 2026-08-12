@@ -144,9 +144,12 @@ function getVisibleCards() {
   return cafeCards
     .filter((card) => matchesActiveFilter(card) && matchesSearch(card))
     .slice()
-    .sort((a, b) =>
-      policy.compareCafeApartmentCodes(a.apartmentCode, b.apartmentCode),
-    );
+    .sort((a, b) => {
+      const aPpd = a.ppdAlert ? 0 : 1;
+      const bPpd = b.ppdAlert ? 0 : 1;
+      if (aPpd !== bPpd) return aPpd - bPpd;
+      return policy.compareCafeApartmentCodes(a.apartmentCode, b.apartmentCode);
+    });
 }
 
 function createMetric(label, value, extraClass) {
@@ -180,7 +183,10 @@ function createCard(card) {
       ? "is-paid"
       : "is-unpaid",
     `is-kind-${card.entitlement.kind}`,
-  ].join(" ");
+    card.ppdAlert ? "has-ppd-alert" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   article.dataset.reservationId = card.reservationId;
 
   const guestCell = document.createElement("div");
@@ -195,6 +201,26 @@ function createCard(card) {
   guestLine.className = "guest-line";
   guestLine.textContent = policy.cafeGuestLine(card.entitlement);
   guestCell.append(apt, guest, guestLine);
+
+  if (card.ppdAlert) {
+    const ppdBox = document.createElement("div");
+    ppdBox.className = "ppd-cafe-alert";
+    ppdBox.setAttribute("role", "status");
+    const ppdBadge = document.createElement("span");
+    ppdBadge.className = "ppd-cafe-badge";
+    ppdBadge.textContent = card.ppdAlert.badgeLabel;
+    const ppdTitle = document.createElement("strong");
+    ppdTitle.className = "ppd-cafe-title";
+    ppdTitle.textContent = card.ppdAlert.title;
+    const ppdCharge = document.createElement("span");
+    ppdCharge.className = "ppd-cafe-charge";
+    ppdCharge.textContent = card.ppdAlert.chargeLine;
+    const ppdHits = document.createElement("span");
+    ppdHits.className = "ppd-cafe-hits";
+    ppdHits.textContent = card.ppdAlert.hitsHint;
+    ppdBox.append(ppdBadge, ppdTitle, ppdCharge, ppdHits);
+    guestCell.appendChild(ppdBox);
+  }
 
   const attendanceCell = document.createElement("div");
   attendanceCell.className = "attendance-cell";
@@ -249,6 +275,15 @@ function createCard(card) {
   }
   statusCell.appendChild(statusBadge);
   badgesCell.append(paymentCell, statusCell);
+  if (card.ppdAlert) {
+    const ppdBadgeCell = document.createElement("div");
+    ppdBadgeCell.className = "ppd-badge-cell";
+    const ppdMini = document.createElement("span");
+    ppdMini.className = "ppd-cafe-badge ppd-cafe-badge--mini";
+    ppdMini.textContent = card.ppdAlert.badgeLabel;
+    ppdBadgeCell.appendChild(ppdMini);
+    badgesCell.appendChild(ppdBadgeCell);
+  }
 
   const controlCell = document.createElement("div");
   controlCell.className = "control-cell";
@@ -432,6 +467,16 @@ function mapRowsToCards(reservas, atendimentosByReserva) {
       mealPlanDesc: r.meal_plan_desc || null,
       __testKind: r.__testKind,
       __paidExtraQty: r.__paidExtraQty,
+      __ppdEfetivado: !!r.pagamento_presencial_diferido_efetivado || !!r.__ppdEfetivado,
+      __ppdAutorizado: !!r.pagamento_presencial_diferido_autorizado || !!r.__ppdAutorizado,
+      __pagamentoStatus: r.pagamento_status || r.__pagamentoStatus || null,
+      __ppdRegularizadoEm:
+        r.pagamento_presencial_diferido_regularizado_em || r.__ppdRegularizadoEm || null,
+      __ppdBloqueadoEm:
+        r.pagamento_presencial_diferido_bloqueado_em || r.__ppdBloqueadoEm || null,
+      __pagarmePaid: !!r.__pagarmePaid,
+      __operacionalValorTotal: r.__operacionalValorTotal ?? null,
+      __hitsReservationTotalAmount: r.__hitsReservationTotalAmount ?? null,
     })),
     selectedYmd,
   );
@@ -443,6 +488,26 @@ function mapRowsToCards(reservas, atendimentosByReserva) {
       stay.__testKind,
       stay.__paidExtraQty,
     );
+    const charge = policy.resolvePpdChargeAmount({
+      operacionalValorTotal: stay.__operacionalValorTotal,
+      hitsReservationTotalAmount: stay.__hitsReservationTotalAmount,
+    });
+    const showPpd = policy.shouldShowCafePpdAlert({
+      ppdEfetivado: !!stay.__ppdEfetivado,
+      ppdAutorizado: !!stay.__ppdAutorizado,
+      pagamentoStatus: stay.__pagamentoStatus,
+      statusReserva: stay.statusReserva,
+      ppdRegularizadoEm: stay.__ppdRegularizadoEm,
+      ppdBloqueadoEm: stay.__ppdBloqueadoEm,
+      pagarmeObrigacaoLiquidada: !!stay.__pagarmePaid,
+    });
+    const ppdAlert = showPpd
+      ? policy.buildCafePpdAlertView({
+          apartmentCode: stay.apartmentCode,
+          guestName: stay.mainGuestName,
+          charge,
+        })
+      : null;
     return {
       reservationId: stay.id,
       apartmentCode: stay.apartmentCode,
@@ -452,6 +517,9 @@ function mapRowsToCards(reservas, atendimentosByReserva) {
         att?.quantidade_atendida ?? 0,
         entitlement.entitledQty,
       ),
+      ppdAlert,
+      /** Somente leitura — UI do café NÃO altera pagamento_status. */
+      pagamentoStatus: stay.__pagamentoStatus || null,
     };
   });
 }
@@ -485,8 +553,16 @@ async function loadCafeDataset() {
         status_reserva: row.statusReserva || "ativa",
         total_hospedes_hits: row.totalGuests,
         meal_plan_desc: row.mealPlanDesc || null,
+        pagamento_status: row.pagamentoStatus || null,
+        pagamento_presencial_diferido_efetivado: !!row.ppdEfetivado,
+        pagamento_presencial_diferido_autorizado: !!row.ppdAutorizado,
+        pagamento_presencial_diferido_regularizado_em: row.ppdRegularizadoEm || null,
+        pagamento_presencial_diferido_bloqueado_em: row.ppdBloqueadoEm || null,
         __testKind: row.kind,
         __paidExtraQty: row.paidExtraQty || 0,
+        __pagarmePaid: !!row.pagarmePaid,
+        __operacionalValorTotal: row.operacionalValorTotal ?? null,
+        __hitsReservationTotalAmount: row.hitsReservationTotalAmount ?? null,
       })),
       new Map(
         testDataset.map((row) => [
@@ -510,7 +586,7 @@ async function loadCafeDataset() {
   const { data: reservas, error: errRes } = await supabase
     .from("operacional_reservas")
     .select(
-      "id, apartamento, hospede_principal, check_in_previsto, check_out_previsto, status_reserva, external_reservation_id, total_hospedes_hits, meal_plan_desc",
+      "id, apartamento, hospede_principal, check_in_previsto, check_out_previsto, status_reserva, external_reservation_id, total_hospedes_hits, meal_plan_desc, pagamento_status, pagamento_presencial_diferido_autorizado, pagamento_presencial_diferido_efetivado, pagamento_presencial_diferido_regularizado_em, pagamento_presencial_diferido_bloqueado_em, pagamento_presencial_diferido_deadline_em",
     )
     .neq("status_reserva", "cancelada")
     .lt("check_in_previsto", from)

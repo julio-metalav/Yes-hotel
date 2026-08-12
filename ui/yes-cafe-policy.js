@@ -270,6 +270,74 @@
     return base + " — não mapeado";
   }
 
+  /** Espelho de cafe-ppd-alert.ts — alerta operacional PPD (não altera pagamento). */
+  function parsePositiveMoney(value) {
+    if (value == null || value === "") return null;
+    var n = typeof value === "number" ? value : Number(String(value).replace(",", "."));
+    if (!isFinite(n) || n <= 0) return null;
+    return Math.round(n * 100) / 100;
+  }
+
+  function formatBrl(amount) {
+    return amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  }
+
+  function resolvePpdChargeAmount(input) {
+    input = input || {};
+    var operacional = parsePositiveMoney(input.operacionalValorTotal);
+    if (operacional != null) {
+      return {
+        source: "operacional_explicit",
+        amount: operacional,
+        displayLabel: formatBrl(operacional),
+      };
+    }
+    var hits = parsePositiveMoney(input.hitsReservationTotalAmount);
+    if (hits != null) {
+      return {
+        source: "hits_reservation_total",
+        amount: hits,
+        displayLabel: formatBrl(hits),
+      };
+    }
+    return { source: "none", amount: null, displayLabel: "valor a confirmar" };
+  }
+
+  function isOfficialPaymentPaid(pagamentoStatus) {
+    return String(pagamentoStatus || "").trim().toLowerCase() === "pago";
+  }
+
+  function shouldShowCafePpdAlert(input) {
+    if (!input || !input.ppdEfetivado) return false;
+    if (input.ppdRegularizadoEm) return false;
+    if (input.ppdBloqueadoEm) return false;
+    if (input.pagarmeObrigacaoLiquidada === true) return false;
+    if (isOfficialPaymentPaid(input.pagamentoStatus)) return false;
+    var status = String(input.statusReserva || "").trim().toLowerCase();
+    if (status === "cancelada" || status === "checkout" || status === "finalizada") {
+      return false;
+    }
+    return true;
+  }
+
+  function buildCafePpdAlertView(input) {
+    var apt = String((input && input.apartmentCode) || "").trim() || "—";
+    var guest = String((input && input.guestName) || "").trim() || "—";
+    var charge = (input && input.charge) || resolvePpdChargeAmount({});
+    var chargeText =
+      charge.source === "none"
+        ? "Cobrar: valor a confirmar"
+        : "Cobrar: " + charge.displayLabel;
+    return {
+      badgeLabel: "PAGAMENTO PENDENTE",
+      title: "⚠️ Pagamento presencial até 09h",
+      apartmentLine: "Apto " + apt + " — " + guest,
+      chargeLine: chargeText,
+      deadlineLine: "Prazo: 09h",
+      hitsHint: "Após receber, regularizar no HITS.",
+    };
+  }
+
   var api = {
     TZ: TZ,
     hotelTodayYmd: hotelTodayYmd,
@@ -291,6 +359,10 @@
     planMarkAllCafeAttended: planMarkAllCafeAttended,
     cafeStatusLabel: cafeStatusLabel,
     cafeGuestLine: cafeGuestLine,
+    resolvePpdChargeAmount: resolvePpdChargeAmount,
+    shouldShowCafePpdAlert: shouldShowCafePpdAlert,
+    buildCafePpdAlertView: buildCafePpdAlertView,
+    isOfficialPaymentPaid: isOfficialPaymentPaid,
     MAPPING_GAP: MAPPING_GAP,
   };
 
