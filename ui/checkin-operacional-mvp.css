@@ -666,6 +666,72 @@ html {
   font-weight: 600;
 }
 
+.checkin-view .detail-situacao-pagamento .detail-situacao-valor {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.checkin-view .detail-situacao-pagamento .detail-situacao-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--op-muted, #6b7c82);
+}
+
+.checkin-view .detail-pagarme-inline-btn {
+  margin-top: 6px;
+  min-height: 28px;
+  height: auto;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.checkin-view .detail-situacao-acesso--entrou dd {
+  color: #0f6b3c;
+}
+
+.checkin-view .detail-proxima-acao {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(19, 42, 58, 0.08);
+}
+
+.checkin-view .detail-acao-hint {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--op-text, #132a3a);
+}
+
+.checkin-view .guest-detail-fnrh-line {
+  margin: 2px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--op-muted, #6b7c82);
+}
+
+.checkin-view .guest-detail-responsavel {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--op-muted, #6b7c82);
+}
+
+.checkin-view .guest-detail-readout--compact {
+  margin: 0 0 8px;
+}
+
+.checkin-view .detail-comms-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--op-text, #132a3a);
+}
+
+.checkin-view .detail-comms-list li {
+  margin: 2px 0;
+}
+
 .checkin-view .op-btn {
   display: inline-flex;
   align-items: center;
