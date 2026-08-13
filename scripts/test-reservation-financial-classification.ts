@@ -9,10 +9,12 @@ import {
   classifyCommissionFromHits,
   isBookingEngineChannel,
   isFinanceiramenteLiberadoParaAcesso,
+  isPagarmeQuitacaoIntegral,
   mapPaymentStatusFromBalanceDue,
   matchOtaExactToken,
   nextFinancialActionLabel,
   resolveFinancialStatusVisible,
+  resolvePagamentoStatusParaCredencial,
   shouldCreatePagarmeCharge,
 } from "../src/lib/domain/yes-hotel/reservation-financial-classification.ts";
 
@@ -243,5 +245,101 @@ for (const ch of ["Expedia", "Hotels.com", "Airbnb"]) {
 assert.equal(nextFinancialActionLabel("pendente"), "Gerar e enviar link de pagamento");
 assert.equal(nextFinancialActionLabel("pendente_comissionado"), "Regularizar pagamento no HITS");
 assert.equal(nextFinancialActionLabel("pago"), null);
+
+// --- Pagar.me quitação libera acesso mesmo com HITS pendente ---
+{
+  // A. HITS pago → liberado
+  assert.equal(
+    isFinanceiramenteLiberadoParaAcesso({
+      pagamentoStatus: "pago",
+      balanceDue: 10,
+      classificacao: "nao_comissionada",
+    }),
+    true,
+  );
+  // B. HITS pendente + Pagar.me integral (paid >= saldo) → liberado
+  assert.equal(
+    isPagarmeQuitacaoIntegral({ balanceDue: 10, pagarmePaidCentavosTotal: 1000 }),
+    true,
+  );
+  assert.equal(
+    isFinanceiramenteLiberadoParaAcesso({
+      pagamentoStatus: "pendente",
+      balanceDue: 10,
+      classificacao: "nao_comissionada",
+      pagarmePaidCentavosTotal: 1000,
+    }),
+    true,
+  );
+  assert.equal(
+    resolveFinancialStatusVisible({
+      pagamentoStatus: "pendente",
+      balanceDue: 10,
+      classificacao: "nao_comissionada",
+      pagarmePaidCentavosTotal: 1000,
+    }),
+    "pago",
+  );
+  // C. parcial → NÃO libera
+  assert.equal(
+    isPagarmeQuitacaoIntegral({ balanceDue: 10, pagarmePaidCentavosTotal: 500 }),
+    false,
+  );
+  assert.equal(
+    isFinanceiramenteLiberadoParaAcesso({
+      pagamentoStatus: "pendente",
+      balanceDue: 10,
+      classificacao: "nao_comissionada",
+      pagarmePaidCentavosTotal: 500,
+    }),
+    false,
+  );
+  // D/E. pending/failed sem paid → não libera
+  assert.equal(
+    isFinanceiramenteLiberadoParaAcesso({
+      pagamentoStatus: "pendente",
+      balanceDue: 10,
+      classificacao: "nao_comissionada",
+      pagarmePaidCentavosTotal: 0,
+    }),
+    false,
+  );
+  // F. saldo restante > 0 → não libera
+  assert.equal(
+    isFinanceiramenteLiberadoParaAcesso({
+      pagamentoStatus: "pendente",
+      balanceDue: 300,
+      classificacao: "nao_comissionada",
+      pagarmePaidCentavosTotal: 20000,
+    }),
+    false,
+  );
+  // G. saldo 0 → libera
+  assert.equal(
+    isFinanceiramenteLiberadoParaAcesso({
+      pagamentoStatus: "pendente",
+      balanceDue: 0,
+      classificacao: "nao_comissionada",
+    }),
+    true,
+  );
+  assert.equal(
+    resolvePagamentoStatusParaCredencial({
+      pagamentoStatus: "pendente",
+      balanceDue: 0,
+      classificacao: "nao_comissionada",
+    }),
+    "pago",
+  );
+  // H. comissionada continua liberada sem Pagar.me
+  assert.equal(
+    shouldCreatePagarmeCharge({
+      pagamentoStatus: "pendente",
+      balanceDue: 100,
+      classificacao: "comissionada",
+    }).allowed,
+    false,
+  );
+}
 
 console.log("ok: test-reservation-financial-classification");

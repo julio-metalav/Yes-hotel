@@ -12,6 +12,7 @@ import { createCobrancaPagarmeService } from "../../../src/lib/application/yes-h
 import { createPagarmeClient } from "../../../src/lib/integrations/pagarme/client.ts";
 import { getPagarmeConfig } from "../../../src/lib/integrations/pagarme/config.ts";
 import { createSupabaseCobrancaPagarmeRepository } from "../../../src/lib/infrastructure/supabase/yes-hotel/cobranca-pagarme-repository.ts";
+import { isFinanceiroLiberadoParaAcesso } from "../../../src/lib/domain/yes-hotel/guest-access-messages.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -53,6 +54,110 @@ const adminClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
+async function sumPagarmePaidCentavos(reservaId: string): Promise<number> {
+  const { data, error } = await adminClient
+    .from("operacional_cobrancas_pagarme")
+    .select("valor_centavos, status")
+    .eq("reserva_id", reservaId)
+    .eq("status", "paid");
+  if (error || !data) return 0;
+  let total = 0;
+  for (const row of data as Array<{ valor_centavos?: number }>) {
+    const v = Number(row.valor_centavos);
+    if (Number.isInteger(v) && v > 0) total += v;
+  }
+  return total;
+}
+
+/**
+ * Após quitação Pagar.me + FNRH completa: dispara o mesmo fluxo de requisitos
+ * (acesso_liberado + send-senha). Idempotente via senha_enviada_em.
+ */
+async function maybeDispararLiberacaoAposPagarme(cobrancaId: string | null | undefined): Promise<void> {
+  if (!cobrancaId) return;
+  try {
+    const { data: cob } = await adminClient
+      .from("operacional_cobrancas_pagarme")
+      .select("reserva_id")
+      .eq("id", cobrancaId)
+      .maybeSingle();
+    const reservaId = String((cob as { reserva_id?: string } | null)?.reserva_id ?? "").trim();
+    if (!reservaId) return;
+
+    const { data: reserva } = await adminClient
+      .from("operacional_reservas")
+      .select(
+        "id, pagamento_status, senha_enviada_em, acesso_liberado, classificacao_comissionamento, status_reserva, reservation_balance_due, fnrh_status_agregado",
+      )
+      .eq("id", reservaId)
+      .maybeSingle();
+    if (!reserva) return;
+
+    const statusReserva = String(
+      (reserva as { status_reserva?: string }).status_reserva ?? "",
+    ).toLowerCase();
+    if (statusReserva.includes("cancel")) return;
+    if ((reserva as { senha_enviada_em?: string | null }).senha_enviada_em) return;
+    if (
+      String((reserva as { fnrh_status_agregado?: string }).fnrh_status_agregado ?? "").trim() !==
+      "fnrh_completo"
+    ) {
+      return;
+    }
+
+    const paidTotal = await sumPagarmePaidCentavos(reservaId);
+    if (
+      !isFinanceiroLiberadoParaAcesso({
+        pagamento_status: (reserva as { pagamento_status?: string }).pagamento_status,
+        classificacao_comissionamento: (reserva as { classificacao_comissionamento?: string })
+          .classificacao_comissionamento,
+        reservation_balance_due: (reserva as { reservation_balance_due?: number | null })
+          .reservation_balance_due,
+        pagarme_paid_centavos_total: paidTotal,
+      })
+    ) {
+      return;
+    }
+
+    if (!(reserva as { acesso_liberado?: boolean }).acesso_liberado) {
+      await adminClient
+        .from("operacional_reservas")
+        .update({ acesso_liberado: true, updated_at: new Date().toISOString() })
+        .eq("id", reservaId);
+    }
+
+    const sendUrl = `${supabaseUrl}/functions/v1/send-senha`;
+    const res = await fetch(sendUrl, {
+      method: "POST",
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+      },
+      body: JSON.stringify({
+        reserva_id: reservaId,
+        manual: false,
+        origem: "requisitos",
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.warn("[cobranca-pagarme-webhook] liberação pós-pago falhou:", data);
+      await adminClient.from("operacional_reserva_eventos").insert({
+        reserva_id: reservaId,
+        tipo: "falha_enviar_credenciais",
+        titulo: "Falha ao enviar credenciais",
+        detalhe: JSON.stringify({
+          origem: "requisitos_pos_pagarme",
+          erro: (data as { error?: string }).error || res.statusText,
+        }),
+      });
+    }
+  } catch (error) {
+    console.warn("[cobranca-pagarme-webhook] maybeDispararLiberacaoAposPagarme:", error);
+  }
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -80,6 +185,10 @@ Deno.serve(async (request) => {
         { error: result.error.code, message: result.error.message },
         result.error.httpStatus,
       );
+    }
+
+    if (result.data.payment_registered && !result.data.duplicate_event) {
+      await maybeDispararLiberacaoAposPagarme(result.data.cobranca_id);
     }
 
     // Duplicata ou processado: sempre 200 para evitar storm de retries desnecessários

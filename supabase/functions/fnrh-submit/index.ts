@@ -1085,11 +1085,28 @@ Deno.serve(async (req: Request) => {
  * Quando FNRH fecha por último: se financeiro liberado para acesso e senha não enviada,
  * dispara o fluxo existente send-senha (automático). Idempotente via senha_enviada_em.
  */
+async function sumPagarmePaidCentavos(reservaId: string): Promise<number> {
+  const { data, error } = await admin
+    .from("operacional_cobrancas_pagarme")
+    .select("valor_centavos, status")
+    .eq("reserva_id", reservaId)
+    .eq("status", "paid");
+  if (error || !data) return 0;
+  let total = 0;
+  for (const row of data as Array<{ valor_centavos?: number }>) {
+    const v = Number(row.valor_centavos);
+    if (Number.isInteger(v) && v > 0) total += v;
+  }
+  return total;
+}
+
 async function maybeDispararLiberacaoPorRequisitos(reservaId: string): Promise<void> {
   try {
     const { data: reserva } = await admin
       .from("operacional_reservas")
-      .select("id, pagamento_status, senha_enviada_em, acesso_liberado, classificacao_comissionamento, status_reserva")
+      .select(
+        "id, pagamento_status, senha_enviada_em, acesso_liberado, classificacao_comissionamento, status_reserva, reservation_balance_due",
+      )
       .eq("id", reservaId)
       .maybeSingle();
     if (!reserva) return;
@@ -1099,11 +1116,15 @@ async function maybeDispararLiberacaoPorRequisitos(reservaId: string): Promise<v
     if (statusReserva.includes("cancel")) return;
     if ((reserva as { senha_enviada_em?: string | null }).senha_enviada_em) return;
 
+    const paidTotal = await sumPagarmePaidCentavos(reservaId);
     if (
       !isFinanceiroLiberadoParaAcesso({
         pagamento_status: (reserva as { pagamento_status?: string }).pagamento_status,
         classificacao_comissionamento: (reserva as { classificacao_comissionamento?: string })
           .classificacao_comissionamento,
+        reservation_balance_due: (reserva as { reservation_balance_due?: number | null })
+          .reservation_balance_due,
+        pagarme_paid_centavos_total: paidTotal,
       })
     ) {
       return;

@@ -5,6 +5,7 @@
  */
 
 import { formatTtlockPasscodeForGuest } from "./ttlock-credential-format.ts";
+import { isFinanceiramenteLiberadoParaAcesso } from "./reservation-financial-classification.ts";
 
 export const GUEST_ACCESS_READY_EVENT = "guest_access_ready" as const;
 export const GUEST_FIRST_ACCESS_WELCOME_EVENT = "guest_first_access_welcome" as const;
@@ -293,25 +294,25 @@ export function buildGuestFirstAccessWelcomeMessage(
 }
 
 /**
- * Financeiro liberado para acesso (não usa pagamento_status cru sozinho).
- * - pago → liberado
- * - comissionada (pendente no HITS) → liberado para acesso, sem Pagar.me
+ * Financeiro liberado para acesso — mesma regra do domínio financeiro.
+ * - HITS/pago operacional OU saldo <= 0 → liberado
+ * - Pagar.me quitação integral (paid >= saldo) → liberado mesmo com HITS pendente
+ * - comissionada → liberado para acesso, sem Pagar.me
  * - desconhecida → NÃO libera automaticamente
  */
 export function isFinanceiroLiberadoParaAcesso(input: {
   pagamento_status?: string | null;
   classificacao_comissionamento?: string | null;
   reservation_balance_due?: number | null;
+  /** Soma centavos das cobranças Pagar.me status=paid. */
+  pagarme_paid_centavos_total?: number | null;
 }): boolean {
-  const pay = String(input.pagamento_status ?? "")
-    .trim()
-    .toLowerCase();
-  if (pay === "pago") return true;
-  const cls = String(input.classificacao_comissionamento ?? "")
-    .trim()
-    .toLowerCase();
-  if (cls === "comissionada") return true;
-  return false;
+  return isFinanceiramenteLiberadoParaAcesso({
+    pagamentoStatus: input.pagamento_status,
+    balanceDue: input.reservation_balance_due,
+    classificacao: input.classificacao_comissionamento,
+    pagarmePaidCentavosTotal: input.pagarme_paid_centavos_total,
+  });
 }
 
 export function guestAccessReadyIdempotencyKey(reservationId: string): string {
