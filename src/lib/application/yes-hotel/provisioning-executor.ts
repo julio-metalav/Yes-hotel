@@ -8,7 +8,6 @@
 import {
   allocateNewTtlockPasscode,
   formatTtlockKeyboardPwdName,
-  isTtlockSamePasscodeError,
   TTLOCK_PASSCODE_COLLISION_RETRY_MAX,
 } from "../../domain/yes-hotel/ttlock-credential-format.ts";
 import { resolveProvisionCredentialStatus } from "../../domain/yes-hotel/ttlock-guest-access-gate.ts";
@@ -16,6 +15,17 @@ import {
   canRetryWithNewPasscode,
   shouldRollbackPartialPasscodeAttempt,
 } from "../../domain/yes-hotel/ttlock-passcode-uniqueness.ts";
+import {
+  attemptProvisionLockWithSamePinRetry,
+  encodeTransientRetryState,
+  formatProvisionItemTransientError,
+  parseTransientRetryState,
+  TTLOCK_PROVISION_PHASE2_MAX,
+  TTLOCK_PROVISION_SHORT_BUDGET_MS,
+  TTLOCK_PROVISION_SHORT_DELAY_MS,
+  TTLOCK_PROVISION_SHORT_RETRY_MAX,
+  type ShortRetryBudget,
+} from "../../domain/yes-hotel/ttlock-provision-retry.ts";
 import type { TtlockClient } from "../../integrations/ttlock/client.ts";
 import { logTtlockLifecycle } from "../../integrations/ttlock/lifecycle-log.ts";
 import type { OperacionalCredencialStatus, OperacionalItemProvisionamentoStatus } from "./types.ts";
@@ -140,10 +150,21 @@ export interface ProcessarCredencialResult {
   /** true somente quando todos os itens obrigatórios estão provisionados com remote id. */
   accessReady: boolean;
   rollbackFailed?: boolean;
+  /** Ainda há retry automático (fase curta ou fase 2) em andamento. */
+  retryable?: boolean;
 }
+
+export type ProcessarCredencialRetryOptions = {
+  shortRetryMax?: number;
+  shortDelayMs?: number;
+  shortBudgetMs?: number;
+  phase2Max?: number;
+  sleepFn?: (ms: number) => Promise<void>;
+};
 
 function itemNeedsProvision(item: CredencialItemRow): boolean {
   if (item.status_provisionamento === "pendente") return true;
+  if (item.status_provisionamento === "provisionando") return true;
   if (
     item.status_provisionamento === "falhou" &&
     item.remote_keyboard_pwd_id == null
@@ -182,6 +203,7 @@ async function loadOccupiedPasscodes(
  * Processa uma credencial: gera passcode se necessário, provisiona cada item pendente na TTLock,
  * atualiza itens e credencial no repositório.
  * Colisão (-3007) em qualquer lock: não segue com o mesmo PIN; compensa parciais; novo PIN nos 3.
+ * Erro transitório: retry do mesmo PIN; timeout inconclusivo → reconciliar via listKeyboardPwd.
  */
 export async function processarCredencialDeAcesso(
   credencialId: string,
@@ -189,10 +211,17 @@ export async function processarCredencialDeAcesso(
     repository: ProvisioningRepository;
     ttlockClient: TtlockClient;
     passcodeGenerator?: (exclude?: string | null | Iterable<string>) => string;
+    retry?: ProcessarCredencialRetryOptions;
   },
 ): Promise<ProcessarCredencialResult> {
   const repo = deps.repository;
   const client = deps.ttlockClient;
+  const shortRetryMax = deps.retry?.shortRetryMax ?? TTLOCK_PROVISION_SHORT_RETRY_MAX;
+  const shortDelayMs = deps.retry?.shortDelayMs ?? TTLOCK_PROVISION_SHORT_DELAY_MS;
+  const shortBudgetMs = deps.retry?.shortBudgetMs ?? TTLOCK_PROVISION_SHORT_BUDGET_MS;
+  const phase2Max = deps.retry?.phase2Max ?? TTLOCK_PROVISION_PHASE2_MAX;
+  const sleepFn =
+    deps.retry?.sleepFn ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
 
   const credencial = await repo.getCredencial(credencialId);
   if (!credencial) {
@@ -286,12 +315,18 @@ export async function processarCredencialDeAcesso(
 
   let collisionAttempt = 0;
   let rollbackFailed = false;
+  let hadTransientPending = false;
+  let lastTransientClass = "transient";
+  const budget: ShortRetryBudget = { sleptMs: 0, maxBudgetMs: shortBudgetMs };
+  const priorTransient = parseTransientRetryState(credencial.last_sync_error);
+  let phase2Count = priorTransient?.phase === 2 ? priorTransient.count : 0;
 
   while (true) {
     itens = (await repo.getItens(credencialId)).filter(itemNeedsProvision);
     if (itens.length === 0) break;
 
     let roundCollision = false;
+    hadTransientPending = false;
     const provisionedThisRound: Array<{
       item: CredencialItemRow;
       keyboardPwdId: number;
@@ -310,34 +345,59 @@ export async function processarCredencialDeAcesso(
 
       await repo.updateItem(item.id, { status_provisionamento: "provisionando" });
 
-      logTtlockLifecycle({
-        action: "provision",
-        source: "app_client",
-        reserva_id: credencial.reserva_id,
-        credencial_id: credencialId,
-        credencial_item_id: item.id,
-        codigo_logico_destino: item.codigo_logico_destino,
-        lock_id: item.lock_id_ttlock,
-        status: "start",
-        timestamp: new Date().toISOString(),
+      const result = await attemptProvisionLockWithSamePinRetry({
+        passcode,
+        shortRetryMax,
+        shortDelayMs,
+        budget,
+        sleepFn,
+        addPasscode: async () => {
+          const res = await client.createKeyboardPassword({
+            lockId: item.lock_id_ttlock,
+            keyboardPwd: passcode,
+            keyboardPwdName: keyboardPwdNameBase,
+            startDate: validoDeMs,
+            endDate: validoAteMs,
+          });
+          return res.keyboardPwdId;
+        },
+        listPasscodes: async () => {
+          if (typeof client.listKeyboardPasswords !== "function") return [];
+          return client.listKeyboardPasswords({ lockId: item.lock_id_ttlock });
+        },
+        onAttemptLog: (info) => {
+          logTtlockLifecycle({
+            action: "provision",
+            source: "app_client",
+            reserva_id: credencial.reserva_id,
+            credencial_id: credencialId,
+            credencial_item_id: item.id,
+            codigo_logico_destino: item.codigo_logico_destino,
+            lock_id: item.lock_id_ttlock,
+            status:
+              info.status === "reconciled"
+                ? "success"
+                : info.status === "error"
+                  ? "error"
+                  : "start",
+            error_message: info.classification
+              ? `class=${info.classification.class};transient=${info.classification.transient};retry_count=${info.attempt}`
+              : undefined,
+            remote_keyboard_pwd_id: undefined,
+            timestamp: new Date().toISOString(),
+          });
+        },
       });
-      try {
-        const res = await client.createKeyboardPassword({
-          lockId: item.lock_id_ttlock,
-          keyboardPwd: passcode,
-          keyboardPwdName: keyboardPwdNameBase,
-          startDate: validoDeMs,
-          endDate: validoAteMs,
-        });
 
+      if (result.ok) {
         await repo.updateItem(item.id, {
           status_provisionamento: "provisionado",
           provisionado_em: new Date().toISOString(),
           ultimo_erro: null,
-          remote_keyboard_pwd_id: res.keyboardPwdId,
+          remote_keyboard_pwd_id: result.keyboardPwdId,
           codigo_enviado: passcode,
         });
-        provisionedThisRound.push({ item, keyboardPwdId: res.keyboardPwdId });
+        provisionedThisRound.push({ item, keyboardPwdId: result.keyboardPwdId });
         logTtlockLifecycle({
           action: "provision",
           source: "app_client",
@@ -345,32 +405,49 @@ export async function processarCredencialDeAcesso(
           credencial_id: credencialId,
           credencial_item_id: item.id,
           codigo_logico_destino: item.codigo_logico_destino,
-          remote_keyboard_pwd_id: res.keyboardPwdId,
+          remote_keyboard_pwd_id: result.keyboardPwdId,
           lock_id: item.lock_id_ttlock,
           status: "success",
+          error_message: result.reconciled
+            ? "reconciled_after_uncertain;transient=false"
+            : undefined,
           timestamp: new Date().toISOString(),
         });
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        erros.push(`${item.codigo_logico_destino}: ${msg}`);
-        if (isTtlockSamePasscodeError(msg)) roundCollision = true;
+        continue;
+      }
+
+      erros.push(`${item.codigo_logico_destino}: ${result.message}`);
+
+      if (result.classification.class === "collision") {
+        roundCollision = true;
         await repo.updateItem(item.id, {
           status_provisionamento: "falhou",
-          ultimo_erro: msg,
+          ultimo_erro: result.message,
         });
-        logTtlockLifecycle({
-          action: "provision",
-          source: "app_client",
-          reserva_id: credencial.reserva_id,
-          credencial_id: credencialId,
-          credencial_item_id: item.id,
-          codigo_logico_destino: item.codigo_logico_destino,
-          lock_id: item.lock_id_ttlock,
-          status: "error",
-          error_message: msg,
-          timestamp: new Date().toISOString(),
-        });
+        continue;
       }
+
+      if (!result.stillRetryable) {
+        await repo.updateItem(item.id, {
+          status_provisionamento: "falhou",
+          ultimo_erro: result.message,
+        });
+        continue;
+      }
+
+      // Transitório: NÃO falhou; NÃO rollback dos locks já OK.
+      hadTransientPending = true;
+      lastTransientClass = result.classification.class;
+      const nextRetryAt = new Date(Date.now() + 60_000).toISOString();
+      await repo.updateItem(item.id, {
+        status_provisionamento: "provisionando",
+        ultimo_erro: formatProvisionItemTransientError({
+          classification: result.classification,
+          retryCount: result.attempts,
+          nextRetryAt,
+          phase: 2,
+        }),
+      });
     }
 
     const afterRound = await repo.getItens(credencialId);
@@ -380,6 +457,7 @@ export async function processarCredencialDeAcesso(
     if (!roundCollision) break;
 
     // Compensação: PIN parcial aceito em alguns locks + -3007 em outro.
+    // NÃO rodar rollback por mero timeout/transitório.
     if (
       shouldRollbackPartialPasscodeAttempt({
         collisionOnAnyLock: true,
@@ -453,37 +531,90 @@ export async function processarCredencialDeAcesso(
     }
   }
 
-  const finalItens = await repo.getItens(credencialId);
+  let finalItens = await repo.getItens(credencialId);
   let resolved = resolveProvisionCredentialStatus(finalItens);
+  let retryable = false;
+  const nowIso = new Date().toISOString();
+
   if (rollbackFailed) {
-    // Nunca marcar provisionada / parcial “pronta” com resíduo inconsistente.
     resolved = {
       ...resolved,
       status: resolved.provisionados > 0 ? "parcial" : "falhou",
       allReady: false,
+      inProgress: 0,
     };
-  }
-  await repo.updateCredencial(credencialId, {
-    status: resolved.status,
-    ...(rollbackFailed
-      ? {
-          last_sync_error:
-            "Rollback após colisão de passcode falhou; intervenção necessária.",
+    await repo.updateCredencial(credencialId, {
+      status: resolved.status,
+      sync_status: "failed",
+      last_sync_attempt_at: nowIso,
+      last_sync_error:
+        "Rollback após colisão de passcode falhou; intervenção necessária.",
+    });
+  } else if (hadTransientPending) {
+    phase2Count += 1;
+    if (phase2Count > phase2Max) {
+      for (const item of finalItens) {
+        if (
+          item.status_provisionamento === "provisionando" ||
+          item.status_provisionamento === "pendente"
+        ) {
+          await repo.updateItem(item.id, {
+            status_provisionamento: "falhou",
+            ultimo_erro:
+              item.ultimo_erro || "Retry transitório TTLock esgotado (fase 2).",
+          });
         }
-      : {}),
-  });
+      }
+      finalItens = await repo.getItens(credencialId);
+      resolved = resolveProvisionCredentialStatus(finalItens);
+      await repo.updateCredencial(credencialId, {
+        status: resolved.status,
+        sync_status: "failed",
+        last_sync_attempt_at: nowIso,
+        last_sync_error: encodeTransientRetryState({
+          phase: 2,
+          count: phase2Count,
+          errorClass: lastTransientClass,
+          nextEligibleAt: null,
+        }),
+      });
+    } else {
+      retryable = true;
+      const nextEligibleAt = new Date(Date.now() + 60_000).toISOString();
+      resolved = { ...resolved, status: "provisionando", allReady: false };
+      await repo.updateCredencial(credencialId, {
+        status: "provisionando",
+        sync_status: "pending",
+        last_sync_attempt_at: nowIso,
+        last_sync_error: encodeTransientRetryState({
+          phase: 2,
+          count: phase2Count,
+          errorClass: lastTransientClass,
+          nextEligibleAt,
+        }),
+      });
+    }
+  } else {
+    await repo.updateCredencial(credencialId, {
+      status: resolved.status,
+      last_sync_attempt_at: nowIso,
+      ...(resolved.allReady
+        ? { sync_status: "ok" as const, last_sync_error: null }
+        : {}),
+    });
+  }
 
   return {
     credencialId,
     status: resolved.status,
-    // PIN final só é “aceito” se accessReady; em falha é último candidato (status=falhou bloqueia envio).
-    passcode: resolved.allReady ? passcode : passcode,
+    passcode,
     totalItens: finalItens.length,
     provisionados: resolved.provisionados,
     falhas: resolved.falhas,
     erros,
     accessReady: resolved.allReady,
     rollbackFailed,
+    retryable,
   };
 }
 

@@ -23,12 +23,30 @@ Este documento é a **fonte única de verdade** para o comportamento da integra�
 
 - Endpoint: `POST {apiBase}/v3/keyboardPwd/add`
 - Parâmetros: `clientId`, `accessToken`, `lockId`, `keyboardPwd`, `startDate`, `endDate`, `addType` = `2`, `date`; opcional `keyboardPwdName`.
-- Sem retry obrigatório (provisionamento é menos sensível a instabilidade transitória).
+- **Retry transitório (mesmo PIN):** timeout / network / HTTP 429 / 5xx / gateway temporário → retry do **mesmo** PIN (fase curta ~10s, até ~1 min com orçamento de sleep na Edge; fase 2 assíncrona via reentrada `lifecycle_provision`, até 5 ciclos ~1 min). **Não** gerar novo PIN.
+- **Colisão -3007:** NÃO retry do mesmo PIN; fluxo de novo candidato + rollback parcial (quando aplicável).
+- **Auth/config definitivo (401/credenciais inválidas/não configurado):** NÃO loop transitório.
+- **Estado incerto (timeout após POST add):** reconciliar com `POST {apiBase}/v3/lock/listKeyboardPwd` (read-only). Se o PIN candidato existir, capturar `keyboardPwdId` e seguir. Se -3007 vier após incerteza, reconciliar antes de assumir colisão estrangeira.
+- **2/3 OK + 3º transitório:** manter 1–2; retry do 3º com o mesmo PIN; credencial permanece `provisionando` (não `falhou`); sem `guest_access_ready`.
+- Content-Type preferido: `application/x-www-form-urlencoded` (Edge). App client legado pode diferir; Edge é autoridade em produção.
+
+## List (reconciliação)
+
+- Endpoint: `POST {apiBase}/v3/lock/listKeyboardPwd`
+- Parâmetros: `clientId`, `accessToken`, `lockId`, `pageNo`, `pageSize`, `date`.
+- Uso: somente reconciliação / observabilidade — sem criar PIN.
+
+## Limpeza pós-checkout (decisão operacional pendente)
+
+- Arquitetura de revoke / `pendente_limpeza` / `retry_sync` já existe.
+- **Não** ativar cron automático de limpeza neste hardening.
+- Pendente decidir: quanto tempo após o checkout efetivo manter a credencial na TTLock antes do delete remoto (não assumir 4h automaticamente).
 
 ## Onde está implementado
 
-- **Edge Function:** `supabase/functions/yes-hotel-lifecycle/index.ts` — `ttlockDeleteKeyboardPassword`, `ttlockAddKeyboardPassword`.
-- **App:** `src/lib/integrations/ttlock/client.ts` — `deleteKeyboardPassword`, `createKeyboardPassword`.
+- **Edge Function:** `supabase/functions/yes-hotel-lifecycle/index.ts` — `ttlockDeleteKeyboardPassword`, `ttlockAddKeyboardPassword`, `ttlockListKeyboardPasswords`.
+- **App:** `src/lib/integrations/ttlock/client.ts` — `deleteKeyboardPassword`, `createKeyboardPassword`, `listKeyboardPasswords`.
+- **Domínio:** `src/lib/domain/yes-hotel/ttlock-provision-retry.ts` — classificação de erro + retry mesmo PIN + reconciliação.
 
 Qualquer alteração em content-type, serialização, retry ou tratamento de erro deve ser feita nos dois pontos e refletida neste documento.
 

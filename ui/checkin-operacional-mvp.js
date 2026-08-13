@@ -3386,18 +3386,20 @@ function presentTtlockPasswordStatus(data) {
     return { statusClass: "sync-ok", statusLabel: "Senha pronta", resumoText: "" };
   }
   if (status === "falhou" || syncStatus === "failed") {
-    return { statusClass: "sync-failed", statusLabel: "Falha no envio", resumoText: resumoRaw };
+    return { statusClass: "sync-failed", statusLabel: "Falha ao provisionar senha", resumoText: resumoRaw };
   }
   if (status === "parcial" || syncStatus === "partial") {
-    return { statusClass: "sync-partial", statusLabel: "Envio pendente", resumoText: resumoRaw };
+    return { statusClass: "sync-partial", statusLabel: "Provisionamento pendente", resumoText: resumoRaw };
   }
-  if (
-    status === "pendente" ||
-    status === "pronta" ||
-    status === "provisionando" ||
-    syncStatus === "pending"
-  ) {
-    return { statusClass: "sync-pending", statusLabel: "Envio pendente", resumoText: "" };
+  if (status === "provisionando" || syncStatus === "pending") {
+    return {
+      statusClass: "sync-pending",
+      statusLabel: "Provisionando senha — aguardando confirmação da TTLock",
+      resumoText: resumoRaw,
+    };
+  }
+  if (status === "pendente" || status === "pronta") {
+    return { statusClass: "sync-pending", statusLabel: "Provisionando senha…", resumoText: "" };
   }
   if (status === "revogada") {
     if (syncStatus === "failed") {
@@ -5111,8 +5113,14 @@ function formatAcessoSituacaoLabel(reserva) {
   if (st === "falhou") {
     return { label: "Falha ao provisionar senha", accent: "error" };
   }
-  if (st === "parcial" || st === "provisionando" || st === "pendente" || st === "pronta") {
-    return { label: "Provisionamento pendente", accent: "pending" };
+  if (st === "provisionando") {
+    return {
+      label: "Provisionando senha — aguardando confirmação da TTLock",
+      accent: "pending",
+    };
+  }
+  if (st === "parcial" || st === "pendente" || st === "pronta") {
+    return { label: "Provisionando senha…", accent: "pending" };
   }
   if (acessoLiberadoEfetivo(reserva)) {
     return { label: "Provisionamento pendente", accent: "pending" };
