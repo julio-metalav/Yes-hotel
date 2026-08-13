@@ -220,7 +220,12 @@ Deno.serve(async (req: Request) => {
   } else if (!passcode) {
     const provisionRes = await fetch(lifecycleUrl, {
       method: "POST",
-      headers: { ...corsHeaders, "Content-Type": "application/json", "Authorization": authHeader },
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json",
+        Authorization: authHeader || `Bearer ${serviceRoleKey}`,
+        "x-yes-internal-caller": "send-senha",
+      },
       body: JSON.stringify({ action: "lifecycle_provision", payload: { reservaId } }),
     });
     const provisionData = await provisionRes.json().catch(() => ({})) as { passcode?: string; error?: string };

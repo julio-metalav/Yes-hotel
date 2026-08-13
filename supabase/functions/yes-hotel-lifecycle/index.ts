@@ -183,6 +183,15 @@ async function ensureCallerAllowed(request: Request): Promise<void> {
     throw new HttpError("Autenticação obrigatória.", 401);
   }
 
+  // Chamada interna send-senha→lifecycle_provision com service_role.
+  // Necessária quando a quitação Pagar.me fecha depois da FNRH (sem JWT de operador).
+  const internalCaller = String(request.headers.get("x-yes-internal-caller") ?? "")
+    .trim()
+    .toLowerCase();
+  if (token === supabaseServiceKey && internalCaller === "send-senha") {
+    return;
+  }
+
   const requestClient = createRequestClientWithAuth(request);
   const {
     data: { user },
