@@ -523,7 +523,7 @@ Deno.serve(async (req: Request) => {
       whatsapp_status: agg.whatsapp,
       canal_operacional_whatsapp: enviadoWhatsapp ? "digisac" : null,
       multicanal_hospede: true,
-      qtd_fnrh_links: links.length,
+      qtd_fnrh_links: 0,
       timestamp: now,
     }),
   });
