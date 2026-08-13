@@ -175,6 +175,23 @@ async function insertReservaEvento(
   }
 }
 
+/** Aceita service_role por igualdade com o secret da Edge ou claim JWT `role=service_role`. */
+function isServiceRoleBearer(token: string, expectedServiceKey: string): boolean {
+  if (!token) return false;
+  if (expectedServiceKey && token === expectedServiceKey) return true;
+  const parts = token.split(".");
+  if (parts.length < 2) return false;
+  try {
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4));
+    const json = atob(b64 + pad);
+    const payload = JSON.parse(json) as { role?: string };
+    return String(payload.role ?? "").toLowerCase() === "service_role";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Mesmo padrão de `internal-users-admin`: client com Authorization nos headers globais + getUser(),
  * em vez de getClaims/getUser(jwt) num client sem header (comportamento inconsistente no Edge).
@@ -191,7 +208,7 @@ async function ensureCallerAllowed(request: Request): Promise<void> {
   const internalCaller = String(request.headers.get("x-yes-internal-caller") ?? "")
     .trim()
     .toLowerCase();
-  if (token === supabaseServiceKey && internalCaller === "send-senha") {
+  if (internalCaller === "send-senha" && isServiceRoleBearer(token, supabaseServiceKey)) {
     return;
   }
 
