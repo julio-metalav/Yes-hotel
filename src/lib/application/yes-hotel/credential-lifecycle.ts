@@ -3,8 +3,8 @@
  * Revogação, alteração de validade, reprovisionamento e handlers por cenário operacional.
  */
 
-import { logTtlockLifecycle } from "../../integrations/ttlock.ts";
-import type { TtlockClient } from "../../integrations/ttlock.ts";
+import type { TtlockClient } from "../../integrations/ttlock/client.ts";
+import { logTtlockLifecycle } from "../../integrations/ttlock/lifecycle-log.ts";
 import { generateRandomTtlockPasscode } from "../../domain/yes-hotel/ttlock-credential-format.ts";
 import type { CredencialItemRow, CredencialRow, ProvisioningRepository } from "./provisioning-executor.ts";
 import { processarCredencialDeAcesso } from "./provisioning-executor.ts";

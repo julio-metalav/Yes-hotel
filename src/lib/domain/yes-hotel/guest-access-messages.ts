@@ -45,6 +45,11 @@ export type BuildGuestAccessReadyInput = {
    * false = às 13h ou depois (senha já ativa).
    */
   before_activation: boolean;
+  /**
+   * Linha opcional para o hóspede (ex.: reenvio com senha da hospedagem 14/08).
+   * Não mencionar detalhes técnicos.
+   */
+  stay_access_note?: string | null;
 };
 
 export type GuestAccessMessage = {
@@ -154,6 +159,7 @@ export function buildGuestAccessReadyMessage(
   const activation = input.before_activation
     ? `⏰ Sua senha ficará ativa a partir das 13h do dia ${input.checkin_date_label}.`
     : "⏰ Sua senha já está ativa.";
+  const stayNote = String(input.stay_access_note ?? "").trim();
 
   const body = [
     `🏨 Olá, ${name}! Seu acesso ao Yes Hotel está liberado.`,
@@ -165,6 +171,7 @@ export function buildGuestAccessReadyMessage(
     "",
     `🔑 Sua senha de acesso: ${pinHash}`,
     `(digite ${pin} + #)`,
+    ...(stayNote ? ["", stayNote] : []),
     "",
     "A mesma senha é utilizada nos portões de pedestres e na porta do apartamento.",
     "",
@@ -191,6 +198,7 @@ export function buildGuestAccessReadyMessage(
     `<p><strong>📍 Endereço</strong><br/>${escHtml(HOTEL_ADDRESS)}</p>`,
     `<p><strong>🛏️ Apartamento:</strong> ${escHtml(apt)}</p>`,
     `<p><strong>🔑 Sua senha de acesso:</strong> ${escHtml(pinHash)}<br/>(digite ${escHtml(pin)} + #)</p>`,
+    ...(stayNote ? [`<p>${escHtml(stayNote)}</p>`] : []),
     `<p>A mesma senha é utilizada nos portões de pedestres e na porta do apartamento.</p>`,
     `<p>Para entrar:<br/>• No portão de pedestres, digite ${escHtml(pin)} + #.<br/>• Na porta do apartamento, utilize novamente ${escHtml(pin)} + #.</p>`,
     `<p>${escHtml(activation)}</p>`,

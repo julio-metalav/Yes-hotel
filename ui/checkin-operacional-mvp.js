@@ -1142,49 +1142,71 @@ async function fetchReservaIdsComTtlockPendenteCritico(supabase) {
 
 /**
  * Reservas em que cada credencial principal ativa tem pelo menos um item e todos os itens estão provisionados.
+ * Também retorna o pior status TTLock por reserva (para rótulos do painel).
  */
 async function fetchReservaIdsPrincipalTtlockTodosProvisionados(supabase) {
+  const empty = { ok: new Set(), statusByReserva: new Map() };
   const { data: creds, error } = await supabase
     .from("operacional_credenciais_acesso")
     .select("id, reserva_id, status")
     .eq("tipo_credencial", "principal")
     .neq("status", "revogada");
-  if (error || !Array.isArray(creds) || creds.length === 0) return new Set();
+  if (error || !Array.isArray(creds) || creds.length === 0) return empty;
   const credIds = creds.map((c) => c.id);
   const { data: itens, error: errItens } = await supabase
     .from("operacional_credencial_itens")
-    .select("credencial_id, status_provisionamento")
+    .select("credencial_id, status_provisionamento, remote_keyboard_pwd_id")
     .in("credencial_id", credIds);
-  if (errItens || !Array.isArray(itens)) return new Set();
+  if (errItens || !Array.isArray(itens)) return empty;
   const itemsByCred = new Map();
   for (const c of creds) itemsByCred.set(c.id, []);
   for (const it of itens) {
     if (itemsByCred.has(it.credencial_id)) itemsByCred.get(it.credencial_id).push(it);
   }
-  const reservaToCredIds = new Map();
+  const reservaToCreds = new Map();
   for (const c of creds) {
     const rid = c.reserva_id != null ? String(c.reserva_id) : "";
     if (!rid) continue;
-    if (!reservaToCredIds.has(rid)) reservaToCredIds.set(rid, []);
-    reservaToCredIds.get(rid).push(c.id);
+    if (!reservaToCreds.has(rid)) reservaToCreds.set(rid, []);
+    reservaToCreds.get(rid).push(c);
   }
+  const rank = { falhou: 5, parcial: 4, provisionando: 3, pendente: 2, pronta: 2, provisionada: 1 };
   const out = new Set();
-  for (const [rid, credList] of reservaToCredIds) {
+  const statusByReserva = new Map();
+  for (const [rid, credList] of reservaToCreds) {
     let allOk = true;
-    for (const cid of credList) {
-      const list = itemsByCred.get(cid) || [];
+    let worst = null;
+    let worstRank = 0;
+    for (const c of credList) {
+      const list = itemsByCred.get(c.id) || [];
+      const st = String(c.status || "pendente");
+      const r = rank[st] != null ? rank[st] : 2;
+      if (r > worstRank) {
+        worstRank = r;
+        worst = st;
+      }
       if (list.length === 0) {
         allOk = false;
-        break;
+        continue;
       }
-      if (!list.every((i) => i.status_provisionamento === "provisionado")) {
+      if (
+        !list.every(
+          (i) =>
+            i.status_provisionamento === "provisionado" &&
+            i.remote_keyboard_pwd_id != null,
+        )
+      ) {
         allOk = false;
-        break;
       }
     }
-    if (allOk) out.add(rid);
+    if (allOk) {
+      out.add(rid);
+      statusByReserva.set(rid, "provisionada");
+    } else {
+      statusByReserva.set(rid, worst || "pendente");
+    }
   }
-  return out;
+  return { ok: out, statusByReserva };
 }
 
 /** Uma reserva: todas as credenciais principais ativas com itens, todos provisionados (para pular lifecycle_provision). */
@@ -1251,7 +1273,7 @@ async function loadReservasFromBackend(loadOpts) {
   const ids = reservasRows.map((r) => r.id).filter(Boolean);
   const [
     ttlockCritico,
-    principalTtlockOk,
+    principalTtlockInfo,
     hospedesRes,
     eventosRes,
     fnrhRes,
@@ -1294,6 +1316,8 @@ async function loadReservasFromBackend(loadOpts) {
       .eq("status", "failed")
       .is("processed_at", null),
   ]);
+  const principalTtlockOk = principalTtlockInfo.ok || new Set();
+  const ttlockStatusByReserva = principalTtlockInfo.statusByReserva || new Map();
 
   function groupByKey(rows, key) {
     const map = new Map();
@@ -1328,6 +1352,7 @@ async function loadReservasFromBackend(loadOpts) {
     );
     internal.ttlockBloqueiaLiberado = ttlockCritico.has(ridKey);
     internal.ttlockPrincipalTodosProvisionados = principalTtlockOk.has(ridKey);
+    internal.ttlockCredencialStatus = ttlockStatusByReserva.get(ridKey) || null;
     if (tolRows[0]) {
       internal.acessoTolerancia = {
         id: tolRows[0].id,
@@ -3403,7 +3428,36 @@ async function loadAndRenderTtlockSection(reservaId) {
   if (typeof console !== "undefined" && console.log) {
     console.log("[TTLock] loadAndRenderTtlockSection reservaId=" + reservaId + " invokeLifecycleAction=" + hasInvoke);
   }
-  if (!loadingEl || !contentEl || !hasInvoke) return;
+  if (!loadingEl || !contentEl) return;
+
+  function finishWithHtml(html) {
+    contentEl.innerHTML = html;
+    loadingEl.classList.add("hidden");
+    contentEl.classList.remove("hidden");
+  }
+
+  if (!hasInvoke) {
+    const reserva =
+      typeof reservas !== "undefined" && Array.isArray(reservas)
+        ? reservas.find((r) => String(r.id) === String(reservaId))
+        : null;
+    let fallbackLabel = "Status TTLock indisponível (sessão sem lifecycle)";
+    let statusClass = "sync-pending";
+    if (reserva && reserva.ttlockPrincipalTodosProvisionados) {
+      fallbackLabel = "Senha pronta (cache local)";
+      statusClass = "sync-ok";
+    } else if (reserva && String(reserva.ttlockCredencialStatus || "") === "falhou") {
+      fallbackLabel = "Falha no envio (cache local)";
+      statusClass = "sync-failed";
+    } else if (reserva && reserva.ttlockCredencialStatus) {
+      fallbackLabel = "Envio pendente (cache local)";
+      statusClass = "sync-pending";
+    }
+    finishWithHtml(
+      `<div class="ttlock-panel-stack"><div class="ttlock-card-status-block ttlock-card-status-block--${statusClass}"><p class="ttlock-card-status-label">Status da senha</p><div class="ttlock-status-row"><span class="ttlock-sync-badge ${statusClass}" role="status">${escapeHtml(fallbackLabel)}</span></div></div><p class="reservation-detail-ttlock-muted">Não foi possível consultar o lifecycle agora. Atualize a página ou faça login novamente.</p></div>`,
+    );
+    return;
+  }
   try {
     const data = await auth.invokeLifecycleAction("sync_summary", { reservaId });
     const presented = presentTtlockPasswordStatus(data);
@@ -3438,9 +3492,7 @@ async function loadAndRenderTtlockSection(reservaId) {
       html += `<div class="ttlock-card-attention ttlock-card-attention--muted"><p class="reservation-detail-ttlock-muted">Credencial ainda não gerada</p></div>`;
     }
     html += `</div>`;
-    contentEl.innerHTML = html;
-    loadingEl.classList.add("hidden");
-    contentEl.classList.remove("hidden");
+    finishWithHtml(html);
     contentEl.querySelectorAll(".detail-ttlock-cancel-btn").forEach((btn) => {
       btn.addEventListener("click", () => acaoLifecycleCancel(btn.dataset.reservaId));
     });
@@ -3453,9 +3505,7 @@ async function loadAndRenderTtlockSection(reservaId) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (typeof console !== "undefined" && console.warn) console.warn("[TTLock] loadAndRenderTtlockSection error", msg);
-    contentEl.innerHTML = `<div class="ttlock-panel-stack"><p class="reservation-detail-ttlock-error reservation-detail-ttlock-error--banner">Erro ao carregar status: ${escapeHtml(msg)}</p></div>`;
-    loadingEl.classList.add("hidden");
-    contentEl.classList.remove("hidden");
+    finishWithHtml(`<div class="ttlock-panel-stack"><p class="reservation-detail-ttlock-error reservation-detail-ttlock-error--banner">Erro ao carregar status: ${escapeHtml(msg)}</p></div>`);
   }
 }
 
@@ -5047,19 +5097,25 @@ function formatAcessoSituacaoLabel(reserva) {
   if (reserva.entrouNoApto) {
     return { label: "Entrou no apartamento", accent: "entrou" };
   }
-  if (
-    reserva.ttlockPrincipalTodosProvisionados ||
-    (reserva.senhaEnviadaEm && acessoLiberadoEfetivo(reserva))
-  ) {
-    if (acessoLiberadoEfetivo(reserva)) {
-      return { label: "Senha provisionada", accent: "ok" };
-    }
+  // Status TTLock real — não usar senhaEnviadaEm / acessoLiberado como proxy de success.
+  if (reserva.ttlockPrincipalTodosProvisionados) {
+    return { label: "Senha provisionada", accent: "ok" };
+  }
+  if (reserva.senhaEnviadaEm && !reserva.ttlockPrincipalTodosProvisionados) {
+    return {
+      label: "Inconsistência: mensagem enviada sem provisioning TTLock",
+      accent: "error",
+    };
+  }
+  const st = String(reserva.ttlockCredencialStatus || "");
+  if (st === "falhou") {
+    return { label: "Falha ao provisionar senha", accent: "error" };
+  }
+  if (st === "parcial" || st === "provisionando" || st === "pendente" || st === "pronta") {
+    return { label: "Provisionamento pendente", accent: "pending" };
   }
   if (acessoLiberadoEfetivo(reserva)) {
-    return { label: "Liberado", accent: "ok" };
-  }
-  if (reserva.ttlockPrincipalTodosProvisionados || reserva.senhaEnviadaEm) {
-    return { label: "Senha provisionada", accent: "pending" };
+    return { label: "Provisionamento pendente", accent: "pending" };
   }
   return { label: "Aguardando liberação", accent: "pending" };
 }
