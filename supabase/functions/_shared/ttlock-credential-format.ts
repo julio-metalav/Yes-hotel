@@ -3,6 +3,8 @@
  * Ao alterar regras, mantenha os dois arquivos alinhados.
  */
 
+export const TTLOCK_PASSCODE_COLLISION_RETRY_MAX = 3;
+
 export function extractDigits(input: string): string {
   return String(input ?? "").replace(/\D/g, "");
 }
@@ -13,6 +15,10 @@ export function lastFourDigitsPaddedFromDigitRun(digits: string): string {
   return d.padStart(4, "0");
 }
 
+/**
+ * @deprecated Não usar para provisionar novas credenciais.
+ * Preferir allocateNewTtlockPasscode / generateRandomTtlockPasscode.
+ */
 export function deriveTtlockPasscodeFromReservation(
   externalReservationId: string | null | undefined,
   internalReservaId: string,
@@ -26,14 +32,46 @@ export function deriveTtlockPasscodeFromReservation(
   return lastFourDigitsPaddedFromDigitRun(uuidDig.length > 0 ? uuidDig : "0");
 }
 
-/** Senha aleatória de 4 dígitos distinta de `exclude` (Gerar nova senha). */
-export function generateRandomTtlockPasscode(exclude?: string | null): string {
-  const blocked = exclude != null && String(exclude).trim() ? String(exclude).trim() : null;
-  for (let i = 0; i < 32; i++) {
-    const code = String(1000 + Math.floor(Math.random() * 9000));
-    if (!blocked || code !== blocked) return code;
+function randomFourDigitCode(): string {
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  return String(1000 + (buf[0] % 9000));
+}
+
+/** Senha aleatória de 4 dígitos distinta de `exclude` (provisionamento / Gerar nova senha). */
+export function generateRandomTtlockPasscode(
+  exclude?: string | null | Iterable<string>,
+): string {
+  const blocked = new Set<string>();
+  if (typeof exclude === "string") {
+    const s = exclude.trim();
+    if (s) blocked.add(s);
+  } else if (exclude) {
+    for (const x of exclude) {
+      const s = String(x ?? "").trim();
+      if (s) blocked.add(s);
+    }
   }
-  return blocked === "9999" ? "1000" : "9999";
+  for (let i = 0; i < 64; i++) {
+    const code = randomFourDigitCode();
+    if (!blocked.has(code)) return code;
+  }
+  for (let n = 1000; n <= 9999; n++) {
+    const code = String(n);
+    if (!blocked.has(code)) return code;
+  }
+  return "1000";
+}
+
+export function allocateNewTtlockPasscode(
+  exclude?: string | null | Iterable<string>,
+): string {
+  return generateRandomTtlockPasscode(exclude);
+}
+
+export function isTtlockSamePasscodeError(message: string | null | undefined): boolean {
+  const m = String(message ?? "");
+  return m.includes("-3007") || /same passcode already exists/i.test(m);
 }
 
 function guestFirstAndSecondOrNull(fullName: string | null | undefined): string | null {

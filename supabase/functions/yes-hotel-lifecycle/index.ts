@@ -8,15 +8,18 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import md5 from "npm:md5";
 import {
-  deriveTtlockPasscodeFromReservation,
+  allocateNewTtlockPasscode,
   formatTtlockKeyboardPwdName,
   generateRandomTtlockPasscode,
+  isTtlockSamePasscodeError,
+  TTLOCK_PASSCODE_COLLISION_RETRY_MAX,
 } from "../_shared/ttlock-credential-format.ts";
 import {
   resolveDefaultCredentialValidityIso,
   validityIsoToTtlockMs,
 } from "../_shared/hotel-timezone.ts";
 import { executeLifecycleUpdateValidity } from "../_shared/lifecycle-update-validity.ts";
+import { resolveProvisionCredentialStatus } from "../../../src/lib/domain/yes-hotel/ttlock-guest-access-gate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -805,29 +808,71 @@ async function getCredencialPrincipalPorId(credencialId: string): Promise<Creden
   return row ? (row as CredencialForProvision) : null;
 }
 
-async function getItensPendentes(credencialId: string): Promise<ItemRow[]> {
+async function getAllItensCredencial(credencialId: string): Promise<ItemRow[]> {
   const cid = String(credencialId ?? "").trim();
   if (!cid) {
-    throw new HttpError("credencialId inválido para listagem de itens pendentes.", 400);
+    throw new HttpError("credencialId inválido para listagem de itens.", 400);
   }
   const { data, error } = await adminClient
     .from("operacional_credencial_itens")
-    .select("id, credencial_id, lock_id_ttlock, status_provisionamento, codigo_logico_destino")
-    .eq("credencial_id", cid)
-    .eq("status_provisionamento", "pendente");
+    .select(
+      "id, credencial_id, lock_id_ttlock, status_provisionamento, codigo_logico_destino, remote_keyboard_pwd_id",
+    )
+    .eq("credencial_id", cid);
   if (error) {
-    if (typeof console !== "undefined") {
-      console.warn("[lifecycle] getItensPendentes query error credencial_id=" + cid, error.message, (error as { code?: string }).code ?? "");
-    }
-    throw new HttpError("Falha ao listar itens pendentes da credencial: " + error.message, 500);
+    throw new HttpError("Falha ao listar itens da credencial: " + error.message, 500);
   }
-  if (!Array.isArray(data)) {
-    if (typeof console !== "undefined") {
-      console.warn("[lifecycle] getItensPendentes resposta inesperada credencial_id=" + cid, typeof data);
-    }
-    throw new HttpError("Resposta inválida ao listar itens pendentes.", 500);
+  return (Array.isArray(data) ? data : []) as ItemRow[];
+}
+
+/** Pendente ou falhou sem remote id (retry controlado de provisionamento). */
+async function getItensPendentes(credencialId: string): Promise<ItemRow[]> {
+  const all = await getAllItensCredencial(credencialId);
+  return all.filter(
+    (i) =>
+      i.status_provisionamento === "pendente" ||
+      (i.status_provisionamento === "falhou" && i.remote_keyboard_pwd_id == null),
+  );
+}
+
+async function listActivePasscodesOnLocks(
+  lockIds: string[],
+  excludeCredencialId: string,
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  const locks = lockIds.map((x) => String(x || "").trim()).filter(Boolean);
+  if (locks.length === 0) return out;
+  const { data: itens } = await adminClient
+    .from("operacional_credencial_itens")
+    .select("credencial_id, lock_id_ttlock, status_provisionamento, remote_keyboard_pwd_id")
+    .in("lock_id_ttlock", locks)
+    .eq("status_provisionamento", "provisionado")
+    .not("remote_keyboard_pwd_id", "is", null);
+  const credIds = [
+    ...new Set(
+      (itens ?? [])
+        .map((r: { credencial_id?: string }) => String(r.credencial_id || "").trim())
+        .filter((id: string) => id && id !== excludeCredencialId),
+    ),
+  ];
+  if (credIds.length === 0) return out;
+  const { data: creds } = await adminClient
+    .from("operacional_credenciais_acesso")
+    .select("id, codigo_credencial, status, valido_ate")
+    .in("id", credIds)
+    .neq("status", "revogada");
+  const now = Date.now();
+  for (const c of creds ?? []) {
+    const row = c as {
+      codigo_credencial?: string | null;
+      valido_ate?: string | null;
+    };
+    const pin = String(row.codigo_credencial ?? "").trim();
+    if (!pin) continue;
+    if (row.valido_ate && new Date(row.valido_ate).getTime() < now) continue;
+    out.add(pin);
   }
-  return data as ItemRow[];
+  return out;
 }
 
 async function getItensProvisionados(credencialId: string): Promise<ItemRow[]> {
@@ -1157,38 +1202,53 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     ttlockCtx.principal_guest_nome ?? ttlockCtx.hospede_principal,
   );
 
-  let passcode = credencial.codigo_credencial ?? null;
-  if (!passcode) {
-    passcode = deriveTtlockPasscodeFromReservation(ttlockCtx.external_reservation_id, reservaId);
+  const allItensBefore = await getAllItensCredencial(credencial.id);
+  const alreadyRemoteOk = allItensBefore.some(
+    (i) => i.status_provisionamento === "provisionado" && i.remote_keyboard_pwd_id != null,
+  );
+  const lockIds = [
+    ...new Set(allItensBefore.map((i) => String(i.lock_id_ttlock || "").trim()).filter(Boolean)),
+  ];
+  const localBlocked = await listActivePasscodesOnLocks(lockIds, credencial.id);
+
+  let passcode = credencial.codigo_credencial
+    ? String(credencial.codigo_credencial).trim()
+    : "";
+  // Credencial já com sucesso remoto: nunca trocar PIN. Senão: aleatório + evitar colisão local.
+  if (!alreadyRemoteOk) {
+    if (!passcode || localBlocked.has(passcode)) {
+      if (passcode) localBlocked.add(passcode);
+      passcode = allocateNewTtlockPasscode(localBlocked);
+    }
+  } else if (!passcode) {
+    passcode = allocateNewTtlockPasscode(localBlocked);
   }
 
-  const credencialPatchComPasscode: Record<string, unknown> = {
+  const credencialPatch: Record<string, unknown> = {
     status: "provisionando",
     codigo_credencial: passcode,
     provider_tipo: "ttlock_passcode",
   };
-  const credencialPatchSoStatus: Record<string, unknown> = { status: "provisionando" };
 
   let upErr = (
     await adminClient
       .from("operacional_credenciais_acesso")
-      .update(credencial.codigo_credencial ? credencialPatchSoStatus : credencialPatchComPasscode)
+      .update(credencialPatch)
       .eq("id", credencial.id)
   ).error;
 
-  if (upErr && !credencial.codigo_credencial) {
-    upErr = (await adminClient
-      .from("operacional_credenciais_acesso")
-      .update(credencialPatchSoStatus)
-      .eq("id", credencial.id)).error;
-  } else if (upErr && credencial.codigo_credencial) {
-    throw new HttpError("Falha ao atualizar credencial (status): " + upErr.message, 500);
+  if (upErr) {
+    // Fallback: só status se colunas TTLock ausentes (legado).
+    upErr = (
+      await adminClient
+        .from("operacional_credenciais_acesso")
+        .update({ status: "provisionando" })
+        .eq("id", credencial.id)
+    ).error;
   }
-
   if (upErr) {
     throw new HttpError(
-      "Falha ao atualizar credencial para provisionamento (colunas codigo_credencial/provider_tipo podem não existir): " +
-        upErr.message,
+      "Falha ao atualizar credencial para provisionamento: " + upErr.message,
       500,
     );
   }
@@ -1234,12 +1294,21 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     validoAteIso,
   );
   const erros: string[] = [];
-  let provisionados = 0;
-  let falhas = 0;
   const now = NOW();
 
   if (!isTtlockAvailable()) {
-    if (typeof console !== "undefined") console.warn("[lifecycle] TTLock indisponível: env CLIENT_ID=" + (!!ttlockClientId) + " SECRET=" + (!!ttlockClientSecret) + " USER=" + (!!ttlockUsername) + " PWD=" + (!!ttlockPassword));
+    if (typeof console !== "undefined") {
+      console.warn(
+        "[lifecycle] TTLock indisponível: env CLIENT_ID=" +
+          !!ttlockClientId +
+          " SECRET=" +
+          !!ttlockClientSecret +
+          " USER=" +
+          !!ttlockUsername +
+          " PWD=" +
+          !!ttlockPassword,
+      );
+    }
     const msg = "TTLock não configurado (variáveis de ambiente).";
     erros.push(msg);
     for (const item of itens) {
@@ -1247,77 +1316,133 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
         .from("operacional_credencial_itens")
         .update({ status_provisionamento: "falhou", ultimo_erro: msg })
         .eq("id", item.id);
-      falhas++;
     }
+    const after = await getAllItensCredencial(credencial.id);
+    const resolved = resolveProvisionCredentialStatus(after);
     await adminClient
       .from("operacional_credenciais_acesso")
-      .update({ status: falhas === itens.length ? "falhou" : "parcial" })
+      .update({ status: resolved.status })
       .eq("id", credencial.id);
-    const st = falhas === itens.length ? "falhou" : "parcial";
     await insertReservaEvento(reservaId, "ttlock_provision_ttlock_indisponivel", "TTLock: provisionamento sem API (variáveis ausentes)", {
       action: "lifecycle_provision_concluido",
       credencial_id: credencial.id,
-      status_final: st,
-      total_itens: itens.length,
-      provisionados: 0,
-      falhas: itens.length,
+      status_final: resolved.status,
+      total_itens: after.length,
+      provisionados: resolved.provisionados,
+      falhas: resolved.falhas,
       revogados: 0,
       erro_resumido: msg,
     });
-    return jsonResponse({
-      ok: true,
-      message: "Provisionamento tentado; TTLock indisponível.",
-      credencialId: credencial.id,
-      reservaId,
-      status: st,
-      passcode,
-      totalItens: itens.length,
-      provisionados: 0,
-      falhas: itens.length,
-      erros,
-    });
+    return jsonResponse(
+      {
+        ok: false,
+        error: msg,
+        message: "Provisionamento falhou; TTLock indisponível.",
+        credencialId: credencial.id,
+        reservaId,
+        status: resolved.status,
+        totalItens: after.length,
+        provisionados: resolved.provisionados,
+        falhas: resolved.falhas,
+        erros,
+      },
+      503,
+    );
   }
 
-  for (const item of itens) {
-    await adminClient
-      .from("operacional_credencial_itens")
-      .update({ status_provisionamento: "provisionando" })
-      .eq("id", item.id);
+  let collisionAttempt = 0;
+  let workingItens = itens;
+  while (workingItens.length > 0) {
+    let roundCollision = false;
+    let roundProvisionados = 0;
 
-    try {
-      const keyboardPwdId = await ttlockAddKeyboardPassword(
-        item.lock_id_ttlock,
-        passcode!,
-        validoDeMs,
-        validoAteMs,
-        keyboardPwdBaseName,
-        { reserva_id: reservaId, credencial_id: credencial.id, credencial_item_id: item.id, codigo_logico_destino: item.codigo_logico_destino },
-      );
+    for (const item of workingItens) {
       await adminClient
         .from("operacional_credencial_itens")
-        .update({
-          status_provisionamento: "provisionado",
-          provisionado_em: now,
-          ultimo_erro: null,
-          remote_keyboard_pwd_id: keyboardPwdId,
-        })
+        .update({ status_provisionamento: "provisionando" })
         .eq("id", item.id);
-      provisionados++;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (typeof console !== "undefined") console.warn("[lifecycle] TTLock provision item FAIL", item.codigo_logico_destino, "error=" + msg, e instanceof Error ? e.stack : String(e));
-      erros.push(`${item.codigo_logico_destino}: ${msg}`);
-      await adminClient
-        .from("operacional_credencial_itens")
-        .update({ status_provisionamento: "falhou", ultimo_erro: msg })
-        .eq("id", item.id);
-      falhas++;
+
+      try {
+        const keyboardPwdId = await ttlockAddKeyboardPassword(
+          item.lock_id_ttlock,
+          passcode,
+          validoDeMs,
+          validoAteMs,
+          keyboardPwdBaseName,
+          {
+            reserva_id: reservaId,
+            credencial_id: credencial.id,
+            credencial_item_id: item.id,
+            codigo_logico_destino: item.codigo_logico_destino,
+          },
+        );
+        await adminClient
+          .from("operacional_credencial_itens")
+          .update({
+            status_provisionamento: "provisionado",
+            provisionado_em: now,
+            ultimo_erro: null,
+            remote_keyboard_pwd_id: keyboardPwdId,
+          })
+          .eq("id", item.id);
+        roundProvisionados++;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (typeof console !== "undefined") {
+          console.warn(
+            "[lifecycle] TTLock provision item FAIL",
+            item.codigo_logico_destino,
+            "error=" + msg,
+            e instanceof Error ? e.stack : String(e),
+          );
+        }
+        erros.push(`${item.codigo_logico_destino}: ${msg}`);
+        if (isTtlockSamePasscodeError(msg)) roundCollision = true;
+        await adminClient
+          .from("operacional_credencial_itens")
+          .update({ status_provisionamento: "falhou", ultimo_erro: msg })
+          .eq("id", item.id);
+      }
     }
+
+    workingItens = await getItensPendentes(credencial.id);
+    const remoteOkNow = (await getAllItensCredencial(credencial.id)).some(
+      (i) => i.status_provisionamento === "provisionado" && i.remote_keyboard_pwd_id != null,
+    );
+
+    if (workingItens.length === 0) break;
+
+    if (
+      roundCollision &&
+      roundProvisionados === 0 &&
+      !remoteOkNow &&
+      !alreadyRemoteOk &&
+      collisionAttempt < TTLOCK_PASSCODE_COLLISION_RETRY_MAX - 1
+    ) {
+      collisionAttempt++;
+      localBlocked.add(passcode);
+      passcode = allocateNewTtlockPasscode(localBlocked);
+      await adminClient
+        .from("operacional_credenciais_acesso")
+        .update({ codigo_credencial: passcode, provider_tipo: "ttlock_passcode" })
+        .eq("id", credencial.id);
+      for (const item of workingItens) {
+        await adminClient
+          .from("operacional_credencial_itens")
+          .update({ status_provisionamento: "pendente", ultimo_erro: null })
+          .eq("id", item.id);
+      }
+      workingItens = await getItensPendentes(credencial.id);
+      continue;
+    }
+    break;
   }
 
-  let statusFinal: "provisionada" | "parcial" | "falhou" = "provisionada";
-  if (falhas > 0 && provisionados > 0) statusFinal = "parcial";
-  else if (falhas === itens.length) statusFinal = "falhou";
+  const finalItens = await getAllItensCredencial(credencial.id);
+  const resolved = resolveProvisionCredentialStatus(finalItens);
+  const statusFinal = resolved.status;
+  const provisionados = resolved.provisionados;
+  const falhas = resolved.falhas;
 
   await adminClient
     .from("operacional_credenciais_acesso")
@@ -1330,7 +1455,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
       action: "lifecycle_provision_concluido",
       credencial_id: credencial.id,
       status_final: statusFinal,
-      total_itens: itens.length,
+      total_itens: finalItens.length,
       provisionados,
       falhas,
       revogados: 0,
@@ -1341,7 +1466,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
       action: "lifecycle_provision_concluido",
       credencial_id: credencial.id,
       status_final: statusFinal,
-      total_itens: itens.length,
+      total_itens: finalItens.length,
       provisionados,
       falhas,
       revogados: 0,
@@ -1352,7 +1477,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
       action: "lifecycle_provision_concluido",
       credencial_id: credencial.id,
       status_final: statusFinal,
-      total_itens: itens.length,
+      total_itens: finalItens.length,
       provisionados,
       falhas,
       revogados: 0,
@@ -1360,23 +1485,42 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     });
   }
 
-  return jsonResponse({
-    ok: true,
-    message:
-      statusFinal === "provisionada"
-        ? "Provisionamento concluído."
-        : statusFinal === "parcial"
+  if (resolved.allReady) {
+    return jsonResponse({
+      ok: true,
+      message: "Provisionamento concluído.",
+      credencialId: credencial.id,
+      reservaId,
+      status: statusFinal,
+      passcode,
+      totalItens: finalItens.length,
+      provisionados,
+      falhas,
+      erros,
+    });
+  }
+
+  return jsonResponse(
+    {
+      ok: false,
+      error:
+        statusFinal === "parcial"
+          ? "Provisionamento parcial: todos os locks obrigatórios precisam estar provisionados."
+          : "Provisionamento falhou em um ou mais locks obrigatórios.",
+      message:
+        statusFinal === "parcial"
           ? "Provisionamento parcial (alguns itens falharam)."
           : "Provisionamento falhou em todos os itens.",
-    credencialId: credencial.id,
-    reservaId,
-    status: statusFinal,
-    passcode: passcode!,
-    totalItens: itens.length,
-    provisionados,
-    falhas,
-    erros,
-  });
+      credencialId: credencial.id,
+      reservaId,
+      status: statusFinal,
+      totalItens: finalItens.length,
+      provisionados,
+      falhas,
+      erros,
+    },
+    409,
+  );
 }
 
 async function handleCancelOrCheckout(

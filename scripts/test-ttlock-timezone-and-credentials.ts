@@ -225,7 +225,7 @@ function alertaConflitoSemVinculo(opts: {
   assert.equal(edge.guestBlockHtml, guest.guestBlockHtml);
   assert.equal(edgeNormalize("1134#"), "1134");
 
-  // Derivação técnica continua 4 dígitos sem hash
+  // Legado (deprecated): derivação ainda 4 dígitos; provisionamento novo usa PIN aleatório.
   const derived = deriveTtlockPasscodeFromReservation("HITS-FAKE-E2E-20260811-BRENO-APT34", "80a2d708-5bcc-4af3-856d-505f234055e0");
   assert.equal(derived.length, 4);
   assert.equal(/\D/.test(derived), false);

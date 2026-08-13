@@ -2,7 +2,15 @@
  * Regras de exibição do passcode TTLock e do nome na fechadura.
  * Desacopladas de PMS: usa `external_reservation_id` (texto vindo de integração externa)
  * e fallback para dígitos do UUID interno da reserva.
+ *
+ * Política de PIN (provisionamento):
+ * - gerar PIN aleatório de 4 dígitos UMA VEZ e persistir em `codigo_credencial`;
+ * - replay da mesma credencial reutiliza o PIN persistido;
+ * - NÃO derivar de marker/data para novas credenciais (evita colisão entre reservas).
  */
+
+/** Máximo de tentativas com PIN novo após TTLock -3007 (mesma credencial nunca provisionada). */
+export const TTLOCK_PASSCODE_COLLISION_RETRY_MAX = 3;
 
 /** Mantém apenas dígitos 0-9. */
 export function extractDigits(input: string): string {
@@ -19,9 +27,9 @@ export function lastFourDigitsPaddedFromDigitRun(digits: string): string {
 }
 
 /**
- * Senha TTLock: 4 dígitos.
- * 1) Dígitos de `external_reservation_id` (qualquer PMS), últimos 4, pad se necessário.
- * 2) Se vazio, dígitos do `internalReservaId` (UUID interno), mesma regra.
+ * @deprecated Não usar para provisionar novas credenciais.
+ * Preferir `allocateNewTtlockPasscode` / `generateRandomTtlockPasscode` + persistência.
+ * Mantido apenas para compatibilidade de testes/legado.
  */
 export function deriveTtlockPasscodeFromReservation(
   externalReservationId: string | null | undefined,
@@ -36,17 +44,59 @@ export function deriveTtlockPasscodeFromReservation(
   return lastFourDigitsPaddedFromDigitRun(uuidDig.length > 0 ? uuidDig : "0");
 }
 
+function randomFourDigitCode(): string {
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  return String(1000 + (buf[0] % 9000));
+}
+
 /**
- * Gera senha TTLock aleatória de 4 dígitos, distinta de `exclude` quando informado.
- * Usada em "Gerar nova senha" (não reutiliza a derivação determinística da reserva).
+ * Senha TTLock aleatória de 4 dígitos, distinta dos valores em `exclude`.
+ * Usada em provisionamento inicial e em "Gerar nova senha".
  */
-export function generateRandomTtlockPasscode(exclude?: string | null): string {
-  const blocked = exclude != null && String(exclude).trim() ? String(exclude).trim() : null;
-  for (let i = 0; i < 32; i++) {
-    const code = String(1000 + Math.floor(Math.random() * 9000));
-    if (!blocked || code !== blocked) return code;
+export function generateRandomTtlockPasscode(
+  exclude?: string | null | Iterable<string>,
+): string {
+  const blocked = new Set<string>();
+  if (typeof exclude === "string") {
+    const s = exclude.trim();
+    if (s) blocked.add(s);
+  } else if (exclude) {
+    for (const x of exclude) {
+      const s = String(x ?? "").trim();
+      if (s) blocked.add(s);
+    }
   }
-  return blocked === "9999" ? "1000" : "9999";
+  for (let i = 0; i < 64; i++) {
+    const code = randomFourDigitCode();
+    if (!blocked.has(code)) return code;
+  }
+  for (let n = 1000; n <= 9999; n++) {
+    const code = String(n);
+    if (!blocked.has(code)) return code;
+  }
+  return "1000";
+}
+
+/** Alias semântico: alocar PIN aleatório para persistir em `codigo_credencial`. */
+export function allocateNewTtlockPasscode(
+  exclude?: string | null | Iterable<string>,
+): string {
+  return generateRandomTtlockPasscode(exclude);
+}
+
+/** Detecta colisão de passcode na TTLock (errcode -3007). */
+export function isTtlockSamePasscodeError(message: string | null | undefined): boolean {
+  const m = String(message ?? "");
+  return m.includes("-3007") || /same passcode already exists/i.test(m);
+}
+
+/**
+ * Normaliza o PIN técnico TTLock (somente dígitos).
+ * Nunca inclui "#" — o hash é só instrução de uso no teclado físico.
+ */
+export function normalizeTechnicalTtlockPasscode(passcode: string | null | undefined): string {
+  return extractDigits(String(passcode ?? ""));
 }
 
 /**
@@ -58,14 +108,6 @@ function guestFirstAndSecondOrNull(fullName: string | null | undefined): string 
   const parts = s.split(" ");
   if (parts.length === 1) return parts[0];
   return `${parts[0]} ${parts[1]}`;
-}
-
-/**
- * Normaliza o PIN técnico TTLock (somente dígitos).
- * Nunca inclui "#" — o hash é só instrução de uso no teclado físico.
- */
-export function normalizeTechnicalTtlockPasscode(passcode: string | null | undefined): string {
-  return extractDigits(String(passcode ?? ""));
 }
 
 export type TtlockPasscodeGuestPresentation = {

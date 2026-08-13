@@ -25,6 +25,10 @@ import {
   isBeforeCheckinActivationHour,
   resolveParkingSpot,
 } from "../../../src/lib/domain/yes-hotel/guest-access-messages.ts";
+import {
+  evaluateTtlockReadyForGuestAccess,
+  isLifecycleProvisionAccessReady,
+} from "../../../src/lib/domain/yes-hotel/ttlock-guest-access-gate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -151,10 +155,47 @@ Deno.serve(async (req: Request) => {
     }, 400);
   }
 
-  let passcode = (credencial as { codigo_credencial?: string | null }).codigo_credencial;
   let passcodeAnterior: string | null = null;
   const authHeader = req.headers.get("Authorization") ?? "";
   const lifecycleUrl = `${supabaseUrl}/functions/v1/yes-hotel-lifecycle`;
+  const credencialId = String((credencial as { id: string }).id);
+
+  async function loadReadyGate() {
+    const { data: cred } = await admin
+      .from("operacional_credenciais_acesso")
+      .select("id, codigo_credencial, status")
+      .eq("id", credencialId)
+      .maybeSingle();
+    const { data: itens } = await admin
+      .from("operacional_credencial_itens")
+      .select("status_provisionamento, remote_keyboard_pwd_id")
+      .eq("credencial_id", credencialId);
+    return evaluateTtlockReadyForGuestAccess(
+      cred as { status: string; codigo_credencial: string | null } | null,
+      (itens ?? []) as { status_provisionamento: string; remote_keyboard_pwd_id: number | null }[],
+    );
+  }
+
+  async function blockGuestAccessReady(motivo: string, detalheExtra?: Record<string, unknown>) {
+    await admin.from("operacional_reserva_eventos").insert({
+      reserva_id: reservaId,
+      tipo: "falha_enviar_credenciais",
+      titulo: "Envio guest_access_ready bloqueado — TTLock não confirmado",
+      detalhe: JSON.stringify({
+        origem: origemRegistro,
+        motivo,
+        ...(detalheExtra ?? {}),
+        timestamp: new Date().toISOString(),
+      }),
+    });
+    return jsonResponse({
+      ok: false,
+      error:
+        "Acesso TTLock não confirmado nos locks obrigatórios. Nenhuma mensagem foi enviada. Tente provisionar novamente.",
+      motivo,
+      reserva_id: reservaId,
+    }, 409);
+  }
 
   if (gerarNova) {
     if (gerarNovaInFlight.has(reservaId)) {
@@ -212,33 +253,53 @@ Deno.serve(async (req: Request) => {
           bloqueado_por_limpeza: !!genData.bloqueadoPorLimpeza,
         }, genRes.status === 409 ? 409 : 400);
       }
-      passcodeAnterior = genData.passcodeAnterior ?? passcode ?? null;
-      passcode = genData.passcode;
+      passcodeAnterior = genData.passcodeAnterior ?? null;
     } finally {
       gerarNovaInFlight.delete(reservaId);
     }
-  } else if (!passcode) {
-    // Sempre service_role + header interno: lifecycle_provision exige operador JWT
-    // no caminho manual; no automático (requisitos/Pagar.me) não há sessão de operador.
-    const provisionRes = await fetch(lifecycleUrl, {
-      method: "POST",
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${serviceRoleKey}`,
-        "x-yes-internal-caller": "send-senha",
-      },
-      body: JSON.stringify({ action: "lifecycle_provision", payload: { reservaId } }),
-    });
-    const provisionData = await provisionRes.json().catch(() => ({})) as { passcode?: string; error?: string };
-    if (provisionData.error || !provisionData.passcode) {
-      return jsonResponse({
-        ok: false,
-        error: provisionData.error ?? "Falha ao provisionar senha. Tente liberar acesso e provisionar no painel.",
-      }, 400);
+  } else {
+    let gatePre = await loadReadyGate();
+    if (!gatePre.ready) {
+      // Sempre service_role + header interno: lifecycle_provision exige operador JWT
+      // no caminho manual; no automático (requisitos/Pagar.me) não há sessão de operador.
+      const provisionRes = await fetch(lifecycleUrl, {
+        method: "POST",
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "x-yes-internal-caller": "send-senha",
+        },
+        body: JSON.stringify({ action: "lifecycle_provision", payload: { reservaId } }),
+      });
+      const provisionData = await provisionRes.json().catch(() => ({})) as {
+        ok?: boolean;
+        passcode?: string;
+        error?: string;
+        status?: string;
+        falhas?: number;
+      };
+      if (!isLifecycleProvisionAccessReady(provisionData)) {
+        return await blockGuestAccessReady(
+          provisionData.error
+            ? "lifecycle_provision_falhou"
+            : "lifecycle_provision_nao_confirmado",
+          {
+            lifecycle_status: provisionData.status ?? null,
+            lifecycle_error: provisionData.error ?? null,
+            falhas: provisionData.falhas ?? null,
+          },
+        );
+      }
+      gatePre = await loadReadyGate();
     }
-    passcode = provisionData.passcode;
   }
+
+  const gate = await loadReadyGate();
+  if (!gate.ready || !gate.passcode) {
+    return await blockGuestAccessReady(gate.reason ?? "ttlock_nao_pronto");
+  }
+  const passcode = gate.passcode;
 
   const { data: hospedes } = await admin
     .from("operacional_hospedes")
@@ -277,35 +338,25 @@ Deno.serve(async (req: Request) => {
     check_in_previsto?: string;
   };
   // PIN técnico (passcode) permanece sem "#"; apresentação ao hóspede inclui # só como instrução.
-  // Mensagem canônica guest_access_ready (sem Wi-Fi / FNRH / cobrança).
-  if (!passcode || !String(passcode).trim()) {
-    await admin.from("operacional_reserva_eventos").insert({
-      reserva_id: reservaId,
-      tipo: "falha_enviar_credenciais",
-      titulo: "Falha técnica — credencial ausente",
-      detalhe: JSON.stringify({
-        origem: origemRegistro,
-        motivo: "sem_credencial_valida_para_guest_access_ready",
-      }),
-    });
-    return jsonResponse({
-      ok: false,
-      error: "Credencial TTLock ausente; mensagem de acesso não enviada.",
-    }, 409);
-  }
+  // Mensagem canônica guest_access_ready — só após gate TTLock 3/3.
 
   const apt = String(r.apartamento ?? "").trim();
   const checkin = r.check_in_previsto
     ? `${String(r.check_in_previsto).slice(0, 10)}T13:00:00-04:00`
     : new Date().toISOString();
   const nowDt = new Date();
+  const checkinLabel = formatCheckinDateLabelPtBr(checkin);
+  const stayNote = alreadySentAtStart
+    ? `Use esta senha de acesso para sua hospedagem de ${checkinLabel.slice(0, 5)}.`
+    : null;
   const accessMsg = buildGuestAccessReadyMessage({
     guest_first_name: guestFirstName(r.hospede_principal),
     apartment_number: apt || "—",
     passcode: String(passcode),
     parking_spot: resolveParkingSpot({ apartment_number: apt }),
-    checkin_date_label: formatCheckinDateLabelPtBr(checkin),
+    checkin_date_label: checkinLabel,
     before_activation: isBeforeCheckinActivationHour(checkin, nowDt),
+    stay_access_note: stayNote,
   });
   // Garante helper de formatação carregado (evita tree-shake acidental em Deno).
   void formatTtlockPasscodeForGuest;
