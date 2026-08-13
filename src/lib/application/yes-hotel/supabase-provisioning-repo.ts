@@ -4,6 +4,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { collectOccupiedPasscodesFromRows } from "../../domain/yes-hotel/ttlock-passcode-uniqueness.ts";
 import type {
   CredencialItemRow,
   CredencialRow,
@@ -334,6 +335,52 @@ export function createSupabaseProvisioningRepository(
       }
 
       return result;
+    },
+
+    async listOccupiedPasscodesOnLocks(
+      lockIds: string[],
+      excludeCredencialId: string,
+    ): Promise<string[]> {
+      const locks = lockIds.map((x) => String(x || "").trim()).filter(Boolean);
+      if (locks.length === 0) return [];
+      const { data: itens, error } = await supabase
+        .from("operacional_credencial_itens")
+        .select("credencial_id, status_provisionamento, remote_keyboard_pwd_id")
+        .in("lock_id_ttlock", locks);
+      if (error) throw new Error(`listOccupiedPasscodesOnLocks: ${error.message}`);
+      const rows = (itens ?? []) as {
+        credencial_id: string;
+        status_provisionamento: string;
+        remote_keyboard_pwd_id: number | null;
+      }[];
+      const credIds = [
+        ...new Set(
+          rows
+            .map((r) => String(r.credencial_id || "").trim())
+            .filter((id) => id && id !== excludeCredencialId),
+        ),
+      ];
+      if (credIds.length === 0) return [];
+      const { data: creds, error: errC } = await supabase
+        .from("operacional_credenciais_acesso")
+        .select("id, codigo_credencial")
+        .in("id", credIds);
+      if (errC) throw new Error(`listOccupiedPasscodesOnLocks(creds): ${errC.message}`);
+      const pinByCred = new Map<string, string | null>();
+      for (const c of creds ?? []) {
+        const row = c as { id: string; codigo_credencial?: string | null };
+        pinByCred.set(String(row.id), row.codigo_credencial ?? null);
+      }
+      const set = collectOccupiedPasscodesFromRows(
+        rows.map((r) => ({
+          credencial_id: r.credencial_id,
+          codigo_credencial: pinByCred.get(String(r.credencial_id)) ?? null,
+          status_provisionamento: r.status_provisionamento,
+          remote_keyboard_pwd_id: r.remote_keyboard_pwd_id,
+        })),
+        excludeCredencialId,
+      );
+      return [...set];
     },
   };
 }

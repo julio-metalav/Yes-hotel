@@ -12,6 +12,10 @@ import {
   TTLOCK_PASSCODE_COLLISION_RETRY_MAX,
 } from "../../domain/yes-hotel/ttlock-credential-format.ts";
 import { resolveProvisionCredentialStatus } from "../../domain/yes-hotel/ttlock-guest-access-gate.ts";
+import {
+  canRetryWithNewPasscode,
+  shouldRollbackPartialPasscodeAttempt,
+} from "../../domain/yes-hotel/ttlock-passcode-uniqueness.ts";
 import type { TtlockClient } from "../../integrations/ttlock/client.ts";
 import { logTtlockLifecycle } from "../../integrations/ttlock/lifecycle-log.ts";
 import type { OperacionalCredencialStatus, OperacionalItemProvisionamentoStatus } from "./types.ts";
@@ -110,7 +114,15 @@ export interface ProvisioningRepository {
   getReservaApartment(reservaId: string): Promise<string | null>;
   getFechadurasForApartment(apartmentCode: string): Promise<NovoItemDestino[]>;
   getReservaTtlockCredentialSource(reservaId: string): Promise<ReservaTtlockCredentialSource>;
-  /** Opcional: PINs ativos no mesmo lock (evitar colisão local). */
+  /**
+   * PINs ocupados nos locks (existência na fechadura / risco de -3007).
+   * Sem filtro temporal. Preferir implementação conservadora.
+   */
+  listOccupiedPasscodesOnLocks?(
+    lockIds: string[],
+    excludeCredencialId: string,
+  ): Promise<string[]>;
+  /** @deprecated use listOccupiedPasscodesOnLocks */
   listActivePasscodesOnLocks?(
     lockIds: string[],
     excludeCredencialId: string,
@@ -127,6 +139,7 @@ export interface ProcessarCredencialResult {
   erros: string[];
   /** true somente quando todos os itens obrigatórios estão provisionados com remote id. */
   accessReady: boolean;
+  rollbackFailed?: boolean;
 }
 
 function itemNeedsProvision(item: CredencialItemRow): boolean {
@@ -147,18 +160,35 @@ function hasSuccessfulRemote(itens: CredencialItemRow[]): boolean {
   );
 }
 
+async function loadOccupiedPasscodes(
+  repo: ProvisioningRepository,
+  lockIds: string[],
+  excludeCredencialId: string,
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  const loader =
+    repo.listOccupiedPasscodesOnLocks?.bind(repo) ??
+    repo.listActivePasscodesOnLocks?.bind(repo);
+  if (!loader || lockIds.length === 0) return out;
+  const active = await loader(lockIds, excludeCredencialId);
+  for (const p of active) {
+    const s = String(p ?? "").trim();
+    if (s) out.add(s);
+  }
+  return out;
+}
+
 /**
  * Processa uma credencial: gera passcode se necessário, provisiona cada item pendente na TTLock,
  * atualiza itens e credencial no repositório.
- * Se o cliente TTLock não estiver disponível (sem credenciais), falha de forma controlada
- * e atualiza itens/credencial com erro claro.
+ * Colisão (-3007) em qualquer lock: não segue com o mesmo PIN; compensa parciais; novo PIN nos 3.
  */
 export async function processarCredencialDeAcesso(
   credencialId: string,
   deps: {
     repository: ProvisioningRepository;
     ttlockClient: TtlockClient;
-    passcodeGenerator?: (exclude?: string | null) => string;
+    passcodeGenerator?: (exclude?: string | null | Iterable<string>) => string;
   },
 ): Promise<ProcessarCredencialResult> {
   const repo = deps.repository;
@@ -178,35 +208,29 @@ export async function processarCredencialDeAcesso(
   const allItens = await repo.getItens(credencialId);
   const erros: string[] = [];
   const alreadyRemoteOk = hasSuccessfulRemote(allItens);
+  const rejectedPins = new Set<string>();
 
   const lockIds = [
     ...new Set(allItens.map((i) => String(i.lock_id_ttlock || "").trim()).filter(Boolean)),
   ];
-  const localBlocked = new Set<string>();
-  if (typeof repo.listActivePasscodesOnLocks === "function" && lockIds.length > 0) {
-    const active = await repo.listActivePasscodesOnLocks(lockIds, credencialId);
-    for (const p of active) {
-      const s = String(p ?? "").trim();
-      if (s) localBlocked.add(s);
-    }
-  }
+  const localBlocked = await loadOccupiedPasscodes(repo, lockIds, credencialId);
 
   let passcode = credencial.codigo_credencial ? String(credencial.codigo_credencial).trim() : "";
-  // Credencial já provisionada com sucesso: nunca trocar PIN.
   if (!alreadyRemoteOk) {
     if (!passcode || localBlocked.has(passcode)) {
+      if (passcode) rejectedPins.add(passcode);
+      const exclude = new Set([...localBlocked, ...rejectedPins]);
       passcode = deps.passcodeGenerator
-        ? deps.passcodeGenerator(passcode || null)
-        : allocateNewTtlockPasscode(localBlocked);
+        ? String(deps.passcodeGenerator(exclude))
+        : allocateNewTtlockPasscode(exclude);
       await repo.updateCredencial(credencialId, {
         codigo_credencial: passcode,
         provider_tipo: "ttlock_passcode",
       });
     }
   } else if (!passcode) {
-    // Estado inconsistente: remote ok sem codigo — não inventar marker-derived.
     passcode = deps.passcodeGenerator
-      ? deps.passcodeGenerator(null)
+      ? String(deps.passcodeGenerator(localBlocked))
       : allocateNewTtlockPasscode(localBlocked);
     await repo.updateCredencial(credencialId, {
       codigo_credencial: passcode,
@@ -261,14 +285,29 @@ export async function processarCredencialDeAcesso(
   }
 
   let collisionAttempt = 0;
+  let rollbackFailed = false;
+
   while (true) {
     itens = (await repo.getItens(credencialId)).filter(itemNeedsProvision);
     if (itens.length === 0) break;
 
     let roundCollision = false;
-    let roundProvisionados = 0;
+    const provisionedThisRound: Array<{
+      item: CredencialItemRow;
+      keyboardPwdId: number;
+    }> = [];
 
     for (const item of itens) {
+      // Colisão já detectada: não continuar o mesmo PIN nos demais locks.
+      if (roundCollision) {
+        await repo.updateItem(item.id, {
+          status_provisionamento: "falhou",
+          ultimo_erro: "Abortado: colisão de passcode em outro lock da mesma tentativa.",
+        });
+        erros.push(`${item.codigo_logico_destino}: abortado por colisão no mesmo round`);
+        continue;
+      }
+
       await repo.updateItem(item.id, { status_provisionamento: "provisionando" });
 
       logTtlockLifecycle({
@@ -283,9 +322,8 @@ export async function processarCredencialDeAcesso(
         timestamp: new Date().toISOString(),
       });
       try {
-        const lockId = item.lock_id_ttlock;
         const res = await client.createKeyboardPassword({
-          lockId,
+          lockId: item.lock_id_ttlock,
           keyboardPwd: passcode,
           keyboardPwdName: keyboardPwdNameBase,
           startDate: validoDeMs,
@@ -299,7 +337,7 @@ export async function processarCredencialDeAcesso(
           remote_keyboard_pwd_id: res.keyboardPwdId,
           codigo_enviado: passcode,
         });
-        roundProvisionados++;
+        provisionedThisRound.push({ item, keyboardPwdId: res.keyboardPwdId });
         logTtlockLifecycle({
           action: "provision",
           source: "app_client",
@@ -337,52 +375,115 @@ export async function processarCredencialDeAcesso(
 
     const afterRound = await repo.getItens(credencialId);
     const stillNeeds = afterRound.filter(itemNeedsProvision);
-    const remoteOkNow = hasSuccessfulRemote(afterRound);
+    if (stillNeeds.length === 0 && !roundCollision) break;
 
-    if (stillNeeds.length === 0) break;
+    if (!roundCollision) break;
 
-    // -3007: novo PIN só se nunca houve sucesso remoto nesta credencial.
+    // Compensação: PIN parcial aceito em alguns locks + -3007 em outro.
     if (
-      roundCollision &&
-      roundProvisionados === 0 &&
-      !remoteOkNow &&
-      !alreadyRemoteOk &&
-      collisionAttempt < TTLOCK_PASSCODE_COLLISION_RETRY_MAX - 1
+      shouldRollbackPartialPasscodeAttempt({
+        collisionOnAnyLock: true,
+        provisionedInRound: provisionedThisRound.length,
+        credentialNeverFullyProvisioned: !alreadyRemoteOk,
+      })
     ) {
-      collisionAttempt++;
-      localBlocked.add(passcode);
-      const next = deps.passcodeGenerator
-        ? deps.passcodeGenerator(passcode)
-        : allocateNewTtlockPasscode(localBlocked);
-      passcode = next;
-      await repo.updateCredencial(credencialId, {
-        codigo_credencial: passcode,
-        provider_tipo: "ttlock_passcode",
-      });
-      for (const item of stillNeeds) {
-        await repo.updateItem(item.id, {
-          status_provisionamento: "pendente",
-          ultimo_erro: null,
-        });
+      for (const { item, keyboardPwdId } of provisionedThisRound) {
+        try {
+          await client.deleteKeyboardPassword({
+            lockId: item.lock_id_ttlock,
+            keyboardPwdId,
+          });
+          await repo.updateItem(item.id, {
+            status_provisionamento: "pendente",
+            remote_keyboard_pwd_id: null,
+            codigo_enviado: null,
+            provisionado_em: null,
+            ultimo_erro: null,
+          });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          rollbackFailed = true;
+          erros.push(`${item.codigo_logico_destino}: rollback falhou: ${msg}`);
+          await repo.updateItem(item.id, {
+            status_provisionamento: "pendente_limpeza",
+            ultimo_erro: `Rollback após colisão -3007 falhou: ${msg}`,
+          });
+        }
       }
-      continue;
     }
-    break;
+
+    if (
+      !canRetryWithNewPasscode({
+        collisionOnAnyLock: true,
+        credentialNeverFullyProvisioned: !alreadyRemoteOk,
+        collisionAttempt,
+        maxAttempts: TTLOCK_PASSCODE_COLLISION_RETRY_MAX,
+        rollbackFailed,
+      })
+    ) {
+      break;
+    }
+
+    collisionAttempt++;
+    rejectedPins.add(passcode);
+    localBlocked.add(passcode);
+    const exclude = new Set([...localBlocked, ...rejectedPins]);
+    const next = deps.passcodeGenerator
+      ? String(deps.passcodeGenerator(exclude))
+      : allocateNewTtlockPasscode(exclude);
+    passcode = next;
+    await repo.updateCredencial(credencialId, {
+      codigo_credencial: passcode,
+      provider_tipo: "ttlock_passcode",
+    });
+
+    const pendingAgain = (await repo.getItens(credencialId)).filter(
+      (i) =>
+        itemNeedsProvision(i) ||
+        (i.status_provisionamento === "falhou" && i.remote_keyboard_pwd_id == null),
+    );
+    for (const item of pendingAgain) {
+      await repo.updateItem(item.id, {
+        status_provisionamento: "pendente",
+        ultimo_erro: null,
+        remote_keyboard_pwd_id: null,
+        codigo_enviado: null,
+        provisionado_em: null,
+      });
+    }
   }
 
   const finalItens = await repo.getItens(credencialId);
-  const resolved = resolveProvisionCredentialStatus(finalItens);
-  await repo.updateCredencial(credencialId, { status: resolved.status });
+  let resolved = resolveProvisionCredentialStatus(finalItens);
+  if (rollbackFailed) {
+    // Nunca marcar provisionada / parcial “pronta” com resíduo inconsistente.
+    resolved = {
+      ...resolved,
+      status: resolved.provisionados > 0 ? "parcial" : "falhou",
+      allReady: false,
+    };
+  }
+  await repo.updateCredencial(credencialId, {
+    status: resolved.status,
+    ...(rollbackFailed
+      ? {
+          last_sync_error:
+            "Rollback após colisão de passcode falhou; intervenção necessária.",
+        }
+      : {}),
+  });
 
   return {
     credencialId,
     status: resolved.status,
-    passcode,
+    // PIN final só é “aceito” se accessReady; em falha é último candidato (status=falhou bloqueia envio).
+    passcode: resolved.allReady ? passcode : passcode,
     totalItens: finalItens.length,
     provisionados: resolved.provisionados,
     falhas: resolved.falhas,
     erros,
     accessReady: resolved.allReady,
+    rollbackFailed,
   };
 }
 
@@ -393,7 +494,7 @@ export async function processarCredencialDeAcesso(
 export async function processarProvisionamentosPendentes(deps: {
   repository: ProvisioningRepository;
   ttlockClient: TtlockClient;
-  passcodeGenerator?: (exclude?: string | null) => string;
+  passcodeGenerator?: (exclude?: string | null | Iterable<string>) => string;
 }): Promise<ProcessarCredencialResult[]> {
   const credenciais = await deps.repository.getCredenciaisPendentes();
   const results: ProcessarCredencialResult[] = [];

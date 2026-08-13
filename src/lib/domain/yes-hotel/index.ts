@@ -36,4 +36,5 @@ export * from "./reservation-sync-diff.ts";
 export * from "./synced-reservation.ts";
 export * from "./ttlock-credential-format.ts";
 export * from "./ttlock-guest-access-gate.ts";
+export * from "./ttlock-passcode-uniqueness.ts";
 export * from "./types.ts";

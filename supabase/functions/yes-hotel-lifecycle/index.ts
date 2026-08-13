@@ -20,6 +20,11 @@ import {
 } from "../_shared/hotel-timezone.ts";
 import { executeLifecycleUpdateValidity } from "../_shared/lifecycle-update-validity.ts";
 import { resolveProvisionCredentialStatus } from "../../../src/lib/domain/yes-hotel/ttlock-guest-access-gate.ts";
+import {
+  canRetryWithNewPasscode,
+  collectOccupiedPasscodesFromRows,
+  shouldRollbackPartialPasscodeAttempt,
+} from "../../../src/lib/domain/yes-hotel/ttlock-passcode-uniqueness.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -852,44 +857,51 @@ async function getItensPendentes(credencialId: string): Promise<ItemRow[]> {
   );
 }
 
-async function listActivePasscodesOnLocks(
+/**
+ * PINs ocupados nos locks obrigatórios — sem filtro temporal/status de reserva.
+ * Inclui vencidas, futuras, inativas; exclui só delete remoto confirmado (`revogado`).
+ */
+async function listOccupiedPasscodesOnLocks(
   lockIds: string[],
   excludeCredencialId: string,
 ): Promise<Set<string>> {
-  const out = new Set<string>();
   const locks = lockIds.map((x) => String(x || "").trim()).filter(Boolean);
-  if (locks.length === 0) return out;
+  if (locks.length === 0) return new Set();
   const { data: itens } = await adminClient
     .from("operacional_credencial_itens")
     .select("credencial_id, lock_id_ttlock, status_provisionamento, remote_keyboard_pwd_id")
-    .in("lock_id_ttlock", locks)
-    .eq("status_provisionamento", "provisionado")
-    .not("remote_keyboard_pwd_id", "is", null);
+    .in("lock_id_ttlock", locks);
+  const rows = (itens ?? []) as {
+    credencial_id: string;
+    status_provisionamento: string;
+    remote_keyboard_pwd_id: number | null;
+  }[];
   const credIds = [
     ...new Set(
-      (itens ?? [])
-        .map((r: { credencial_id?: string }) => String(r.credencial_id || "").trim())
-        .filter((id: string) => id && id !== excludeCredencialId),
+      rows
+        .map((r) => String(r.credencial_id || "").trim())
+        .filter((id) => id && id !== excludeCredencialId),
     ),
   ];
-  if (credIds.length === 0) return out;
+  if (credIds.length === 0) return new Set();
   const { data: creds } = await adminClient
     .from("operacional_credenciais_acesso")
-    .select("id, codigo_credencial, status, valido_ate")
-    .in("id", credIds)
-    .neq("status", "revogada");
-  const now = Date.now();
+    .select("id, codigo_credencial")
+    .in("id", credIds);
+  const pinByCred = new Map<string, string | null>();
   for (const c of creds ?? []) {
-    const row = c as {
-      codigo_credencial?: string | null;
-      valido_ate?: string | null;
-    };
-    const pin = String(row.codigo_credencial ?? "").trim();
-    if (!pin) continue;
-    if (row.valido_ate && new Date(row.valido_ate).getTime() < now) continue;
-    out.add(pin);
+    const row = c as { id: string; codigo_credencial?: string | null };
+    pinByCred.set(String(row.id), row.codigo_credencial ?? null);
   }
-  return out;
+  return collectOccupiedPasscodesFromRows(
+    rows.map((r) => ({
+      credencial_id: r.credencial_id,
+      codigo_credencial: pinByCred.get(String(r.credencial_id)) ?? null,
+      status_provisionamento: r.status_provisionamento,
+      remote_keyboard_pwd_id: r.remote_keyboard_pwd_id,
+    })),
+    excludeCredencialId,
+  );
 }
 
 async function getItensProvisionados(credencialId: string): Promise<ItemRow[]> {
@@ -1226,16 +1238,17 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
   const lockIds = [
     ...new Set(allItensBefore.map((i) => String(i.lock_id_ttlock || "").trim()).filter(Boolean)),
   ];
-  const localBlocked = await listActivePasscodesOnLocks(lockIds, credencial.id);
+  const localBlocked = await listOccupiedPasscodesOnLocks(lockIds, credencial.id);
+  const rejectedPins = new Set<string>();
 
   let passcode = credencial.codigo_credencial
     ? String(credencial.codigo_credencial).trim()
     : "";
-  // Credencial já com sucesso remoto: nunca trocar PIN. Senão: aleatório + evitar colisão local.
+  // Credencial já com sucesso remoto: nunca trocar PIN. Senão: aleatório + evitar colisão local (global por lock).
   if (!alreadyRemoteOk) {
     if (!passcode || localBlocked.has(passcode)) {
-      if (passcode) localBlocked.add(passcode);
-      passcode = allocateNewTtlockPasscode(localBlocked);
+      if (passcode) rejectedPins.add(passcode);
+      passcode = allocateNewTtlockPasscode(new Set([...localBlocked, ...rejectedPins]));
     }
   } else if (!passcode) {
     passcode = allocateNewTtlockPasscode(localBlocked);
@@ -1369,11 +1382,24 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
 
   let collisionAttempt = 0;
   let workingItens = itens;
+  let rollbackFailed = false;
   while (workingItens.length > 0) {
     let roundCollision = false;
-    let roundProvisionados = 0;
+    const provisionedThisRound: Array<{ item: ItemRow; keyboardPwdId: number }> = [];
 
     for (const item of workingItens) {
+      if (roundCollision) {
+        await adminClient
+          .from("operacional_credencial_itens")
+          .update({
+            status_provisionamento: "falhou",
+            ultimo_erro: "Abortado: colisão de passcode em outro lock da mesma tentativa.",
+          })
+          .eq("id", item.id);
+        erros.push(`${item.codigo_logico_destino}: abortado por colisão no mesmo round`);
+        continue;
+      }
+
       await adminClient
         .from("operacional_credencial_itens")
         .update({ status_provisionamento: "provisionando" })
@@ -1402,7 +1428,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
             remote_keyboard_pwd_id: keyboardPwdId,
           })
           .eq("id", item.id);
-        roundProvisionados++;
+        provisionedThisRound.push({ item, keyboardPwdId });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (typeof console !== "undefined") {
@@ -1423,47 +1449,145 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     }
 
     workingItens = await getItensPendentes(credencial.id);
-    const remoteOkNow = (await getAllItensCredencial(credencial.id)).some(
-      (i) => i.status_provisionamento === "provisionado" && i.remote_keyboard_pwd_id != null,
-    );
-
-    if (workingItens.length === 0) break;
+    if (workingItens.length === 0 && !roundCollision) break;
+    if (!roundCollision) break;
 
     if (
-      roundCollision &&
-      roundProvisionados === 0 &&
-      !remoteOkNow &&
-      !alreadyRemoteOk &&
-      collisionAttempt < TTLOCK_PASSCODE_COLLISION_RETRY_MAX - 1
+      shouldRollbackPartialPasscodeAttempt({
+        collisionOnAnyLock: true,
+        provisionedInRound: provisionedThisRound.length,
+        credentialNeverFullyProvisioned: !alreadyRemoteOk,
+      })
     ) {
-      collisionAttempt++;
-      localBlocked.add(passcode);
-      passcode = allocateNewTtlockPasscode(localBlocked);
+      for (const { item, keyboardPwdId } of provisionedThisRound) {
+        try {
+          await ttlockDeleteKeyboardPassword(
+            item.lock_id_ttlock,
+            keyboardPwdId,
+            {
+              reserva_id: reservaId,
+              credencial_id: credencial.id,
+              credencial_item_id: item.id,
+              codigo_logico_destino: item.codigo_logico_destino,
+            },
+          );
+          await adminClient
+            .from("operacional_credencial_itens")
+            .update({
+              status_provisionamento: "pendente",
+              remote_keyboard_pwd_id: null,
+              provisionado_em: null,
+              ultimo_erro: null,
+            })
+            .eq("id", item.id);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          rollbackFailed = true;
+          erros.push(`${item.codigo_logico_destino}: rollback falhou: ${msg}`);
+          await adminClient
+            .from("operacional_credencial_itens")
+            .update({
+              status_provisionamento: "pendente_limpeza",
+              ultimo_erro: `Rollback após colisão -3007 falhou: ${msg}`,
+            })
+            .eq("id", item.id);
+        }
+      }
+      if (rollbackFailed) {
+        await insertReservaEvento(
+          reservaId,
+          "ttlock_provision_rollback_failed",
+          "TTLock: rollback após colisão de passcode falhou",
+          {
+            action: "lifecycle_provision_rollback_failed",
+            credencial_id: credencial.id,
+            status_final: "falhou",
+            total_itens: (await getAllItensCredencial(credencial.id)).length,
+            provisionados: 0,
+            falhas: 0,
+            revogados: 0,
+            erro_resumido: erros.slice(0, 3).join("; "),
+          },
+        );
+        break;
+      }
+    }
+
+    if (
+      !canRetryWithNewPasscode({
+        collisionOnAnyLock: true,
+        credentialNeverFullyProvisioned: !alreadyRemoteOk,
+        collisionAttempt,
+        maxAttempts: TTLOCK_PASSCODE_COLLISION_RETRY_MAX,
+        rollbackFailed,
+      })
+    ) {
+      break;
+    }
+
+    collisionAttempt++;
+    rejectedPins.add(passcode);
+    localBlocked.add(passcode);
+    passcode = allocateNewTtlockPasscode(new Set([...localBlocked, ...rejectedPins]));
+    await adminClient
+      .from("operacional_credenciais_acesso")
+      .update({ codigo_credencial: passcode, provider_tipo: "ttlock_passcode" })
+      .eq("id", credencial.id);
+    await insertReservaEvento(reservaId, "ttlock_provision_retry", "TTLock: retry com novo PIN após colisão", {
+      action: "lifecycle_provision_retry",
+      credencial_id: credencial.id,
+      status_final: "provisionando",
+      total_itens: 0,
+      provisionados: 0,
+      falhas: 0,
+      revogados: 0,
+      erro_resumido: `tentativa=${collisionAttempt + 1}`,
+    });
+    for (const item of await getItensPendentes(credencial.id)) {
       await adminClient
-        .from("operacional_credenciais_acesso")
-        .update({ codigo_credencial: passcode, provider_tipo: "ttlock_passcode" })
-        .eq("id", credencial.id);
-      for (const item of workingItens) {
+        .from("operacional_credencial_itens")
+        .update({
+          status_provisionamento: "pendente",
+          ultimo_erro: null,
+          remote_keyboard_pwd_id: null,
+          provisionado_em: null,
+        })
+        .eq("id", item.id);
+    }
+    // Também rearmar itens falhou sem remote (abortados no mesmo round).
+    const allAfter = await getAllItensCredencial(credencial.id);
+    for (const item of allAfter) {
+      if (item.status_provisionamento === "falhou" && item.remote_keyboard_pwd_id == null) {
         await adminClient
           .from("operacional_credencial_itens")
           .update({ status_provisionamento: "pendente", ultimo_erro: null })
           .eq("id", item.id);
       }
-      workingItens = await getItensPendentes(credencial.id);
-      continue;
     }
-    break;
+    workingItens = await getItensPendentes(credencial.id);
   }
 
   const finalItens = await getAllItensCredencial(credencial.id);
-  const resolved = resolveProvisionCredentialStatus(finalItens);
+  let resolved = resolveProvisionCredentialStatus(finalItens);
+  if (rollbackFailed) {
+    resolved = {
+      ...resolved,
+      status: resolved.provisionados > 0 ? "parcial" : "falhou",
+      allReady: false,
+    };
+  }
   const statusFinal = resolved.status;
   const provisionados = resolved.provisionados;
   const falhas = resolved.falhas;
 
   await adminClient
     .from("operacional_credenciais_acesso")
-    .update({ status: statusFinal })
+    .update({
+      status: statusFinal,
+      ...(rollbackFailed
+        ? { last_sync_error: "Rollback após colisão de passcode falhou; intervenção necessária." }
+        : {}),
+    })
     .eq("id", credencial.id);
 
   const erroResumidoConclusao = erros.length ? erros.slice(0, 3).join("; ") : null;
