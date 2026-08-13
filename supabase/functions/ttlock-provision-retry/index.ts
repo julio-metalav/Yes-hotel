@@ -31,12 +31,26 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function isServiceRoleBearer(token: string, expectedServiceKey: string): boolean {
+  if (!token) return false;
+  if (expectedServiceKey && constantTimeEqual(token, expectedServiceKey)) return true;
+  const parts = token.split(".");
+  if (parts.length < 2) return false;
+  try {
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4));
+    const json = atob(b64 + pad);
+    const payload = JSON.parse(json) as { role?: string };
+    return String(payload.role ?? "").toLowerCase() === "service_role";
+  } catch {
+    return false;
+  }
+}
+
 function authorize(req: Request): boolean {
   const auth = req.headers.get("Authorization") ?? "";
-  if (auth.startsWith("Bearer ") && serviceRoleKey) {
-    const t = auth.slice("Bearer ".length).trim();
-    if (t && constantTimeEqual(t, serviceRoleKey)) return true;
-  }
+  const token = auth.replace(/^Bearer\s+/i, "").trim();
+  if (isServiceRoleBearer(token, serviceRoleKey)) return true;
   if (processorToken) {
     const h = (req.headers.get("x-access-tolerance-token") ?? "").trim();
     if (h && constantTimeEqual(h, processorToken)) return true;
