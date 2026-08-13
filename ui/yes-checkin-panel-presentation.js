@@ -863,18 +863,20 @@
       return { statusClass: "sync-ok", statusLabel: "Senha pronta", resumoText: "" };
     }
     if (status === "falhou" || syncStatus === "failed") {
-      return { statusClass: "sync-failed", statusLabel: "Falha no envio", resumoText: "" };
+      return { statusClass: "sync-failed", statusLabel: "Falha ao provisionar senha", resumoText: "" };
     }
     if (status === "parcial" || syncStatus === "partial") {
-      return { statusClass: "sync-partial", statusLabel: "Envio pendente", resumoText: "" };
+      return { statusClass: "sync-partial", statusLabel: "Provisionamento pendente", resumoText: "" };
     }
-    if (
-      status === "pendente" ||
-      status === "pronta" ||
-      status === "provisionando" ||
-      syncStatus === "pending"
-    ) {
-      return { statusClass: "sync-pending", statusLabel: "Envio pendente", resumoText: "" };
+    if (status === "provisionando" || syncStatus === "pending") {
+      return {
+        statusClass: "sync-pending",
+        statusLabel: "Provisionando senha — aguardando confirmação da TTLock",
+        resumoText: "",
+      };
+    }
+    if (status === "pendente" || status === "pronta") {
+      return { statusClass: "sync-pending", statusLabel: "Provisionando senha…", resumoText: "" };
     }
     if (status === "revogada") {
       if (syncStatus === "failed") {

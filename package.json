@@ -20,6 +20,7 @@
     "test:yes:payment-link-send": "tsx scripts/test-payment-link-send.ts",
     "test:yes:ttlock-timezone": "tsx scripts/test-ttlock-timezone-and-credentials.ts",
     "test:yes:ttlock-passcode-collision-gate": "tsx scripts/test-ttlock-passcode-collision-gate.ts",
+    "test:yes:ttlock-transient-provision-retry": "tsx scripts/test-ttlock-transient-provision-retry.ts",
     "test:yes:lifecycle-update-validity": "tsx scripts/test-lifecycle-update-validity.ts",
     "test:yes:first-room-access": "tsx scripts/test-first-room-access-policy.ts",
     "test:yes:pagamento-presencial-diferido": "tsx scripts/test-pagamento-presencial-diferido.ts",

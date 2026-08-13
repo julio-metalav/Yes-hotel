@@ -11,7 +11,6 @@ import {
   allocateNewTtlockPasscode,
   formatTtlockKeyboardPwdName,
   generateRandomTtlockPasscode,
-  isTtlockSamePasscodeError,
   TTLOCK_PASSCODE_COLLISION_RETRY_MAX,
 } from "../_shared/ttlock-credential-format.ts";
 import {
@@ -25,6 +24,17 @@ import {
   collectOccupiedPasscodesFromRows,
   shouldRollbackPartialPasscodeAttempt,
 } from "../../../src/lib/domain/yes-hotel/ttlock-passcode-uniqueness.ts";
+import {
+  attemptProvisionLockWithSamePinRetry,
+  encodeTransientRetryState,
+  formatProvisionItemTransientError,
+  parseTransientRetryState,
+  TTLOCK_PROVISION_PHASE2_MAX,
+  TTLOCK_PROVISION_SHORT_BUDGET_MS,
+  TTLOCK_PROVISION_SHORT_DELAY_MS,
+  TTLOCK_PROVISION_SHORT_RETRY_MAX,
+  type ShortRetryBudget,
+} from "../../../src/lib/domain/yes-hotel/ttlock-provision-retry.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -467,12 +477,41 @@ async function ttlockAddKeyboardPassword(
   params.append("endDate", String(endDateMs));
   params.append("addType", "2");
   params.append("date", String(Date.now()));
-  const res = await fetch(`${ttlockApiBase}/v3/keyboardPwd/add`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
-  });
-  const text = await res.text();
+  const controller = new AbortController();
+  const timeoutMs = Number(Deno.env.get("TTLOCK_REQUEST_TIMEOUT_MS") || 15000);
+  const timeout = setTimeout(() => controller.abort(), Number.isFinite(timeoutMs) ? timeoutMs : 15000);
+  let res: Response;
+  let text: string;
+  try {
+    res = await fetch(`${ttlockApiBase}/v3/keyboardPwd/add`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+      signal: controller.signal,
+    });
+    text = await res.text();
+  } catch (e) {
+    clearTimeout(timeout);
+    const msg = e instanceof Error ? e.message : String(e);
+    const aborted = e instanceof Error && e.name === "AbortError";
+    const errMsg = aborted ? `TTLock add timeout/aborted: ${msg}` : `TTLock add network error: ${msg}`;
+    logTtlockLifecycle({
+      action: "provision",
+      source: "edge_function",
+      reserva_id: ctx?.reserva_id,
+      credencial_id: ctx?.credencial_id,
+      credencial_item_id: ctx?.credencial_item_id,
+      codigo_logico_destino: ctx?.codigo_logico_destino,
+      lock_id: lockIdNum,
+      status: "error",
+      error_message: errMsg,
+      timestamp: new Date().toISOString(),
+    });
+    const err = new Error(errMsg);
+    if (aborted) err.name = "AbortError";
+    throw err;
+  }
+  clearTimeout(timeout);
   let data: { keyboardPwdId?: number; errcode?: number; errmsg?: string };
   try {
     data = text ? JSON.parse(text) : {};
@@ -551,6 +590,61 @@ async function ttlockAddKeyboardPassword(
     timestamp: new Date().toISOString(),
   });
   return data.keyboardPwdId;
+}
+
+/** Lista passcodes da fechadura (read-only) para reconciliação pós-timeout. */
+async function ttlockListKeyboardPasswords(
+  lockId: string | number,
+): Promise<Array<{ keyboardPwdId: number; keyboardPwd?: string | null }>> {
+  const lockIdNum = typeof lockId === "string" ? parseInt(lockId, 10) : lockId;
+  const token = await getTtlockToken();
+  const params = new URLSearchParams();
+  params.append("clientId", ttlockClientId);
+  params.append("accessToken", token);
+  params.append("lockId", String(lockIdNum));
+  params.append("pageNo", "1");
+  params.append("pageSize", "100");
+  params.append("date", String(Date.now()));
+  const controller = new AbortController();
+  const timeoutMs = Number(Deno.env.get("TTLOCK_REQUEST_TIMEOUT_MS") || 15000);
+  const timeout = setTimeout(() => controller.abort(), Number.isFinite(timeoutMs) ? timeoutMs : 15000);
+  try {
+    const res = await fetch(`${ttlockApiBase}/v3/lock/listKeyboardPwd`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    const text = await res.text();
+    let data: { list?: Array<{ keyboardPwdId?: number; keyboardPwd?: string }>; errcode?: number; errmsg?: string };
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      throw new Error("TTLock listKeyboardPwd respondeu não-JSON: " + text.substring(0, 200));
+    }
+    if (!res.ok) {
+      throw new Error(data.errmsg ?? `listKeyboardPwd HTTP ${res.status}`);
+    }
+    if (data.errcode != null && data.errcode !== 0) {
+      throw new Error(`TTLock erro ${data.errcode}: ${data.errmsg ?? "listKeyboardPwd"}`);
+    }
+    const list = Array.isArray(data.list) ? data.list : [];
+    return list
+      .filter((r) => typeof r.keyboardPwdId === "number")
+      .map((r) => ({
+        keyboardPwdId: r.keyboardPwdId as number,
+        keyboardPwd: r.keyboardPwd ?? null,
+      }));
+  } catch (e) {
+    clearTimeout(timeout);
+    if (e instanceof Error && e.name === "AbortError") {
+      const err = new Error("TTLock listKeyboardPwd timeout/aborted");
+      err.name = "AbortError";
+      throw err;
+    }
+    throw e instanceof Error ? e : new Error(String(e));
+  }
 }
 
 /**
@@ -687,6 +781,7 @@ type CredencialForProvision = {
   motivo_origem?: string;
   codigo_credencial?: string | null;
   provider_tipo?: string | null;
+  last_sync_error?: string | null;
 };
 
 type ItemRow = {
@@ -696,6 +791,7 @@ type ItemRow = {
   status_provisionamento: string;
   remote_keyboard_pwd_id: number | null;
   codigo_logico_destino: string;
+  ultimo_erro?: string | null;
 };
 
 async function getCredencialPorReserva(reservaId: string): Promise<CredencialRow | null> {
@@ -838,7 +934,7 @@ async function getAllItensCredencial(credencialId: string): Promise<ItemRow[]> {
   const { data, error } = await adminClient
     .from("operacional_credencial_itens")
     .select(
-      "id, credencial_id, lock_id_ttlock, status_provisionamento, codigo_logico_destino, remote_keyboard_pwd_id",
+      "id, credencial_id, lock_id_ttlock, status_provisionamento, codigo_logico_destino, remote_keyboard_pwd_id, ultimo_erro",
     )
     .eq("credencial_id", cid);
   if (error) {
@@ -847,12 +943,13 @@ async function getAllItensCredencial(credencialId: string): Promise<ItemRow[]> {
   return (Array.isArray(data) ? data : []) as ItemRow[];
 }
 
-/** Pendente ou falhou sem remote id (retry controlado de provisionamento). */
+/** Pendente, provisionando (retry transitório) ou falhou sem remote id. */
 async function getItensPendentes(credencialId: string): Promise<ItemRow[]> {
   const all = await getAllItensCredencial(credencialId);
   return all.filter(
     (i) =>
       i.status_provisionamento === "pendente" ||
+      i.status_provisionamento === "provisionando" ||
       (i.status_provisionamento === "falhou" && i.remote_keyboard_pwd_id == null),
   );
 }
@@ -1075,6 +1172,25 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
   }
   if (credencial) {
     reservaId = String(credencial.reserva_id).trim().toLowerCase();
+    try {
+      const { data: syncExtra } = await adminClient
+        .from("operacional_credenciais_acesso")
+        .select("last_sync_error, codigo_credencial, provider_tipo")
+        .eq("id", credencial.id)
+        .maybeSingle();
+      if (syncExtra && typeof syncExtra === "object") {
+        const sx = syncExtra as {
+          last_sync_error?: string | null;
+          codigo_credencial?: string | null;
+          provider_tipo?: string | null;
+        };
+        credencial.last_sync_error = sx.last_sync_error ?? null;
+        if (sx.codigo_credencial != null) credencial.codigo_credencial = sx.codigo_credencial;
+        if (sx.provider_tipo != null) credencial.provider_tipo = sx.provider_tipo;
+      }
+    } catch {
+      // colunas sync/codigo opcionais em legado
+    }
   }
 
   if (!credencial) {
@@ -1383,8 +1499,22 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
   let collisionAttempt = 0;
   let workingItens = itens;
   let rollbackFailed = false;
+  let hadTransientPending = false;
+  let lastTransientClass = "transient";
+  const shortRetryMax = Number(Deno.env.get("TTLOCK_PROVISION_SHORT_RETRY_MAX") || TTLOCK_PROVISION_SHORT_RETRY_MAX);
+  const shortDelayMs = Number(Deno.env.get("TTLOCK_PROVISION_SHORT_DELAY_MS") || TTLOCK_PROVISION_SHORT_DELAY_MS);
+  const shortBudgetMs = Number(Deno.env.get("TTLOCK_PROVISION_SHORT_BUDGET_MS") || TTLOCK_PROVISION_SHORT_BUDGET_MS);
+  const phase2Max = Number(Deno.env.get("TTLOCK_PROVISION_PHASE2_MAX") || TTLOCK_PROVISION_PHASE2_MAX);
+  const budget: ShortRetryBudget = {
+    sleptMs: 0,
+    maxBudgetMs: Number.isFinite(shortBudgetMs) ? shortBudgetMs : TTLOCK_PROVISION_SHORT_BUDGET_MS,
+  };
+  const priorTransient = parseTransientRetryState(credencial.last_sync_error);
+  let phase2Count = priorTransient?.phase === 2 ? priorTransient.count : 0;
+
   while (workingItens.length > 0) {
     let roundCollision = false;
+    hadTransientPending = false;
     const provisionedThisRound: Array<{ item: ItemRow; keyboardPwdId: number }> = [];
 
     for (const item of workingItens) {
@@ -1405,47 +1535,110 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
         .update({ status_provisionamento: "provisionando" })
         .eq("id", item.id);
 
-      try {
-        const keyboardPwdId = await ttlockAddKeyboardPassword(
-          item.lock_id_ttlock,
-          passcode,
-          validoDeMs,
-          validoAteMs,
-          keyboardPwdBaseName,
-          {
+      const result = await attemptProvisionLockWithSamePinRetry({
+        passcode,
+        shortRetryMax: Number.isFinite(shortRetryMax) ? shortRetryMax : TTLOCK_PROVISION_SHORT_RETRY_MAX,
+        shortDelayMs: Number.isFinite(shortDelayMs) ? shortDelayMs : TTLOCK_PROVISION_SHORT_DELAY_MS,
+        budget,
+        sleepFn: delay,
+        addPasscode: () =>
+          ttlockAddKeyboardPassword(
+            item.lock_id_ttlock,
+            passcode,
+            validoDeMs,
+            validoAteMs,
+            keyboardPwdBaseName,
+            {
+              reserva_id: reservaId,
+              credencial_id: credencial.id,
+              credencial_item_id: item.id,
+              codigo_logico_destino: item.codigo_logico_destino,
+            },
+          ),
+        listPasscodes: () => ttlockListKeyboardPasswords(item.lock_id_ttlock),
+        onAttemptLog: (info) => {
+          logTtlockLifecycle({
+            action: "provision",
+            source: "edge_function",
             reserva_id: reservaId,
             credencial_id: credencial.id,
             credencial_item_id: item.id,
             codigo_logico_destino: item.codigo_logico_destino,
-          },
-        );
+            lock_id: item.lock_id_ttlock,
+            status:
+              info.status === "reconciled"
+                ? "success"
+                : info.status === "error"
+                  ? "error"
+                  : "start",
+            error_message: info.classification
+              ? `class=${info.classification.class};transient=${info.classification.transient};retry_count=${info.attempt}`
+              : info.status === "reconciled"
+                ? "reconciled_after_uncertain"
+                : undefined,
+            timestamp: new Date().toISOString(),
+          });
+        },
+      });
+
+      if (result.ok) {
         await adminClient
           .from("operacional_credencial_itens")
           .update({
             status_provisionamento: "provisionado",
             provisionado_em: now,
             ultimo_erro: null,
-            remote_keyboard_pwd_id: keyboardPwdId,
+            remote_keyboard_pwd_id: result.keyboardPwdId,
           })
           .eq("id", item.id);
-        provisionedThisRound.push({ item, keyboardPwdId });
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (typeof console !== "undefined") {
-          console.warn(
-            "[lifecycle] TTLock provision item FAIL",
-            item.codigo_logico_destino,
-            "error=" + msg,
-            e instanceof Error ? e.stack : String(e),
-          );
-        }
-        erros.push(`${item.codigo_logico_destino}: ${msg}`);
-        if (isTtlockSamePasscodeError(msg)) roundCollision = true;
+        provisionedThisRound.push({ item, keyboardPwdId: result.keyboardPwdId });
+        continue;
+      }
+
+      if (typeof console !== "undefined") {
+        console.warn(
+          "[lifecycle] TTLock provision item FAIL",
+          item.codigo_logico_destino,
+          "class=" + result.classification.class,
+          "transient=" + result.classification.transient,
+          "error=" + result.message,
+        );
+      }
+      erros.push(`${item.codigo_logico_destino}: ${result.message}`);
+
+      if (result.classification.class === "collision") {
+        roundCollision = true;
         await adminClient
           .from("operacional_credencial_itens")
-          .update({ status_provisionamento: "falhou", ultimo_erro: msg })
+          .update({ status_provisionamento: "falhou", ultimo_erro: result.message })
           .eq("id", item.id);
+        continue;
       }
+
+      if (!result.stillRetryable) {
+        await adminClient
+          .from("operacional_credencial_itens")
+          .update({ status_provisionamento: "falhou", ultimo_erro: result.message })
+          .eq("id", item.id);
+        continue;
+      }
+
+      // Transitório: manter provisionando; NÃO rollback dos locks OK.
+      hadTransientPending = true;
+      lastTransientClass = result.classification.class;
+      const nextRetryAt = new Date(Date.now() + 60_000).toISOString();
+      await adminClient
+        .from("operacional_credencial_itens")
+        .update({
+          status_provisionamento: "provisionando",
+          ultimo_erro: formatProvisionItemTransientError({
+            classification: result.classification,
+            retryCount: result.attempts,
+            nextRetryAt,
+            phase: 2,
+          }),
+        })
+        .eq("id", item.id);
     }
 
     workingItens = await getItensPendentes(credencial.id);
@@ -1554,7 +1747,6 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
         })
         .eq("id", item.id);
     }
-    // Também rearmar itens falhou sem remote (abortados no mesmo round).
     const allAfter = await getAllItensCredencial(credencial.id);
     for (const item of allAfter) {
       if (item.status_provisionamento === "falhou" && item.remote_keyboard_pwd_id == null) {
@@ -1567,30 +1759,110 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     workingItens = await getItensPendentes(credencial.id);
   }
 
-  const finalItens = await getAllItensCredencial(credencial.id);
+  let finalItens = await getAllItensCredencial(credencial.id);
   let resolved = resolveProvisionCredentialStatus(finalItens);
+  let retryable = false;
+  const nowIso = NOW();
+
   if (rollbackFailed) {
     resolved = {
       ...resolved,
       status: resolved.provisionados > 0 ? "parcial" : "falhou",
       allReady: false,
+      inProgress: 0,
     };
+    await adminClient
+      .from("operacional_credenciais_acesso")
+      .update({
+        status: resolved.status,
+        sync_status: "failed",
+        last_sync_attempt_at: nowIso,
+        last_sync_error: "Rollback após colisão de passcode falhou; intervenção necessária.",
+      })
+      .eq("id", credencial.id);
+  } else if (hadTransientPending) {
+    phase2Count += 1;
+    if (phase2Count > phase2Max) {
+      for (const item of finalItens) {
+        if (
+          item.status_provisionamento === "provisionando" ||
+          item.status_provisionamento === "pendente"
+        ) {
+          await adminClient
+            .from("operacional_credencial_itens")
+            .update({
+              status_provisionamento: "falhou",
+              ultimo_erro: item.ultimo_erro || "Retry transitório TTLock esgotado (fase 2).",
+            })
+            .eq("id", item.id);
+        }
+      }
+      finalItens = await getAllItensCredencial(credencial.id);
+      resolved = resolveProvisionCredentialStatus(finalItens);
+      await adminClient
+        .from("operacional_credenciais_acesso")
+        .update({
+          status: resolved.status,
+          sync_status: "failed",
+          last_sync_attempt_at: nowIso,
+          last_sync_error: encodeTransientRetryState({
+            phase: 2,
+            count: phase2Count,
+            errorClass: lastTransientClass,
+            nextEligibleAt: null,
+          }),
+        })
+        .eq("id", credencial.id);
+    } else {
+      retryable = true;
+      const nextEligibleAt = new Date(Date.now() + 60_000).toISOString();
+      resolved = { ...resolved, status: "provisionando", allReady: false };
+      await adminClient
+        .from("operacional_credenciais_acesso")
+        .update({
+          status: "provisionando",
+          sync_status: "pending",
+          last_sync_attempt_at: nowIso,
+          last_sync_error: encodeTransientRetryState({
+            phase: 2,
+            count: phase2Count,
+            errorClass: lastTransientClass,
+            nextEligibleAt,
+          }),
+        })
+        .eq("id", credencial.id);
+      await insertReservaEvento(
+        reservaId,
+        "ttlock_provision_retry_transiente",
+        "TTLock: aguardando retry transitório (mesmo PIN)",
+        {
+          action: "lifecycle_provision_retry_transiente",
+          credencial_id: credencial.id,
+          status_final: "provisionando",
+          total_itens: finalItens.length,
+          provisionados: resolved.provisionados,
+          falhas: 0,
+          revogados: 0,
+          erro_resumido: `phase=2;count=${phase2Count};class=${lastTransientClass};transient=true`,
+        },
+      );
+    }
+  } else {
+    await adminClient
+      .from("operacional_credenciais_acesso")
+      .update({
+        status: resolved.status,
+        last_sync_attempt_at: nowIso,
+        ...(resolved.allReady ? { sync_status: "ok", last_sync_error: null } : {}),
+      })
+      .eq("id", credencial.id);
   }
+
   const statusFinal = resolved.status;
   const provisionados = resolved.provisionados;
   const falhas = resolved.falhas;
-
-  await adminClient
-    .from("operacional_credenciais_acesso")
-    .update({
-      status: statusFinal,
-      ...(rollbackFailed
-        ? { last_sync_error: "Rollback após colisão de passcode falhou; intervenção necessária." }
-        : {}),
-    })
-    .eq("id", credencial.id);
-
   const erroResumidoConclusao = erros.length ? erros.slice(0, 3).join("; ") : null;
+
   if (statusFinal === "provisionada") {
     await insertReservaEvento(reservaId, "ttlock_provision_sucesso", "TTLock: provisionamento concluído", {
       action: "lifecycle_provision_concluido",
@@ -1602,6 +1874,8 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
       revogados: 0,
       erro_resumido: erroResumidoConclusao,
     });
+  } else if (statusFinal === "provisionando" || retryable) {
+    // Evento de retry transitório já registrado acima quando aplicável.
   } else if (statusFinal === "parcial") {
     await insertReservaEvento(reservaId, "ttlock_provision_parcial", "TTLock: provisionamento parcial", {
       action: "lifecycle_provision_concluido",
@@ -1638,12 +1912,33 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
       provisionados,
       falhas,
       erros,
+      retryable: false,
     });
+  }
+
+  if (retryable || statusFinal === "provisionando") {
+    return jsonResponse(
+      {
+        ok: false,
+        retryable: true,
+        error: "Provisionamento em andamento: aguardando confirmação da TTLock (retry automático).",
+        message: "Provisionando senha — aguardando confirmação da TTLock.",
+        credencialId: credencial.id,
+        reservaId,
+        status: "provisionando",
+        totalItens: finalItens.length,
+        provisionados,
+        falhas,
+        erros,
+      },
+      202,
+    );
   }
 
   return jsonResponse(
     {
       ok: false,
+      retryable: false,
       error:
         statusFinal === "parcial"
           ? "Provisionamento parcial: todos os locks obrigatórios precisam estar provisionados."

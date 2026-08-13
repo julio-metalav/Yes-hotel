@@ -38,6 +38,30 @@ export interface TtlockKeyboardPwdAddResponse {
   keyboardPwdId: number;
 }
 
+/** Item da listagem read-only v3/lock/listKeyboardPwd. */
+export interface TtlockKeyboardPwdListItem {
+  keyboardPwdId: number;
+  lockId?: number;
+  keyboardPwd?: string;
+  keyboardPwdName?: string;
+  keyboardPwdVersion?: number;
+  keyboardPwdType?: number;
+  startDate?: number;
+  endDate?: number;
+  sendDate?: number;
+  isCustom?: number;
+  status?: number;
+  senderUsername?: string;
+}
+
+export interface TtlockKeyboardPwdListResponse {
+  list?: TtlockKeyboardPwdListItem[];
+  pages?: number;
+  pageNo?: number;
+  pageSize?: number;
+  total?: number;
+}
+
 /** Parâmetros para deletar passcode (v3/keyboardPwd/delete). deleteType=2 = via gateway. */
 export interface TtlockKeyboardPwdDeleteParams {
   lockId: number | string;

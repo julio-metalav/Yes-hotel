@@ -85,16 +85,19 @@ export function isLifecycleProvisionAccessReady(payload: {
 /**
  * Após tentativa de provisionamento, credencial só fica `provisionada` se TODOS
  * os itens obrigatórios estiverem provisionados com remote id.
+ * Itens ainda `pendente`/`provisionando` → status `provisionando` (retry em andamento).
  */
 export function resolveProvisionCredentialStatus(itens: TtlockItemReadyRow[]): {
-  status: "provisionada" | "parcial" | "falhou";
+  status: "provisionada" | "provisionando" | "parcial" | "falhou";
   provisionados: number;
   falhas: number;
   allReady: boolean;
+  inProgress: number;
 } {
   const list = Array.isArray(itens) ? itens : [];
   let provisionados = 0;
   let falhas = 0;
+  let inProgress = 0;
   for (const item of list) {
     if (
       item.status_provisionamento === "provisionado" &&
@@ -102,6 +105,11 @@ export function resolveProvisionCredentialStatus(itens: TtlockItemReadyRow[]): {
       item.remote_keyboard_pwd_id !== ""
     ) {
       provisionados++;
+    } else if (
+      item.status_provisionamento === "pendente" ||
+      item.status_provisionamento === "provisionando"
+    ) {
+      inProgress++;
     } else if (item.status_provisionamento === "falhou") {
       falhas++;
     } else if (item.status_provisionamento !== "provisionado") {
@@ -111,9 +119,10 @@ export function resolveProvisionCredentialStatus(itens: TtlockItemReadyRow[]): {
       falhas++;
     }
   }
-  const allReady = list.length > 0 && provisionados === list.length && falhas === 0;
-  let status: "provisionada" | "parcial" | "falhou" = "falhou";
+  const allReady = list.length > 0 && provisionados === list.length && falhas === 0 && inProgress === 0;
+  let status: "provisionada" | "provisionando" | "parcial" | "falhou" = "falhou";
   if (allReady) status = "provisionada";
+  else if (inProgress > 0) status = "provisionando";
   else if (provisionados > 0) status = "parcial";
-  return { status, provisionados, falhas, allReady };
+  return { status, provisionados, falhas, allReady, inProgress };
 }

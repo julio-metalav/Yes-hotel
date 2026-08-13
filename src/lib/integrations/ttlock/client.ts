@@ -13,6 +13,8 @@ import type {
   TtlockKeyboardPwdAddResponse,
   TtlockKeyboardPwdChangeParams,
   TtlockKeyboardPwdDeleteParams,
+  TtlockKeyboardPwdListItem,
+  TtlockKeyboardPwdListResponse,
   TtlockSuccessResponse,
 } from "./types.ts";
 import { TtlockApiError } from "./types.ts";
@@ -457,6 +459,66 @@ export class TtlockClient {
       }
 
       return data;
+    } catch (e) {
+      clearTimeout(timeout);
+      if (e instanceof TtlockApiError) throw e;
+      if (e instanceof Error) throw e;
+      throw new Error(String(e));
+    }
+  }
+
+  /**
+   * Lista passcodes da fechadura (Open API /v3/lock/listKeyboardPwd). Read-only.
+   * Usado para reconciliar estado incerto após timeout no add.
+   */
+  async listKeyboardPasswords(params: {
+    lockId: number | string;
+    pageNo?: number;
+    pageSize?: number;
+    date?: number;
+  }): Promise<TtlockKeyboardPwdListItem[]> {
+    if (!this.isAvailable()) {
+      throw new Error(
+        "TTLock: credenciais nao configuradas. Configure TTLOCK_CLIENT_ID, TTLOCK_CLIENT_SECRET, TTLOCK_USERNAME, TTLOCK_PASSWORD.",
+      );
+    }
+    const accessToken = await this.ensureAccessToken();
+    const lockId = typeof params.lockId === "string" ? parseInt(params.lockId, 10) : params.lockId;
+    const url = `${this.config.apiBaseUrl}/v3/lock/listKeyboardPwd`;
+    const body = new URLSearchParams({
+      clientId: this.config.clientId,
+      accessToken,
+      lockId: String(lockId),
+      pageNo: String(params.pageNo ?? 1),
+      pageSize: String(params.pageSize ?? 100),
+      date: String(params.date ?? Date.now()),
+    });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const res = await this.fetchImpl(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      const data = (await parseJsonSafe(res)) as TtlockKeyboardPwdListResponse & {
+        errcode?: number;
+        errmsg?: string;
+      };
+      if (!res.ok) {
+        throw new TtlockApiError(
+          data?.errmsg ?? `listKeyboardPwd HTTP ${res.status}`,
+          res.status,
+          data,
+        );
+      }
+      if (data.errcode != null && data.errcode !== 0) {
+        throw new TtlockApiError(data.errmsg ?? "listKeyboardPwd error", res.status, data);
+      }
+      return Array.isArray(data.list) ? data.list : [];
     } catch (e) {
       clearTimeout(timeout);
       if (e instanceof TtlockApiError) throw e;
