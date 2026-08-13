@@ -17,6 +17,14 @@ import type {
   ClockPort,
 } from "./first-room-access-ports.ts";
 
+/** Espelha normalizeAccessPhoneDigits (evita import circular com senders). */
+function normalizePhoneDigits(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length >= 12) return digits;
+  if (digits.length === 10 || digits.length === 11) return "55" + digits;
+  return digits;
+}
+
 const MAX_ATTEMPTS = 5;
 const RETRY_BACKOFF_MS = 60_000;
 const CLAIM_LEASE_MS = 5 * 60_000;
@@ -128,11 +136,16 @@ async function dispatchOne(
   const attempts = row.attempts + 1;
 
   if (row.channel === "whatsapp") {
-    const phone = isInternal
-      ? flags.digisacInternalNumber.replace(/\D/g, "") || null
+    const rawPhone = isInternal
+      ? flags.digisacInternalNumber
       : recipients.phone_digits;
-    if (!phone) {
-      const err = isInternal ? "numero_interno_ausente" : "telefone_ausente";
+    const phone = rawPhone ? normalizePhoneDigits(String(rawPhone)) : "";
+    if (!phone || phone.length < 12) {
+      const err = isInternal
+        ? rawPhone
+          ? "numero_interno_invalido"
+          : "numero_interno_ausente"
+        : "telefone_ausente";
       // Terminal — sem retry infinito.
       await ports.queue.markFailed(row.id, err, attempts, nowIso, nowIso);
       return { id: row.id, status: "failed", channel: "whatsapp", error: err };
@@ -158,7 +171,16 @@ async function dispatchOne(
       );
       return { id: row.id, status: "failed", channel: "whatsapp", error: send.error };
     }
-    await ports.queue.markSent(row.id, nowIso);
+    const dest = send.normalized_recipient || phone;
+    // sent = aceite da API DigiSac (não confirma entrega WhatsApp ao aparelho).
+    await ports.queue.markSent(row.id, nowIso, {
+      recipient_ref: dest,
+      provider_message_id: send.provider_message_id ?? null,
+      payload_audit: {
+        destination_kind: isInternal ? "digisac_internal" : "guest",
+        destination_masked: maskPhone(dest),
+      },
+    });
     return { id: row.id, status: "sent", channel: "whatsapp" };
   }
 
@@ -196,7 +218,11 @@ async function dispatchOne(
     );
     return { id: row.id, status: "failed", channel: "email", error: send.error };
   }
-  await ports.queue.markSent(row.id, nowIso);
+  await ports.queue.markSent(row.id, nowIso, {
+    recipient_ref: email,
+    provider_message_id: send.provider_message_id ?? null,
+    payload_audit: { destination_kind: "guest_email" },
+  });
   return { id: row.id, status: "sent", channel: "email" };
 }
 
@@ -206,17 +232,25 @@ export function createMockAccessCommunicationSender(options?: {
   failEmail?: boolean;
 }): AccessCommunicationSenderPort {
   return {
-    async sendWhatsapp() {
+    async sendWhatsapp(input) {
       if (options?.failWhatsapp) {
         return { ok: false, error: "mock_whatsapp_fail", retryable: true };
       }
-      return { ok: true };
+      return {
+        ok: true,
+        provider_message_id: `mock-wa-${input.idempotency_key}`,
+        normalized_recipient: normalizePhoneDigits(input.recipient_ref),
+      };
     },
-    async sendEmail() {
+    async sendEmail(input) {
       if (options?.failEmail) {
         return { ok: false, error: "mock_email_fail", retryable: true };
       }
-      return { ok: true };
+      return {
+        ok: true,
+        provider_message_id: `mock-em-${input.idempotency_key}`,
+        normalized_recipient: input.recipient_ref,
+      };
     },
   };
 }

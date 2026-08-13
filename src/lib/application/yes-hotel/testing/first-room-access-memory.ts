@@ -703,14 +703,35 @@ export class InMemoryAccessOutboxQueue implements AccessOutboxQueuePort {
     };
   }
 
-  async markSent(id: string, processedAt: string): Promise<void> {
+  async markSent(
+    id: string,
+    processedAt: string,
+    meta?: {
+      recipient_ref?: string | null;
+      provider_message_id?: string | null;
+      payload_audit?: Record<string, unknown> | null;
+    },
+  ): Promise<void> {
     const idx = this.state.accessOutbox.findIndex((r) => r.id === id);
     if (idx < 0) return;
+    const prev = this.state.accessOutbox[idx];
+    const prevPayload =
+      prev.payload && typeof prev.payload === "object" && !Array.isArray(prev.payload)
+        ? (prev.payload as Record<string, unknown>)
+        : {};
+    const audit = { ...(meta?.payload_audit ?? {}) };
+    if (meta?.provider_message_id) audit.provider_message_id = meta.provider_message_id;
+    if (Object.keys(audit).length > 0) audit.provider_accept = "api_accepted";
     this.state.accessOutbox[idx] = {
-      ...this.state.accessOutbox[idx],
+      ...prev,
       status: "sent",
       processed_at: processedAt,
       last_error: null,
+      recipient_ref:
+        meta?.recipient_ref != null && String(meta.recipient_ref).trim()
+          ? String(meta.recipient_ref).trim()
+          : prev.recipient_ref,
+      payload: Object.keys(audit).length > 0 ? { ...prevPayload, ...audit } : prev.payload,
     };
   }
 

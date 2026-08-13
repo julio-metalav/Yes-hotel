@@ -1206,6 +1206,7 @@ html {
 
 .checkin-view .op-flux-pag--paid { color: var(--op-success); }
 .checkin-view .op-flux-pag--unpaid { color: var(--op-warning-fg); }
+.checkin-view .op-flux-pag--comiss { color: var(--op-warning-fg); }
 
 .checkin-view .op-next-action {
   display: -webkit-box;
@@ -1273,6 +1274,13 @@ html {
   background: rgba(184, 60, 57, 0.1);
   border-color: rgba(184, 60, 57, 0.25);
   color: var(--op-destructive);
+}
+
+/* Comissionada: âmbar operacional — não vermelho de cobrança ao hóspede. */
+.checkin-view .op-badge--pend-comiss {
+  background: rgba(229, 171, 66, 0.12);
+  border-color: rgba(229, 171, 66, 0.4);
+  color: var(--op-warning-fg);
 }
 
 .checkin-view .op-badge--clickable {

@@ -69,10 +69,59 @@ export class SupabaseAccessOutboxQueuePort implements AccessOutboxQueuePort {
     if (error) throw new Error(`outbox releaseClaim: ${error.message}`);
   }
 
-  async markSent(id: string, processedAt: string): Promise<void> {
+  async markSent(
+    id: string,
+    processedAt: string,
+    meta?: {
+      recipient_ref?: string | null;
+      provider_message_id?: string | null;
+      payload_audit?: Record<string, unknown> | null;
+    },
+  ): Promise<void> {
+    const patch: Record<string, unknown> = {
+      status: "sent",
+      processed_at: processedAt,
+      last_error: null,
+    };
+    if (meta?.recipient_ref != null && String(meta.recipient_ref).trim()) {
+      patch.recipient_ref = String(meta.recipient_ref).trim();
+    }
+    if (meta?.payload_audit && typeof meta.payload_audit === "object") {
+      const { data: cur } = await this.client
+        .from("operacional_acesso_outbox")
+        .select("payload")
+        .eq("id", id)
+        .maybeSingle();
+      const prev =
+        cur?.payload && typeof cur.payload === "object" && !Array.isArray(cur.payload)
+          ? (cur.payload as Record<string, unknown>)
+          : {};
+      const audit = { ...meta.payload_audit };
+      if (meta.provider_message_id) {
+        audit.provider_message_id = meta.provider_message_id;
+      }
+      // sent = aceite HTTP/API do provider (não confirma entrega WhatsApp end-to-end).
+      audit.provider_accept = "api_accepted";
+      patch.payload = { ...prev, ...audit };
+    } else if (meta?.provider_message_id) {
+      const { data: cur } = await this.client
+        .from("operacional_acesso_outbox")
+        .select("payload")
+        .eq("id", id)
+        .maybeSingle();
+      const prev =
+        cur?.payload && typeof cur.payload === "object" && !Array.isArray(cur.payload)
+          ? (cur.payload as Record<string, unknown>)
+          : {};
+      patch.payload = {
+        ...prev,
+        provider_message_id: meta.provider_message_id,
+        provider_accept: "api_accepted",
+      };
+    }
     const { error } = await this.client
       .from("operacional_acesso_outbox")
-      .update({ status: "sent", processed_at: processedAt, last_error: null })
+      .update(patch)
       .eq("id", id);
     if (error) throw new Error(`outbox markSent: ${error.message}`);
   }

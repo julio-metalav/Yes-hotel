@@ -171,11 +171,28 @@ export interface TtlockValidityChangePort {
 }
 
 /** Fila operacional_acesso_outbox. */
+export type AccessOutboxMarkSentMeta = {
+  recipient_ref?: string | null;
+  provider_message_id?: string | null;
+  /** Merge superficial no payload JSON (auditoria; sem segredos). */
+  payload_audit?: Record<string, unknown> | null;
+};
+
+export type AccessSendResult = {
+  ok: boolean;
+  error?: string;
+  retryable?: boolean;
+  /** ID retornado pelo provider (DigiSac/Resend), se houver. */
+  provider_message_id?: string;
+  /** Destino efetivamente usado (ex.: E.164 digits). */
+  normalized_recipient?: string;
+};
+
 export interface AccessOutboxQueuePort {
   listAvailable(nowIso: string, limit?: number): Promise<import("./first-room-access-types").AccessOutboxRecord[]>;
   tryClaim(id: string, nowIso: string, leaseUntilIso: string): Promise<boolean>;
   releaseClaim?(id: string, availableAt: string): Promise<void>;
-  markSent(id: string, processedAt: string): Promise<void>;
+  markSent(id: string, processedAt: string, meta?: AccessOutboxMarkSentMeta): Promise<void>;
   markFailed(
     id: string,
     error: string,
@@ -191,13 +208,13 @@ export interface AccessCommunicationSenderPort {
     recipient_ref: string;
     body: string;
     idempotency_key: string;
-  }): Promise<{ ok: boolean; error?: string; retryable?: boolean }>;
+  }): Promise<AccessSendResult>;
   sendEmail(input: {
     recipient_ref: string;
     subject: string;
     body: string;
     idempotency_key: string;
-  }): Promise<{ ok: boolean; error?: string; retryable?: boolean }>;
+  }): Promise<AccessSendResult>;
 }
 
 export interface ClockPort {

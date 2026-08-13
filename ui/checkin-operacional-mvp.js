@@ -2103,7 +2103,12 @@ function derivarStatusOperacional(reserva) {
       type: "pagarme-pago-hits-pendente",
     };
   }
-  if (isPagamentoPendenteOperacional(reserva)) {
+  // Comissionada com saldo HITS: não induzir "hóspede precisa pagar".
+  const finStatus = resolveFinancialUi(reserva).status;
+  if (finStatus === "pendente_comissionado") {
+    return { label: "Pendente (comissionado)", type: "pendente-comissionado" };
+  }
+  if (finStatus === "pendente" || isPagamentoPendenteOperacional(reserva)) {
     return { label: "Pendente pagamento", type: "pendente-pagamento" };
   }
   if (hasFnrhPendente(reserva)) {
@@ -2322,6 +2327,7 @@ function noitesEntre(checkIn, checkOut) {
 function badgeClassFromStatusType(type) {
   const map = {
     "pendente-pagamento": "op-badge op-badge--pend-pag",
+    "pendente-comissionado": "op-badge op-badge--pend-comiss",
     "pagarme-pago-hits-pendente": "op-badge op-badge--pagarme-hits",
     "pendente-fnrh": "op-badge op-badge--pend-fnrh",
     "pronto-liberar": "op-badge op-badge--pronto",
@@ -2515,7 +2521,7 @@ function linhaFluxoResumo(reserva) {
     pago
       ? "op-flux-pag op-flux-pag--paid"
       : finUi.status === "pendente_comissionado"
-        ? "op-flux-pag op-flux-pag--unpaid"
+        ? "op-flux-pag op-flux-pag--comiss"
         : "op-flux-pag op-flux-pag--unpaid";
   const pagText =
     finUi.status === "pago"
@@ -2544,12 +2550,13 @@ function linhaFluxoResumo(reserva) {
     }
   }
 
-  if (pago) {
+  // Acesso operacional: pago OU pendente comissionado (não bloqueia linha).
+  if (pago || finUi.status === "pendente_comissionado") {
     if (reserva.entrouNoApto) {
       rest.push("Entrou");
     } else if (total > 0 && confirmadas === total) {
       rest.push(acessoLiberadoEfetivo(reserva) ? "Acesso ok" : "Sem acesso");
-    } else if (total > 0) {
+    } else if (total > 0 && pago) {
       rest.push(`${total} hósp.`);
     }
   }
