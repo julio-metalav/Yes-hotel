@@ -5,6 +5,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { collectOccupiedPasscodesFromRows } from "../../domain/yes-hotel/ttlock-passcode-uniqueness.ts";
+import { splitCredencialProvisionDbPatch } from "../../domain/yes-hotel/ttlock-provision-db-patch.ts";
 import type {
   CredencialItemRow,
   CredencialRow,
@@ -203,11 +204,23 @@ export function createSupabaseProvisioningRepository(
         >
       >,
     ): Promise<void> {
-      const { error } = await supabase
-        .from("operacional_credenciais_acesso")
-        .update(patch)
-        .eq("id", id);
-      if (error) throw new Error(`updateCredencial: ${error.message}`);
+      const { core, sync } = splitCredencialProvisionDbPatch(patch as Record<string, unknown>);
+      if (Object.keys(core).length > 0) {
+        const { error } = await supabase
+          .from("operacional_credenciais_acesso")
+          .update(core)
+          .eq("id", id);
+        if (error) throw new Error(`updateCredencial: ${error.message}`);
+      }
+      if (Object.keys(sync).length > 0) {
+        const { error } = await supabase
+          .from("operacional_credenciais_acesso")
+          .update(sync)
+          .eq("id", id);
+        if (error) {
+          console.warn("updateCredencial sync_* ignorado:", error.message);
+        }
+      }
     },
 
     async getCredenciaisComPendenciaSync(): Promise<CredencialRow[]> {

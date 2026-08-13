@@ -69,3 +69,8 @@ verify_jwt = false
 # Auth: service_role ou x-access-tolerance-token. Flag YES_HOTEL_TTLOCK_ACCESS_POLL_ENABLED.
 [functions.ttlock-access-poller]
 verify_jwt = false
+
+# Retomada assíncrona fase 2 do provisionamento TTLock + send-senha.
+# Auth: service_role ou x-access-tolerance-token. Default enabled.
+[functions.ttlock-provision-retry]
+verify_jwt = false

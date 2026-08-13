@@ -19,6 +19,7 @@ import {
 } from "../_shared/hotel-timezone.ts";
 import { executeLifecycleUpdateValidity } from "../_shared/lifecycle-update-validity.ts";
 import { resolveProvisionCredentialStatus } from "../../../src/lib/domain/yes-hotel/ttlock-guest-access-gate.ts";
+import { splitCredencialProvisionDbPatch } from "../../../src/lib/domain/yes-hotel/ttlock-provision-db-patch.ts";
 import {
   canRetryWithNewPasscode,
   collectOccupiedPasscodesFromRows,
@@ -223,7 +224,8 @@ async function ensureCallerAllowed(request: Request): Promise<void> {
   const internalCaller = String(request.headers.get("x-yes-internal-caller") ?? "")
     .trim()
     .toLowerCase();
-  if (internalCaller === "send-senha" && isServiceRoleBearer(token, supabaseServiceKey)) {
+  const internalCallers = new Set(["send-senha", "ttlock-provision-retry"]);
+  if (internalCallers.has(internalCaller) && isServiceRoleBearer(token, supabaseServiceKey)) {
     return;
   }
 
@@ -793,6 +795,41 @@ type ItemRow = {
   codigo_logico_destino: string;
   ultimo_erro?: string | null;
 };
+
+/**
+ * Persiste status operacional primeiro (obrigatório). Colunas sync_* são
+ * best-effort: se 0009 não estiver no schema físico, o status não pode ficar preso.
+ */
+async function persistCredencialProvisionOutcome(
+  credencialId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const { core, sync } = splitCredencialProvisionDbPatch(patch);
+  if (Object.keys(core).length > 0) {
+    const { error } = await adminClient
+      .from("operacional_credenciais_acesso")
+      .update(core)
+      .eq("id", credencialId);
+    if (error) {
+      throw new HttpError(
+        "Falha ao atualizar status da credencial: " + error.message,
+        500,
+      );
+    }
+  }
+  if (Object.keys(sync).length > 0) {
+    const { error } = await adminClient
+      .from("operacional_credenciais_acesso")
+      .update(sync)
+      .eq("id", credencialId);
+    if (error && typeof console !== "undefined") {
+      console.warn(
+        "[lifecycle] sync_* update ignorado (colunas ausentes ou schema):",
+        error.message,
+      );
+    }
+  }
+}
 
 async function getCredencialPorReserva(reservaId: string): Promise<CredencialRow | null> {
   const normalizedId = String(reservaId ?? "").trim().toLowerCase();
@@ -1771,15 +1808,12 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
       allReady: false,
       inProgress: 0,
     };
-    await adminClient
-      .from("operacional_credenciais_acesso")
-      .update({
-        status: resolved.status,
-        sync_status: "failed",
-        last_sync_attempt_at: nowIso,
-        last_sync_error: "Rollback após colisão de passcode falhou; intervenção necessária.",
-      })
-      .eq("id", credencial.id);
+    await persistCredencialProvisionOutcome(credencial.id, {
+      status: resolved.status,
+      sync_status: "failed",
+      last_sync_attempt_at: nowIso,
+      last_sync_error: "Rollback após colisão de passcode falhou; intervenção necessária.",
+    });
   } else if (hadTransientPending) {
     phase2Count += 1;
     if (phase2Count > phase2Max) {
@@ -1799,38 +1833,32 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
       }
       finalItens = await getAllItensCredencial(credencial.id);
       resolved = resolveProvisionCredentialStatus(finalItens);
-      await adminClient
-        .from("operacional_credenciais_acesso")
-        .update({
-          status: resolved.status,
-          sync_status: "failed",
-          last_sync_attempt_at: nowIso,
-          last_sync_error: encodeTransientRetryState({
-            phase: 2,
-            count: phase2Count,
-            errorClass: lastTransientClass,
-            nextEligibleAt: null,
-          }),
-        })
-        .eq("id", credencial.id);
+      await persistCredencialProvisionOutcome(credencial.id, {
+        status: resolved.status,
+        sync_status: "failed",
+        last_sync_attempt_at: nowIso,
+        last_sync_error: encodeTransientRetryState({
+          phase: 2,
+          count: phase2Count,
+          errorClass: lastTransientClass,
+          nextEligibleAt: null,
+        }),
+      });
     } else {
       retryable = true;
       const nextEligibleAt = new Date(Date.now() + 60_000).toISOString();
       resolved = { ...resolved, status: "provisionando", allReady: false };
-      await adminClient
-        .from("operacional_credenciais_acesso")
-        .update({
-          status: "provisionando",
-          sync_status: "pending",
-          last_sync_attempt_at: nowIso,
-          last_sync_error: encodeTransientRetryState({
-            phase: 2,
-            count: phase2Count,
-            errorClass: lastTransientClass,
-            nextEligibleAt,
-          }),
-        })
-        .eq("id", credencial.id);
+      await persistCredencialProvisionOutcome(credencial.id, {
+        status: "provisionando",
+        sync_status: "pending",
+        last_sync_attempt_at: nowIso,
+        last_sync_error: encodeTransientRetryState({
+          phase: 2,
+          count: phase2Count,
+          errorClass: lastTransientClass,
+          nextEligibleAt,
+        }),
+      });
       await insertReservaEvento(
         reservaId,
         "ttlock_provision_retry_transiente",
@@ -1848,14 +1876,11 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
       );
     }
   } else {
-    await adminClient
-      .from("operacional_credenciais_acesso")
-      .update({
-        status: resolved.status,
-        last_sync_attempt_at: nowIso,
-        ...(resolved.allReady ? { sync_status: "ok", last_sync_error: null } : {}),
-      })
-      .eq("id", credencial.id);
+    await persistCredencialProvisionOutcome(credencial.id, {
+      status: resolved.status,
+      last_sync_attempt_at: nowIso,
+      ...(resolved.allReady ? { sync_status: "ok", last_sync_error: null } : {}),
+    });
   }
 
   const statusFinal = resolved.status;
@@ -2410,12 +2435,24 @@ async function getSyncSummary(request: Request, reservaId: string): Promise<Resp
   }
   const { data: itens } = await adminClient
     .from("operacional_credencial_itens")
-    .select("status_provisionamento, ultimo_erro")
+    .select("status_provisionamento, ultimo_erro, remote_keyboard_pwd_id")
     .eq("credencial_id", credencial.id);
-  const provisionados = (itens ?? []).filter((i: { status_provisionamento: string }) => i.status_provisionamento === "provisionado").length;
-  const pendentesLimpeza = (itens ?? []).filter((i: { status_provisionamento: string }) => i.status_provisionamento === "pendente_limpeza").length;
-  const comErro = (itens ?? []).filter((i: { ultimo_erro: unknown }) => i.ultimo_erro != null).length;
-  let resumo = credencial.status;
+  const itemRows = (itens ?? []) as {
+    status_provisionamento: string;
+    ultimo_erro: string | null;
+    remote_keyboard_pwd_id: number | null;
+  }[];
+  const resolved = resolveProvisionCredentialStatus(itemRows);
+  const provisionados = resolved.provisionados;
+  const pendentesLimpeza = itemRows.filter((i) => i.status_provisionamento === "pendente_limpeza").length;
+  const comErro = itemRows.filter((i) => i.ultimo_erro != null).length;
+  const allItemsProvisioned =
+    resolved.allReady && credencial.status !== "revogada";
+  const effectiveStatus =
+    allItemsProvisioned && credencial.status !== "revogada"
+      ? "provisionada"
+      : credencial.status;
+  let resumo = effectiveStatus;
   if (credencial.sync_status) resumo += ` | sync: ${credencial.sync_status}`;
   if (comErro > 0) resumo += ` | ${comErro} item(ns) com erro`;
   if (pendentesLimpeza > 0) resumo += ` | ${pendentesLimpeza} pendente(s) limpeza`;
@@ -2425,7 +2462,11 @@ async function getSyncSummary(request: Request, reservaId: string): Promise<Resp
     reservaId,
     temCredencial: true,
     credencialId: credencial.id,
-    status: credencial.status,
+    status: effectiveStatus,
+    storedStatus: credencial.status,
+    allItemsProvisioned,
+    provisionados,
+    totalItens: itemRows.length,
     syncStatus: credencial.sync_status ?? null,
     lastSyncAttemptAt: credencial.last_sync_attempt_at ?? null,
     lastSyncError: credencial.last_sync_error ?? null,

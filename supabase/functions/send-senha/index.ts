@@ -262,36 +262,48 @@ Deno.serve(async (req: Request) => {
     if (!gatePre.ready) {
       // Sempre service_role + header interno: lifecycle_provision exige operador JWT
       // no caminho manual; no automático (requisitos/Pagar.me) não há sessão de operador.
-      const provisionRes = await fetch(lifecycleUrl, {
-        method: "POST",
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${serviceRoleKey}`,
-          "x-yes-internal-caller": "send-senha",
-        },
-        body: JSON.stringify({ action: "lifecycle_provision", payload: { reservaId } }),
-      });
-      const provisionData = await provisionRes.json().catch(() => ({})) as {
-        ok?: boolean;
-        passcode?: string;
-        error?: string;
-        status?: string;
-        falhas?: number;
-      };
-      if (!isLifecycleProvisionAccessReady(provisionData)) {
+      async function callLifecycleProvision() {
+        const provisionRes = await fetch(lifecycleUrl, {
+          method: "POST",
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${serviceRoleKey}`,
+            "x-yes-internal-caller": "send-senha",
+          },
+          body: JSON.stringify({ action: "lifecycle_provision", payload: { reservaId } }),
+        });
+        return {
+          res: provisionRes,
+          data: (await provisionRes.json().catch(() => ({}))) as {
+            ok?: boolean;
+            passcode?: string;
+            error?: string;
+            status?: string;
+            falhas?: number;
+          },
+        };
+      }
+      const first = await callLifecycleProvision();
+      if (!isLifecycleProvisionAccessReady(first.data)) {
         return await blockGuestAccessReady(
-          provisionData.error
+          first.data.error
             ? "lifecycle_provision_falhou"
             : "lifecycle_provision_nao_confirmado",
           {
-            lifecycle_status: provisionData.status ?? null,
-            lifecycle_error: provisionData.error ?? null,
-            falhas: provisionData.falhas ?? null,
+            lifecycle_status: first.data.status ?? null,
+            lifecycle_error: first.data.error ?? null,
+            falhas: first.data.falhas ?? null,
           },
         );
       }
       gatePre = await loadReadyGate();
+      // Heal: lifecycle já confirmou 3/3 mas o status da credencial pode ter
+      // ficado preso em provisionando se sync_* falhou. Reentrada idempotente.
+      if (!gatePre.ready && String(gatePre.reason ?? "").startsWith("status_")) {
+        await callLifecycleProvision();
+        gatePre = await loadReadyGate();
+      }
     }
   }
 

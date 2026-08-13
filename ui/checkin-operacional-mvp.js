@@ -3381,8 +3381,10 @@ function presentTtlockPasswordStatus(data) {
   }
   const status = data && data.status != null ? String(data.status) : null;
   const syncStatus = data && data.syncStatus != null ? String(data.syncStatus) : null;
+  const allItems =
+    data && (data.allItemsProvisioned === true || data.all_items_provisioned === true);
   const resumoRaw = data && data.resumo != null ? String(data.resumo) : "";
-  if (status === "provisionada") {
+  if (allItems || status === "provisionada") {
     return { statusClass: "sync-ok", statusLabel: "Senha pronta", resumoText: "" };
   }
   if (status === "falhou" || syncStatus === "failed") {

@@ -535,6 +535,18 @@ function ok(label: string) {
   ok("23 regressão TTLock Senha pronta / provisionada");
 }
 
+{
+  const t = P.presentTtlockPasswordStatus({
+    status: "provisionando",
+    syncStatus: "pending",
+    allItemsProvisioned: true,
+    resumo: "provisionando | 3 provisionado(s)",
+  });
+  assert.equal(t.statusLabel, "Senha pronta");
+  assert.equal(t.statusClass, "sync-ok");
+  ok("23b 3/3 itens → Senha pronta mesmo com status provisionando");
+}
+
 // 24 FNRH confirmada sem ainda não enviado
 {
   const g = P.presentGuestCardState({
