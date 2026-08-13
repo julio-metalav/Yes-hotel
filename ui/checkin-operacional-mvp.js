@@ -83,6 +83,15 @@ function addDaysYmd(ymd, days) {
   return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
 }
 
+/** Último dia civil do mês de `ymd` (YYYY-MM-DD). */
+function endOfMonthYmd(ymd) {
+  const m = String(ymd || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return "";
+  // Dia 0 do mês seguinte = último dia do mês corrente (UTC civil).
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]), 0));
+  return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
+}
+
 /** Partes civis no fuso do hotel (America/Campo_Grande). */
 function hotelLocalParts(now) {
   const d = now instanceof Date ? now : new Date();
@@ -125,10 +134,11 @@ function resolvePeriodRangeYmd(periodo, opts) {
   const yesterday = addDaysYmd(today, -1);
   if (periodo === "hoje") return { from: today, to: today };
   if (periodo === "ontem") return { from: yesterday, to: yesterday };
-  if (periodo === "7dias") return { from: addDaysYmd(today, -6), to: today };
+  // Próximos 7 dias operacionais (inclui chegadas futuras no horizonte).
+  if (periodo === "7dias") return { from: today, to: addDaysYmd(today, 6) };
   if (periodo === "este_mes") {
     const from = `${today.slice(0, 7)}-01`;
-    return { from, to: today };
+    return { from, to: endOfMonthYmd(today) };
   }
   if (periodo === "periodo") {
     let from = String(o.fromYmd || "").slice(0, 10);

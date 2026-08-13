@@ -69,6 +69,7 @@
     "test:ver-panel-operacional": "tsx scripts/test-ver-panel-operacional.ts",
     "test:ui-static-js": "node --check ui/checkin-operacional-mvp.js && node --check ui/fnrh-checkin-v2.js && node --check ui/yes-arrivals-policy.js && node --check ui/yes-access-tolerance-policy.js && node --check ui/yes-cafe-policy.js && node --check ui/cafe-da-manha-mvp.js && node --check ui/yes-checkin-panel-presentation.js",
     "test:checkin-panel-presentation": "tsx scripts/test-checkin-panel-presentation.ts",
+    "test:checkin-operational-period": "tsx scripts/test-checkin-operational-period.ts",
     "test:yes:cafe-operacional": "tsx scripts/test-cafe-operacional.ts",
     "test:hits-real:json": "tsx scripts/test-hits-real-json-to-yes.ts",
     "debug:provisioning": "tsx scripts/debug-provisioning-plan.ts",
