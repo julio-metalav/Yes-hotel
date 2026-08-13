@@ -218,12 +218,14 @@ Deno.serve(async (req: Request) => {
       gerarNovaInFlight.delete(reservaId);
     }
   } else if (!passcode) {
+    // Sempre service_role + header interno: lifecycle_provision exige operador JWT
+    // no caminho manual; no automático (requisitos/Pagar.me) não há sessão de operador.
     const provisionRes = await fetch(lifecycleUrl, {
       method: "POST",
       headers: {
         ...corsHeaders,
         "Content-Type": "application/json",
-        Authorization: authHeader || `Bearer ${serviceRoleKey}`,
+        Authorization: `Bearer ${serviceRoleKey}`,
         "x-yes-internal-caller": "send-senha",
       },
       body: JSON.stringify({ action: "lifecycle_provision", payload: { reservaId } }),
