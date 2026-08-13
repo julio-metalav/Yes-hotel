@@ -160,6 +160,22 @@
     };
   }
 
+  function isPagarmeQuitacaoIntegral(input) {
+    input = input || {};
+    var balance = parseHitsMoney(input.balanceDue);
+    if (balance != null && balance <= 0) return true;
+    var paidRaw = input.pagarmePaidCentavosTotal;
+    if (paidRaw == null || paidRaw === "") return false;
+    var paid = Number(paidRaw);
+    if (!isFinite(paid) || Math.floor(paid) !== paid || paid <= 0) return false;
+    if (balance == null) return false;
+    var balanceCentavos = Math.round(balance * 100);
+    if (!isFinite(balanceCentavos) || Math.floor(balanceCentavos) !== balanceCentavos || balanceCentavos < 0) {
+      return false;
+    }
+    return paid >= balanceCentavos;
+  }
+
   function resolveFinancialStatusVisible(input) {
     input = input || {};
     var pay = String(input.pagamentoStatus == null ? "" : input.pagamentoStatus)
@@ -169,7 +185,11 @@
     var cls = String(input.classificacao == null ? "" : input.classificacao)
       .trim()
       .toLowerCase();
-    var isPaid = pay === "pago" || (balance != null && balance <= 0);
+    var pagarmeQuitado = isPagarmeQuitacaoIntegral({
+      balanceDue: input.balanceDue,
+      pagarmePaidCentavosTotal: input.pagarmePaidCentavosTotal,
+    });
+    var isPaid = pay === "pago" || (balance != null && balance <= 0) || pagarmeQuitado;
     if (isPaid) return "pago";
     var hasDue =
       (balance != null && balance > 0) ||
@@ -194,6 +214,10 @@
     return false;
   }
 
+  function resolvePagamentoStatusParaCredencial(input) {
+    return isFinanceiramenteLiberadoParaAcesso(input) ? "pago" : "pendente";
+  }
+
   function nextFinancialActionLabel(status) {
     if (status === "pendente") return "Gerar e enviar link de pagamento";
     if (status === "pendente_comissionado") return "Regularizar pagamento no HITS";
@@ -215,9 +239,11 @@
   global.YesReservationFinancial = {
     parseHitsMoney: parseHitsMoney,
     classifyCommissionFromHits: classifyCommissionFromHits,
+    isPagarmeQuitacaoIntegral: isPagarmeQuitacaoIntegral,
     resolveFinancialStatusVisible: resolveFinancialStatusVisible,
     financialStatusLabel: financialStatusLabel,
     isFinanceiramenteLiberadoParaAcesso: isFinanceiramenteLiberadoParaAcesso,
+    resolvePagamentoStatusParaCredencial: resolvePagamentoStatusParaCredencial,
     nextFinancialActionLabel: nextFinancialActionLabel,
     shouldCreatePagarmeCharge: shouldCreatePagarmeCharge,
     isB2bChannelManager: isB2bChannelManager,

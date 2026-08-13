@@ -1848,6 +1848,18 @@ function getNaoIdentificados(reserva) {
   return reserva.hospedes.filter((h) => !hasIdentificacaoMinima(h));
 }
 
+function sumPagarmePaidCentavosFromReserva(reserva) {
+  const rows = reserva && Array.isArray(reserva.cobrancasPagarme) ? reserva.cobrancasPagarme : [];
+  let total = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const c = rows[i];
+    if (!c || String(c.status || "").toLowerCase() !== "paid") continue;
+    const v = Number(c.valor_centavos);
+    if (Number.isInteger(v) && v > 0) total += v;
+  }
+  return total;
+}
+
 function resolveFinancialUi(reserva) {
   const api =
     typeof YesReservationFinancial !== "undefined" && YesReservationFinancial
@@ -1857,15 +1869,21 @@ function resolveFinancialUi(reserva) {
     pagamentoStatus: reserva.pagamento,
     balanceDue: reserva.reservationBalanceDue,
     classificacao: reserva.classificacaoComissionamento,
+    pagarmePaidCentavosTotal: sumPagarmePaidCentavosFromReserva(reserva),
   };
   if (api && typeof api.resolveFinancialStatusVisible === "function") {
     const status = api.resolveFinancialStatusVisible(input);
+    const hitsReconcilePending =
+      status === "pago" &&
+      String(reserva.pagamento || "").toLowerCase() !== "pago" &&
+      sumPagarmePaidCentavosFromReserva(reserva) > 0;
+    const baseLabel =
+      typeof api.financialStatusLabel === "function"
+        ? api.financialStatusLabel(status)
+        : status;
     return {
       status: status,
-      label:
-        typeof api.financialStatusLabel === "function"
-          ? api.financialStatusLabel(status)
-          : status,
+      label: hitsReconcilePending ? "Pago via Pagar.me" : baseLabel,
       accessOk:
         typeof api.isFinanceiramenteLiberadoParaAcesso === "function"
           ? api.isFinanceiramenteLiberadoParaAcesso(input)
@@ -1874,6 +1892,7 @@ function resolveFinancialUi(reserva) {
         typeof api.nextFinancialActionLabel === "function"
           ? api.nextFinancialActionLabel(status)
           : null,
+      hitsReconcilePending: hitsReconcilePending,
     };
   }
   if (reserva.pagamento === "pago") {
@@ -3997,7 +4016,21 @@ var OPERACIONAL_EXCECOES_MAX_ITENS = 14;
  * Uma exceção por reserva (a mais prioritária). null se nada aplicável.
  */
 function buildCredentialReleaseInputFromReserva(reserva, overrides) {
-  const pagamentoStatus = isPagamentoOk(reserva) ? "pago" : "pendente";
+  const finApi =
+    typeof YesReservationFinancial !== "undefined" && YesReservationFinancial
+      ? YesReservationFinancial
+      : null;
+  const pagamentoStatus =
+    finApi && typeof finApi.resolvePagamentoStatusParaCredencial === "function"
+      ? finApi.resolvePagamentoStatusParaCredencial({
+          pagamentoStatus: reserva && reserva.pagamento,
+          balanceDue: reserva && reserva.reservationBalanceDue,
+          classificacao: reserva && reserva.classificacaoComissionamento,
+          pagarmePaidCentavosTotal: sumPagarmePaidCentavosFromReserva(reserva),
+        })
+      : isPagamentoOk(reserva)
+        ? "pago"
+        : "pendente";
   const fnrhStatus = isFnrhCompleta(reserva) ? "completa" : "pendente";
   const senhaEnviada = !!(reserva && (reserva.senhaEnviadaEm || (obterUltimosEventosSenha(reserva).lastOkSenha)));
   const checkInDate = reserva?.checkInPrevisto
@@ -5039,6 +5072,10 @@ function buildPagamentoSituacaoHtml(reserva, fin) {
   }
 
   if (fin.status === "pago") {
+    if (fin.hitsReconcilePending) {
+      html +=
+        '<p class="detail-situacao-sub">HITS pendente de regularização</p>';
+    }
     html += "</div>";
     return html;
   }

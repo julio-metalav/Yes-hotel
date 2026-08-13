@@ -304,10 +304,39 @@ export function classifyCommissionFromHits(input: {
   };
 }
 
+/**
+ * Quitação integral via Pagar.me confirmado no Yes.
+ *
+ * Casos:
+ * - saldo operacional <= 0 (já decrementado pelo webhook) → quitado
+ * - soma de cobranças paid (centavos) >= saldo operacional atual → cobre
+ *   inconsistência pré-PR#55 em que o paid não decrementou o saldo
+ *
+ * Parcial (paid < saldo) → false.
+ */
+export function isPagarmeQuitacaoIntegral(input: {
+  balanceDue?: unknown;
+  /** Soma de valor_centavos (ou recebido) das cobranças status=paid. */
+  pagarmePaidCentavosTotal?: unknown;
+}): boolean {
+  const balance = parseHitsMoney(input.balanceDue);
+  if (balance != null && balance <= 0) return true;
+  const paidRaw = input.pagarmePaidCentavosTotal;
+  if (paidRaw == null || paidRaw === "") return false;
+  const paid = Number(paidRaw);
+  if (!Number.isInteger(paid) || paid <= 0) return false;
+  if (balance == null) return false;
+  const balanceCentavos = Math.round(balance * 100);
+  if (!Number.isInteger(balanceCentavos) || balanceCentavos < 0) return false;
+  return paid >= balanceCentavos;
+}
+
 export function resolveFinancialStatusVisible(input: {
   pagamentoStatus?: unknown;
   balanceDue?: unknown;
   classificacao?: unknown;
+  /** Soma paid Pagar.me em centavos (opcional; prova Yes independente do HITS). */
+  pagarmePaidCentavosTotal?: unknown;
 }): FinancialStatusVisible {
   const pay = String(input.pagamentoStatus ?? "")
     .trim()
@@ -317,8 +346,13 @@ export function resolveFinancialStatusVisible(input: {
     .trim()
     .toLowerCase();
 
-  // 1) saldo <= 0 / pago → Pago
-  const isPaid = pay === "pago" || (balance != null && balance <= 0);
+  // 1) HITS/pago operacional OU saldo <= 0 OU quitação integral Pagar.me → Pago
+  const pagarmeQuitado = isPagarmeQuitacaoIntegral({
+    balanceDue: input.balanceDue,
+    pagarmePaidCentavosTotal: input.pagarmePaidCentavosTotal,
+  });
+  const isPaid =
+    pay === "pago" || (balance != null && balance <= 0) || pagarmeQuitado;
   if (isPaid) return "pago";
 
   const hasDue =
@@ -342,6 +376,7 @@ export function isFinanceiramenteLiberadoParaAcesso(input: {
   pagamentoStatus?: unknown;
   balanceDue?: unknown;
   classificacao?: unknown;
+  pagarmePaidCentavosTotal?: unknown;
 }): boolean {
   const status = resolveFinancialStatusVisible(input);
   if (status === "pago") return true;
@@ -349,6 +384,19 @@ export function isFinanceiramenteLiberadoParaAcesso(input: {
   if (status === "pendente_comissionado") return true;
   // desconhecida NÃO libera automaticamente.
   return false;
+}
+
+/**
+ * Status de pagamento para política de credenciais/TTLock.
+ * "pago" quando HITS/saldo/Pagar.me quitado OU comissionada (acesso liberado sem Pagar.me).
+ */
+export function resolvePagamentoStatusParaCredencial(input: {
+  pagamentoStatus?: unknown;
+  balanceDue?: unknown;
+  classificacao?: unknown;
+  pagarmePaidCentavosTotal?: unknown;
+}): "pago" | "pendente" {
+  return isFinanceiramenteLiberadoParaAcesso(input) ? "pago" : "pendente";
 }
 
 export function shouldCreatePagarmeCharge(input: {

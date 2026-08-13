@@ -147,7 +147,33 @@ async function main() {
       }),
       false,
     );
-    ok("financeiro liberado (pago/comissionada; desconhecida não libera)");
+    assert.equal(
+      isFinanceiroLiberadoParaAcesso({
+        pagamento_status: "pendente",
+        classificacao_comissionamento: "nao_comissionada",
+        reservation_balance_due: 0,
+      }),
+      true,
+    );
+    assert.equal(
+      isFinanceiroLiberadoParaAcesso({
+        pagamento_status: "pendente",
+        classificacao_comissionamento: "nao_comissionada",
+        reservation_balance_due: 10,
+        pagarme_paid_centavos_total: 1000,
+      }),
+      true,
+    );
+    assert.equal(
+      isFinanceiroLiberadoParaAcesso({
+        pagamento_status: "pendente",
+        classificacao_comissionamento: "nao_comissionada",
+        reservation_balance_due: 10,
+        pagarme_paid_centavos_total: 500,
+      }),
+      false,
+    );
+    ok("financeiro liberado (pago/comissionada/saldo0/pagarme integral; desconhecida não libera)");
   }
 
   {
