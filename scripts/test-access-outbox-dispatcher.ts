@@ -145,7 +145,13 @@ async function main() {
     assert.equal(results.length, 1);
     assert.equal(results[0].status, "sent");
     assert.equal(h.state.accessOutbox[0].last_error, null);
-    ok("mock injetado marca sent; last_error limpo");
+    // Destino interno (não hóspede) + auditoria de aceite API.
+    assert.equal(h.state.accessOutbox[0].recipient_ref, "556721800225");
+    const payload = h.state.accessOutbox[0].payload as Record<string, unknown>;
+    assert.equal(payload.destination_kind, "digisac_internal");
+    assert.equal(payload.provider_accept, "api_accepted");
+    assert.ok(String(payload.provider_message_id || "").startsWith("mock-wa-"));
+    ok("mock injetado marca sent; last_error limpo; destino interno auditado");
   }
 
   // whatsapp + email
@@ -426,7 +432,7 @@ async function main() {
         queue: h.outboxQueue,
         sender: createMockAccessCommunicationSender(),
         clock: h.clock,
-        resolveRecipients: async () => ({ phone_digits: "67999", email: null }),
+        resolveRecipients: async () => ({ phone_digits: "67999999999", email: null }),
       },
       { flags: FLAGS_SEND },
     );

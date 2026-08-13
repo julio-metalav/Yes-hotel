@@ -56,16 +56,38 @@ export function resendConfigComplete(cfg: ResendSenderConfig): boolean {
   return Boolean(cfg.apiKey && cfg.fromEmail);
 }
 
-function normalizePhoneDigits(value: string): string {
+/** Normaliza telefone BR para dígitos com DDI 55 quando local (10/11). */
+export function normalizeAccessPhoneDigits(value: string): string {
   const digits = value.replace(/\D/g, "");
   if (digits.length >= 12) return digits;
   if (digits.length === 10 || digits.length === 11) return "55" + digits;
   return digits;
 }
 
+function extractDigisacMessageId(data: Record<string, unknown>): string | undefined {
+  const direct =
+    (typeof data.id === "string" && data.id) ||
+    (typeof data.messageId === "string" && data.messageId) ||
+    (typeof data.uuid === "string" && data.uuid);
+  if (direct) return direct;
+  const nested = data.data;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    const o = nested as Record<string, unknown>;
+    if (typeof o.id === "string") return o.id;
+    if (typeof o.messageId === "string") return o.messageId;
+  }
+  const msg = data.message;
+  if (msg && typeof msg === "object" && !Array.isArray(msg)) {
+    const o = msg as Record<string, unknown>;
+    if (typeof o.id === "string") return o.id;
+  }
+  return undefined;
+}
+
 /**
  * Sender DigiSac real. Sem config completa → disabled (não mock ok).
  * fetchImpl injetável para testes sem rede.
+ * ok=true = HTTP 2xx (aceite API); não implica delivery WhatsApp.
  */
 export function createDigisacAccessCommunicationSender(
   cfg: DigisacSenderConfig,
@@ -81,8 +103,8 @@ export function createDigisacAccessCommunicationSender(
 
   return {
     async sendWhatsapp(input) {
-      const number = normalizePhoneDigits(input.recipient_ref);
-      if (!number) {
+      const number = normalizeAccessPhoneDigits(input.recipient_ref);
+      if (!number || number.length < 12) {
         return { ok: false, error: "telefone_invalido", retryable: false };
       }
       try {
@@ -102,15 +124,29 @@ export function createDigisacAccessCommunicationSender(
             origin: "bot",
           }),
         });
+        const rawText = await res.text();
+        let parsed: Record<string, unknown> = {};
+        if (rawText.length > 0) {
+          try {
+            parsed = JSON.parse(rawText) as Record<string, unknown>;
+          } catch {
+            /* corpo não-JSON */
+          }
+        }
         if (!res.ok) {
           const retryable = res.status >= 500 || res.status === 429;
           return {
             ok: false,
             error: `digisac_http_${res.status}`,
             retryable,
+            normalized_recipient: number,
           };
         }
-        return { ok: true };
+        return {
+          ok: true,
+          provider_message_id: extractDigisacMessageId(parsed),
+          normalized_recipient: number,
+        };
       } catch (e) {
         const msg = e instanceof Error ? e.message.slice(0, 120) : "digisac_network";
         return { ok: false, error: msg, retryable: true };
@@ -151,11 +187,32 @@ export function createResendAccessCommunicationSender(
             text: input.body,
           }),
         });
+        const rawText = await res.text();
+        let parsed: Record<string, unknown> = {};
+        if (rawText.length > 0) {
+          try {
+            parsed = JSON.parse(rawText) as Record<string, unknown>;
+          } catch {
+            /* ignore */
+          }
+        }
         if (!res.ok) {
           const retryable = res.status >= 500 || res.status === 429;
           return { ok: false, error: `resend_http_${res.status}`, retryable };
         }
-        return { ok: true };
+        const id =
+          (typeof parsed.id === "string" && parsed.id) ||
+          (parsed.data &&
+          typeof parsed.data === "object" &&
+          !Array.isArray(parsed.data) &&
+          typeof (parsed.data as { id?: unknown }).id === "string"
+            ? String((parsed.data as { id: string }).id)
+            : undefined);
+        return {
+          ok: true,
+          provider_message_id: id,
+          normalized_recipient: input.recipient_ref,
+        };
       } catch (e) {
         const msg = e instanceof Error ? e.message.slice(0, 120) : "resend_network";
         return { ok: false, error: msg, retryable: true };

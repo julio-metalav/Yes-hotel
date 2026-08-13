@@ -33,3 +33,17 @@ Migration: `20260811220053_access_outbox_dispatch_cron.sql`
 ```
 
 Idempotente: claim na outbox; fila vazia = `dispatch_count=0` sem erro.
+
+## Semântica de `sent`
+
+`operacional_acesso_outbox.status = sent` significa que o provider (DigiSac/Resend)
+**aceitou** a requisição HTTP (2xx). Não garante entrega WhatsApp no aparelho.
+
+Após o dispatch, a linha deve persistir:
+- `recipient_ref` = destino normalizado usado
+- `payload.provider_message_id` quando o provider devolver id
+- `payload.provider_accept = api_accepted`
+- `payload.destination_kind` = `digisac_internal` | `guest` | `guest_email`
+
+Notificações `internal_first_access` usam `YES_HOTEL_DIGISAC_INTERNAL_NUMBER`
+(ex.: `556721800225` = 67 2180-0225), nunca o telefone do hóspede.
