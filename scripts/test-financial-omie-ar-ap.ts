@@ -3,7 +3,7 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isRawPayloadMinimized } from "../src/lib/financial/index.ts";
@@ -217,7 +217,31 @@ async function main() {
   );
   assert.notEqual(persist.status, 0);
   assert.match(persist.stderr + persist.stdout, /Persistência recusada/i);
-  ok("CLI dry-run; persistência recusada");
+  const emitSql = join(tmp, "must-not-write.sql");
+  const emit = spawnSync(
+    process.execPath,
+    [tsxCli, "scripts/import-financial-omie-ar-ap.ts", "--file", file, "--emit-sql", emitSql],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.notEqual(emit.status, 0);
+  assert.match(emit.stderr + emit.stdout, /Persistência recusada/i);
+  assert.equal(existsSync(emitSql), false);
+  const persistGated = spawnSync(
+    process.execPath,
+    [tsxCli, "scripts/import-financial-omie-ar-ap.ts", "--file", file, "--persist", "--allow-homo-backfill"],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        SUPABASE_URL: "https://example-prod.supabase.co",
+        SUPABASE_SERVICE_ROLE_KEY: "not-a-real-key",
+      },
+    },
+  );
+  assert.notEqual(persistGated.status, 0);
+  assert.match(persistGated.stderr + persistGated.stdout, /URL não é o HOMO/i);
+  ok("CLI dry-run; persist/emit-sql recusados sem gate; PROD não é alvo");
 }
 
 console.log(`\n${passed} testes ok\n`);
