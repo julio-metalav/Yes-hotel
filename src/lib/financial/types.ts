@@ -174,6 +174,8 @@ export const RAW_PAYLOAD_ALLOWED_KEYS = [
   "fee_cents",
   "tax_cents",
   "open_amount_cents",
+  "settled_amount_cents",
+  "omie_side",
   "issue_date",
   "due_date",
   "settlement_date",
