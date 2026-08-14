@@ -44,8 +44,10 @@ Este documento é a **fonte única de verdade** para o comportamento da integra�
 
 ## Onde está implementado
 
-- **Edge Function:** `supabase/functions/yes-hotel-lifecycle/index.ts` — `ttlockDeleteKeyboardPassword`, `ttlockAddKeyboardPassword`, `ttlockListKeyboardPasswords`.
-- **App:** `src/lib/integrations/ttlock/client.ts` — `deleteKeyboardPassword`, `createKeyboardPassword`, `listKeyboardPasswords`.
+- **Edge Function:** `supabase/functions/yes-hotel-lifecycle/index.ts` — `ttlockDeleteKeyboardPassword`, `ttlockAddKeyboardPassword`, `ttlockChangeKeyboardPasswordValidity`, `ttlockListKeyboardPasswords`.
+- **App:** `src/lib/integrations/ttlock/client.ts` — `deleteKeyboardPassword`, `createKeyboardPassword`, `changeKeyboardPassword`, `listKeyboardPasswords`.
+  - `changeKeyboardPassword` e `deleteKeyboardPassword`: `application/x-www-form-urlencoded` + type=2 (gateway).
+  - `createKeyboardPassword` (app client legado) ainda serializa JSON; Edge add é autoridade em produção.
 - **Domínio:** `src/lib/domain/yes-hotel/ttlock-provision-retry.ts` — classificação de erro + retry mesmo PIN + reconciliação.
 
 Qualquer alteração em content-type, serialização, retry ou tratamento de erro deve ser feita nos dois pontos e refletida neste documento.

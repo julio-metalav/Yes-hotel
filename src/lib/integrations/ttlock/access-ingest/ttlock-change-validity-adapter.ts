@@ -9,6 +9,19 @@ import type {
   TtlockValidityChangeRequest,
   TtlockValidityChangeResult,
 } from "../../../application/yes-hotel/first-room-access-ports.ts";
+import { TtlockApiError } from "../types.ts";
+import {
+  formatTtlockPublicErrorMessage,
+  parseTtlockPublicError,
+} from "../ttlock-api-error.ts";
+
+function publicChangeError(e: unknown): string {
+  if (e instanceof TtlockApiError) {
+    const pub = parseTtlockPublicError(e.status, e.body);
+    return formatTtlockPublicErrorMessage(pub).slice(0, 400);
+  }
+  return (e instanceof Error ? e.message : "ttlock_error").slice(0, 400);
+}
 
 export class TtlockChangeValidityAdapter implements TtlockValidityChangePort {
   constructor(private readonly client: TtlockClient) {}
@@ -26,7 +39,7 @@ export class TtlockChangeValidityAdapter implements TtlockValidityChangePort {
       });
       return { ok: true };
     } catch (e) {
-      const msg = e instanceof Error ? e.message.slice(0, 200) : "ttlock_error";
+      const msg = publicChangeError(e);
       const retryable =
         /timeout|abort|network|429|5\d\d/i.test(msg) ||
         (e instanceof Error && e.name === "AbortError");

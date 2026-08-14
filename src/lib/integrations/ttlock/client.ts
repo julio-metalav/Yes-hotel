@@ -20,6 +20,15 @@ import type {
 import { TtlockApiError } from "./types.ts";
 import { getTtlockConfig, isTtlockAvailable } from "./config.ts";
 import { logTtlockLifecycle } from "./lifecycle-log.ts";
+import {
+  formatTtlockPublicErrorMessage,
+  parseTtlockPublicError,
+} from "./ttlock-api-error.ts";
+import {
+  TTLOCK_CHANGE_TYPE_GATEWAY,
+  TTLOCK_PASSCODE_FORM_CONTENT_TYPE,
+  encodeTtlockChangeValidityForm,
+} from "./ttlock-change-request.ts";
 
 function md5Lower(value: string): string {
   return crypto.createHash("md5").update(value, "utf8").digest("hex").toLowerCase();
@@ -398,8 +407,8 @@ export class TtlockClient {
 
   /**
    * Altera passcode na fechadura (via gateway, changeType=2).
+   * Contrato: application/x-www-form-urlencoded — JSON gera HTTP 400 HTML na TTLock.
    * Permite alterar validade (startDate/endDate) e opcionalmente o próprio código.
-   * Usado para early check-in, late check-out e ajuste manual.
    */
   async changeKeyboardPassword(
     params: Omit<TtlockKeyboardPwdChangeParams, "changeType" | "date"> & { date?: number },
@@ -412,20 +421,21 @@ export class TtlockClient {
 
     const token = await this.ensureAccessToken();
     const lockId = typeof params.lockId === "string" ? parseInt(params.lockId, 10) : params.lockId;
-    const date = params.date ?? Date.now();
-
-    const body: Record<string, string | number> = {
-      clientId: this.config.clientId,
-      accessToken: token,
-      lockId,
-      keyboardPwdId: params.keyboardPwdId,
-      changeType: 2,
-      date,
-    };
-    if (params.keyboardPwdName != null) body.keyboardPwdName = params.keyboardPwdName;
-    if (params.newKeyboardPwd != null) body.newKeyboardPwd = params.newKeyboardPwd;
-    if (params.startDate != null) body.startDate = params.startDate;
-    if (params.endDate != null) body.endDate = params.endDate;
+    const form = encodeTtlockChangeValidityForm(
+      {
+        lockId,
+        keyboardPwdId: params.keyboardPwdId,
+        startDate: params.startDate ?? 0,
+        endDate: params.endDate ?? 0,
+        changeType: TTLOCK_CHANGE_TYPE_GATEWAY,
+        date: params.date ?? Date.now(),
+        keyboardPwdName: params.keyboardPwdName,
+      },
+      { clientId: this.config.clientId, accessToken: token },
+    );
+    if (params.startDate == null) form.delete("startDate");
+    if (params.endDate == null) form.delete("endDate");
+    if (params.newKeyboardPwd != null) form.set("newKeyboardPwd", params.newKeyboardPwd);
 
     const url = `${this.config.apiBaseUrl}/v3/keyboardPwd/change`;
     const controller = new AbortController();
@@ -434,31 +444,25 @@ export class TtlockClient {
     try {
       const res = await this.fetchImpl(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        headers: { "Content-Type": TTLOCK_PASSCODE_FORM_CONTENT_TYPE },
+        body: form.toString(),
         signal: controller.signal,
       });
 
       clearTimeout(timeout);
-      const data = (await parseJsonSafe(res)) as TtlockSuccessResponse & { errcode?: number; errmsg?: string };
-
-      if (!res.ok) {
-        throw new TtlockApiError(
-          data?.errmsg ?? `Change passcode failed: ${res.status}`,
-          res.status,
-          data,
-        );
+      const data = await parseJsonSafe(res);
+      const rec = (data && typeof data === "object" ? data : {}) as TtlockSuccessResponse & {
+        errcode?: number;
+        errmsg?: string;
+      };
+      const httpFailed = !res.ok;
+      const ttlockFailed = rec.errcode != null && rec.errcode !== 0;
+      if (httpFailed || ttlockFailed) {
+        const pub = parseTtlockPublicError(res.status, data);
+        throw new TtlockApiError(formatTtlockPublicErrorMessage(pub), res.status, pub);
       }
 
-      if (data.errcode != null && data.errcode !== 0) {
-        throw new TtlockApiError(
-          data.errmsg ?? "Change passcode error",
-          res.status,
-          data,
-        );
-      }
-
-      return data;
+      return rec;
     } catch (e) {
       clearTimeout(timeout);
       if (e instanceof TtlockApiError) throw e;

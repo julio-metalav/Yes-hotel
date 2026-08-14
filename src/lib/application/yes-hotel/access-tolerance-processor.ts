@@ -341,7 +341,7 @@ async function applyValidityToItems(input: {
       });
     } else {
       failed += 1;
-      lastError = result.error.slice(0, 200);
+      lastError = result.error.slice(0, 400);
       await input.tolerances.updateItemSuspension!(item.id, {
         suspension_status: input.mode === "suspend" ? "failed" : item.suspension_status,
         restore_status: input.mode === "restore" ? "failed" : item.restore_status,

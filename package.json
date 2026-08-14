@@ -22,6 +22,8 @@
     "test:yes:ttlock-passcode-collision-gate": "tsx scripts/test-ttlock-passcode-collision-gate.ts",
     "test:yes:ttlock-transient-provision-retry": "tsx scripts/test-ttlock-transient-provision-retry.ts",
     "test:yes:ttlock-phase2-worker": "tsx scripts/test-ttlock-phase2-worker.ts",
+    "test:yes:ttlock-change-400": "tsx scripts/test-ttlock-change-400-observability.ts",
+    "diagnose:yes:ttlock-change-400": "tsx scripts/diagnose-ttlock-change-400.ts",
     "test:yes:lifecycle-update-validity": "tsx scripts/test-lifecycle-update-validity.ts",
     "test:yes:first-room-access": "tsx scripts/test-first-room-access-policy.ts",
     "test:yes:pagamento-presencial-diferido": "tsx scripts/test-pagamento-presencial-diferido.ts",
