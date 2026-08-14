@@ -101,15 +101,22 @@ export type FinancialNameMatch =
   | "none"
   | "unknown";
 
+export type FinancialPartyMatch = "exact_normalized" | "token_exact" | "contains_safe" | "no_match";
+
 /** Evidência determinística persistida em financial_reconciliation_groups.score_evidence. */
 export type FinancialScoreEvidence = {
   amount_exact?: boolean;
+  amount_cents?: number;
   document_match?: boolean;
   date_distance_days?: number | null;
   name_match?: FinancialNameMatch;
+  party_match?: FinancialPartyMatch;
   same_account?: boolean;
   direction_compatible?: boolean;
+  direction_match?: boolean;
   external_id_match?: boolean;
+  candidate_count?: number;
+  internal_transfer_excluded?: boolean;
   rule_id?: string;
 };
 
