@@ -1,5 +1,5 @@
 import { isRawPayloadMinimized } from "../../payload.ts";
-import { resolveOfxAccount } from "./account.ts";
+import { assertHintedFingerprint, extractOfxFingerprint, resolveOfxAccount } from "./account.ts";
 import { parseOfxDateTime } from "./dates.ts";
 import { ofxNormalizedHash, normalizeOfxText, sha256HexOfBytes } from "./hash.ts";
 import { parseOfxAmountToSignedCents, signedCentsToDirection } from "./money.ts";
@@ -94,6 +94,7 @@ export function normalizeOfxImport(input: {
   bytes: Uint8Array;
   expectedAccountCode?: string | null;
   knownAccounts?: readonly OfxAccountHint[];
+  requireFingerprint?: boolean;
 }): OfxImportResult {
   const fileSha = sha256HexOfBytes(input.bytes);
   const stats = emptyStats();
@@ -109,6 +110,19 @@ export function normalizeOfxImport(input: {
       parser_version: OFX_PARSER_VERSION,
       account_code: null,
       fatal: { code: parsed.reason, message: parsed.message },
+      errors,
+      stats,
+    };
+  }
+
+  if (input.requireFingerprint && !String(input.expectedAccountCode ?? "").trim()) {
+    return {
+      ok: false,
+      file_sha256: fileSha,
+      parser_name: OFX_PARSER_NAME,
+      parser_version: OFX_PARSER_VERSION,
+      account_code: null,
+      fatal: { code: "account_unresolved", message: "persistência exige --account explícito" },
       errors,
       stats,
     };
@@ -130,6 +144,28 @@ export function normalizeOfxImport(input: {
       errors,
       stats,
     };
+  }
+
+  let resolution = account.method;
+  if (input.requireFingerprint) {
+    const finger = assertHintedFingerprint({
+      file: extractOfxFingerprint(parsed.document.account),
+      expectedCode: account.code,
+      knownAccounts,
+    });
+    if (!finger.ok) {
+      return {
+        ok: false,
+        file_sha256: fileSha,
+        parser_name: OFX_PARSER_NAME,
+        parser_version: OFX_PARSER_VERSION,
+        account_code: null,
+        fatal: { code: finger.code, message: finger.message },
+        errors,
+        stats,
+      };
+    }
+    resolution = finger.method;
   }
 
   const seenFitid = new Set<string>();
@@ -245,7 +281,7 @@ export function normalizeOfxImport(input: {
     parser_name: OFX_PARSER_NAME,
     parser_version: OFX_PARSER_VERSION,
     account_code: account.code,
-    account_resolution: account.method,
+    account_resolution: resolution,
     currency: parsed.document.currency,
     period_start: parseOptionalDate(parsed.document.periodStartRaw) ?? minSettlement,
     period_end: parseOptionalDate(parsed.document.periodEndRaw) ?? maxSettlement,

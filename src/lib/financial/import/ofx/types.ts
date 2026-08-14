@@ -1,6 +1,13 @@
 import type { FinancialDirection, FinancialSourceKind } from "../../types.ts";
 
-export type AccountResolutionMethod = "mask" | "operator_hint";
+export type AccountResolutionMethod = "mask" | "operator_hint" | "fingerprint";
+
+export type OfxAccountFingerprint = {
+  bank_id: string | null;
+  branch_fingerprint: string | null;
+  account_last4: string | null;
+  account_type: string | null;
+};
 
 export const OFX_PARSER_NAME = "ofx_sicredi";
 export const OFX_PARSER_VERSION = "ofx@1.0.0";
@@ -18,6 +25,7 @@ export type OfxRowErrorCode =
 export type OfxFatalCode =
   | "malformed_ofx"
   | "account_unresolved"
+  | "account_fingerprint_mismatch"
   | "empty_banktranlist"
   | "duplicate_import";
 
@@ -25,6 +33,7 @@ export type OfxAccountHint = {
   code: string;
   account_mask: string | null;
   institution: string | null;
+  ofx_fingerprint?: OfxAccountFingerprint | null;
 };
 
 export type OfxBankAccount = {

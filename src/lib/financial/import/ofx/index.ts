@@ -1,6 +1,7 @@
 export { OFX_PARSER_NAME, OFX_PARSER_VERSION, SICREDI_BANK_IDS } from "./types.ts";
 export type {
   AccountResolutionMethod,
+  OfxAccountFingerprint,
   OfxAccountHint,
   OfxBankAccount,
   OfxDocument,
@@ -15,7 +16,17 @@ export type {
   OfxStmtTrn,
 } from "./types.ts";
 
-export { accountIdLast4, maskAccountId, resolveOfxAccount } from "./account.ts";
+export {
+  accountIdLast4,
+  assertHintedFingerprint,
+  extractOfxFingerprint,
+  isOfxFingerprintComplete,
+  maskAccountId,
+  maskOfxFingerprint,
+  ofxFingerprintsMatch,
+  parseOfxFingerprint,
+  resolveOfxAccount,
+} from "./account.ts";
 export { OFX_DEFAULT_TIMEZONE, parseOfxDateTime } from "./dates.ts";
 export {
   maskSha256,
