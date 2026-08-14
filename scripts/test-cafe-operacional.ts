@@ -144,7 +144,11 @@ console.log("\n== Estadias do café ==");
     ["10", "02", "11", "01"].sort(compareCafeApartmentCodes),
     ["01", "02", "10", "11"],
   );
-  ok("janela cin < D <= cout; cancelada fora; ordem 01,02,10,11");
+  assert.deepEqual(
+    ["27", "30", "31", "28", "29"].sort(compareCafeApartmentCodes),
+    ["27", "28", "29", "30", "31"],
+  );
+  ok("janela cin < D <= cout; cancelada fora; ordem numérica crescente");
   assert.equal(isValidCafeStayStatus("4"), false);
   assert.equal(isValidCafeStayStatus("blocked"), false);
   assert.equal(isValidCafeStayStatus("Blocked"), false);
@@ -423,6 +427,11 @@ console.log("\n== Contrato UI/SQL sem parâmetros inseguros ==");
   assert.match(js, /p_data_cafe/);
   assert.match(js, /p_acao:\s*action/);
   assert.match(js, /"marcar_todos"/);
+  assert.doesNotMatch(js, /const aPpd\s*=/);
+  assert.match(
+    js,
+    /\.sort\(\(a, b\) =>\s*policy\.compareCafeApartmentCodes\(a\.apartmentCode, b\.apartmentCode\)/s,
+  );
 
   const sql = readFileSync(
     join(
