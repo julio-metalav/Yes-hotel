@@ -72,6 +72,7 @@
     "test:hits-real-reservation-source": "tsx scripts/test-hits-real-reservation-source.ts",
     "test:hits-edge:deno-imports": "tsx scripts/test-hits-edge-deno-imports.ts",
     "test:reservation-financial-classification": "tsx scripts/test-reservation-financial-classification.ts",
+    "test:yes:management-foundation": "tsx scripts/test-management-foundation.ts",
 
     "test:hits-fnrh-panel-financial-ui": "tsx scripts/test-hits-fnrh-panel-financial-ui.ts",
     "test:ver-panel-operacional": "tsx scripts/test-ver-panel-operacional.ts",
