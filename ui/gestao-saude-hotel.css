@@ -1,0 +1,286 @@
+/* Gestão — Saúde do Hotel. Extensão do shell do Check-in Operacional. */
+
+.gestao-view .gestao-content {
+  gap: 16px;
+  overflow: auto;
+}
+
+.gestao-view .gestao-demo-banner {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 10px;
+  padding: 8px 14px;
+  border: 1px solid rgba(184, 148, 46, 0.45);
+  border-radius: var(--op-radius-lg);
+  background: rgba(184, 148, 46, 0.12);
+  color: #7a5c12;
+  font-size: 12px;
+  text-align: center;
+}
+
+.gestao-view .gestao-demo-banner strong {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.gestao-view .gestao-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  overflow: visible;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.gestao-view .gestao-kpis article {
+  display: flex;
+  min-width: 0;
+  min-height: 108px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--op-border);
+  border-radius: var(--op-radius-lg);
+  background: var(--op-surface);
+  box-shadow: var(--op-shadow);
+  border-left: 1px solid var(--op-border);
+}
+
+.gestao-view .gestao-kpis article + article {
+  border-left: 1px solid var(--op-border);
+}
+
+.gestao-view .gestao-kpis span {
+  color: var(--op-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gestao-view .gestao-kpis strong {
+  color: var(--op-text);
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.gestao-view .yes-kpis.gestao-kpis small,
+.gestao-view .gestao-kpis small {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip: auto;
+  color: var(--op-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gestao-view .gestao-trend--up {
+  color: var(--op-success);
+}
+
+.gestao-view .gestao-trend--down {
+  color: var(--op-destructive);
+}
+
+.gestao-view .gestao-trend--flat {
+  color: var(--op-text-muted);
+}
+
+.gestao-view .gestao-panel {
+  padding: 16px 18px 18px;
+  border: 1px solid var(--op-border);
+  border-radius: var(--op-radius-lg);
+  background: var(--op-surface);
+  box-shadow: var(--op-shadow);
+}
+
+.gestao-view .gestao-panel h2 {
+  margin: 0 0 14px;
+  color: var(--op-text);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.gestao-view .gestao-otb-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.gestao-view .gestao-otb-grid div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.gestao-view .gestao-otb-grid span {
+  color: var(--op-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gestao-view .gestao-otb-grid strong {
+  color: var(--op-text);
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.gestao-view .gestao-channel-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.gestao-view .gestao-channel-table th,
+.gestao-view .gestao-channel-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--op-border);
+  text-align: left;
+  font-size: 13px;
+  color: var(--op-text);
+}
+
+.gestao-view .gestao-channel-table th {
+  color: var(--op-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gestao-view .gestao-channel-table td:nth-child(n + 2) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.gestao-view .gestao-channel-table th:nth-child(n + 2) {
+  text-align: right;
+}
+
+.gestao-view .gestao-bar {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: var(--op-muted);
+  overflow: hidden;
+}
+
+.gestao-view .gestao-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--op-blue);
+}
+
+.gestao-view .gestao-bar--ota > i {
+  background: #5b6b8a;
+}
+
+.gestao-view .gestao-bar--b2b > i {
+  background: var(--op-gold);
+}
+
+.gestao-view .gestao-bar--direct > i {
+  background: var(--op-blue);
+}
+
+.gestao-view .gestao-kind {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--op-border);
+  background: var(--op-muted);
+  color: var(--op-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.gestao-view .gestao-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gestao-view .gestao-alerts li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--op-border);
+  border-radius: 10px;
+  background: var(--op-muted);
+  font-size: 13px;
+  color: var(--op-text);
+}
+
+.gestao-view .gestao-alerts li[data-severity="warning"] {
+  border-color: rgba(229, 171, 66, 0.45);
+  background: rgba(229, 171, 66, 0.12);
+}
+
+.gestao-view .gestao-alerts li[data-severity="critical"] {
+  border-color: rgba(184, 60, 57, 0.35);
+  background: rgba(184, 60, 57, 0.08);
+}
+
+.gestao-view .gestao-alerts li[data-severity="info"] {
+  border-color: rgba(52, 89, 185, 0.28);
+  background: rgba(52, 89, 185, 0.08);
+}
+
+.gestao-view .gestao-crm-soon {
+  padding: 14px 16px;
+  border: 1px dashed var(--op-border);
+  border-radius: var(--op-radius-lg);
+  background: rgba(237, 242, 241, 0.6);
+  color: var(--op-text-muted);
+  font-size: 13px;
+}
+
+.gestao-view .gestao-crm-soon strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--op-blue);
+  font-size: 14px;
+}
+
+.gestao-view .yes-sidebar a.hidden {
+  display: none !important;
+}
+
+@media (max-width: 1100px) {
+  .gestao-view .gestao-kpis,
+  .gestao-view .gestao-otb-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .gestao-view .gestao-kpis,
+  .gestao-view .gestao-otb-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gestao-view .gestao-channel-table {
+    display: block;
+    overflow-x: auto;
+  }
+}

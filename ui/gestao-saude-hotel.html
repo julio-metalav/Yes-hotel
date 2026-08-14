@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Yes Hotel — Recepção</title>
+    <title>Yes Hotel — Saúde do Hotel</title>
     <link rel="icon" href="data:," />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -11,23 +11,25 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=44" />
-    <link rel="stylesheet" href="./recepcao-mvp.css?v=3" />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=53" />
+    <link rel="stylesheet" href="./gestao-saude-hotel.css?v=1" />
   </head>
-  <body class="op-body checkin-view recepcao-view">
+  <body class="op-body checkin-view gestao-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
 
     <div id="content-panel" class="op-app hidden">
-      <aside class="yes-sidebar" id="recepcao-sidebar" aria-label="Áreas operacionais">
+      <aside class="yes-sidebar" id="gestao-sidebar" aria-label="Áreas operacionais">
         <div class="yes-sidebar-brand">
           <img src="./assets/yes-hotel-logo.png" alt="Yes Hotel" width="153" height="89" />
           <button
             type="button"
             class="op-icon-button yes-sidebar-close"
-            id="recepcao-sidebar-close"
+            id="gestao-sidebar-close"
             aria-label="Fechar menu"
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
           </button>
         </div>
         <nav aria-label="Navegação principal">
@@ -44,7 +46,7 @@
             </svg>
             <span>Café da manhã</span>
           </a>
-          <a href="./gestao-saude-hotel.html" data-nav="gestao">
+          <a class="active" href="./gestao-saude-hotel.html" aria-current="page" data-nav="gestao">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M3 3v18h18M7 16v-5M12 16V8M17 16v-9" />
             </svg>
@@ -52,15 +54,15 @@
           </a>
         </nav>
         <div class="yes-sidebar-foot">
-          Ambiente operacional<br />
-          <strong>Recepção Yes Hotel</strong>
+          Ambiente gerencial<br />
+          <strong>Somente leitura · demo</strong>
         </div>
       </aside>
 
       <button
         type="button"
         class="op-sidebar-backdrop"
-        id="recepcao-sidebar-backdrop"
+        id="gestao-sidebar-backdrop"
         aria-label="Fechar navegação"
         tabindex="-1"
       ></button>
@@ -71,9 +73,9 @@
             <button
               type="button"
               class="op-icon-button op-menu-toggle"
-              id="recepcao-menu-toggle"
+              id="gestao-menu-toggle"
               aria-label="Abrir menu"
-              aria-controls="recepcao-sidebar"
+              aria-controls="gestao-sidebar"
               aria-expanded="false"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -88,14 +90,14 @@
               height="89"
             />
             <div class="op-header__heading">
-              <span class="op-header__eyebrow">Operação</span>
-              <h1 class="op-header__title">Recepção</h1>
+              <span class="op-header__eyebrow">Gestão</span>
+              <h1 class="op-header__title">Saúde do Hotel</h1>
             </div>
           </div>
           <div class="op-header__right">
             <p id="session-user" class="op-header__user" aria-live="polite">
-              <strong id="recepcao-session-user-name"></strong>
-              <span id="recepcao-session-user-role" class="op-header__role"></span>
+              <strong id="gestao-session-user-name"></strong>
+              <span id="gestao-session-user-role" class="op-header__role"></span>
             </p>
             <button type="button" class="op-btn op-btn--ghost" id="logout-button">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -106,26 +108,43 @@
           </div>
         </header>
 
-        <main class="op-content recepcao-content">
-          <section class="recepcao-intro" aria-labelledby="recepcao-home-title">
-            <h2 id="recepcao-home-title">Home operacional</h2>
-            <p>Escolha a rotina disponível para o seu perfil.</p>
+        <main class="op-content gestao-content">
+          <div id="gestao-demo-banner" class="gestao-demo-banner" role="status">
+            DADOS DEMONSTRATIVOS — aguardando integração gerencial
+          </div>
+
+          <section class="yes-kpis gestao-kpis" id="gestao-kpis" aria-label="Indicadores do mês"></section>
+
+          <section class="gestao-panel" aria-labelledby="gestao-otb-title">
+            <h2 id="gestao-otb-title">Próximos 30 dias</h2>
+            <div class="gestao-otb-grid" id="gestao-otb"></div>
           </section>
 
-          <nav class="recepcao-home-grid" aria-label="Atalhos operacionais">
-            <a class="recepcao-home-card" href="./checkin-operacional-mvp.html">
-              <span class="recepcao-home-card__label">Check-in Operacional</span>
-              <span class="recepcao-home-card__desc">Reservas, FNRH, senhas e liberação de acesso</span>
-            </a>
-            <a class="recepcao-home-card" href="./cafe-da-manha-mvp.html" data-nav="cafe">
-              <span class="recepcao-home-card__label">Café da manhã</span>
-              <span class="recepcao-home-card__desc">Atendimento do serviço diário</span>
-            </a>
-            <a class="recepcao-home-card" href="./gestao-saude-hotel.html" data-nav="gestao">
-              <span class="recepcao-home-card__label">Gestão</span>
-              <span class="recepcao-home-card__desc">Saúde do Hotel — indicadores demonstrativos</span>
-            </a>
-          </nav>
+          <section class="gestao-panel" aria-labelledby="gestao-channels-title">
+            <h2 id="gestao-channels-title">Origem das reservas</h2>
+            <table class="gestao-channel-table">
+              <thead>
+                <tr>
+                  <th>Canal</th>
+                  <th>Reservas</th>
+                  <th>Receita</th>
+                  <th>ADR</th>
+                  <th>Part. reservas</th>
+                </tr>
+              </thead>
+              <tbody id="gestao-channels"></tbody>
+            </table>
+          </section>
+
+          <section class="gestao-panel" aria-labelledby="gestao-alerts-title">
+            <h2 id="gestao-alerts-title">O que merece atenção</h2>
+            <ul class="gestao-alerts" id="gestao-alerts"></ul>
+          </section>
+
+          <div class="gestao-crm-soon" role="note">
+            <strong>CRM de Hóspedes — em breve</strong>
+            Recorrência e LTV canônicos já existem na fundação; esta tela ainda não lista hóspedes.
+          </div>
         </main>
       </div>
     </div>
@@ -133,6 +152,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
-    <script defer src="./recepcao-mvp.js?v=4"></script>
+    <script defer src="./gestao-saude-hotel-demo.js?v=1"></script>
+    <script defer src="./gestao-saude-hotel.js?v=1"></script>
   </body>
 </html>

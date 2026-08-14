@@ -38,6 +38,15 @@
     }
     accessEl.classList.add("hidden");
     panelEl.classList.remove("hidden");
+
+    var canManage =
+      typeof auth.canAccessManagement === "function"
+        ? auth.canAccessManagement(user)
+        : user.role === "admin" || user.role === "recepcao";
+    document.querySelectorAll('[data-nav="gestao"]').forEach(function (node) {
+      node.classList.toggle("hidden", !canManage);
+    });
+
     return auth.getSupabaseClient();
   }
 

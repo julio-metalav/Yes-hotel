@@ -98,6 +98,14 @@ async function initRecepcaoPage() {
     node.classList.toggle("hidden", !canBreakfast);
   });
 
+  const canManage =
+    typeof auth.canAccessManagement === "function"
+      ? auth.canAccessManagement(currentUser)
+      : currentUser.role === "admin" || currentUser.role === "recepcao";
+  document.querySelectorAll('[data-nav="gestao"]').forEach((node) => {
+    node.classList.toggle("hidden", !canManage);
+  });
+
   if (
     sessionUserElement instanceof HTMLElement &&
     sessionUserNameElement instanceof HTMLElement &&
