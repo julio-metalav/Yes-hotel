@@ -1,0 +1,32 @@
+[Unit]
+Description=Yes Hotel HITS Gateway (read-only)
+Documentation=file:///opt/hits-gateway/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hits-gateway
+Group=hits-gateway
+WorkingDirectory=/opt/hits-gateway
+EnvironmentFile=/etc/hits-gateway/hits-gateway.env
+ExecStart=/usr/bin/node /opt/hits-gateway/dist/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hits-gateway
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,29 @@
+{
+  "name": "@yes-hotel/hits-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Gateway de leitura HITS PMS (IP fixo). Isolado; bind 127.0.0.1; Nginx na frente.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "start:prod": "node dist/server.js",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/gateway.test.ts tests/startup.test.ts",
+    "smoke:dist": "tsx --test tests/dist-smoke.test.ts"
+  },
+  "dependencies": {
+    "@fastify/helmet": "^13.0.2",
+    "@fastify/rate-limit": "^10.3.0",
+    "fastify": "^5.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "esbuild": "^0.25.9",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
