@@ -252,27 +252,28 @@
   }
 
   function cafeStatusLabel(entitlement) {
-    if (entitlement.kind === "incluido") return "Incluído na diária";
     if (entitlement.kind === "avulso_pago") {
       var n = entitlement.paidExtraQty;
       return n === 1 ? "1 café avulso pago" : n + " cafés avulsos pagos";
     }
-    if (entitlement.kind === "sem_cafe") return "Sem café incluído";
-    return "Café ainda não identificado";
+    return "";
   }
 
   function cafeGuestLine(entitlement) {
     var n = entitlement.guestCount;
     var base = n === 1 ? "1 hóspede" : n + " hóspedes";
-    if (entitlement.kind === "sem_cafe") return base + " · Sem café incluído";
-    if (entitlement.kind === "incluido") return base + " · Café incluído";
     if (entitlement.kind === "avulso_pago") return base + " · " + cafeStatusLabel(entitlement);
-    return base + " · Café ainda não identificado";
+    return base;
+  }
+
+  function cafeAlertLabel(entitlement) {
+    return entitlement.kind === "sem_cafe" ? "SEM CAFÉ" : null;
   }
 
   function cafeOperationalStatusLabel(entitlement, attendedQty) {
-    if (entitlement.kind === "sem_cafe") return "Sem café";
-    if (entitlement.kind === "nao_mapeado") return "Café ainda não identificado";
+    if (entitlement.kind === "sem_cafe" || entitlement.kind === "nao_mapeado") {
+      return "";
+    }
     var attended = clampCafeAttendedQty(attendedQty, entitlement.entitledQty);
     return attended >= entitlement.entitledQty
       ? "Atendimento completo"
@@ -375,6 +376,7 @@
     planMarkAllCafeAttended: planMarkAllCafeAttended,
     cafeStatusLabel: cafeStatusLabel,
     cafeGuestLine: cafeGuestLine,
+    cafeAlertLabel: cafeAlertLabel,
     cafeOperationalStatusLabel: cafeOperationalStatusLabel,
     resolvePpdChargeAmount: resolvePpdChargeAmount,
     resolveCafePpdOperationalState: resolveCafePpdOperationalState,

@@ -197,6 +197,17 @@ function createMetric(label, value, extraClass) {
   return wrap;
 }
 
+function createSimpleAlert(className, text) {
+  const alert = document.createElement("div");
+  alert.className = `cafe-simple-alert ${className} is-danger`;
+  alert.setAttribute("role", "alert");
+  const title = document.createElement("strong");
+  title.className = "cafe-simple-alert__title";
+  title.textContent = text;
+  alert.append(title);
+  return alert;
+}
+
 function createCard(card) {
   const missingGuests = policy.cafeMissingQty(card);
   const isComplete =
@@ -231,15 +242,15 @@ function createCard(card) {
   guestLine.textContent = policy.cafeGuestLine(card.entitlement);
   guestCell.append(apt, guest, guestLine);
 
+  const cafeAlert = policy.cafeAlertLabel(card.entitlement);
+  if (cafeAlert) {
+    guestCell.appendChild(createSimpleAlert("cafe-no-breakfast-alert", cafeAlert));
+  }
+
   if (card.ppdAlert) {
-    const ppdBox = document.createElement("div");
-    ppdBox.className = `ppd-cafe-alert is-${card.ppdAlert.tone}`;
-    ppdBox.setAttribute("role", "alert");
-    const ppdTitle = document.createElement("strong");
-    ppdTitle.className = "ppd-cafe-title";
-    ppdTitle.textContent = card.ppdAlert.badgeLabel;
-    ppdBox.append(ppdTitle);
-    guestCell.appendChild(ppdBox);
+    guestCell.appendChild(
+      createSimpleAlert("ppd-cafe-alert", card.ppdAlert.badgeLabel),
+    );
   }
 
   const attendanceCell = document.createElement("div");
@@ -276,8 +287,11 @@ function createCard(card) {
       ? "is-paid"
       : "is-neutral"
   }`;
-  paymentBadge.textContent = policy.cafeStatusLabel(card.entitlement);
-  paymentCell.appendChild(paymentBadge);
+  const paymentLabel = policy.cafeStatusLabel(card.entitlement);
+  if (paymentLabel) {
+    paymentBadge.textContent = paymentLabel;
+    paymentCell.appendChild(paymentBadge);
+  }
 
   const statusCell = document.createElement("div");
   statusCell.className = "status-cell";
@@ -289,12 +303,16 @@ function createCard(card) {
         ? "is-complete"
         : "is-pending"
   }`;
-  statusBadge.textContent = policy.cafeOperationalStatusLabel(
+  const statusLabel = policy.cafeOperationalStatusLabel(
     card.entitlement,
     card.attendedQty,
   );
-  statusCell.appendChild(statusBadge);
-  badgesCell.append(paymentCell, statusCell);
+  if (statusLabel) {
+    statusBadge.textContent = statusLabel;
+    statusCell.appendChild(statusBadge);
+  }
+  if (paymentCell.childElementCount > 0) badgesCell.appendChild(paymentCell);
+  if (statusCell.childElementCount > 0) badgesCell.appendChild(statusCell);
 
   const controlCell = document.createElement("div");
   controlCell.className = "control-cell";

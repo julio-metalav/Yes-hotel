@@ -286,7 +286,7 @@
   box-shadow: 0 0 0 1px rgba(174, 40, 40, 0.1);
 }
 
-.cafe-view .ppd-cafe-alert {
+.cafe-view .cafe-simple-alert {
   display: block;
   margin-top: 8px;
   padding: 9px 10px;
@@ -298,13 +298,13 @@
   line-height: 1.35;
 }
 
-.cafe-view .ppd-cafe-alert.is-danger {
+.cafe-view .cafe-simple-alert.is-danger {
   border-color: rgba(174, 40, 40, 0.4);
   background: rgba(174, 40, 40, 0.08);
   color: #8e2222;
 }
 
-.cafe-view .ppd-cafe-title {
+.cafe-view .cafe-simple-alert__title {
   font-size: 12px;
   font-weight: 800;
 }
@@ -580,7 +580,7 @@
     box-sizing: border-box;
   }
 
-  .cafe-view .ppd-cafe-alert {
+  .cafe-view .cafe-simple-alert {
     width: 100%;
     box-sizing: border-box;
     padding: 7px 9px;
@@ -731,7 +731,7 @@
     padding: 7px 10px;
   }
 
-  .cafe-view .ppd-cafe-alert {
+  .cafe-view .cafe-simple-alert {
     font-size: 11px;
   }
 }

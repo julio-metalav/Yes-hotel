@@ -142,8 +142,8 @@ assert.equal(
 );
 assert.equal(clampCafeAttendedQty(99, avulso.entitledQty), 1);
 assert.equal(clampCafeAttendedQty(-1, incluido.entitledQty), 0);
-assert.equal(cafeOperationalStatusLabel(semCafe, 0), "Sem café");
-assert.equal(cafeOperationalStatusLabel(naoMapeado, 0), "Café ainda não identificado");
+assert.equal(cafeOperationalStatusLabel(semCafe, 0), "");
+assert.equal(cafeOperationalStatusLabel(naoMapeado, 0), "");
 ok("PPD não muda entitledQty; +/- respeita 0..entitledQty");
 
 console.log("\n== Demo A–H e KPIs ==");
@@ -175,15 +175,27 @@ const cards = rows.map((row) => {
   };
 });
 const byApartment = new Map(cards.map((card) => [card.apartmentCode, card]));
-assert.equal(policy.cafeGuestLine(byApartment.get("34")!.entitlement), "1 hóspede · Café incluído");
-assert.equal(policy.cafeStatusLabel(byApartment.get("34")!.entitlement), "Incluído na diária");
-assert.equal(policy.cafeGuestLine(byApartment.get("33")!.entitlement), "2 hóspedes · Sem café incluído");
-assert.equal(policy.cafeOperationalStatusLabel(byApartment.get("33")!.entitlement, 0), "Sem café");
+assert.equal(policy.cafeGuestLine(byApartment.get("34")!.entitlement), "1 hóspede");
+assert.equal(policy.cafeStatusLabel(byApartment.get("34")!.entitlement), "");
+assert.equal(policy.cafeAlertLabel(byApartment.get("34")!.entitlement), null);
+assert.equal(policy.cafeGuestLine(byApartment.get("33")!.entitlement), "2 hóspedes");
+assert.equal(policy.cafeStatusLabel(byApartment.get("33")!.entitlement), "");
+assert.equal(policy.cafeAlertLabel(byApartment.get("33")!.entitlement), "SEM CAFÉ");
+assert.equal(policy.cafeOperationalStatusLabel(byApartment.get("33")!.entitlement, 0), "");
 assert.equal(byApartment.get("32")!.entitlement.entitledQty, 1);
 assert.equal(policy.cafeStatusLabel(byApartment.get("32")!.entitlement), "1 café avulso pago");
 assert.equal(
   policy.cafeOperationalStatusLabel(byApartment.get("28")!.entitlement, 0),
-  "Café ainda não identificado",
+  "",
+);
+assert.equal(policy.cafeGuestLine(byApartment.get("28")!.entitlement), "1 hóspede");
+assert.equal(policy.cafeAlertLabel(byApartment.get("28")!.entitlement), null);
+assert.equal(
+  shouldShowCafePpdAlert({
+    ...basePpd,
+    nowIso: "2026-08-14T08:15:00-04:00",
+  }),
+  true,
 );
 const ppdRows = new Map(rows.map((row) => [row.scenario, row]));
 assert.equal(
@@ -247,9 +259,15 @@ assert.ok(
     uiSource.indexOf("await ensureDemoModuleLoaded()"),
 );
 assert.match(uiSource, /script\.src = "\.\/cafe-demo-data\.js\?v=2"/);
-assert.match(html, /cafe-da-manha-mvp\.js\?v=10/);
-assert.match(html, /yes-cafe-policy\.js\?v=4/);
-assert.match(html, /cafe-da-manha-mvp\.css\?v=8/);
+assert.match(html, /cafe-da-manha-mvp\.js\?v=11/);
+assert.match(html, /yes-cafe-policy\.js\?v=5/);
+assert.match(html, /cafe-da-manha-mvp\.css\?v=9/);
+assert.match(uiSource, /createSimpleAlert\("cafe-no-breakfast-alert", cafeAlert\)/);
+assert.match(uiSource, /createSimpleAlert\("ppd-cafe-alert", card\.ppdAlert\.badgeLabel\)/);
+assert.match(
+  uiSource,
+  /if \(cafeAlert\)[\s\S]*if \(card\.ppdAlert\)/,
+);
 assert.match(uiSource, /usuarios-login-mvp\.html\?next=cafe-demo/);
 assert.match(loginJs, /get\("next"\) === "cafe-demo"/);
 assert.match(loginJs, /cafe-da-manha-mvp\.html\?demo=1/);
