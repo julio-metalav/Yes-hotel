@@ -45,6 +45,8 @@
     "test:yes:guest-access-welcome": "tsx scripts/test-guest-access-welcome-messages.ts",
     "test:yes:first-room-access-transaction": "tsx scripts/test-first-room-access-transaction.ts",
     "test:yes:access-tolerance-processor": "tsx scripts/test-access-tolerance-processor.ts",
+    "test:yes:access-tolerance-process-cron": "tsx scripts/test-access-tolerance-process-cron-wiring.ts",
+    "smoke:yes:access-tolerance-process-ap34": "tsx scripts/smoke-access-tolerance-process-ap34.ts",
     "test:yes:access-outbox-dispatcher": "tsx scripts/test-access-outbox-dispatcher.ts",
     "test:yes:access-tolerance-ui": "tsx scripts/test-access-tolerance-ui.ts",
     "homologate:yes:first-room-access-adapter": "tsx scripts/homologate-first-room-access-adapter.ts",

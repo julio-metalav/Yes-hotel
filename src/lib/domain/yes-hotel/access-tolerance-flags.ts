@@ -62,3 +62,18 @@ export function isAccessToleranceProcessorEnabled(
 ): boolean {
   return (flags ?? getAccessToleranceFlags()).processorEnabled;
 }
+
+/**
+ * dry-run efetivo do Edge.
+ * Cliente pode pedir dry_run=false; execução real só com flag TTLock + homolog lock.
+ * Ausência / true → dry-run. Homolog ausente → dry-run (fail-closed).
+ */
+export function resolveAccessToleranceEffectiveDryRun(
+  bodyDryRun: unknown,
+  flags: AccessToleranceFlags,
+): boolean {
+  if (bodyDryRun !== false) return true;
+  if (!flags.ttlockSuspensionEnabled) return true;
+  if (flags.homologLockIdFilter == null) return true;
+  return false;
+}
