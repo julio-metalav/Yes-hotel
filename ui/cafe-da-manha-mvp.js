@@ -181,12 +181,9 @@ function getVisibleCards() {
   return cafeCards
     .filter((card) => matchesActiveFilter(card) && matchesSearch(card))
     .slice()
-    .sort((a, b) => {
-      const aPpd = a.ppdAlert ? 0 : 1;
-      const bPpd = b.ppdAlert ? 0 : 1;
-      if (aPpd !== bPpd) return aPpd - bPpd;
-      return policy.compareCafeApartmentCodes(a.apartmentCode, b.apartmentCode);
-    });
+    .sort((a, b) =>
+      policy.compareCafeApartmentCodes(a.apartmentCode, b.apartmentCode),
+    );
 }
 
 function createMetric(label, value, extraClass) {

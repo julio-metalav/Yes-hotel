@@ -247,7 +247,7 @@ assert.ok(
     uiSource.indexOf("await ensureDemoModuleLoaded()"),
 );
 assert.match(uiSource, /script\.src = "\.\/cafe-demo-data\.js\?v=2"/);
-assert.match(html, /cafe-da-manha-mvp\.js\?v=9/);
+assert.match(html, /cafe-da-manha-mvp\.js\?v=10/);
 assert.match(html, /yes-cafe-policy\.js\?v=4/);
 assert.match(html, /cafe-da-manha-mvp\.css\?v=8/);
 assert.match(uiSource, /usuarios-login-mvp\.html\?next=cafe-demo/);
