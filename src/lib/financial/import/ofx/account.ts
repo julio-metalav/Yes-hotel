@@ -3,7 +3,13 @@
  * Não usa nome de arquivo. Não persiste agência/conta completa.
  */
 
-import { SICREDI_BANK_IDS, type AccountResolutionMethod, type OfxAccountHint, type OfxBankAccount } from "./types.ts";
+import {
+  SICREDI_BANK_IDS,
+  type AccountResolutionMethod,
+  type OfxAccountFingerprint,
+  type OfxAccountHint,
+  type OfxBankAccount,
+} from "./types.ts";
 
 export type AccountResolveOk = { ok: true; code: string; method: AccountResolutionMethod };
 export type AccountResolveErr = { ok: false; code: "account_unresolved"; message: string };
@@ -17,6 +23,60 @@ export function accountIdLast4(acctId: string | null | undefined): string | null
 
 export function maskAccountId(acctId: string | null | undefined): string | null {
   return accountIdLast4(acctId);
+}
+
+function digitsOnly(raw: string | null | undefined): string | null {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  return digits.length ? digits : null;
+}
+
+function normalizeAcctType(raw: string | null | undefined): string | null {
+  const text = String(raw ?? "").trim().toUpperCase();
+  return text || null;
+}
+
+export function extractOfxFingerprint(ofx: OfxBankAccount): OfxAccountFingerprint {
+  return {
+    bank_id: digitsOnly(ofx.bankId),
+    branch_fingerprint: accountIdLast4(ofx.branchId),
+    account_last4: ofx.acctIdLast4 ?? accountIdLast4(ofx.acctId),
+    account_type: normalizeAcctType(ofx.acctType),
+  };
+}
+
+export function parseOfxFingerprint(metadata: unknown): OfxAccountFingerprint | null {
+  if (metadata == null || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const ofx = (metadata as { ofx?: unknown }).ofx;
+  if (ofx == null || typeof ofx !== "object" || Array.isArray(ofx)) return null;
+  const row = ofx as Record<string, unknown>;
+  if ("account_number" in row || "acct_id" in row || "conta" in row) return null;
+  return {
+    bank_id: digitsOnly(row.bank_id == null ? null : String(row.bank_id)),
+    branch_fingerprint: accountIdLast4(row.branch_fingerprint == null ? null : String(row.branch_fingerprint)),
+    account_last4: accountIdLast4(row.account_last4 == null ? null : String(row.account_last4)),
+    account_type: normalizeAcctType(row.account_type == null ? null : String(row.account_type)),
+  };
+}
+
+export function isOfxFingerprintComplete(fp: OfxAccountFingerprint | null | undefined): boolean {
+  return Boolean(fp?.bank_id && fp.account_last4 && fp.account_last4.length >= 2);
+}
+
+export function maskOfxFingerprint(fp: OfxAccountFingerprint | null | undefined): string {
+  if (!fp) return "(ausente)";
+  const last4 = fp.account_last4 ?? "";
+  const last2 = last4.length >= 2 ? last4.slice(-2) : "??";
+  return `bank=${fp.bank_id ?? "?"} type=${fp.account_type ?? "?"} last4=**${last2} branch=${fp.branch_fingerprint ?? "null"}`;
+}
+
+/** Comparação exata dos campos cadastrados. Sem similaridade. */
+export function ofxFingerprintsMatch(file: OfxAccountFingerprint, registered: OfxAccountFingerprint): boolean {
+  if (!isOfxFingerprintComplete(registered) || !isOfxFingerprintComplete(file)) return false;
+  if (file.account_last4 !== registered.account_last4) return false;
+  if (registered.bank_id && file.bank_id !== registered.bank_id) return false;
+  if (registered.branch_fingerprint && file.branch_fingerprint !== registered.branch_fingerprint) return false;
+  if (registered.account_type && file.account_type !== registered.account_type) return false;
+  return true;
 }
 
 export function resolveOfxAccount(input: {
@@ -62,4 +122,31 @@ export function resolveOfxAccount(input: {
   }
 
   return { ok: false, code: "account_unresolved", message: "não foi possível identificar a conta univocamente" };
+}
+
+export function assertHintedFingerprint(input: {
+  file: OfxAccountFingerprint;
+  expectedCode: string;
+  knownAccounts: readonly OfxAccountHint[];
+}):
+  | { ok: true; method: "fingerprint" }
+  | { ok: false; code: "account_fingerprint_mismatch"; message: string } {
+  const hinted = input.knownAccounts.find((a) => a.code === input.expectedCode);
+  const registered = hinted?.ofx_fingerprint ?? null;
+  if (!hinted || !isOfxFingerprintComplete(registered)) {
+    return { ok: false, code: "account_fingerprint_mismatch", message: "fingerprint cadastrado ausente ou incompleto" };
+  }
+  const otherMatch = input.knownAccounts.find(
+    (a) =>
+      a.code !== input.expectedCode &&
+      a.ofx_fingerprint &&
+      ofxFingerprintsMatch(input.file, a.ofx_fingerprint),
+  );
+  if (otherMatch) {
+    return { ok: false, code: "account_fingerprint_mismatch", message: "fingerprint do arquivo não confere com a conta informada" };
+  }
+  if (!ofxFingerprintsMatch(input.file, registered)) {
+    return { ok: false, code: "account_fingerprint_mismatch", message: "fingerprint do arquivo não confere com a conta informada" };
+  }
+  return { ok: true, method: "fingerprint" };
 }

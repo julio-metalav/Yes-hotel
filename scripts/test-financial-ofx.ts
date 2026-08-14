@@ -15,10 +15,12 @@ import {
   dryRunReportLeaksPii,
   formatDryRunReport,
   normalizeOfxImport,
+  ofxFingerprintsMatch,
   ofxNormalizedHash,
   parseOfxAmountToSignedCents,
   parseOfxDateTime,
   parseOfxDocument,
+  parseOfxFingerprint,
   resolveOfxAccount,
   sha256HexOfBytes,
 } from "../src/lib/financial/import/ofx/index.ts";
@@ -337,6 +339,43 @@ console.log("\n=== OFX Sicredi V1 ===\n");
   assert.notEqual(persist.status, 0);
   assert.match(persist.stderr + persist.stdout, /Persistência recusada/i);
   ok("CLI dry-run sintético; persistência recusada");
+}
+
+{
+  const fpA = { bank_id: "748", branch_fingerprint: null, account_last4: "4321", account_type: "CHECKING" };
+  const fpB = { bank_id: "748", branch_fingerprint: null, account_last4: "7777", account_type: "CHECKING" };
+  assert.equal(ofxFingerprintsMatch(fpA, fpA), true);
+  assert.equal(ofxFingerprintsMatch(fpA, fpB), false);
+  assert.equal(parseOfxFingerprint({ ofx: { bank_id: "748", account_last4: "4321", account_type: "CHECKING" } })?.account_last4, "4321");
+  assert.equal(parseOfxFingerprint({ ofx: { account_number: "123", account_last4: "4321" } }), null);
+  const hinted = [
+    { code: "sicredi_principal", account_mask: null, institution: "Sicredi", ofx_fingerprint: fpA },
+    { code: "sicredi_0911", account_mask: "0911", institution: "Sicredi", ofx_fingerprint: fpB },
+  ];
+  const okMatch = normalizeOfxImport({
+    bytes: bytesOf(SYNTHETIC_PRINCIPAL_OK),
+    expectedAccountCode: "sicredi_principal",
+    knownAccounts: hinted,
+    requireFingerprint: true,
+  });
+  assert.equal(okMatch.ok && okMatch.account_resolution, "fingerprint");
+  const wrongHint = normalizeOfxImport({
+    bytes: bytesOf(SYNTHETIC_PRINCIPAL_OK),
+    expectedAccountCode: "sicredi_0911",
+    knownAccounts: hinted,
+    requireFingerprint: true,
+  });
+  assert.equal(wrongHint.ok, false);
+  if (wrongHint.ok) throw new Error("esperado mismatch");
+  assert.equal(wrongHint.fatal.code, "account_fingerprint_mismatch");
+  const missing = normalizeOfxImport({
+    bytes: bytesOf(SYNTHETIC_PRINCIPAL_OK),
+    expectedAccountCode: "sicredi_principal",
+    knownAccounts: DEFAULT_SICREDI_ACCOUNT_HINTS,
+    requireFingerprint: true,
+  });
+  assert.equal(missing.ok, false);
+  ok("fingerprint: match, hint errado e cadastro ausente abortam o import");
 }
 
 console.log(`\n${passed} testes ok\n`);

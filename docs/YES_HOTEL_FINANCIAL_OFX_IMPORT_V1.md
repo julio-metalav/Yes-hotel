@@ -21,7 +21,18 @@ O parser **não** usa nome de arquivo. Resolve por `BANKID` (Sicredi `748` quand
 - last4 OFX igual à máscara de **outra** conta Yes → `account_unresolved`
 - sem hint e sem máscara casada → `account_unresolved`; nenhuma linha é atribuída
 
-Nos OFX reais Sicredi, `0911` é apelido operacional: não aparece em `ACCTID`/`BRANCHID`. Sem fingerprint persistido, o import da 0911 exige `--account sicredi_0911`.
+Nos OFX reais Sicredi, `0911` é apelido operacional: não aparece em `ACCTID`/`BRANCHID`.
+
+Persistência exige `--account` **e** fingerprint cadastrado em `financial_accounts.metadata.ofx`:
+
+```json
+{ "ofx": { "bank_id": "748", "branch_fingerprint": null, "account_last4": "••••", "account_type": "CHECKING" } }
+```
+
+- last4/BANKID/ACCTTYPE — nunca número completo
+- mismatch → `account_fingerprint_mismatch`, import inteiro aborta
+- fingerprints reais ficam só no HOMO; não vão para o Git
+- Storage do OFX original ainda não é feito neste backfill
 
 Agência/conta completa não entram em `raw_payload` nem no dry-run.
 
