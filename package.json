@@ -77,10 +77,11 @@
     "test:yes:financial-foundation-pg": "tsx scripts/test-financial-foundation-pg.ts",
     "test:yes:financial-ofx": "tsx scripts/test-financial-ofx.ts",
     "financial:import-ofx": "tsx scripts/import-financial-ofx.ts",
+    "test:yes:financial-omie-ar-ap": "tsx scripts/test-financial-omie-ar-ap.ts",
+    "financial:import-omie-ar-ap": "tsx scripts/import-financial-omie-ar-ap.ts",
     "test:yes:gestao-saude-hotel-ui": "tsx scripts/test-gestao-saude-hotel-ui.ts",
     "test:yes:management-report-import": "tsx scripts/test-management-report-import.ts",
     "import:management-reports": "tsx scripts/import-management-reports.ts",
-
     "test:hits-fnrh-panel-financial-ui": "tsx scripts/test-hits-fnrh-panel-financial-ui.ts",
     "test:ver-panel-operacional": "tsx scripts/test-ver-panel-operacional.ts",
     "test:ui-static-js": "node --check ui/checkin-operacional-mvp.js && node --check ui/fnrh-checkin-v2.js && node --check ui/yes-arrivals-policy.js && node --check ui/yes-access-tolerance-policy.js && node --check ui/yes-cafe-policy.js && node --check ui/cafe-demo-data.js && node --check ui/cafe-da-manha-mvp.js && node --check ui/usuarios-login-mvp.js && node --check ui/yes-checkin-panel-presentation.js && node --check ui/gestao-saude-hotel.js && node --check ui/recepcao-mvp.js && node --check ui/yes-supabase-auth.js && node --check ui/apartamentos-wifi-mvp.js && node --check ui/data/management-historical-2026.js",
@@ -102,6 +103,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.47.0",
     "dotenv": "^17.3.1",
+    "exceljs": "^4.4.0",
     "lucide-react": "^1.28.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

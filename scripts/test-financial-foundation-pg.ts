@@ -388,6 +388,20 @@ try {
   assert.equal(recepcaoAfterRevoke, "0");
   ok("grants: REVOKE authenticated write; SELECT admin-only; service_role intacto");
 
+  psqlFile(resolve(ROOT, "supabase/migrations/20260815010000_financial_entries_settled_amount_cents.sql"));
+  psqlExpectFail(`
+    update public.financial_entries
+    set settled_amount_cents = -1
+    where source_record_id = 'FITID-1'
+  `);
+  psql(`
+    update public.financial_entries
+    set settled_amount_cents = 150050
+    where source_record_id = 'FITID-1'
+  `);
+  assert.equal(psql("select settled_amount_cents from public.financial_entries where source_record_id = 'FITID-1'"), "150050");
+  ok("settled_amount_cents aceita >=0 e rejeita negativo");
+
   const uniqueIdx = psql(`
     select indexname from pg_indexes
     where schemaname = 'public'
