@@ -185,6 +185,10 @@ export const RAW_PAYLOAD_ALLOWED_KEYS = [
   "external_reference",
   "currency",
   "parser_version",
+  "dtposted_raw",
+  "timezone",
+  "checknum",
+  "refnum",
 ] as const;
 
 export const SEEDED_FINANCIAL_ACCOUNT_CODES = ["sicredi_principal", "sicredi_0911"] as const;
