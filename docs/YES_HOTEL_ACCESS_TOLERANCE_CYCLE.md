@@ -8,7 +8,7 @@ Fecha o ciclo pós-primeiro acesso: processar tolerâncias vencidas, revalidar p
 
 | Capacidade | Estado neste PR |
 |------------|-----------------|
-| Processador de tolerâncias | Código pronto; **flag default false** |
+| Processador de tolerâncias | Código pronto; cron `yes-hotel-access-tolerance-process` (`mode=process`) |
 | Efeito TTLock (suspender/restaurar) | Só com flag TTLock + lock homologado + dry-run efetivo false **no servidor** |
 | Dry-run | **Default**; cliente não força execução real com `dry_run=false` |
 | DigiSac WhatsApp | Adapter real existe; **default desligado**; exige flag + `DIGISAC_USE_MOCK=false` + credenciais |
@@ -16,7 +16,8 @@ Fecha o ciclo pós-primeiro acesso: processar tolerâncias vencidas, revalidar p
 | Mock de envio | **Somente injeção explícita em testes** — nunca fallback silencioso |
 | Ações manuais na UI/Edge | **Removidas** (501) até existir auditoria append-only dedicada |
 | HITS pagamento | **Não chamada**; port `ReservationPendingStatePort` (pagamento desconhecido **não suspende**) |
-| Cron / deploy / secrets | **Fora deste PR** |
+| Cron process | `yes-hotel-access-tolerance-process` a cada 1 min (`mode=process`) |
+| Cron dispatch | `yes-hotel-access-outbox-dispatch` a cada 1 min (`mode=dispatch`) — job separado |
 
 ## Feature flags (default `false`)
 
@@ -44,7 +45,9 @@ Edge Function: `supabase/functions/access-tolerance-processor`
 
 - Auth batch: `Bearer <service_role>` ou `x-access-tolerance-token` (comparação constant-time)
 - `mode=manual`: desabilitado (`manual_actions_disabled`) — sem tabela de auditoria TTLock compatível
-- Cron **não** configurado neste PR
+- Cron process: `yes-hotel-access-tolerance-process` → `mode=process` (migration `20260814003954_access_tolerance_process_cron.sql`)
+- Cron dispatch permanece separado: `yes-hotel-access-outbox-dispatch` → `mode=dispatch`
+- Efeito TTLock real continua fail-closed: flag TTLock + `YES_HOTEL_TTLOCK_HOMOLOG_LOCK_ID` + dry-run efetivo false
 
 ## Dívida técnica registrada
 
@@ -56,4 +59,5 @@ Edge Function: `supabase/functions/access-tolerance-processor`
 
 ## Migrations
 
-Nenhuma migration nova. Nenhuma aplicada neste trabalho.
+- `20260811220053_access_outbox_dispatch_cron.sql` — dispatch (não processa tolerâncias)
+- `20260814003954_access_tolerance_process_cron.sql` — process (não despacha outbox)

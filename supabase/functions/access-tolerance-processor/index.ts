@@ -5,7 +5,8 @@
  * - Batch: service_role ou token scheduler (comparação constant-time)
  * - mode=manual: DESABILITADO neste PR (sem tabela de auditoria compatível)
  * - Senders: DigiSac/Resend reais somente com flag+config; nunca mock silencioso
- * - Sem cron neste PR
+ * - Cron process: yes-hotel-access-tolerance-process (mode=process)
+ * - Cron dispatch: yes-hotel-access-outbox-dispatch (mode=dispatch) — job separado
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { processAccessTolerancesBatch } from "../../../src/lib/application/yes-hotel/access-tolerance-processor.ts";
@@ -13,7 +14,10 @@ import {
   createMockTtlockValidityChangePort,
   dispatchAccessOutboxBatch,
 } from "../../../src/lib/application/yes-hotel/access-outbox-dispatcher.ts";
-import { getAccessToleranceFlags } from "../../../src/lib/domain/yes-hotel/access-tolerance-flags.ts";
+import {
+  getAccessToleranceFlags,
+  resolveAccessToleranceEffectiveDryRun,
+} from "../../../src/lib/domain/yes-hotel/access-tolerance-flags.ts";
 import { createSupabaseFirstRoomAccessPorts } from "../../../src/lib/infrastructure/supabase/yes-hotel/index.ts";
 import { SupabaseAccessOutboxQueuePort } from "../../../src/lib/infrastructure/supabase/yes-hotel/access-outbox-queue.ts";
 import { buildProductionAccessCommunicationSender } from "../../../src/lib/infrastructure/comunicacao/access-communication-senders.ts";
@@ -89,22 +93,6 @@ function denoFlagsEnv(): Record<string, string | undefined> {
   return env;
 }
 
-/**
- * dry-run default true.
- * Cliente pode forçar dry_run=true; dry_run=false só vale se servidor autorizar execução real.
- */
-function resolveEffectiveDryRun(
-  bodyDryRun: unknown,
-  flags: ReturnType<typeof getAccessToleranceFlags>,
-): boolean {
-  // Ausente ou true → dry-run
-  if (bodyDryRun !== false) return true;
-  // Cliente pediu real: só se flags TTLock + homolog lock
-  if (!flags.ttlockSuspensionEnabled) return true;
-  if (flags.homologLockIdFilter == null) return true;
-  return false;
-}
-
 async function resolveRecipients(reservationId: string) {
   const { data: hop } = await admin
     .from("operacional_hospedes")
@@ -155,7 +143,7 @@ Deno.serve(async (req: Request) => {
   const env = denoFlagsEnv();
   const flags = getAccessToleranceFlags(env);
   const limit = Math.min(Number(body.limit ?? 20) || 20, 50);
-  const dryRun = resolveEffectiveDryRun(body.dry_run, flags);
+  const dryRun = resolveAccessToleranceEffectiveDryRun(body.dry_run, flags);
 
   const basePorts = createSupabaseFirstRoomAccessPorts(admin, env);
   const outboxQueue = new SupabaseAccessOutboxQueuePort(admin);
