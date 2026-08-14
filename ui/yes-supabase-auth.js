@@ -79,6 +79,10 @@
     return ["admin", "recepcao", "cafe"].includes(user?.role);
   }
 
+  function canAccessManagement(user) {
+    return user?.role === "admin" || user?.role === "recepcao";
+  }
+
   function mapProfile(profileRow) {
     if (!profileRow) {
       return null;
@@ -506,6 +510,7 @@
     getRoleLabel,
     canAccessUserManagement,
     canAccessBreakfast,
+    canAccessManagement,
     hasUsers,
     bootstrapFirstAdmin,
     login,
