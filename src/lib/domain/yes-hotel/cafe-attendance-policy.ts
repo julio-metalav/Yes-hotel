@@ -107,32 +107,35 @@ export function planMarkAllCafeAttended(cards: CafeCardModel[]): Array<{
 }
 
 export function cafeStatusLabel(entitlement: CafeBreakfastEntitlement): string {
-  if (entitlement.kind === "incluido") return "Incluído na diária";
   if (entitlement.kind === "avulso_pago") {
     const n = entitlement.paidExtraQty;
     return n === 1 ? "1 café avulso pago" : `${n} cafés avulsos pagos`;
   }
-  if (entitlement.kind === "sem_cafe") return "Sem café incluído";
-  return "Café ainda não identificado";
+  return "";
 }
 
 export function cafeGuestLine(entitlement: CafeBreakfastEntitlement): string {
   const n = entitlement.guestCount;
   const base = n === 1 ? "1 hóspede" : `${n} hóspedes`;
-  if (entitlement.kind === "sem_cafe") return `${base} · Sem café incluído`;
-  if (entitlement.kind === "incluido") return `${base} · Café incluído`;
   if (entitlement.kind === "avulso_pago") {
     return `${base} · ${cafeStatusLabel(entitlement)}`;
   }
-  return `${base} · Café ainda não identificado`;
+  return base;
+}
+
+export function cafeAlertLabel(
+  entitlement: CafeBreakfastEntitlement,
+): string | null {
+  return entitlement.kind === "sem_cafe" ? "SEM CAFÉ" : null;
 }
 
 export function cafeOperationalStatusLabel(
   entitlement: CafeBreakfastEntitlement,
   attendedQty: number,
 ): string {
-  if (entitlement.kind === "sem_cafe") return "Sem café";
-  if (entitlement.kind === "nao_mapeado") return "Café ainda não identificado";
+  if (entitlement.kind === "sem_cafe" || entitlement.kind === "nao_mapeado") {
+    return "";
+  }
   const attended = clampCafeAttendedQty(attendedQty, entitlement.entitledQty);
   return attended >= entitlement.entitledQty
     ? "Atendimento completo"
