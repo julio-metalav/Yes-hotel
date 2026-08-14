@@ -61,7 +61,8 @@ verify_jwt = false
 [functions.send-payment-link]
 verify_jwt = false
 
-# Diagnóstico read-only lockRecord/list (token scheduler / service_role).
+# Diagnóstico TTLock (lockRecord / lock capacity / gateway / change probe).
+# Auth: token scheduler / service_role. verify_jwt=false (auth própria).
 [functions.ttlock-lock-record-diagnose]
 verify_jwt = false
 
