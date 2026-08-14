@@ -365,6 +365,29 @@ try {
   assert.equal(psql(`select count(*) from public.financial_imports where file_sha256 = '${SHA2}'`), "1");
   ok("service_role escreve (writes futuros via backend)");
 
+  psql("grant insert, update, delete on public.financial_entries to authenticated");
+  assert.equal(psql("select has_table_privilege('authenticated', 'public.financial_entries', 'INSERT')"), "t");
+  psqlFile(resolve(ROOT, "supabase/migrations/20260814233000_financial_grants_revoke_authenticated.sql"));
+  assert.equal(psql("select has_table_privilege('authenticated', 'public.financial_entries', 'INSERT')"), "f");
+  assert.equal(psql("select has_table_privilege('authenticated', 'public.financial_entries', 'UPDATE')"), "f");
+  assert.equal(psql("select has_table_privilege('authenticated', 'public.financial_entries', 'DELETE')"), "f");
+  assert.equal(psql("select has_table_privilege('authenticated', 'public.financial_entries', 'SELECT')"), "t");
+  assert.equal(psql("select has_table_privilege('service_role', 'public.financial_entries', 'INSERT')"), "t");
+  assert.equal(psql("select has_table_privilege('service_role', 'public.financial_accounts', 'DELETE')"), "t");
+  const adminReadAfterRevoke = asRole(
+    "authenticated",
+    ADMIN_AUTH,
+    "select count(*)::text from public.financial_entries;",
+  );
+  assert.equal(adminReadAfterRevoke, "1");
+  const recepcaoAfterRevoke = asRole(
+    "authenticated",
+    RECEPCAO_AUTH,
+    "select count(*)::text from public.financial_entries;",
+  );
+  assert.equal(recepcaoAfterRevoke, "0");
+  ok("grants: REVOKE authenticated write; SELECT admin-only; service_role intacto");
+
   const uniqueIdx = psql(`
     select indexname from pg_indexes
     where schemaname = 'public'
