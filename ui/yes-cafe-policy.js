@@ -252,22 +252,31 @@
   }
 
   function cafeStatusLabel(entitlement) {
-    if (entitlement.kind === "incluido") return "Café incluído";
+    if (entitlement.kind === "incluido") return "Incluído na diária";
     if (entitlement.kind === "avulso_pago") {
       var n = entitlement.paidExtraQty;
       return n === 1 ? "1 café avulso pago" : n + " cafés avulsos pagos";
     }
-    if (entitlement.kind === "sem_cafe") return "Café não incluído — cobrar antes de servir";
+    if (entitlement.kind === "sem_cafe") return "Sem café incluído";
     return "Café ainda não identificado";
   }
 
   function cafeGuestLine(entitlement) {
     var n = entitlement.guestCount;
     var base = n === 1 ? "1 hóspede" : n + " hóspedes";
-    if (entitlement.kind === "sem_cafe") return base + " — reserva sem café";
-    if (entitlement.kind === "incluido") return base + " — café incluído";
-    if (entitlement.kind === "avulso_pago") return base + " — " + cafeStatusLabel(entitlement);
-    return base + " — não mapeado";
+    if (entitlement.kind === "sem_cafe") return base + " · Sem café incluído";
+    if (entitlement.kind === "incluido") return base + " · Café incluído";
+    if (entitlement.kind === "avulso_pago") return base + " · " + cafeStatusLabel(entitlement);
+    return base + " · Café ainda não identificado";
+  }
+
+  function cafeOperationalStatusLabel(entitlement, attendedQty) {
+    if (entitlement.kind === "sem_cafe") return "Sem café";
+    if (entitlement.kind === "nao_mapeado") return "Café ainda não identificado";
+    var attended = clampCafeAttendedQty(attendedQty, entitlement.entitledQty);
+    return attended >= entitlement.entitledQty
+      ? "Atendimento completo"
+      : "Aguardando atendimento";
   }
 
   /** Espelho de cafe-ppd-alert.ts — alerta operacional PPD (não altera pagamento). */
@@ -307,34 +316,41 @@
     return String(pagamentoStatus || "").trim().toLowerCase() === "pago";
   }
 
-  function shouldShowCafePpdAlert(input) {
-    if (!input || !input.ppdEfetivado) return false;
-    if (input.ppdRegularizadoEm) return false;
-    if (input.ppdBloqueadoEm) return false;
-    if (input.pagarmeObrigacaoLiquidada === true) return false;
-    if (isOfficialPaymentPaid(input.pagamentoStatus)) return false;
+  function resolveCafePpdOperationalState(input) {
+    if (!input || !input.ppdEfetivado) return "none";
+    if (input.ppdRegularizadoEm || isOfficialPaymentPaid(input.pagamentoStatus)) {
+      return "regularized";
+    }
+    if (input.pagarmeObrigacaoLiquidada === true) return "none";
     var status = String(input.statusReserva || "").trim().toLowerCase();
     if (status === "cancelada" || status === "checkout" || status === "finalizada") {
-      return false;
+      return "none";
     }
-    return true;
+    if (input.ppdBloqueadoEm) return "suspended";
+    var deadlineMs = input.ppdDeadlineEm ? Date.parse(input.ppdDeadlineEm) : NaN;
+    var nowMs = input.nowIso ? Date.parse(input.nowIso) : Date.now();
+    if (isFinite(deadlineMs) && isFinite(nowMs) && nowMs >= deadlineMs) {
+      return "overdue";
+    }
+    return "pending";
+  }
+
+  function shouldShowCafePpdAlert(input) {
+    var state = resolveCafePpdOperationalState(input);
+    return state === "pending" || state === "overdue" || state === "suspended";
   }
 
   function buildCafePpdAlertView(input) {
-    var apt = String((input && input.apartmentCode) || "").trim() || "—";
-    var guest = String((input && input.guestName) || "").trim() || "—";
     var charge = (input && input.charge) || resolvePpdChargeAmount({});
-    var chargeText =
+    var state = (input && input.state) || "pending";
+    var badgeLabel =
       charge.source === "none"
-        ? "Cobrar: valor a confirmar"
-        : "Cobrar: " + charge.displayLabel;
+        ? "DIÁRIA PENDENTE"
+        : "DIÁRIA PENDENTE: " + charge.displayLabel;
     return {
-      badgeLabel: "PAGAMENTO PENDENTE",
-      title: "⚠️ Pagamento presencial até 09h",
-      apartmentLine: "Apto " + apt + " — " + guest,
-      chargeLine: chargeText,
-      deadlineLine: "Prazo: 09h",
-      hitsHint: "Após receber, regularizar no HITS.",
+      state: state,
+      tone: "danger",
+      badgeLabel: badgeLabel,
     };
   }
 
@@ -359,7 +375,9 @@
     planMarkAllCafeAttended: planMarkAllCafeAttended,
     cafeStatusLabel: cafeStatusLabel,
     cafeGuestLine: cafeGuestLine,
+    cafeOperationalStatusLabel: cafeOperationalStatusLabel,
     resolvePpdChargeAmount: resolvePpdChargeAmount,
+    resolveCafePpdOperationalState: resolveCafePpdOperationalState,
     shouldShowCafePpdAlert: shouldShowCafePpdAlert,
     buildCafePpdAlertView: buildCafePpdAlertView,
     isOfficialPaymentPaid: isOfficialPaymentPaid,

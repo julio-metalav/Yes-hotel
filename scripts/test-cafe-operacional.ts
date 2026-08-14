@@ -427,7 +427,7 @@ console.log("\n== Contrato UI/SQL sem parâmetros inseguros ==");
   const sql = readFileSync(
     join(
       process.cwd(),
-      "supabase/migrations/20260808234300_operacional_cafe_atendimento.sql",
+      "supabase/migrations/20260809005734_operacional_cafe_atendimento.sql",
     ),
     "utf8",
   );

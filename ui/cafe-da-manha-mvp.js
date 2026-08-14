@@ -4,6 +4,8 @@
  *
  * Seam de teste (somente harness externo): window.__YES_CAFE_TEST_DATASET__
  * Nunca é populado por este arquivo.
+ *
+ * Demo explícito: ?demo=1, após autenticação/autorização, somente em memória.
  */
 
 const policy = window.YesHotelCafePolicy;
@@ -14,6 +16,18 @@ if (!policy || typeof policy.resolveCafeOperationalDateYmd !== "function") {
 
 function getAuth() {
   return window.YesHotelAuthApp;
+}
+
+async function ensureDemoModuleLoaded() {
+  if (!demoMode || window.YesHotelCafeDemo?.createDataset) return;
+  await new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "./cafe-demo-data.js?v=2";
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("Não foi possível carregar o modo demonstração."));
+    document.head.appendChild(script);
+  });
 }
 
 const cardsListElement = document.querySelector("#cards-list");
@@ -29,6 +43,7 @@ const currentDateElement = document.querySelector("#current-date");
 const cafeDateInputElement = document.querySelector("#cafe-date-input");
 const cafeDateResetButton = document.querySelector("#cafe-date-reset");
 const cafeReadonlyBadge = document.querySelector("#cafe-readonly-badge");
+const cafeDemoBanner = document.querySelector("#cafe-demo-banner");
 const cafeLoadStateElement = document.querySelector("#cafe-load-state");
 const cafeRetryButton = document.querySelector("#cafe-retry-button");
 const searchElement = document.querySelector("#breakfast-search");
@@ -62,6 +77,9 @@ let isLoading = false;
 let realtimeChannel = null;
 let autoDateTimer = null;
 let writeInFlight = false;
+const demoMode = new URLSearchParams(window.location.search).get("demo") === "1";
+let demoDataset = null;
+let demoDatasetYmd = null;
 
 if (!(cardsListElement instanceof HTMLElement) || !policy) {
   throw new Error("Café: dependências da tela não encontradas.");
@@ -83,7 +101,9 @@ function showAccessState(title, message, actionLabel) {
   paragraph.textContent = message;
   const action = document.createElement("a");
   action.className = "secondary-link";
-  action.href = "./usuarios-login-mvp.html";
+  action.href = demoMode
+    ? "./usuarios-login-mvp.html?next=cafe-demo"
+    : "./usuarios-login-mvp.html";
   action.textContent = actionLabel;
   accessStateElement.append(heading, paragraph, action);
 }
@@ -97,9 +117,26 @@ function hideAccessState() {
 
 function canWrite() {
   if (!currentUser) return false;
+  if (demoMode) return true;
   if (!policy.canRoleWriteCafeAttendance(currentUser.role)) return false;
   if (!policy.canRegisterCafeAttendanceForDate(selectedYmd)) return false;
   return true;
+}
+
+function canWriteCard(card) {
+  if (!canWrite()) return false;
+  if (demoMode) {
+    return (
+      card.entitlement.kind !== "sem_cafe" &&
+      card.entitlement.kind !== "nao_mapeado" &&
+      card.entitlement.entitledQty > 0
+    );
+  }
+  return policy.assertCanWriteCafeAttendance({
+    role: currentUser?.role,
+    cafeDateYmd: selectedYmd,
+    entitlement: card.entitlement,
+  }).ok;
 }
 
 function normalizeSearchValue(value) {
@@ -167,13 +204,7 @@ function createCard(card) {
   const missingGuests = policy.cafeMissingQty(card);
   const isComplete =
     card.entitlement.entitledQty > 0 && missingGuests === 0;
-  const writable =
-    canWrite() &&
-    policy.assertCanWriteCafeAttendance({
-      role: currentUser?.role,
-      cafeDateYmd: selectedYmd,
-      entitlement: card.entitlement,
-    }).ok;
+  const writable = canWriteCard(card);
 
   const article = document.createElement("article");
   article.className = [
@@ -184,6 +215,7 @@ function createCard(card) {
       : "is-unpaid",
     `is-kind-${card.entitlement.kind}`,
     card.ppdAlert ? "has-ppd-alert" : "",
+    card.ppdAlert ? `has-ppd-${card.ppdAlert.state}` : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -204,21 +236,12 @@ function createCard(card) {
 
   if (card.ppdAlert) {
     const ppdBox = document.createElement("div");
-    ppdBox.className = "ppd-cafe-alert";
-    ppdBox.setAttribute("role", "status");
-    const ppdBadge = document.createElement("span");
-    ppdBadge.className = "ppd-cafe-badge";
-    ppdBadge.textContent = card.ppdAlert.badgeLabel;
+    ppdBox.className = `ppd-cafe-alert is-${card.ppdAlert.tone}`;
+    ppdBox.setAttribute("role", "alert");
     const ppdTitle = document.createElement("strong");
     ppdTitle.className = "ppd-cafe-title";
-    ppdTitle.textContent = card.ppdAlert.title;
-    const ppdCharge = document.createElement("span");
-    ppdCharge.className = "ppd-cafe-charge";
-    ppdCharge.textContent = card.ppdAlert.chargeLine;
-    const ppdHits = document.createElement("span");
-    ppdHits.className = "ppd-cafe-hits";
-    ppdHits.textContent = card.ppdAlert.hitsHint;
-    ppdBox.append(ppdBadge, ppdTitle, ppdCharge, ppdHits);
+    ppdTitle.textContent = card.ppdAlert.badgeLabel;
+    ppdBox.append(ppdTitle);
     guestCell.appendChild(ppdBox);
   }
 
@@ -254,7 +277,7 @@ function createCard(card) {
   paymentBadge.className = `payment-badge ${
     card.entitlement.kind === "incluido" || card.entitlement.kind === "avulso_pago"
       ? "is-paid"
-      : "is-unpaid"
+      : "is-neutral"
   }`;
   paymentBadge.textContent = policy.cafeStatusLabel(card.entitlement);
   paymentCell.appendChild(paymentBadge);
@@ -262,28 +285,19 @@ function createCard(card) {
   const statusCell = document.createElement("div");
   statusCell.className = "status-cell";
   const statusBadge = document.createElement("span");
-  statusBadge.className = `status-badge ${isComplete ? "is-complete" : "is-pending"}`;
-  if (card.entitlement.entitledQty <= 0) {
-    statusBadge.textContent =
-      card.entitlement.kind === "sem_cafe"
-        ? "Sem direito"
-        : card.entitlement.kind === "nao_mapeado"
-          ? "Não mapeado"
-          : "Sem direito";
-  } else {
-    statusBadge.textContent = isComplete ? "Completo" : "Pendente";
-  }
+  statusBadge.className = `status-badge ${
+    card.entitlement.entitledQty <= 0
+      ? "is-neutral"
+      : isComplete
+        ? "is-complete"
+        : "is-pending"
+  }`;
+  statusBadge.textContent = policy.cafeOperationalStatusLabel(
+    card.entitlement,
+    card.attendedQty,
+  );
   statusCell.appendChild(statusBadge);
   badgesCell.append(paymentCell, statusCell);
-  if (card.ppdAlert) {
-    const ppdBadgeCell = document.createElement("div");
-    ppdBadgeCell.className = "ppd-badge-cell";
-    const ppdMini = document.createElement("span");
-    ppdMini.className = "ppd-cafe-badge ppd-cafe-badge--mini";
-    ppdMini.textContent = card.ppdAlert.badgeLabel;
-    ppdBadgeCell.appendChild(ppdMini);
-    badgesCell.appendChild(ppdBadgeCell);
-  }
 
   const controlCell = document.createElement("div");
   controlCell.className = "control-cell";
@@ -369,7 +383,10 @@ function renderSession(user) {
   const write = canWrite();
   cafeReadonlyBadge?.classList.toggle("hidden", write);
   if (markAllButtonElement instanceof HTMLButtonElement) {
-    markAllButtonElement.classList.toggle("hidden", !policy.canRoleWriteCafeAttendance(user.role));
+    markAllButtonElement.classList.toggle(
+      "hidden",
+      !demoMode && !policy.canRoleWriteCafeAttendance(user.role),
+    );
   }
 }
 
@@ -474,6 +491,9 @@ function mapRowsToCards(reservas, atendimentosByReserva) {
         r.pagamento_presencial_diferido_regularizado_em || r.__ppdRegularizadoEm || null,
       __ppdBloqueadoEm:
         r.pagamento_presencial_diferido_bloqueado_em || r.__ppdBloqueadoEm || null,
+      __ppdDeadlineEm:
+        r.pagamento_presencial_diferido_deadline_em || r.__ppdDeadlineEm || null,
+      __demoNowIso: r.__demoNowIso || null,
       __pagarmePaid: !!r.__pagarmePaid,
       __operacionalValorTotal: r.__operacionalValorTotal ?? null,
       __hitsReservationTotalAmount: r.__hitsReservationTotalAmount ?? null,
@@ -492,20 +512,22 @@ function mapRowsToCards(reservas, atendimentosByReserva) {
       operacionalValorTotal: stay.__operacionalValorTotal,
       hitsReservationTotalAmount: stay.__hitsReservationTotalAmount,
     });
-    const showPpd = policy.shouldShowCafePpdAlert({
+    const ppdInput = {
       ppdEfetivado: !!stay.__ppdEfetivado,
       ppdAutorizado: !!stay.__ppdAutorizado,
       pagamentoStatus: stay.__pagamentoStatus,
       statusReserva: stay.statusReserva,
       ppdRegularizadoEm: stay.__ppdRegularizadoEm,
       ppdBloqueadoEm: stay.__ppdBloqueadoEm,
+      ppdDeadlineEm: stay.__ppdDeadlineEm,
+      nowIso: stay.__demoNowIso,
       pagarmeObrigacaoLiquidada: !!stay.__pagarmePaid,
-    });
-    const ppdAlert = showPpd
+    };
+    const ppdState = policy.resolveCafePpdOperationalState(ppdInput);
+    const ppdAlert = policy.shouldShowCafePpdAlert(ppdInput)
       ? policy.buildCafePpdAlertView({
-          apartmentCode: stay.apartmentCode,
-          guestName: stay.mainGuestName,
           charge,
+          state: ppdState,
         })
       : null;
     return {
@@ -541,9 +563,19 @@ async function countGuestsFallback(supabase, reservaIds) {
 
 async function loadCafeDataset() {
   const testDataset = window.__YES_CAFE_TEST_DATASET__;
-  if (Array.isArray(testDataset)) {
+  if (demoMode) {
+    if (!window.YesHotelCafeDemo?.createDataset) {
+      throw new Error("Fixtures do modo demonstração não foram carregadas.");
+    }
+    if (!Array.isArray(demoDataset) || demoDatasetYmd !== selectedYmd) {
+      demoDataset = window.YesHotelCafeDemo.createDataset(selectedYmd);
+      demoDatasetYmd = selectedYmd;
+    }
+  }
+  const localDataset = demoMode ? demoDataset : testDataset;
+  if (Array.isArray(localDataset)) {
     cafeCards = mapRowsToCards(
-      testDataset.map((row) => ({
+      localDataset.map((row) => ({
         id: row.id,
         external_reservation_id: row.externalReservationId || null,
         apartamento: row.apartmentCode,
@@ -558,14 +590,16 @@ async function loadCafeDataset() {
         pagamento_presencial_diferido_autorizado: !!row.ppdAutorizado,
         pagamento_presencial_diferido_regularizado_em: row.ppdRegularizadoEm || null,
         pagamento_presencial_diferido_bloqueado_em: row.ppdBloqueadoEm || null,
+        pagamento_presencial_diferido_deadline_em: row.ppdDeadlineEm || null,
         __testKind: row.kind,
         __paidExtraQty: row.paidExtraQty || 0,
         __pagarmePaid: !!row.pagarmePaid,
         __operacionalValorTotal: row.operacionalValorTotal ?? null,
         __hitsReservationTotalAmount: row.hitsReservationTotalAmount ?? null,
+        __demoNowIso: row.demoNowIso || null,
       })),
       new Map(
-        testDataset.map((row) => [
+        localDataset.map((row) => [
           row.id,
           { quantidade_atendida: row.attendedQty || 0 },
         ]),
@@ -647,6 +681,36 @@ async function refreshCafe(options = {}) {
 }
 
 async function persistAttendance(card, nextQty, action) {
+  if (demoMode) {
+    if (
+      !currentUser ||
+      card.entitlement.kind === "sem_cafe" ||
+      card.entitlement.kind === "nao_mapeado" ||
+      card.entitlement.entitledQty <= 0
+    ) {
+      return;
+    }
+    let localNext;
+    if (action === "increment") {
+      localNext = card.attendedQty + 1;
+    } else if (action === "decrement") {
+      localNext = card.attendedQty - 1;
+    } else if (action === "marcar_todos") {
+      localNext = card.entitlement.entitledQty;
+    } else {
+      localNext = nextQty;
+    }
+    localNext = policy.clampCafeAttendedQty(
+      localNext,
+      card.entitlement.entitledQty,
+    );
+    card.attendedQty = localNext;
+    const row = demoDataset?.find((item) => item.id === card.reservationId);
+    if (row) row.attendedQty = localNext;
+    renderCards();
+    return;
+  }
+
   const gate = policy.assertCanWriteCafeAttendance({
     role: currentUser?.role,
     cafeDateYmd: selectedYmd,
@@ -762,7 +826,7 @@ function startAutoDateWatch() {
 }
 
 function setupRealtime(supabase) {
-  if (!supabase?.channel || realtimeChannel) return;
+  if (demoMode || !supabase?.channel || realtimeChannel) return;
   realtimeChannel = supabase
     .channel(`cafe-atendimentos-${selectedYmd}`)
     .on(
@@ -895,11 +959,14 @@ async function initBreakfastPage() {
     return;
   }
 
+  await ensureDemoModuleLoaded();
+  document.body.classList.toggle("is-demo", demoMode);
+  cafeDemoBanner?.classList.toggle("hidden", !demoMode);
   hideAccessState();
   renderSession(currentUser);
   await refreshCafe();
   const supabase = getAuth().getSupabaseClient();
-  if (supabase && !Array.isArray(window.__YES_CAFE_TEST_DATASET__)) {
+  if (supabase && !demoMode && !Array.isArray(window.__YES_CAFE_TEST_DATASET__)) {
     setupRealtime(supabase);
   }
 }

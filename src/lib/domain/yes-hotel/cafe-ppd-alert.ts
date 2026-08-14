@@ -79,54 +79,73 @@ export type CafePpdAlertInput = {
   ppdRegularizadoEm?: string | null;
   /** Cancelamento/bloqueio operacional do PPD. */
   ppdBloqueadoEm?: string | null;
+  /** Deadline operacional persistido (09:00 America/Campo_Grande). */
+  ppdDeadlineEm?: string | null;
+  /** Relógio da apresentação/teste. Default: agora. */
+  nowIso?: string | null;
   /** Pagar.me paid → PPD não elegível / sem alerta. */
   pagarmeObrigacaoLiquidada?: boolean;
 };
 
+export type CafePpdOperationalState =
+  | "none"
+  | "pending"
+  | "overdue"
+  | "suspended"
+  | "regularized";
+
 /**
- * Mostrar alerta na lista do café somente se:
- * PPD efetivado + pagamento oficial ≠ pago + reserva ativa + não regularizado/cancelado/pagarme.
+ * Estado adicional à classificação de café. Nunca muda o entitlement.
+ * Deadline vencido é elegível imediatamente; não existe tolerância extra de 1h.
  */
-export function shouldShowCafePpdAlert(input: CafePpdAlertInput): boolean {
-  if (!input.ppdEfetivado) return false;
-  if (input.ppdRegularizadoEm) return false;
-  if (input.ppdBloqueadoEm) return false;
-  if (input.pagarmeObrigacaoLiquidada === true) return false;
-  if (isOfficialPaymentPaid(input.pagamentoStatus)) return false;
+export function resolveCafePpdOperationalState(
+  input: CafePpdAlertInput,
+): CafePpdOperationalState {
+  if (!input.ppdEfetivado) return "none";
+  if (input.ppdRegularizadoEm || isOfficialPaymentPaid(input.pagamentoStatus)) {
+    return "regularized";
+  }
+  if (input.pagarmeObrigacaoLiquidada === true) return "none";
   const status = String(input.statusReserva || "").trim().toLowerCase();
   if (status === "cancelada" || status === "checkout" || status === "finalizada") {
-    return false;
+    return "none";
   }
-  return true;
+  if (input.ppdBloqueadoEm) return "suspended";
+
+  const deadlineMs = input.ppdDeadlineEm ? Date.parse(input.ppdDeadlineEm) : NaN;
+  const nowMs = input.nowIso ? Date.parse(input.nowIso) : Date.now();
+  if (Number.isFinite(deadlineMs) && Number.isFinite(nowMs) && nowMs >= deadlineMs) {
+    return "overdue";
+  }
+  return "pending";
+}
+
+/** Alertas fortes: pendente, vencido ou acesso suspenso. */
+export function shouldShowCafePpdAlert(input: CafePpdAlertInput): boolean {
+  const state = resolveCafePpdOperationalState(input);
+  return state === "pending" || state === "overdue" || state === "suspended";
 }
 
 export type CafePpdAlertView = {
+  state: "pending" | "overdue" | "suspended";
+  tone: "danger";
   badgeLabel: string;
-  title: string;
-  apartmentLine: string;
-  chargeLine: string;
-  deadlineLine: string;
-  hitsHint: string;
 };
 
 export function buildCafePpdAlertView(input: {
-  apartmentCode: string;
-  guestName: string;
   charge: PpdChargeAmountResolution;
+  state?: "pending" | "overdue" | "suspended";
 }): CafePpdAlertView {
-  const apt = String(input.apartmentCode || "").trim() || "—";
-  const guest = String(input.guestName || "").trim() || "—";
-  const chargeText =
+  const state = input.state ?? "pending";
+  const badgeLabel =
     input.charge.source === "none"
-      ? "Cobrar: valor a confirmar"
-      : `Cobrar: ${input.charge.displayLabel}`;
+      ? "DIÁRIA PENDENTE"
+      : `DIÁRIA PENDENTE: ${input.charge.displayLabel}`;
+
   return {
-    badgeLabel: "PAGAMENTO PENDENTE",
-    title: "⚠️ Pagamento presencial até 09h",
-    apartmentLine: `Apto ${apt} — ${guest}`,
-    chargeLine: chargeText,
-    deadlineLine: "Prazo: 09h",
-    hitsHint: "Após receber, regularizar no HITS.",
+    state,
+    tone: "danger",
+    badgeLabel,
   };
 }
 

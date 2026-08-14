@@ -23,23 +23,35 @@ const loginSubmitButtonElement = loginFormElement?.querySelector('[type="submit"
 const REMEMBERED_EMAIL_STORAGE_KEY = "yesHotel.rememberedEmail";
 let usersCache = [];
 
+function isCafeDemoReturnRequested() {
+  return new URLSearchParams(window.location.search).get("next") === "cafe-demo";
+}
+
 function redirectUserByRole(user) {
   if (!user) {
-    return;
+    return false;
+  }
+
+  if (isCafeDemoReturnRequested() && auth.canAccessBreakfast(user)) {
+    window.location.href = "./cafe-da-manha-mvp.html?demo=1";
+    return true;
   }
 
   if (auth.canAccessUserManagement(user)) {
-    return;
+    return false;
   }
 
   if (user.role === "recepcao") {
     window.location.href = "./recepcao-mvp.html";
-    return;
+    return true;
   }
 
   if (user.role === "cafe") {
     window.location.href = "./cafe-da-manha-mvp.html";
+    return true;
   }
+
+  return false;
 }
 
 function showNotice(message, variant = "success") {
@@ -237,6 +249,10 @@ async function renderPageState() {
   const currentUser = await auth.getCurrentUser();
 
   if (currentUser) {
+    if (isCafeDemoReturnRequested() && redirectUserByRole(currentUser)) {
+      return;
+    }
+
     if (!auth.canAccessUserManagement(currentUser)) {
       redirectUserByRole(currentUser);
       return;
@@ -363,6 +379,10 @@ loginFormElement?.addEventListener("submit", async (event) => {
 
   try {
     const { user } = await auth.login(formData.get("email"), formData.get("password"));
+
+    if (isCafeDemoReturnRequested() && redirectUserByRole(user)) {
+      return;
+    }
 
     if (auth.canAccessUserManagement(user)) {
       await renderAdminPanel();

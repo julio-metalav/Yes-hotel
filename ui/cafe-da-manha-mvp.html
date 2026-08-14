@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=44" />
-    <link rel="stylesheet" href="./cafe-da-manha-mvp.css?v=6" />
+    <link rel="stylesheet" href="./cafe-da-manha-mvp.css?v=8" />
   </head>
   <body class="op-body checkin-view cafe-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -105,6 +105,11 @@
         <section class="session-banner hidden" id="session-banner" aria-hidden="true"></section>
 
         <main class="op-content cafe-content">
+          <div id="cafe-demo-banner" class="cafe-demo-banner hidden" role="status">
+            <strong>MODO DEMONSTRAÇÃO</strong>
+            <span>Dados fictícios · alterações somente nesta tela</span>
+          </div>
+
           <div class="cafe-service-date">
             <div class="cafe-service-date__main">
               <span>Data do serviço</span>
@@ -133,9 +138,9 @@
 
           <section class="yes-kpis yes-kpis--four cafe-kpis" aria-label="Indicadores do café da manhã">
             <article>
-              <span>Hóspedes previstos</span>
+              <span>Cafés previstos</span>
               <strong id="kpi-expected">0</strong>
-              <small>Incluídos ou avulsos pagos</small>
+              <small>Direitos incluídos ou avulsos pagos</small>
             </article>
             <article>
               <span>Cafés atendidos</span>
@@ -178,8 +183,8 @@
               <button class="op-tab filter-tab active" type="button" data-filter="all" aria-pressed="true">Todos</button>
               <button class="op-tab filter-tab" type="button" data-filter="pending" aria-pressed="false">Pendentes</button>
               <button class="op-tab filter-tab" type="button" data-filter="complete" aria-pressed="false">Completos</button>
-              <button class="op-tab filter-tab" type="button" data-filter="paid" aria-pressed="false">Pagos</button>
-              <button class="op-tab filter-tab" type="button" data-filter="unpaid" aria-pressed="false">Não pagos</button>
+              <button class="op-tab filter-tab" type="button" data-filter="paid" aria-pressed="false">Com café</button>
+              <button class="op-tab filter-tab" type="button" data-filter="unpaid" aria-pressed="false">Sem café / não identificado</button>
             </nav>
           </section>
 
@@ -207,7 +212,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
-    <script defer src="./yes-cafe-policy.js?v=2"></script>
-    <script defer src="./cafe-da-manha-mvp.js?v=6"></script>
+    <script defer src="./yes-cafe-policy.js?v=4"></script>
+    <script defer src="./cafe-da-manha-mvp.js?v=9"></script>
   </body>
 </html>
