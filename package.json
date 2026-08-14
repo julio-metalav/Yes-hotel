@@ -28,6 +28,7 @@
     "test:yes:first-room-access": "tsx scripts/test-first-room-access-policy.ts",
     "test:yes:pagamento-presencial-diferido": "tsx scripts/test-pagamento-presencial-diferido.ts",
     "test:yes:ppd-cafe-da-manha": "tsx scripts/test-ppd-cafe-da-manha.ts",
+    "test:yes:cafe-demo-operacional": "tsx scripts/test-cafe-demo-operacional.ts",
     "test:yes:reservation-pending-state": "tsx scripts/test-reservation-pending-state.ts",
     "test:yes:access-grace-messages": "tsx scripts/test-access-grace-messages.ts",
     "test:yes:access-suspension-strategy": "tsx scripts/test-access-suspension-strategy.ts",
@@ -74,7 +75,7 @@
 
     "test:hits-fnrh-panel-financial-ui": "tsx scripts/test-hits-fnrh-panel-financial-ui.ts",
     "test:ver-panel-operacional": "tsx scripts/test-ver-panel-operacional.ts",
-    "test:ui-static-js": "node --check ui/checkin-operacional-mvp.js && node --check ui/fnrh-checkin-v2.js && node --check ui/yes-arrivals-policy.js && node --check ui/yes-access-tolerance-policy.js && node --check ui/yes-cafe-policy.js && node --check ui/cafe-da-manha-mvp.js && node --check ui/yes-checkin-panel-presentation.js",
+    "test:ui-static-js": "node --check ui/checkin-operacional-mvp.js && node --check ui/fnrh-checkin-v2.js && node --check ui/yes-arrivals-policy.js && node --check ui/yes-access-tolerance-policy.js && node --check ui/yes-cafe-policy.js && node --check ui/cafe-demo-data.js && node --check ui/cafe-da-manha-mvp.js && node --check ui/usuarios-login-mvp.js && node --check ui/yes-checkin-panel-presentation.js",
     "test:checkin-panel-presentation": "tsx scripts/test-checkin-panel-presentation.ts",
     "test:checkin-operational-period": "tsx scripts/test-checkin-operational-period.ts",
     "test:checkin-comissionado-status": "tsx scripts/test-checkin-comissionado-status.ts",

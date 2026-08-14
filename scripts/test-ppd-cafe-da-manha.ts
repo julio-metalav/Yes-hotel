@@ -12,6 +12,7 @@ import {
 } from "../src/lib/domain/yes-hotel/access-grace-messages.ts";
 import {
   buildCafePpdAlertView,
+  resolveCafePpdOperationalState,
   resolvePpdChargeAmount,
   shouldShowCafePpdAlert,
 } from "../src/lib/domain/yes-hotel/cafe-ppd-alert.ts";
@@ -225,24 +226,21 @@ async function main() {
     assert.equal(withValue.source, "hits_reservation_total");
     assert.match(withValue.displayLabel, /420/);
     const view = buildCafePpdAlertView({
-      apartmentCode: "34",
-      guestName: "Breno",
       charge: withValue,
     });
-    assert.match(view.badgeLabel, /PAGAMENTO PENDENTE/);
-    assert.match(view.chargeLine, /420/);
-    assert.match(view.hitsHint, /HITS/);
+    assert.equal(
+      view.badgeLabel.replace(/\s/g, " "),
+      "DIÁRIA PENDENTE: R$ 420,00",
+    );
 
     const missing = resolvePpdChargeAmount({});
     assert.equal(missing.source, "none");
     assert.equal(missing.displayLabel, "valor a confirmar");
     const viewMissing = buildCafePpdAlertView({
-      apartmentCode: "10",
-      guestName: "Ana",
       charge: missing,
     });
-    assert.match(viewMissing.chargeLine, /valor a confirmar/i);
-    ok("alerta + valor confiável + fallback");
+    assert.equal(viewMissing.badgeLabel, "DIÁRIA PENDENTE");
+    ok("alerta simples + valor confiável + fallback sem valor");
   }
 
   console.log("== F) HITS pago → alerta some ==");
@@ -281,7 +279,7 @@ async function main() {
     ok("pagarme paid protegido");
   }
 
-  console.log("== H) PPD cancelado/bloqueado → não aparece ==");
+  console.log("== H) PPD bloqueado → mesma cobrança simples ==");
   {
     assert.equal(
       shouldShowCafePpdAlert({
@@ -290,9 +288,24 @@ async function main() {
         statusReserva: "ativa",
         ppdBloqueadoEm: "2026-08-12T08:00:00.000Z",
       }),
-      false,
+      true,
     );
-    ok("bloqueado sem alerta");
+    const state = resolveCafePpdOperationalState({
+      ppdEfetivado: true,
+      pagamentoStatus: "pendente",
+      statusReserva: "ativa",
+      ppdBloqueadoEm: "2026-08-12T08:00:00.000Z",
+    });
+    assert.equal(state, "suspended");
+    const view = buildCafePpdAlertView({
+      charge: resolvePpdChargeAmount({ hitsReservationTotalAmount: 250 }),
+      state,
+    });
+    assert.equal(
+      view.badgeLabel.replace(/\s/g, " "),
+      "DIÁRIA PENDENTE: R$ 250,00",
+    );
+    ok("bloqueado mantém somente cobrança da diária");
   }
 
   console.log("== I/J) Exactly-once keys + multicanal ==");
@@ -364,7 +377,8 @@ async function main() {
     assert.equal(/\.(update|upsert)\s*\(\s*\{[^}]*pagamento_status/s.test(js), false);
     assert.match(js, /ppdAlert|ppd-cafe-alert/);
     assert.match(js, /pagamento_presencial_diferido_efetivado/);
-    assert.match(policyJs, /regularizar no HITS/);
+    assert.match(policyJs, /DIÁRIA PENDENTE/);
+    assert.doesNotMatch(policyJs, /regularizar no HITS/);
     ok("sem mistura welcome + café não altera pagamento_status");
   }
 

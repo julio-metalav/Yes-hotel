@@ -5,6 +5,31 @@
   overflow: auto;
 }
 
+.cafe-view .cafe-demo-banner {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 10px;
+  padding: 8px 14px;
+  border: 1px solid rgba(30, 92, 103, 0.35);
+  border-radius: var(--op-radius-lg);
+  background: rgba(30, 92, 103, 0.08);
+  color: var(--op-blue);
+  font-size: 12px;
+  text-align: center;
+}
+
+.cafe-view .cafe-demo-banner strong {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.cafe-view .cafe-demo-banner.hidden {
+  display: none !important;
+}
+
 .cafe-view .cafe-service-date {
   display: flex;
   flex-shrink: 0;
@@ -257,55 +282,31 @@
 }
 
 .cafe-view .breakfast-card.has-ppd-alert {
-  border-color: rgba(180, 90, 20, 0.45);
-  box-shadow: 0 0 0 1px rgba(180, 90, 20, 0.12);
+  border-color: rgba(174, 40, 40, 0.45);
+  box-shadow: 0 0 0 1px rgba(174, 40, 40, 0.1);
 }
 
 .cafe-view .ppd-cafe-alert {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  display: block;
   margin-top: 8px;
-  padding: 8px 10px;
+  padding: 9px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(180, 90, 20, 0.35);
-  background: rgba(229, 140, 50, 0.12);
-  color: #7a3e0c;
+  border: 1px solid rgba(174, 40, 40, 0.4);
+  background: rgba(174, 40, 40, 0.08);
+  color: #8e2222;
   font-size: 12px;
   line-height: 1.35;
 }
 
-.cafe-view .ppd-cafe-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(180, 90, 20, 0.4);
-  background: rgba(229, 140, 50, 0.2);
-  color: #7a3e0c;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.cafe-view .ppd-cafe-badge--mini {
-  margin-top: 4px;
+.cafe-view .ppd-cafe-alert.is-danger {
+  border-color: rgba(174, 40, 40, 0.4);
+  background: rgba(174, 40, 40, 0.08);
+  color: #8e2222;
 }
 
 .cafe-view .ppd-cafe-title {
   font-size: 12px;
-  font-weight: 700;
-}
-
-.cafe-view .ppd-cafe-charge,
-.cafe-view .ppd-cafe-hits {
-  font-weight: 600;
-}
-
-.cafe-view .ppd-badge-cell {
-  display: contents;
+  font-weight: 800;
 }
 
 .cafe-view .badges-cell {
@@ -335,6 +336,13 @@
   background: rgba(229, 171, 66, 0.15);
   border-color: rgba(229, 171, 66, 0.35);
   color: var(--op-warning-fg);
+}
+
+.cafe-view .payment-badge.is-neutral,
+.cafe-view .status-badge.is-neutral {
+  border-color: var(--op-border);
+  background: var(--op-muted);
+  color: var(--op-text-muted);
 }
 
 .cafe-view .control-cell {
@@ -572,6 +580,12 @@
     box-sizing: border-box;
   }
 
+  .cafe-view .ppd-cafe-alert {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 9px;
+  }
+
   .cafe-view .guest-cell {
     grid-area: guest;
     flex-direction: row;
@@ -709,5 +723,15 @@
 
   .cafe-view .breakfast-card {
     padding: 9px 10px;
+  }
+
+  .cafe-view .cafe-demo-banner {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 7px 10px;
+  }
+
+  .cafe-view .ppd-cafe-alert {
+    font-size: 11px;
   }
 }
