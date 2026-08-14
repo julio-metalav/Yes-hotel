@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=53" />
-    <link rel="stylesheet" href="./gestao-saude-hotel.css?v=1" />
+    <link rel="stylesheet" href="./gestao-saude-hotel.css?v=2" />
   </head>
   <body class="op-body checkin-view gestao-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -110,14 +110,21 @@
 
         <main class="op-content gestao-content">
           <div id="gestao-demo-banner" class="gestao-demo-banner" role="status">
-            DADOS DEMONSTRATIVOS — aguardando integração gerencial
+            DADOS HISTÓRICOS REAIS — HITS + Omnibees — Jan a Jul/2026
           </div>
+          <p id="gestao-footnote" class="gestao-footnote">
+            Atualização manual por relatórios · integração automática HITS pendente
+          </p>
 
-          <section class="yes-kpis gestao-kpis" id="gestao-kpis" aria-label="Indicadores do mês"></section>
+          <div class="gestao-period" id="gestao-period" role="tablist" aria-label="Período"></div>
+
+          <section class="yes-kpis gestao-kpis" id="gestao-kpis" aria-label="Indicadores do período"></section>
 
           <section class="gestao-panel" aria-labelledby="gestao-otb-title">
             <h2 id="gestao-otb-title">Próximos 30 dias</h2>
-            <div class="gestao-otb-grid" id="gestao-otb"></div>
+            <div class="gestao-otb-grid gestao-otb-placeholder" id="gestao-otb">
+              Forecast / próximos 30 dias — aguardando integração online HITS
+            </div>
           </section>
 
           <section class="gestao-panel" aria-labelledby="gestao-channels-title">
@@ -126,14 +133,16 @@
               <thead>
                 <tr>
                   <th>Canal</th>
-                  <th>Reservas</th>
+                  <th>Estadias</th>
+                  <th>Room nights</th>
                   <th>Receita</th>
                   <th>ADR</th>
-                  <th>Part. reservas</th>
+                  <th>Part. receita</th>
                 </tr>
               </thead>
               <tbody id="gestao-channels"></tbody>
             </table>
+            <p class="gestao-coverage" id="gestao-coverage"></p>
           </section>
 
           <section class="gestao-panel" aria-labelledby="gestao-alerts-title">
@@ -152,7 +161,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
-    <script defer src="./gestao-saude-hotel-demo.js?v=1"></script>
-    <script defer src="./gestao-saude-hotel.js?v=1"></script>
+    <script defer src="./data/management-historical-2026.js?v=1"></script>
+    <script defer src="./gestao-saude-hotel.js?v=2"></script>
   </body>
 </html>

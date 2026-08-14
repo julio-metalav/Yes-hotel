@@ -1,0 +1,917 @@
+{
+  "source": "hits_omnibees_reports",
+  "periodStart": "2026-01-01",
+  "periodEnd": "2026-07-31",
+  "generatedAt": "2026-08-14T04:37:49.173Z",
+  "sellableRooms": 40,
+  "banner": "DADOS HISTÓRICOS REAIS — HITS + Omnibees — Jan a Jul/2026",
+  "footnote": "Atualização manual por relatórios · integração automática HITS pendente",
+  "sources": [
+    "HITS diarias lancadas Jan-Mar",
+    "HITS diarias lancadas Apr-Jun",
+    "HITS diarias lancadas Jul",
+    "Omnibees reservas Jan-Jul"
+  ],
+  "methodology": {
+    "eligibleNights": "Tipo Regular e operação L",
+    "excludedTipos": [
+      "Early ck-in",
+      "Late ck-out",
+      "No show",
+      "Cortesia"
+    ],
+    "excludedOps": [
+      "E"
+    ],
+    "occupancyDenominator": "40 apartamentos × dias do mês (sem bloqueios registrados)",
+    "lodgingRevenue": "coluna Diária-A&B das noites elegíveis",
+    "notes": [
+      "HITS é a fonte do realizado. Omnibees só enriquece canal quando o match é exact ou high_confidence.",
+      "Ambiguous não recebe canal Omnibees.",
+      "1 noite(s) Regular fora de Jan–Jul/2026 foram excluídas do recorte."
+    ]
+  },
+  "omnibees": {
+    "parsedReservations": 569,
+    "cancelled": 80,
+    "reportHeaderApartments": 581,
+    "reportHeaderTotalBrl": 417466.02
+  },
+  "defaultPeriod": "2026-07",
+  "periods": {
+    "2026-01": {
+      "key": "2026-01",
+      "label": "Janeiro/2026",
+      "lodgingRevenueCents": 15302830,
+      "abCents": 1522000,
+      "diariaTotalCents": 16824830,
+      "roomNights": 477,
+      "availableRoomNights": 1240,
+      "occupancy": 0.38467741935483873,
+      "adrCents": 32081.404612159327,
+      "revparCents": 12340.991935483871,
+      "reservationCount": 249,
+      "averageLos": 1.9156626506024097,
+      "coverage": {
+        "revenueIdentified": 0.41632684934747366,
+        "nightsIdentified": 0.389937106918239,
+        "exact": 16,
+        "highConfidence": 0,
+        "unmatched": 232,
+        "ambiguous": 1
+      },
+      "channels": [
+        {
+          "code": "be_mobile",
+          "kind": "direct",
+          "group": "direct",
+          "label": "BE Mobile",
+          "stayCount": 12,
+          "roomNights": 14,
+          "lodgingRevenueCents": 557825,
+          "adrCents": 39844.642857142855,
+          "shareOfReservations": 0.04819277108433735,
+          "shareOfRevenue": 0.03645240782260536,
+          "shareOfNights": 0.029350104821802937
+        },
+        {
+          "code": "booking_engine",
+          "kind": "booking_engine",
+          "group": "direct",
+          "label": "Booking Engine",
+          "stayCount": 2,
+          "roomNights": 3,
+          "lodgingRevenueCents": 130050,
+          "adrCents": 43350,
+          "shareOfReservations": 0.008032128514056224,
+          "shareOfRevenue": 0.008498428068533728,
+          "shareOfNights": 0.006289308176100629
+        },
+        {
+          "code": "booking",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Booking.com",
+          "stayCount": 57,
+          "roomNights": 78,
+          "lodgingRevenueCents": 3320548,
+          "adrCents": 42571.1282051282,
+          "shareOfReservations": 0.2289156626506024,
+          "shareOfRevenue": 0.21698914514504833,
+          "shareOfNights": 0.16352201257861634
+        },
+        {
+          "code": "expedia",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Expedia",
+          "stayCount": 5,
+          "roomNights": 13,
+          "lodgingRevenueCents": 322656,
+          "adrCents": 24819.69230769231,
+          "shareOfReservations": 0.020080321285140562,
+          "shareOfRevenue": 0.021084727465442668,
+          "shareOfNights": 0.027253668763102725
+        },
+        {
+          "code": "b2b",
+          "kind": "b2b",
+          "group": "b2b",
+          "label": "B2B",
+          "stayCount": 31,
+          "roomNights": 78,
+          "lodgingRevenueCents": 2039900,
+          "adrCents": 26152.5641025641,
+          "shareOfReservations": 0.12449799196787148,
+          "shareOfRevenue": 0.13330214084584355,
+          "shareOfNights": 0.16352201257861634
+        },
+        {
+          "code": "unknown",
+          "kind": "unknown",
+          "group": "other",
+          "label": "Não identificado",
+          "stayCount": 142,
+          "roomNights": 291,
+          "lodgingRevenueCents": 8931851,
+          "adrCents": 30693.646048109964,
+          "shareOfReservations": 0.570281124497992,
+          "shareOfRevenue": 0.5836731506525263,
+          "shareOfNights": 0.610062893081761
+        }
+      ],
+      "alerts": [
+        {
+          "code": "coverage_low",
+          "severity": "info",
+          "message": "Cobertura de canal abaixo de 60% da receita realizada."
+        }
+      ]
+    },
+    "2026-02": {
+      "key": "2026-02",
+      "label": "Fevereiro/2026",
+      "lodgingRevenueCents": 12622639,
+      "abCents": 1040000,
+      "diariaTotalCents": 13662639,
+      "roomNights": 396,
+      "availableRoomNights": 1120,
+      "occupancy": 0.3535714285714286,
+      "adrCents": 31875.35101010101,
+      "revparCents": 11270.213392857142,
+      "reservationCount": 171,
+      "averageLos": 2.3157894736842106,
+      "coverage": {
+        "revenueIdentified": 0.3253872664820724,
+        "nightsIdentified": 0.32323232323232326,
+        "exact": 6,
+        "highConfidence": 0,
+        "unmatched": 165,
+        "ambiguous": 0
+      },
+      "channels": [
+        {
+          "code": "be_mobile",
+          "kind": "direct",
+          "group": "direct",
+          "label": "BE Mobile",
+          "stayCount": 5,
+          "roomNights": 11,
+          "lodgingRevenueCents": 376600,
+          "adrCents": 34236.36363636364,
+          "shareOfReservations": 0.029239766081871343,
+          "shareOfRevenue": 0.029835282463516542,
+          "shareOfNights": 0.027777777777777776
+        },
+        {
+          "code": "booking_engine",
+          "kind": "booking_engine",
+          "group": "direct",
+          "label": "Booking Engine",
+          "stayCount": 1,
+          "roomNights": 2,
+          "lodgingRevenueCents": 94000,
+          "adrCents": 47000,
+          "shareOfReservations": 0.005847953216374269,
+          "shareOfRevenue": 0.007446937205444915,
+          "shareOfNights": 0.005050505050505051
+        },
+        {
+          "code": "booking",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Booking.com",
+          "stayCount": 9,
+          "roomNights": 12,
+          "lodgingRevenueCents": 642781,
+          "adrCents": 53565.083333333336,
+          "shareOfReservations": 0.05263157894736842,
+          "shareOfRevenue": 0.05092286961545838,
+          "shareOfNights": 0.030303030303030304
+        },
+        {
+          "code": "expedia",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Expedia",
+          "stayCount": 13,
+          "roomNights": 44,
+          "lodgingRevenueCents": 1269745,
+          "adrCents": 28857.840909090908,
+          "shareOfReservations": 0.07602339181286549,
+          "shareOfRevenue": 0.10059267321199632,
+          "shareOfNights": 0.1111111111111111
+        },
+        {
+          "code": "b2b",
+          "kind": "b2b",
+          "group": "b2b",
+          "label": "B2B",
+          "stayCount": 20,
+          "roomNights": 59,
+          "lodgingRevenueCents": 1724120,
+          "adrCents": 29222.372881355932,
+          "shareOfReservations": 0.11695906432748537,
+          "shareOfRevenue": 0.13658950398565625,
+          "shareOfNights": 0.14898989898989898
+        },
+        {
+          "code": "unknown",
+          "kind": "unknown",
+          "group": "other",
+          "label": "Não identificado",
+          "stayCount": 123,
+          "roomNights": 268,
+          "lodgingRevenueCents": 8515393,
+          "adrCents": 31773.85447761194,
+          "shareOfReservations": 0.7192982456140351,
+          "shareOfRevenue": 0.6746127335179276,
+          "shareOfNights": 0.6767676767676768
+        }
+      ],
+      "alerts": [
+        {
+          "code": "revenue_down",
+          "severity": "warning",
+          "message": "Receita de hospedagem caiu frente ao mês anterior."
+        },
+        {
+          "code": "coverage_low",
+          "severity": "info",
+          "message": "Cobertura de canal abaixo de 60% da receita realizada."
+        }
+      ]
+    },
+    "2026-03": {
+      "key": "2026-03",
+      "label": "Março/2026",
+      "lodgingRevenueCents": 11211950,
+      "abCents": 934000,
+      "diariaTotalCents": 12145950,
+      "roomNights": 402,
+      "availableRoomNights": 1240,
+      "occupancy": 0.3241935483870968,
+      "adrCents": 27890.422885572138,
+      "revparCents": 9041.895161290322,
+      "reservationCount": 175,
+      "averageLos": 2.297142857142857,
+      "coverage": {
+        "revenueIdentified": 0.3652016821337947,
+        "nightsIdentified": 0.35323383084577115,
+        "exact": 12,
+        "highConfidence": 0,
+        "unmatched": 163,
+        "ambiguous": 0
+      },
+      "channels": [
+        {
+          "code": "be_mobile",
+          "kind": "direct",
+          "group": "direct",
+          "label": "BE Mobile",
+          "stayCount": 5,
+          "roomNights": 9,
+          "lodgingRevenueCents": 271200,
+          "adrCents": 30133.333333333332,
+          "shareOfReservations": 0.02857142857142857,
+          "shareOfRevenue": 0.02418847747269654,
+          "shareOfNights": 0.022388059701492536
+        },
+        {
+          "code": "booking_engine",
+          "kind": "booking_engine",
+          "group": "direct",
+          "label": "Booking Engine",
+          "stayCount": 3,
+          "roomNights": 4,
+          "lodgingRevenueCents": 109000,
+          "adrCents": 27250,
+          "shareOfReservations": 0.017142857142857144,
+          "shareOfRevenue": 0.009721770075678182,
+          "shareOfNights": 0.009950248756218905
+        },
+        {
+          "code": "booking",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Booking.com",
+          "stayCount": 3,
+          "roomNights": 11,
+          "lodgingRevenueCents": 449943,
+          "adrCents": 40903.90909090909,
+          "shareOfReservations": 0.017142857142857144,
+          "shareOfRevenue": 0.04013066415743916,
+          "shareOfNights": 0.02736318407960199
+        },
+        {
+          "code": "expedia",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Expedia",
+          "stayCount": 8,
+          "roomNights": 15,
+          "lodgingRevenueCents": 437792,
+          "adrCents": 29186.133333333335,
+          "shareOfReservations": 0.045714285714285714,
+          "shareOfRevenue": 0.039046909770378925,
+          "shareOfNights": 0.03731343283582089
+        },
+        {
+          "code": "b2b",
+          "kind": "b2b",
+          "group": "b2b",
+          "label": "B2B",
+          "stayCount": 35,
+          "roomNights": 103,
+          "lodgingRevenueCents": 2826688,
+          "adrCents": 27443.572815533982,
+          "shareOfReservations": 0.2,
+          "shareOfRevenue": 0.25211386065760194,
+          "shareOfNights": 0.2562189054726368
+        },
+        {
+          "code": "unknown",
+          "kind": "unknown",
+          "group": "other",
+          "label": "Não identificado",
+          "stayCount": 121,
+          "roomNights": 260,
+          "lodgingRevenueCents": 7117327,
+          "adrCents": 27374.334615384614,
+          "shareOfReservations": 0.6914285714285714,
+          "shareOfRevenue": 0.6347983178662052,
+          "shareOfNights": 0.6467661691542289
+        }
+      ],
+      "alerts": [
+        {
+          "code": "adr_drop",
+          "severity": "warning",
+          "message": "ADR caiu frente ao mês anterior."
+        },
+        {
+          "code": "revenue_down",
+          "severity": "warning",
+          "message": "Receita de hospedagem caiu frente ao mês anterior."
+        },
+        {
+          "code": "coverage_low",
+          "severity": "info",
+          "message": "Cobertura de canal abaixo de 60% da receita realizada."
+        }
+      ]
+    },
+    "2026-04": {
+      "key": "2026-04",
+      "label": "Abril/2026",
+      "lodgingRevenueCents": 14078200,
+      "abCents": 1118000,
+      "diariaTotalCents": 15196200,
+      "roomNights": 484,
+      "availableRoomNights": 1200,
+      "occupancy": 0.4033333333333333,
+      "adrCents": 29087.19008264463,
+      "revparCents": 11731.833333333334,
+      "reservationCount": 161,
+      "averageLos": 3.0062111801242235,
+      "coverage": {
+        "revenueIdentified": 0.24131877654813827,
+        "nightsIdentified": 0.23760330578512398,
+        "exact": 13,
+        "highConfidence": 0,
+        "unmatched": 148,
+        "ambiguous": 0
+      },
+      "channels": [
+        {
+          "code": "be_mobile",
+          "kind": "direct",
+          "group": "direct",
+          "label": "BE Mobile",
+          "stayCount": 7,
+          "roomNights": 10,
+          "lodgingRevenueCents": 312675,
+          "adrCents": 31267.5,
+          "shareOfReservations": 0.043478260869565216,
+          "shareOfRevenue": 0.022209870580045744,
+          "shareOfNights": 0.02066115702479339
+        },
+        {
+          "code": "booking_engine",
+          "kind": "booking_engine",
+          "group": "direct",
+          "label": "Booking Engine",
+          "stayCount": 2,
+          "roomNights": 2,
+          "lodgingRevenueCents": 52000,
+          "adrCents": 26000,
+          "shareOfReservations": 0.012422360248447204,
+          "shareOfRevenue": 0.003693654018269381,
+          "shareOfNights": 0.004132231404958678
+        },
+        {
+          "code": "booking",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Booking.com",
+          "stayCount": 10,
+          "roomNights": 16,
+          "lodgingRevenueCents": 596909,
+          "adrCents": 37306.8125,
+          "shareOfReservations": 0.062111801242236024,
+          "shareOfRevenue": 0.04239952550752227,
+          "shareOfNights": 0.03305785123966942
+        },
+        {
+          "code": "expedia",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Expedia",
+          "stayCount": 16,
+          "roomNights": 39,
+          "lodgingRevenueCents": 1137918,
+          "adrCents": 29177.384615384617,
+          "shareOfReservations": 0.09937888198757763,
+          "shareOfRevenue": 0.08082837294540496,
+          "shareOfNights": 0.08057851239669421
+        },
+        {
+          "code": "b2b",
+          "kind": "b2b",
+          "group": "b2b",
+          "label": "B2B",
+          "stayCount": 22,
+          "roomNights": 48,
+          "lodgingRevenueCents": 1297832,
+          "adrCents": 27038.166666666668,
+          "shareOfReservations": 0.13664596273291926,
+          "shareOfRevenue": 0.09218735349689591,
+          "shareOfNights": 0.09917355371900827
+        },
+        {
+          "code": "unknown",
+          "kind": "unknown",
+          "group": "other",
+          "label": "Não identificado",
+          "stayCount": 104,
+          "roomNights": 369,
+          "lodgingRevenueCents": 10680866,
+          "adrCents": 28945.436314363145,
+          "shareOfReservations": 0.6459627329192547,
+          "shareOfRevenue": 0.7586812234518617,
+          "shareOfNights": 0.762396694214876
+        }
+      ],
+      "alerts": [
+        {
+          "code": "coverage_low",
+          "severity": "info",
+          "message": "Cobertura de canal abaixo de 60% da receita realizada."
+        }
+      ]
+    },
+    "2026-05": {
+      "key": "2026-05",
+      "label": "Maio/2026",
+      "lodgingRevenueCents": 15397548,
+      "abCents": 1378000,
+      "diariaTotalCents": 16775548,
+      "roomNights": 564,
+      "availableRoomNights": 1240,
+      "occupancy": 0.45483870967741935,
+      "adrCents": 27300.617021276597,
+      "revparCents": 12417.377419354838,
+      "reservationCount": 198,
+      "averageLos": 2.8484848484848486,
+      "coverage": {
+        "revenueIdentified": 0.28740757944057066,
+        "nightsIdentified": 0.274822695035461,
+        "exact": 22,
+        "highConfidence": 0,
+        "unmatched": 176,
+        "ambiguous": 0
+      },
+      "channels": [
+        {
+          "code": "be_mobile",
+          "kind": "direct",
+          "group": "direct",
+          "label": "BE Mobile",
+          "stayCount": 8,
+          "roomNights": 9,
+          "lodgingRevenueCents": 284400,
+          "adrCents": 31600,
+          "shareOfReservations": 0.04040404040404041,
+          "shareOfRevenue": 0.018470473350691942,
+          "shareOfNights": 0.015957446808510637
+        },
+        {
+          "code": "booking_engine",
+          "kind": "booking_engine",
+          "group": "direct",
+          "label": "Booking Engine",
+          "stayCount": 4,
+          "roomNights": 7,
+          "lodgingRevenueCents": 214300,
+          "adrCents": 30614.285714285714,
+          "shareOfReservations": 0.020202020202020204,
+          "shareOfRevenue": 0.013917800418612106,
+          "shareOfNights": 0.012411347517730497
+        },
+        {
+          "code": "booking",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Booking.com",
+          "stayCount": 10,
+          "roomNights": 13,
+          "lodgingRevenueCents": 520960,
+          "adrCents": 40073.846153846156,
+          "shareOfReservations": 0.050505050505050504,
+          "shareOfRevenue": 0.03383395849780757,
+          "shareOfNights": 0.02304964539007092
+        },
+        {
+          "code": "expedia",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Expedia",
+          "stayCount": 14,
+          "roomNights": 34,
+          "lodgingRevenueCents": 959401,
+          "adrCents": 28217.676470588234,
+          "shareOfReservations": 0.0707070707070707,
+          "shareOfRevenue": 0.06230868707147398,
+          "shareOfNights": 0.06028368794326241
+        },
+        {
+          "code": "b2b",
+          "kind": "b2b",
+          "group": "b2b",
+          "label": "B2B",
+          "stayCount": 30,
+          "roomNights": 92,
+          "lodgingRevenueCents": 2446311,
+          "adrCents": 26590.33695652174,
+          "shareOfReservations": 0.15151515151515152,
+          "shareOfRevenue": 0.15887666010198506,
+          "shareOfNights": 0.16312056737588654
+        },
+        {
+          "code": "unknown",
+          "kind": "unknown",
+          "group": "other",
+          "label": "Não identificado",
+          "stayCount": 132,
+          "roomNights": 409,
+          "lodgingRevenueCents": 10972176,
+          "adrCents": 26826.83618581907,
+          "shareOfReservations": 0.6666666666666666,
+          "shareOfRevenue": 0.7125924205594293,
+          "shareOfNights": 0.725177304964539
+        }
+      ],
+      "alerts": [
+        {
+          "code": "coverage_low",
+          "severity": "info",
+          "message": "Cobertura de canal abaixo de 60% da receita realizada."
+        }
+      ]
+    },
+    "2026-06": {
+      "key": "2026-06",
+      "label": "Junho/2026",
+      "lodgingRevenueCents": 16802970,
+      "abCents": 1486000,
+      "diariaTotalCents": 18288970,
+      "roomNights": 587,
+      "availableRoomNights": 1200,
+      "occupancy": 0.4891666666666667,
+      "adrCents": 28625.161839863715,
+      "revparCents": 14002.475,
+      "reservationCount": 222,
+      "averageLos": 2.644144144144144,
+      "coverage": {
+        "revenueIdentified": 0.33242801718981824,
+        "nightsIdentified": 0.30664395229982966,
+        "exact": 10,
+        "highConfidence": 0,
+        "unmatched": 208,
+        "ambiguous": 4
+      },
+      "channels": [
+        {
+          "code": "be_mobile",
+          "kind": "direct",
+          "group": "direct",
+          "label": "BE Mobile",
+          "stayCount": 7,
+          "roomNights": 17,
+          "lodgingRevenueCents": 567915,
+          "adrCents": 33406.76470588235,
+          "shareOfReservations": 0.03153153153153153,
+          "shareOfRevenue": 0.03379848919566005,
+          "shareOfNights": 0.028960817717206135
+        },
+        {
+          "code": "booking",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Booking.com",
+          "stayCount": 19,
+          "roomNights": 34,
+          "lodgingRevenueCents": 1328987,
+          "adrCents": 39087.85294117647,
+          "shareOfReservations": 0.08558558558558559,
+          "shareOfRevenue": 0.0790923866435517,
+          "shareOfNights": 0.05792163543441227
+        },
+        {
+          "code": "expedia",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Expedia",
+          "stayCount": 15,
+          "roomNights": 24,
+          "lodgingRevenueCents": 613342,
+          "adrCents": 25555.916666666668,
+          "shareOfReservations": 0.06756756756756757,
+          "shareOfRevenue": 0.036501999348924626,
+          "shareOfNights": 0.04088586030664395
+        },
+        {
+          "code": "b2b",
+          "kind": "b2b",
+          "group": "b2b",
+          "label": "B2B",
+          "stayCount": 41,
+          "roomNights": 105,
+          "lodgingRevenueCents": 3075534,
+          "adrCents": 29290.8,
+          "shareOfReservations": 0.18468468468468469,
+          "shareOfRevenue": 0.18303514200168183,
+          "shareOfNights": 0.1788756388415673
+        },
+        {
+          "code": "unknown",
+          "kind": "unknown",
+          "group": "other",
+          "label": "Não identificado",
+          "stayCount": 140,
+          "roomNights": 407,
+          "lodgingRevenueCents": 11217192,
+          "adrCents": 27560.668304668303,
+          "shareOfReservations": 0.6306306306306306,
+          "shareOfRevenue": 0.6675719828101818,
+          "shareOfNights": 0.6933560477001703
+        }
+      ],
+      "alerts": [
+        {
+          "code": "coverage_low",
+          "severity": "info",
+          "message": "Cobertura de canal abaixo de 60% da receita realizada."
+        }
+      ]
+    },
+    "2026-07": {
+      "key": "2026-07",
+      "label": "Julho/2026",
+      "lodgingRevenueCents": 16878652,
+      "abCents": 1718000,
+      "diariaTotalCents": 18596652,
+      "roomNights": 595,
+      "availableRoomNights": 1240,
+      "occupancy": 0.4798387096774194,
+      "adrCents": 28367.482352941177,
+      "revparCents": 13611.816129032259,
+      "reservationCount": 241,
+      "averageLos": 2.4688796680497926,
+      "coverage": {
+        "revenueIdentified": 0.4069754504091914,
+        "nightsIdentified": 0.4016806722689076,
+        "exact": 17,
+        "highConfidence": 0,
+        "unmatched": 224,
+        "ambiguous": 0
+      },
+      "channels": [
+        {
+          "code": "be_mobile",
+          "kind": "direct",
+          "group": "direct",
+          "label": "BE Mobile",
+          "stayCount": 9,
+          "roomNights": 18,
+          "lodgingRevenueCents": 554224,
+          "adrCents": 30790.222222222223,
+          "shareOfReservations": 0.03734439834024896,
+          "shareOfRevenue": 0.032835797550657485,
+          "shareOfNights": 0.030252100840336135
+        },
+        {
+          "code": "booking_engine",
+          "kind": "booking_engine",
+          "group": "direct",
+          "label": "Booking Engine",
+          "stayCount": 3,
+          "roomNights": 10,
+          "lodgingRevenueCents": 318226,
+          "adrCents": 31822.6,
+          "shareOfReservations": 0.012448132780082987,
+          "shareOfRevenue": 0.018853756804749575,
+          "shareOfNights": 0.01680672268907563
+        },
+        {
+          "code": "booking",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Booking.com",
+          "stayCount": 16,
+          "roomNights": 29,
+          "lodgingRevenueCents": 1144296,
+          "adrCents": 39458.48275862069,
+          "shareOfReservations": 0.06639004149377593,
+          "shareOfRevenue": 0.06779546139111109,
+          "shareOfNights": 0.04873949579831933
+        },
+        {
+          "code": "expedia",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Expedia",
+          "stayCount": 14,
+          "roomNights": 29,
+          "lodgingRevenueCents": 738074,
+          "adrCents": 25450.827586206895,
+          "shareOfReservations": 0.058091286307053944,
+          "shareOfRevenue": 0.043728255076294006,
+          "shareOfNights": 0.04873949579831933
+        },
+        {
+          "code": "b2b",
+          "kind": "b2b",
+          "group": "b2b",
+          "label": "B2B",
+          "stayCount": 37,
+          "roomNights": 153,
+          "lodgingRevenueCents": 4114377,
+          "adrCents": 26891.352941176472,
+          "shareOfReservations": 0.15352697095435686,
+          "shareOfRevenue": 0.2437621795863793,
+          "shareOfNights": 0.2571428571428571
+        },
+        {
+          "code": "unknown",
+          "kind": "unknown",
+          "group": "other",
+          "label": "Não identificado",
+          "stayCount": 162,
+          "roomNights": 356,
+          "lodgingRevenueCents": 10009455,
+          "adrCents": 28116.446629213482,
+          "shareOfReservations": 0.6721991701244814,
+          "shareOfRevenue": 0.5930245495908085,
+          "shareOfNights": 0.5983193277310924
+        }
+      ],
+      "alerts": [
+        {
+          "code": "coverage_low",
+          "severity": "info",
+          "message": "Cobertura de canal abaixo de 60% da receita realizada."
+        }
+      ]
+    },
+    "2026-ytd": {
+      "key": "2026-ytd",
+      "label": "Acumulado Jan–Jul/2026",
+      "lodgingRevenueCents": 102294789,
+      "abCents": 9196000,
+      "diariaTotalCents": 111490789,
+      "roomNights": 3505,
+      "availableRoomNights": 8480,
+      "occupancy": 0.41332547169811323,
+      "adrCents": 29185.38915834522,
+      "revparCents": 12063.064740566038,
+      "reservationCount": 1372,
+      "averageLos": 2.55466472303207,
+      "coverage": {
+        "revenueIdentified": 0.3406872367662834,
+        "nightsIdentified": 0.32667617689015693,
+        "exact": 96,
+        "highConfidence": 0,
+        "unmatched": 1271,
+        "ambiguous": 5
+      },
+      "channels": [
+        {
+          "code": "be_mobile",
+          "kind": "direct",
+          "group": "direct",
+          "label": "BE Mobile",
+          "stayCount": 53,
+          "roomNights": 88,
+          "lodgingRevenueCents": 2924839,
+          "adrCents": 33236.806818181816,
+          "shareOfReservations": 0.038629737609329445,
+          "shareOfRevenue": 0.028592258008372253,
+          "shareOfNights": 0.025106990014265335
+        },
+        {
+          "code": "booking_engine",
+          "kind": "booking_engine",
+          "group": "direct",
+          "label": "Booking Engine",
+          "stayCount": 15,
+          "roomNights": 28,
+          "lodgingRevenueCents": 917576,
+          "adrCents": 32770.57142857143,
+          "shareOfReservations": 0.010932944606413994,
+          "shareOfRevenue": 0.008969919279074909,
+          "shareOfNights": 0.007988587731811698
+        },
+        {
+          "code": "booking",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Booking.com",
+          "stayCount": 124,
+          "roomNights": 193,
+          "lodgingRevenueCents": 8004424,
+          "adrCents": 41473.69948186528,
+          "shareOfReservations": 0.09037900874635568,
+          "shareOfRevenue": 0.07824859974050095,
+          "shareOfNights": 0.0550641940085592
+        },
+        {
+          "code": "expedia",
+          "kind": "ota",
+          "group": "ota",
+          "label": "Expedia",
+          "stayCount": 78,
+          "roomNights": 198,
+          "lodgingRevenueCents": 5478928,
+          "adrCents": 27671.353535353537,
+          "shareOfReservations": 0.056851311953352766,
+          "shareOfRevenue": 0.05356018672661811,
+          "shareOfNights": 0.056490727532097
+        },
+        {
+          "code": "b2b",
+          "kind": "b2b",
+          "group": "b2b",
+          "label": "B2B",
+          "stayCount": 209,
+          "roomNights": 638,
+          "lodgingRevenueCents": 17524762,
+          "adrCents": 27468.278996865203,
+          "shareOfReservations": 0.152332361516035,
+          "shareOfRevenue": 0.17131627301171715,
+          "shareOfNights": 0.18202567760342367
+        },
+        {
+          "code": "unknown",
+          "kind": "unknown",
+          "group": "other",
+          "label": "Não identificado",
+          "stayCount": 893,
+          "roomNights": 2360,
+          "lodgingRevenueCents": 67444260,
+          "adrCents": 28578.07627118644,
+          "shareOfReservations": 0.6508746355685131,
+          "shareOfRevenue": 0.6593127632337167,
+          "shareOfNights": 0.6733238231098431
+        }
+      ],
+      "alerts": [
+        {
+          "code": "coverage_low",
+          "severity": "info",
+          "message": "Cobertura de canal abaixo de 60% da receita realizada."
+        }
+      ]
+    }
+  }
+}
