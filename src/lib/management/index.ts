@@ -7,3 +7,4 @@ export * from "./forecast.ts";
 export * from "./alerts.ts";
 export * from "./from-synced-helpers.ts";
 export * from "./from-synced-reservation.ts";
+export * from "./persistence.ts";

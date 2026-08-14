@@ -26,6 +26,16 @@ import {
 } from "../src/lib/management/metrics.ts";
 import { roomNightsBetween } from "../src/lib/management/temporal.ts";
 import { canonicalReservationFromSynced } from "../src/lib/management/from-synced-reservation.ts";
+import {
+  hitsSourceReservationIdIsValid,
+  receivableAgingV1,
+  reservationChannelPairIsValid,
+  reservationIdempotencyKey,
+  shouldPersistChannelCost,
+  snapshotUniquenessKey,
+  stayCountsTowardOccupancy,
+  stayNightsMatchSchedule,
+} from "../src/lib/management/persistence.ts";
 import type { SyncedReservation } from "../src/lib/domain/yes-hotel/synced-reservation.ts";
 
 const VALID_CPF = "52998224725";
@@ -446,6 +456,96 @@ console.log("\n=== Gestão/CRM foundation ===\n");
   assert.equal(engine.lodgingRevenueCents, 10_000);
   assert.equal(engine.guests[0]?.identity?.kind, "cpf");
   ok("projeção SyncedReservation → canônico (sem bookedAt/comissão)");
+}
+
+{
+  assert.equal(reservationIdempotencyKey("hits", "9001"), "hits:9001");
+  assert.throws(() => reservationIdempotencyKey("hits", " "));
+  assert.equal(snapshotUniquenessKey("2026-03-08", "2026-04-10"), "2026-03-08|2026-04-10|eod");
+  assert.notEqual(
+    snapshotUniquenessKey("2026-03-08", "2026-04-10", "eod"),
+    snapshotUniquenessKey("2026-03-08", "2026-04-10", "midday"),
+  );
+  ok("chaves de idempotência reserva e snapshot");
+}
+
+{
+  assert.equal(stayCountsTowardOccupancy("planned"), true);
+  assert.equal(stayCountsTowardOccupancy("occupied"), true);
+  assert.equal(stayCountsTowardOccupancy("completed"), true);
+  assert.equal(stayCountsTowardOccupancy("cancelled"), false);
+  assert.equal(stayCountsTowardOccupancy("no_show"), false);
+  ok("estadia cancelada/no-show não ocupa");
+}
+
+{
+  const aging = receivableAgingV1(
+    [
+      { dueDate: "2026-03-20", openCents: 5_000 },
+      { dueDate: "2026-03-10", openCents: 10_000 },
+      { dueDate: "2026-02-01", openCents: 20_000 },
+    ],
+    "2026-03-15",
+  );
+  assert.equal(aging[0].bucket, "current");
+  assert.equal(aging[0].openCents, 5_000);
+  assert.equal(aging[1].bucket, "1_30");
+  assert.equal(aging[1].openCents, 10_000);
+  assert.equal(aging[2].openCents, 20_000);
+  ok("aging V1 current / 1-30 / 31-60");
+}
+
+{
+  assert.equal(shouldPersistChannelCost(null), false);
+  assert.equal(shouldPersistChannelCost(undefined), false);
+  assert.equal(shouldPersistChannelCost(0), true);
+  assert.equal(shouldPersistChannelCost(1500), true);
+  ok("custo de canal: null não persiste; 0 só se conhecido");
+}
+
+{
+  assert.equal(hitsSourceReservationIdIsValid("manual", null), true);
+  assert.equal(hitsSourceReservationIdIsValid("unknown", null), true);
+  assert.equal(hitsSourceReservationIdIsValid("hits", "9001"), true);
+  assert.equal(hitsSourceReservationIdIsValid("hits", null), false);
+  assert.equal(hitsSourceReservationIdIsValid("hits", "  "), false);
+  ok("HITS exige source_reservation_id; manual pode sem ID");
+}
+
+{
+  assert.equal(reservationChannelPairIsValid("booking_engine", "booking_engine"), true);
+  assert.equal(reservationChannelPairIsValid("ota", "booking"), true);
+  assert.equal(reservationChannelPairIsValid("ota", "booking_engine"), false);
+  assert.equal(reservationChannelPairIsValid("booking_engine", "booking"), false);
+  ok("canal: booking_engine ≠ booking OTA");
+}
+
+{
+  assert.equal(
+    stayNightsMatchSchedule({
+      nights: 2,
+      scheduledCheckinDate: "2026-03-20",
+      scheduledCheckoutDate: "2026-03-22",
+    }),
+    true,
+  );
+  assert.equal(
+    stayNightsMatchSchedule({
+      nights: 3,
+      scheduledCheckinDate: "2026-03-20",
+      scheduledCheckoutDate: "2026-03-22",
+    }),
+    false,
+  );
+  assert.equal(
+    stayNightsMatchSchedule({
+      nights: 0,
+      scheduledCheckinDate: "2026-03-20",
+      scheduledCheckoutDate: "2026-03-20",
+    }),
+    false,
+  );
+  ok("noites coerentes com datas (checkout exclusivo)");
 }
 
 console.log(`\n=== ${passed} checks Gestão/CRM foundation OK ===\n`);
