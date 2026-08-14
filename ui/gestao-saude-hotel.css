@@ -21,10 +21,48 @@
   text-align: center;
 }
 
-.gestao-view .gestao-demo-banner strong {
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.gestao-view .gestao-footnote {
+  margin: -8px 0 0;
+  color: var(--op-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.gestao-view .gestao-period {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gestao-view .gestao-period button {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--op-border);
+  border-radius: 8px;
+  background: var(--op-surface);
+  color: var(--op-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gestao-view .gestao-period button[aria-selected="true"] {
+  background: var(--op-blue);
+  border-color: var(--op-blue);
+  color: #fff;
+}
+
+.gestao-view .gestao-coverage {
+  margin: 12px 0 0;
+  color: var(--op-text-muted);
+  font-size: 13px;
+}
+
+.gestao-view .gestao-otb-placeholder {
+  color: var(--op-text-muted);
+  font-size: 14px;
+  line-height: 1.45;
 }
 
 .gestao-view .gestao-kpis {

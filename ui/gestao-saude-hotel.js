@@ -1,6 +1,6 @@
 (function () {
   var auth = window.YesHotelAuthApp;
-  var demoApi = window.YesHotelGestaoSaudeDemo;
+  var historico = window.YesHotelGestaoHistorico;
 
   var accessStateElement = document.querySelector("#access-state");
   var contentPanelElement = document.querySelector("#content-panel");
@@ -58,8 +58,10 @@
     return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   }
 
-  function formatPct(ratio) {
-    return (Number(ratio) * 100).toFixed(0).replace(".", ",") + "%";
+  function formatPct(ratio, digits) {
+    var n = Number(ratio) * 100;
+    var d = digits == null ? 0 : digits;
+    return n.toFixed(d).replace(".", ",") + "%";
   }
 
   function formatCount(n) {
@@ -80,23 +82,116 @@
       .replace(/"/g, "&quot;");
   }
 
-  function renderDashboard(data) {
-    if (bannerElement instanceof HTMLElement) {
-      bannerElement.textContent = data.banner;
+  function trend(current, previous) {
+    if (previous == null || previous === 0) {
+      return { deltaLabel: "sem base anterior", direction: "flat" };
     }
+    var pct = (current - previous) / Math.abs(previous);
+    var direction = pct > 0.004 ? "up" : pct < -0.004 ? "down" : "flat";
+    var sign = pct > 0 ? "+" : "";
+    return {
+      direction: direction,
+      deltaLabel: sign + (pct * 100).toFixed(1).replace(".", ",") + "% vs período anterior",
+    };
+  }
+
+  function periodKeys(dataset) {
+    return Object.keys(dataset.periods).filter(function (k) {
+      return k !== "2026-ytd";
+    }).concat(["2026-ytd"]);
+  }
+
+  function previousKey(key) {
+    var months = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07"];
+    var idx = months.indexOf(key);
+    if (idx <= 0) return null;
+    return months[idx - 1];
+  }
+
+  function buildKpis(period, previous) {
+    return [
+      {
+        label: "Receita de hospedagem",
+        format: "money",
+        valueCents: period.lodgingRevenueCents,
+        trend: previous ? trend(period.lodgingRevenueCents, previous.lodgingRevenueCents) : { deltaLabel: period.label, direction: "flat" },
+      },
+      {
+        label: "Ocupação",
+        format: "pct",
+        valueRatio: period.occupancy,
+        trend: previous ? trend(period.occupancy, previous.occupancy) : { deltaLabel: "base 40 aptos", direction: "flat" },
+      },
+      {
+        label: "ADR",
+        format: "money",
+        valueCents: period.adrCents,
+        trend: previous ? trend(period.adrCents, previous.adrCents) : { deltaLabel: "Diária-A&B / RN", direction: "flat" },
+      },
+      {
+        label: "RevPAR",
+        format: "money",
+        valueCents: period.revparCents,
+        trend: previous ? trend(period.revparCents, previous.revparCents) : { deltaLabel: "Diária-A&B / disponíveis", direction: "flat" },
+      },
+      {
+        label: "Room nights",
+        format: "count",
+        valueCount: period.roomNights,
+        trend: previous ? trend(period.roomNights, previous.roomNights) : { deltaLabel: "Regular + L", direction: "flat" },
+      },
+      {
+        label: "A&B",
+        format: "money",
+        valueCents: period.abCents,
+        trend: { deltaLabel: "não entra no ADR", direction: "flat" },
+      },
+    ];
+  }
+
+  function renderPeriodTabs(dataset, selectedKey) {
+    var root = document.querySelector("#gestao-period");
+    if (!root) return;
+    root.innerHTML = periodKeys(dataset)
+      .map(function (key) {
+        var label = dataset.periods[key].label.replace("/2026", "").replace("Acumulado Jan–Jul/2026", "Jan–Jul");
+        return (
+          '<button type="button" role="tab" data-period="' +
+          escapeHtml(key) +
+          '" aria-selected="' +
+          (key === selectedKey ? "true" : "false") +
+          '">' +
+          escapeHtml(label) +
+          "</button>"
+        );
+      })
+      .join("");
+  }
+
+  function renderDashboard(dataset, selectedKey) {
+    var period = dataset.periods[selectedKey];
+    var previous = selectedKey === "2026-ytd" ? dataset.periods["2026-06"] : dataset.periods[previousKey(selectedKey) || ""];
+    if (bannerElement instanceof HTMLElement) {
+      bannerElement.textContent = dataset.banner;
+    }
+    var footnote = document.querySelector("#gestao-footnote");
+    if (footnote) footnote.textContent = dataset.footnote;
+
+    renderPeriodTabs(dataset, selectedKey);
 
     var kpisRoot = document.querySelector("#gestao-kpis");
     if (kpisRoot) {
-      kpisRoot.innerHTML = data.kpis
+      kpisRoot.innerHTML = buildKpis(period, previous)
         .map(function (kpi) {
           var dir = kpi.trend?.direction || "flat";
+          var value = kpi.format === "pct" ? formatPct(kpi.valueRatio, 1) : formatKpiValue(kpi);
           return (
             "<article>" +
             "<span>" +
             escapeHtml(kpi.label) +
             "</span>" +
             "<strong>" +
-            escapeHtml(formatKpiValue(kpi)) +
+            escapeHtml(value) +
             "</strong>" +
             '<small class="gestao-trend--' +
             dir +
@@ -111,28 +206,16 @@
 
     var otbRoot = document.querySelector("#gestao-otb");
     if (otbRoot) {
-      otbRoot.innerHTML =
-        "<div><span>Ocupação já reservada</span><strong>" +
-        escapeHtml(formatPct(data.otb.occupancyBooked)) +
-        "</strong></div>" +
-        "<div><span>Receita futura contratada</span><strong>" +
-        escapeHtml(formatMoneyCents(data.otb.contractedRevenueCents)) +
-        "</strong></div>" +
-        "<div><span>ADR futuro</span><strong>" +
-        escapeHtml(formatMoneyCents(data.otb.futureAdrCents)) +
-        "</strong></div>" +
-        "<div><span>Reservas futuras</span><strong>" +
-        escapeHtml(formatCount(data.otb.futureReservations)) +
-        "</strong></div>";
+      otbRoot.textContent = "Forecast / próximos 30 dias — aguardando integração online HITS";
     }
 
     var channelsRoot = document.querySelector("#gestao-channels");
     if (channelsRoot) {
-      channelsRoot.innerHTML = data.channels
+      channelsRoot.innerHTML = (period.channels || [])
         .map(function (row) {
-          var sharePct = Math.round(row.shareOfReservations * 100);
+          var sharePct = Math.round((row.shareOfRevenue || 0) * 100);
           var barClass =
-            row.group === "ota" ? "gestao-bar--ota" : row.group === "b2b" ? "gestao-bar--b2b" : "gestao-bar--direct";
+            row.group === "ota" ? "gestao-bar--ota" : row.group === "b2b" ? "gestao-bar--b2b" : row.group === "other" ? "gestao-bar--ota" : "gestao-bar--direct";
           var kindLabel =
             row.kind === "booking_engine"
               ? "engine"
@@ -140,7 +223,9 @@
                 ? "ota"
                 : row.kind === "b2b"
                   ? "b2b"
-                  : "direto";
+                  : row.kind === "unknown"
+                    ? "n/d"
+                    : "direto";
           return (
             "<tr data-channel-code=\"" +
             escapeHtml(row.code) +
@@ -161,16 +246,19 @@
             '%"></i></span>' +
             "</td>" +
             "<td>" +
-            escapeHtml(formatCount(row.reservations)) +
+            escapeHtml(formatCount(row.stayCount)) +
+            "</td>" +
+            "<td>" +
+            escapeHtml(formatCount(row.roomNights)) +
             "</td>" +
             "<td>" +
             escapeHtml(formatMoneyCents(row.lodgingRevenueCents)) +
             "</td>" +
             "<td>" +
-            escapeHtml(formatMoneyCents(row.adrCents)) +
+            escapeHtml(row.adrCents == null ? "—" : formatMoneyCents(row.adrCents)) +
             "</td>" +
             "<td>" +
-            escapeHtml(formatPct(row.shareOfReservations)) +
+            escapeHtml(formatPct(row.shareOfRevenue, 1)) +
             "</td>" +
             "</tr>"
           );
@@ -178,20 +266,41 @@
         .join("");
     }
 
+    var coverage = document.querySelector("#gestao-coverage");
+    if (coverage && period.coverage) {
+      var identified = period.coverage.revenueIdentified || 0;
+      var unknownShare = 1 - identified;
+      var unknownRow = (period.channels || []).find(function (c) {
+        return c.code === "unknown";
+      });
+      if (unknownRow && unknownRow.shareOfRevenue != null) {
+        unknownShare = unknownRow.shareOfRevenue;
+      }
+      coverage.innerHTML =
+        "Cobertura de identificação de canal: <strong>" +
+        escapeHtml(formatPct(identified, 1)) +
+        "</strong> da receita realizada<br />Não identificado — <strong>" +
+        escapeHtml(formatPct(unknownShare, 1)) +
+        "</strong> da receita";
+    }
+
     var alertsRoot = document.querySelector("#gestao-alerts");
     if (alertsRoot) {
-      alertsRoot.innerHTML = data.alerts
-        .slice(0, 5)
-        .map(function (alert) {
-          return (
-            '<li data-severity="' +
-            escapeHtml(alert.severity) +
-            '">' +
-            escapeHtml(alert.message) +
-            "</li>"
-          );
-        })
-        .join("");
+      var alerts = period.alerts || [];
+      alertsRoot.innerHTML = alerts.length
+        ? alerts
+            .slice(0, 5)
+            .map(function (alert) {
+              return (
+                '<li data-severity="' +
+                escapeHtml(alert.severity) +
+                '">' +
+                escapeHtml(alert.message) +
+                "</li>"
+              );
+            })
+            .join("")
+        : "<li data-severity=\"info\">Nenhum alerta determinístico neste período.</li>";
     }
   }
 
@@ -252,16 +361,22 @@
       node.classList.toggle("hidden", !canBreakfast);
     });
 
-    if (!demoApi || typeof demoApi.buildDashboard !== "function") {
+    if (!historico || !historico.periods) {
       showAccessState(
-        "Dados demonstrativos indisponíveis",
-        "Não foi possível carregar o fixture gerencial.",
+        "Dados históricos indisponíveis",
+        "Não foi possível carregar o dataset gerencial Jan–Jul/2026.",
         "Voltar para login",
       );
       return;
     }
 
-    renderDashboard(demoApi.buildDashboard());
+    var selected = historico.defaultPeriod || "2026-07";
+    renderDashboard(historico, selected);
+    document.querySelector("#gestao-period")?.addEventListener("click", function (ev) {
+      var btn = ev.target.closest("[data-period]");
+      if (!btn) return;
+      renderDashboard(historico, btn.getAttribute("data-period"));
+    });
   }
 
   logoutButtonElement?.addEventListener("click", async function () {
