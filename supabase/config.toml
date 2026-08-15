@@ -75,3 +75,7 @@ verify_jwt = false
 # Auth: service_role ou x-access-tolerance-token. Default enabled.
 [functions.ttlock-provision-retry]
 verify_jwt = false
+
+# Revisão financeira Omie ↔ Sicredi. Somente leitura. Auth própria (JWT admin).
+[functions.financial-recon-review]
+verify_jwt = false

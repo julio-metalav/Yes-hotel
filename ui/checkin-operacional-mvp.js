@@ -7094,6 +7094,14 @@ async function initCheckinOperacional() {
     sessionUserRoleElement.textContent = auth.getRoleLabel(currentUser.role);
   }
 
+  var canFinancialRecon =
+    typeof auth.canAccessFinancialRecon === "function"
+      ? auth.canAccessFinancialRecon(currentUser)
+      : currentUser.role === "admin";
+  document.querySelectorAll('[data-nav="financeiro"]').forEach(function (node) {
+    node.classList.toggle("hidden", !canFinancialRecon);
+  });
+
   // Reservas manuais descontinuadas: HITS é a única fonte. Mantém o nó por contrato, sempre oculto.
   if (opImportLink instanceof HTMLElement) {
     opImportLink.classList.add("hidden");

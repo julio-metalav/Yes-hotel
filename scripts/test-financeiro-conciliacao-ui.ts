@@ -1,0 +1,95 @@
+/**
+ * UI Conciliação financeira — existência, guardas, read-only, sem PII.
+ * Sem I/O de rede.
+ */
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+let cases = 0;
+function ok(name: string) {
+  cases += 1;
+  console.log("  OK ", name);
+}
+function read(rel: string) {
+  return readFileSync(join(root, rel), "utf8");
+}
+
+console.log("\n=== UI Conciliação financeira ===\n");
+
+const files = [
+  "ui/financeiro-conciliacao.html",
+  "ui/financeiro-conciliacao.js",
+  "ui/financeiro-conciliacao.css",
+];
+for (const rel of files) {
+  assert.equal(existsSync(join(root, rel)), true, `falta ${rel}`);
+}
+ok("arquivos da tela Conciliação existem");
+
+const html = read("ui/financeiro-conciliacao.html");
+const pageSrc = read("ui/financeiro-conciliacao.js");
+const authSrc = read("ui/yes-supabase-auth.js");
+const edgeSrc = read("supabase/functions/financial-recon-review/index.ts");
+const cafeHtml = read("ui/cafe-da-manha-mvp.html");
+const gestaoHtml = read("ui/gestao-saude-hotel.html");
+const checkinHtml = read("ui/checkin-operacional-mvp.html");
+const recepcaoHtml = read("ui/recepcao-mvp.html");
+const wifiHtml = read("ui/apartamentos-wifi-mvp.html");
+
+assert.match(html, /Financeiro/);
+assert.match(html, /Conciliação/);
+assert.match(html, /fin-kpis/);
+assert.match(html, /Reconciliado high/);
+assert.match(html, /Suggested/);
+assert.match(html, /Ambiguous/);
+assert.match(html, /Não conciliado Omie/);
+assert.match(html, /Não conciliado banco/);
+assert.match(html, /Transferência interna/);
+assert.match(html, /Possíveis agrupamentos/);
+assert.match(html, /Conta Sicredi/);
+ok("rota, KPIs e filtros presentes");
+
+assert.match(authSrc, /function canAccessFinancialRecon/);
+assert.match(authSrc, /user\?\.role === "admin"/);
+assert.match(pageSrc, /canAccessFinancialRecon/);
+assert.match(pageSrc, /Conciliação financeira é restrita a admin/);
+assert.match(pageSrc, /currentUser\.role === "cafe"/);
+ok("admin acessa; não-admin e café bloqueados");
+
+assert.match(gestaoHtml, /financeiro-conciliacao\.html/);
+assert.match(checkinHtml, /financeiro-conciliacao\.html/);
+assert.match(recepcaoHtml, /financeiro-conciliacao\.html/);
+assert.match(wifiHtml, /financeiro-conciliacao\.html/);
+assert.equal(cafeHtml.includes("financeiro-conciliacao.html"), false);
+ok("nav Conciliação nas telas de gestão/operação; ausente no Café");
+
+assert.doesNotMatch(html, /Confirmar/);
+assert.doesNotMatch(html, /Rejeitar/);
+assert.doesNotMatch(html, /Desfazer/);
+assert.doesNotMatch(pageSrc, /confirmMatch|rejectMatch|undoMatch/);
+assert.doesNotMatch(pageSrc, /\.insert\(/);
+assert.doesNotMatch(pageSrc, /\.update\(/);
+assert.doesNotMatch(pageSrc, /\.delete\(/);
+assert.doesNotMatch(pageSrc, /raw_payload/);
+assert.doesNotMatch(pageSrc, /service_role|SERVICE_ROLE/);
+assert.doesNotMatch(html, /raw_payload/);
+assert.match(pageSrc, /group_detail/);
+assert.match(pageSrc, /financial-recon-review/);
+assert.match(pageSrc, /page/);
+ok("UI 100% read-only, sem PII/raw payload, detalhe sob demanda");
+
+assert.match(pageSrc, /Transferência interna — não é receita nem despesa/);
+assert.match(pageSrc, /Não conciliado\. Não é erro nem fraude/);
+assert.match(pageSrc, /Diagnóstico — não conciliado/);
+assert.match(pageSrc, /Suggested — análise em memória/);
+ok("internal transfer, unmatched e possible aggregation com etiquetas corretas");
+
+assert.match(edgeSrc, /Acesso restrito a admin/);
+assert.match(edgeSrc, /Revisao financeira e somente leitura/);
+assert.doesNotMatch(edgeSrc, /raw_payload/);
+ok("backend read-only admin-only sem raw_payload");
+
+console.log(`\n${cases} checks OK\n`);

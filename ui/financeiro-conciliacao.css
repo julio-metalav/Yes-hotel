@@ -1,0 +1,131 @@
+/* Conciliação financeira — extensão do shell Gestão. Somente leitura. */
+
+.fin-recon-view .fin-kpis {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.fin-recon-view .fin-kpis article small {
+  display: block;
+  margin-top: 2px;
+}
+
+.fin-recon-view .fin-kpis article[data-kind="transfer"] {
+  border-color: rgba(184, 148, 46, 0.45);
+}
+
+.fin-recon-view .fin-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  align-items: end;
+}
+
+.fin-recon-view .fin-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--op-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.fin-recon-view .fin-filters input,
+.fin-recon-view .fin-filters select {
+  min-height: 36px;
+  min-width: 140px;
+  padding: 0 8px;
+  border: 1px solid var(--op-border);
+  border-radius: 8px;
+  background: var(--op-surface);
+  color: var(--op-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.fin-recon-view .fin-list-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fin-recon-view .fin-list-meta,
+.fin-recon-view .fin-list-note {
+  margin: 0 0 12px;
+  color: var(--op-text-muted);
+  font-size: 13px;
+}
+
+.fin-recon-view .fin-table-wrap {
+  overflow: auto;
+}
+
+.fin-recon-view .fin-table tbody tr[data-id] {
+  cursor: pointer;
+}
+
+.fin-recon-view .fin-table tbody tr[data-id]:hover,
+.fin-recon-view .fin-table tbody tr[aria-selected="true"] {
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.fin-recon-view .fin-pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.fin-recon-view .fin-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.fin-recon-view .fin-detail-grid dl {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 6px 10px;
+  margin: 0;
+}
+
+.fin-recon-view .fin-detail-grid dt {
+  color: var(--op-text-muted);
+  font-size: 12px;
+}
+
+.fin-recon-view .fin-detail-grid dd {
+  margin: 0;
+  font-size: 14px;
+}
+
+.fin-recon-view .fin-evidence {
+  margin-top: 16px;
+}
+
+.fin-recon-view .fin-evidence ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.fin-recon-view .fin-transfer-note {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(184, 148, 46, 0.45);
+  border-radius: 8px;
+  background: rgba(184, 148, 46, 0.1);
+  color: #7a5c12;
+  font-size: 13px;
+}
+
+@media (max-width: 1100px) {
+  .fin-recon-view .fin-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fin-recon-view .fin-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
