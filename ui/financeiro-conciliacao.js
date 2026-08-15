@@ -158,7 +158,15 @@
       kpiCard("Omie AP", kpis.omie_ap_count, kpis.omie_ap_cents),
       kpiCard("Sicredi créditos", kpis.sicredi_credit_count, kpis.sicredi_credit_cents),
       kpiCard("Sicredi débitos", kpis.sicredi_debit_count, kpis.sicredi_debit_cents),
-      kpiCard("Conciliados high", kpis.high_count, kpis.high_cents),
+      kpiCard("Conciliados high", kpis.high_count, kpis.high_cents, "persistido"),
+      kpiCard(
+        "High recomputado",
+        kpis.high_recomputed_count,
+        kpis.high_recomputed_cents,
+        kpis.high_unpersisted_count
+          ? kpis.high_unpersisted_count + " ainda não persistidos"
+          : "análise",
+      ),
       kpiCard("Suggested", kpis.suggested_count, kpis.suggested_cents, "análise"),
       kpiCard("Ambiguous", kpis.ambiguous_count, kpis.ambiguous_cents, "análise"),
       kpiCard("Omie sem banco", kpis.unmatched_omie_count, kpis.unmatched_omie_cents, "não conciliado"),
@@ -339,7 +347,7 @@
       unmatched_bank: "Não conciliado. Não é erro nem fraude.",
       possible_aggregation: "Diagnóstico — não conciliado. Sem confirmação.",
       internal_transfer: "Transferência interna — não misturar com receita/despesa.",
-      high: "",
+      high: "Lista persistida: 593 high. Analysis recomputa 601; 8 ainda não persistidos.",
     };
     var text = notes[view] || "";
     listNoteElement.hidden = !text;

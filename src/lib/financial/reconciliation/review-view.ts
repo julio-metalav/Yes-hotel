@@ -96,6 +96,9 @@ export type ReviewKpis = {
   sicredi_debit_cents: number;
   high_count: number;
   high_cents: number;
+  high_recomputed_count: number | null;
+  high_recomputed_cents: number | null;
+  high_unpersisted_count: number | null;
   transfer_count: number;
   transfer_cents: number;
   persisted_findings: number;
@@ -309,6 +312,9 @@ export function formatScoreEvidence(
 
 export function emptyAnalysisKpis(): Pick<
   ReviewKpis,
+  | "high_recomputed_count"
+  | "high_recomputed_cents"
+  | "high_unpersisted_count"
   | "suggested_count"
   | "suggested_cents"
   | "ambiguous_count"
@@ -321,6 +327,9 @@ export function emptyAnalysisKpis(): Pick<
   | "possible_aggregation_cents"
 > {
   return {
+    high_recomputed_count: null,
+    high_recomputed_cents: null,
+    high_unpersisted_count: null,
     suggested_count: null,
     suggested_cents: null,
     ambiguous_count: null,
@@ -355,6 +364,9 @@ export function kpisFromPersisted(input: {
 export function mergeAnalysisKpis(base: ReviewKpis, stats: ReconStats): ReviewKpis {
   return {
     ...base,
+    high_recomputed_count: stats.high_count,
+    high_recomputed_cents: stats.high_cents,
+    high_unpersisted_count: Math.max(0, stats.high_count - base.high_count),
     suggested_count: stats.suggested_count,
     suggested_cents: stats.suggested_cents,
     ambiguous_count: stats.ambiguous_count,

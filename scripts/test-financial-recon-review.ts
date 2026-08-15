@@ -10,6 +10,8 @@ import {
   ANALYSIS_ENTRY_COLUMNS,
   ANALYSIS_ENTRY_SELECT,
   ANALYSIS_SOURCE_KINDS,
+  OMIE_SICREDI_HIGH_PERSIST_EXPECT,
+  OMIE_SICREDI_LIVE_ANALYSIS_EXPECT,
   OMIE_SICREDI_RULE_VERSION,
   REVIEW_ALLOWED_ACTIONS,
   assertReviewDtoSafe,
@@ -298,9 +300,65 @@ console.log("\n=== Revisão financeira Omie ↔ Sicredi ===\n");
     result.stats,
   );
   assert.equal(kpis.suggested_count, result.stats.suggested_count);
+  assert.equal(kpis.high_count, result.stats.high_count);
+  assert.equal(kpis.high_recomputed_count, result.stats.high_count);
+  assert.equal(kpis.high_unpersisted_count, 0);
   assert.ok((kpis.unmatched_omie_count ?? 0) >= 1);
   assertReviewDtoSafe({ lists, kpis });
   ok("suggested/ambiguous/unmatched read-only via engine");
+}
+
+{
+  const live = OMIE_SICREDI_LIVE_ANALYSIS_EXPECT;
+  const persisted = OMIE_SICREDI_HIGH_PERSIST_EXPECT;
+  assert.equal(persisted.high_count, 593);
+  assert.equal(live.high_persisted_count, 593);
+  assert.equal(live.high_recomputed_count, 601);
+  assert.equal(live.high_unpersisted_count, 8);
+  assert.equal(live.high_recomputed_count - live.high_persisted_count, 8);
+  assert.equal(live.suggested_count, 819);
+  assert.equal(live.ambiguous_count, 20);
+  const kpis = mergeAnalysisKpis(
+    kpisFromPersisted({
+      omie_ar_count: 928,
+      omie_ar_cents: 0,
+      omie_ap_count: 1220,
+      omie_ap_cents: 0,
+      sicredi_credit_count: 0,
+      sicredi_credit_cents: 0,
+      sicredi_debit_count: 0,
+      sicredi_debit_cents: 0,
+      high_count: live.high_persisted_count,
+      high_cents: live.high_persisted_cents,
+      transfer_count: live.transfer_high_count,
+      transfer_cents: live.transfer_cents,
+      persisted_findings: 0,
+    }),
+    {
+      high_count: live.high_recomputed_count,
+      high_cents: live.high_recomputed_cents,
+      suggested_count: live.suggested_count,
+      suggested_cents: live.suggested_cents,
+      ambiguous_count: live.ambiguous_count,
+      ambiguous_cents: live.ambiguous_cents,
+      omie_ar_unmatched_count: live.omie_ar_unmatched_count,
+      omie_ar_unmatched_cents: live.omie_ar_unmatched_cents,
+      omie_ap_unmatched_count: live.omie_ap_unmatched_count,
+      omie_ap_unmatched_cents: live.omie_ap_unmatched_cents,
+      bank_credit_unmatched_count: live.bank_credit_unmatched_count,
+      bank_credit_unmatched_cents: live.bank_credit_unmatched_cents,
+      bank_debit_unmatched_count: live.bank_debit_unmatched_count,
+      bank_debit_unmatched_cents: live.bank_debit_unmatched_cents,
+      possible_agg_c_ar: { bank_count: 0, omie_entries: 0, amount_cents: 0, unique_count: 0, ambiguous_count: 0, search_limit: 0 },
+      possible_agg_d_ar: { bank_count: 0, omie_entries: 0, amount_cents: 0, unique_count: 0, ambiguous_count: 0, search_limit: 0 },
+      possible_agg_c_ap: { bank_count: 0, omie_entries: 0, amount_cents: 0, unique_count: 0, ambiguous_count: 0, search_limit: 0 },
+      possible_agg_d_ap: { bank_count: 0, omie_entries: 0, amount_cents: 0, unique_count: 0, ambiguous_count: 0, search_limit: 0 },
+    } as Parameters<typeof mergeAnalysisKpis>[1],
+  );
+  assert.equal(kpis.high_count, 593);
+  assert.equal(kpis.high_recomputed_count, 601);
+  assert.equal(kpis.high_unpersisted_count, 8);
+  ok("contrato live 601 vs persistido 593; delta 8 não persistido");
 }
 
 {

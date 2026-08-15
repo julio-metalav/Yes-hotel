@@ -20,6 +20,32 @@ export const OMIE_SICREDI_HIGH_PERSIST_EXPECT = {
   high_amount_date_only_count: 0,
 } as const;
 
+/** Contrato live da analysis V1.2 nos facts HOMO atuais. Os 8 high extras não estão persistidos. */
+export const OMIE_SICREDI_LIVE_ANALYSIS_EXPECT = {
+  rule_version: "omie_sicredi_v1.2",
+  period_start: "2026-01-01",
+  period_end: "2026-07-31",
+  high_persisted_count: 593,
+  high_persisted_cents: 70421376,
+  high_recomputed_count: 601,
+  high_recomputed_cents: 70821187,
+  high_unpersisted_count: 8,
+  transfer_high_count: 2,
+  transfer_cents: 10000,
+  suggested_count: 819,
+  suggested_cents: 74019205,
+  ambiguous_count: 20,
+  ambiguous_cents: 887596,
+  omie_ar_unmatched_count: 495,
+  omie_ar_unmatched_cents: 95167449,
+  omie_ap_unmatched_count: 233,
+  omie_ap_unmatched_cents: 27007294,
+  bank_credit_unmatched_count: 593,
+  bank_credit_unmatched_cents: 94731202,
+  bank_debit_unmatched_count: 581,
+  bank_debit_unmatched_cents: 33856873,
+} as const;
+
 export type HighPersistMatchMethod = "one_to_one" | "internal_transfer";
 
 export type HighPersistLeg = {

@@ -16,6 +16,7 @@ export {
 } from "./normalize-party.ts";
 export {
   OMIE_SICREDI_HIGH_PERSIST_EXPECT,
+  OMIE_SICREDI_LIVE_ANALYSIS_EXPECT,
   YES_HOTEL_HOMO_REF,
   assertHighPersistSnapshot,
   assertHomoReconciliationGate,
