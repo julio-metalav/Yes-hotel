@@ -10,14 +10,20 @@ import { scoreEvidenceIsStructured } from "../src/lib/financial/index.ts";
 import {
   GROUPING_MAX_CANDIDATES,
   OMIE_SICREDI_RULE_VERSION,
+  assertHighPersistSnapshot,
+  assertHomoReconciliationGate,
+  buildHighPersistPlan,
   compareFinancialParty,
   descriptionLooksLikeTransfer,
+  emitHighPersistSql,
   findInternalTransferCandidates,
   findUniqueSubset,
   formatOmieSicrediDryRun,
+  isYesHotelHomoUrl,
   normalizeFinancialPartyName,
   reconReportLeaksPii,
   reconcileOmieSicredi,
+  reconciliationKey,
   scoreOmieBankPair,
   type ReconEntry,
 } from "../src/lib/financial/reconciliation/index.ts";
@@ -1164,7 +1170,197 @@ console.log("\n=== Omie ↔ Sicredi recon V1.2 ===\n");
   );
   assert.notEqual(persist.status, 0);
   assert.match(persist.stderr + persist.stdout, /Persistência recusada/i);
+  const persistHighNoGate = spawnSync(
+    process.execPath,
+    [tsxCli, "scripts/reconcile-financial-omie-sicredi.ts", "--from-json", file, "--persist-high"],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.notEqual(persistHighNoGate.status, 0);
+  assert.match(persistHighNoGate.stderr + persistHighNoGate.stdout, /Persistência recusada/i);
   ok("CLI dry-run; persistência recusada");
+}
+
+{
+  const omie = entry({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+    source_system: "omie",
+    source_kind: "omie_receivable",
+    direction: "credit",
+    person_name: "CLIENTE HIGH",
+    settled_amount_cents: 50000,
+    settlement_date: "2026-03-10",
+  });
+  const bank = entry({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_principal",
+    description: "CLIENTE HIGH",
+    gross_amount_cents: 50000,
+    settlement_date: "2026-03-10",
+  });
+  const suggestedOmie = entry({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
+    source_system: "omie",
+    source_kind: "omie_receivable",
+    direction: "credit",
+    person_name: "SEM NOME",
+    settled_amount_cents: 12000,
+    settlement_date: "2026-03-11",
+  });
+  const suggestedBank = entry({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_principal",
+    description: "PIX AVULSO",
+    gross_amount_cents: 12000,
+    settlement_date: "2026-03-11",
+  });
+  const ambOmie = entry({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5",
+    source_system: "omie",
+    source_kind: "omie_receivable",
+    direction: "credit",
+    person_name: "CLIENTE AMB",
+    settled_amount_cents: 90000,
+    settlement_date: "2026-03-12",
+  });
+  const ambB1 = entry({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_principal",
+    description: "CLIENTE AMB",
+    gross_amount_cents: 90000,
+    settlement_date: "2026-03-12",
+  });
+  const ambB2 = { ...ambB1, id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa7" };
+  const debit = entry({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa8",
+    source_system: "sicredi",
+    source_kind: "bank_debit",
+    direction: "debit",
+    account_code: "sicredi_principal",
+    description: "MOVIMENTO INTERNO",
+    gross_amount_cents: 10000,
+    settlement_date: "2026-03-13",
+  });
+  const credit = entry({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa9",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_0911",
+    description: "CREDITO CONTA",
+    gross_amount_cents: 10000,
+    settlement_date: "2026-03-13",
+  });
+  const loteO1 = entry({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa10",
+    source_system: "omie",
+    source_kind: "omie_receivable",
+    direction: "credit",
+    person_name: "LOTE A",
+    settled_amount_cents: 3000,
+    settlement_date: "2026-03-14",
+  });
+  const loteO2 = entry({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa11",
+    source_system: "omie",
+    source_kind: "omie_receivable",
+    direction: "credit",
+    person_name: "LOTE B",
+    settled_amount_cents: 4000,
+    settlement_date: "2026-03-14",
+  });
+  const loteBank = entry({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa12",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_principal",
+    description: "DEPOSITO LOTE",
+    gross_amount_cents: 7000,
+    settlement_date: "2026-03-14",
+  });
+  const result = reconcileOmieSicredi({
+    entries: [omie, bank, suggestedOmie, suggestedBank, ambOmie, ambB1, ambB2, debit, credit, loteO1, loteO2, loteBank],
+  });
+  assert.equal(result.stats.high_count, 1);
+  assert.equal(result.stats.suggested_count, 1);
+  assert.ok(result.stats.ambiguous_count >= 1);
+  assert.equal(result.stats.transfer_high_count, 1);
+  assert.ok(result.stats.possible_agg_c_ar.unique_count >= 1);
+  const plan = buildHighPersistPlan(result);
+  assert.equal(plan.one_to_one_count, 1);
+  assert.equal(plan.transfer_count, 1);
+  assert.equal(plan.leg_count, 4);
+  assert.equal(plan.groups.every((g) => g.status === "auto_matched"), true);
+  assert.equal(plan.groups.some((g) => g.match_method === "one_to_one"), true);
+  assert.equal(plan.groups.some((g) => g.match_method === "internal_transfer"), true);
+  assert.equal(plan.groups.some((g) => g.matched_amount_cents === 12000), false);
+  assert.equal(plan.groups.some((g) => g.matched_amount_cents === 90000), false);
+  assert.equal(plan.groups.some((g) => g.matched_amount_cents === 7000), false);
+  const ids = plan.groups.flatMap((g) => g.legs.map((l) => l.entry_id));
+  assert.equal(new Set(ids).size, ids.length);
+  const sql = emitHighPersistSql(plan);
+  assert.match(sql, /begin;/);
+  assert.match(sql, /commit;/);
+  assert.match(sql, /one_to_one/);
+  assert.match(sql, /internal_transfer/);
+  assert.match(sql, /'auto_matched'/);
+  assert.doesNotMatch(sql, /possible_aggregation/);
+  assert.doesNotMatch(sql, /insert into public.financial_audit_findings/i);
+  const keyA = reconciliationKey("one_to_one", [omie.id, bank.id]);
+  const keyB = reconciliationKey("one_to_one", [bank.id, omie.id]);
+  assert.equal(keyA, keyB);
+  ok("persist 1:1 high e transfer; suggested/ambiguous/lote fora");
+}
+
+{
+  assert.equal(isYesHotelHomoUrl("https://minmmecajnmjqlgacfoz.supabase.co"), true);
+  assert.equal(isYesHotelHomoUrl("https://prod-not-homo.supabase.co"), false);
+  assert.throws(
+    () => assertHomoReconciliationGate({ persistHigh: true, allowHomo: false, apply: false }),
+    /allow-homo-reconciliation/,
+  );
+  assert.throws(
+    () =>
+      assertHomoReconciliationGate({
+        persistHigh: true,
+        allowHomo: true,
+        apply: true,
+        url: "https://xxxxxxxxxxxxxxxxxxxx.supabase.co",
+      }),
+    /URL não é o HOMO/,
+  );
+  assert.doesNotThrow(() =>
+    assertHomoReconciliationGate({
+      persistHigh: true,
+      allowHomo: true,
+      apply: true,
+      url: "https://minmmecajnmjqlgacfoz.supabase.co",
+    }),
+  );
+  const tiny = reconcileOmieSicredi({
+    entries: [
+      entry({
+        id: "snap-o",
+        source_system: "omie",
+        source_kind: "omie_receivable",
+        direction: "credit",
+        person_name: "X",
+        settled_amount_cents: 100,
+        settlement_date: "2026-01-02",
+      }),
+    ],
+  });
+  assert.throws(() => assertHighPersistSnapshot(tiny), /divergiu do contrato high/);
+  ok("gate HOMO/PROD e snapshot high");
 }
 
 console.log(`\n${passed} testes ok\n`);

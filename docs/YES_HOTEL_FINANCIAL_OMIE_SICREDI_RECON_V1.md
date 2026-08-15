@@ -1,6 +1,8 @@
 # Yes Hotel — Reconciliação Omie ↔ Sicredi V1.2
 
-Motor determinístico (`rule_version=omie_sicredi_v1.2`). Sem IA, HITS, Stone, Pagar.me ou UI. Não persiste grupos/findings nesta rodada.
+Motor determinístico (`rule_version=omie_sicredi_v1.2`). Sem IA, HITS, Stone, Pagar.me ou UI.
+
+Persistência HIGH (HOMO only): `--persist-high --allow-homo-reconciliation`. Somente transfer high + 1:1 high (`status=auto_matched`, revisável). Suggested/ambiguous/C/D/findings não entram. Idempotência por `reconciliation_key`. PROD aborta.
 
 ## Valor
 

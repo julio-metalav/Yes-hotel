@@ -410,6 +410,77 @@ try {
   assert.equal(uniqueIdx, "financial_imports_file_parser_uidx");
   ok("unique (file_sha256, parser_version) existe");
 
+  psqlFile(resolve(ROOT, "supabase/migrations/20260815001829_financial_reconciliation_key.sql"));
+  assert.equal(
+    psql(`
+      select indexname from pg_indexes
+      where schemaname = 'public'
+        and indexname = 'financial_reconciliation_groups_reconciliation_key_uidx'
+    `),
+    "financial_reconciliation_groups_reconciliation_key_uidx",
+  );
+  ok("reconciliation_key unique existe");
+
+  psql(`
+    insert into public.financial_imports (source_type, file_sha256, parser_version)
+    values ('ofx_bank', 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 'ofx@1.0.0')
+  `);
+  const persistImport = psql(`select id from public.financial_imports where parser_version = 'ofx@1.0.0' and file_sha256 like 'cc%'`);
+  const persistAccount = psql(`select id from public.financial_accounts where code = 'sicredi_principal'`);
+  psql(`
+    insert into public.financial_entries (
+      account_id, source_system, source_kind, source_import_id, direction, entry_type,
+      settled_amount_cents, gross_amount_cents, source_record_id
+    ) values (
+      null, 'omie', 'omie_receivable', '${persistImport}', 'credit', 'receivable', 50000, 50000, 'PERSIST-OMIE-1'
+    )
+  `);
+  psql(`
+    insert into public.financial_entries (
+      account_id, source_system, source_kind, source_import_id, direction, entry_type, gross_amount_cents, source_record_id
+    ) values (
+      '${persistAccount}', 'sicredi', 'bank_credit', '${persistImport}', 'credit', 'bank_tx', 50000, 'PERSIST-BANK-1'
+    )
+  `);
+  const persistOmie = psql(`select id from public.financial_entries where source_record_id = 'PERSIST-OMIE-1'`);
+  const persistBank = psql(`select id from public.financial_entries where source_record_id = 'PERSIST-BANK-1'`);
+  const persistSql = `
+begin;
+insert into public.financial_reconciliation_groups (
+  status, match_method, rule_version, confidence, matched_amount_cents, score_evidence, reconciliation_key
+)
+select 'auto_matched', 'one_to_one', 'omie_sicredi_v1.2', 93, 50000,
+  '{"amount_exact":true,"party_match":"token_exact"}'::jsonb,
+  'persist-high-key-1'
+where not exists (
+  select 1 from public.financial_reconciliation_groups g
+  where g.reconciliation_key = 'persist-high-key-1'
+);
+insert into public.financial_reconciliation_legs (group_id, entry_id, role, allocated_amount_cents)
+select g.id, '${persistOmie}'::uuid, 'source', 50000
+from public.financial_reconciliation_groups g
+where g.reconciliation_key = 'persist-high-key-1'
+  and not exists (
+    select 1 from public.financial_reconciliation_legs l
+    where l.group_id = g.id and l.entry_id = '${persistOmie}'::uuid
+  );
+insert into public.financial_reconciliation_legs (group_id, entry_id, role, allocated_amount_cents)
+select g.id, '${persistBank}'::uuid, 'target', 50000
+from public.financial_reconciliation_groups g
+where g.reconciliation_key = 'persist-high-key-1'
+  and not exists (
+    select 1 from public.financial_reconciliation_legs l
+    where l.group_id = g.id and l.entry_id = '${persistBank}'::uuid
+  );
+commit;
+`;
+  psql(persistSql);
+  psql(persistSql);
+  assert.equal(psql(`select count(*) from public.financial_reconciliation_groups where reconciliation_key = 'persist-high-key-1'`), "1");
+  assert.equal(psql(`select count(*) from public.financial_reconciliation_legs l join public.financial_reconciliation_groups g on g.id = l.group_id where g.reconciliation_key = 'persist-high-key-1'`), "2");
+  assert.equal(psql(`select count(*) from public.financial_reconciliation_groups g where not exists (select 1 from public.financial_reconciliation_legs l where l.group_id = g.id)`), "0");
+  ok("persist high idempotente e atômico no Postgres efêmero");
+
   console.log(`\n${passed} testes ok\n`);
 } finally {
   spawnSync("docker", ["rm", "-f", CONTAINER], { encoding: "utf8" });
