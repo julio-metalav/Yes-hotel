@@ -3,9 +3,9 @@
  *
  * npm run financial:reconcile-omie-sicredi -- --dry-run
  * npm run financial:reconcile-omie-sicredi -- --from-json tmp/recon-entries.json --dry-run
- *
- * Persistência recusada nesta V1.2.
+ * npm run financial:reconcile-omie-sicredi -- --persist-high --allow-homo-reconciliation
  */
+import "dotenv/config";
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -13,13 +13,16 @@ import {
   OMIE_SICREDI_RULE_VERSION,
   RECON_PERIOD_END,
   RECON_PERIOD_START,
+  YES_HOTEL_HOMO_REF,
+  assertHomoReconciliationGate,
+  buildHighPersistPlan,
+  emitHighPersistSql,
   formatOmieSicrediDryRun,
   reconReportLeaksPii,
   reconcileOmieSicredi,
+  summarizeHighPersistPlan,
   type ReconEntry,
 } from "../src/lib/financial/reconciliation/index.ts";
-
-const HOMO_REF = "minmmecajnmjqlgacfoz";
 
 function argValue(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
@@ -32,7 +35,9 @@ function hasFlag(flag: string): boolean {
 function usage(): never {
   console.error(`Uso:
   npm run financial:reconcile-omie-sicredi -- --dry-run
-  npm run financial:reconcile-omie-sicredi -- --from-json <entries.json> --dry-run`);
+  npm run financial:reconcile-omie-sicredi -- --from-json <entries.json> --dry-run
+  npm run financial:reconcile-omie-sicredi -- --persist-high --allow-homo-reconciliation
+  npm run financial:reconcile-omie-sicredi -- --persist-high --allow-homo-reconciliation --emit-sql <arquivo.sql>`);
   process.exit(2);
 }
 
@@ -104,10 +109,7 @@ function parseRows(raw: string): ReconEntry[] {
   });
 }
 
-function fetchHomoEntries(): ReconEntry[] {
-  const sqlPath = resolve("tmp/recon-fetch.sql");
-  mkdirSync(dirname(sqlPath), { recursive: true });
-  writeFileSync(sqlPath, FETCH_SQL, "utf8");
+function runLinkedSql(sqlPath: string): string {
   const out = spawnSync(
     "npx",
     [
@@ -116,7 +118,7 @@ function fetchHomoEntries(): ReconEntry[] {
       "query",
       "--linked",
       "--project-ref",
-      HOMO_REF,
+      YES_HOTEL_HOMO_REF,
       "-f",
       sqlPath,
       "--output-format",
@@ -125,17 +127,43 @@ function fetchHomoEntries(): ReconEntry[] {
     { encoding: "utf8", shell: true },
   );
   if (out.status !== 0) {
-    throw new Error(out.stderr || out.stdout || "falha ao ler HOMO");
+    throw new Error(out.stderr || out.stdout || "falha no SQL HOMO");
   }
-  return parseRows(out.stdout);
+  return out.stdout;
+}
+
+function fetchHomoEntries(): ReconEntry[] {
+  const sqlPath = resolve("tmp/recon-fetch.sql");
+  mkdirSync(dirname(sqlPath), { recursive: true });
+  writeFileSync(sqlPath, FETCH_SQL, "utf8");
+  return parseRows(runLinkedSql(sqlPath));
 }
 
 function main() {
   if (hasFlag("--persist") || hasFlag("--apply")) {
-    console.error("Persistência recusada nesta V1. Use somente --dry-run. Nenhum dado foi gravado.");
+    console.error("Persistência recusada. Use --persist-high --allow-homo-reconciliation. Nenhum dado foi gravado.");
     process.exit(2);
   }
-  if (!hasFlag("--dry-run") && !argValue("--from-json")) usage();
+
+  const persistHigh = hasFlag("--persist-high");
+  const emitSql = argValue("--emit-sql");
+  const apply = persistHigh && !emitSql;
+
+  if (persistHigh || emitSql) {
+    try {
+      assertHomoReconciliationGate({
+        persistHigh,
+        allowHomo: hasFlag("--allow-homo-reconciliation"),
+        url: process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
+        apply,
+      });
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : error);
+      process.exit(2);
+    }
+  }
+
+  if (!persistHigh && !hasFlag("--dry-run") && !argValue("--from-json")) usage();
 
   const fromJson = argValue("--from-json");
   const entries = fromJson ? parseRows(readJsonText(resolve(fromJson))) : fetchHomoEntries();
@@ -152,6 +180,34 @@ function main() {
   console.log(text);
   console.log(`entries_lidas: ${entries.length}`);
   console.log(`parser_rule: ${OMIE_SICREDI_RULE_VERSION}`);
+
+  if (!persistHigh && !emitSql) return;
+
+  try {
+    const plan = buildHighPersistPlan(result, {
+      requireExpectedSnapshot: true,
+      requireUuid: true,
+    });
+    const sql = emitHighPersistSql(plan);
+    console.log(summarizeHighPersistPlan(plan));
+    if (emitSql) {
+      const outPath = resolve(emitSql);
+      mkdirSync(dirname(outPath), { recursive: true });
+      writeFileSync(outPath, sql, "utf8");
+      console.log(`sql_emitido: ${outPath}`);
+      console.log("persistido: NÃO (somente SQL)");
+      return;
+    }
+    const sqlPath = resolve("tmp/recon-high-persist.sql");
+    mkdirSync(dirname(sqlPath), { recursive: true });
+    writeFileSync(sqlPath, sql, "utf8");
+    const applied = runLinkedSql(sqlPath);
+    console.log("persist_high: applied");
+    console.log(applied.slice(applied.indexOf("{") >= 0 ? applied.indexOf("{") : 0));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(2);
+  }
 }
 
 main();

@@ -14,6 +14,17 @@ export {
   comparePartyAgainstMemo,
   normalizeFinancialPartyName,
 } from "./normalize-party.ts";
+export {
+  OMIE_SICREDI_HIGH_PERSIST_EXPECT,
+  YES_HOTEL_HOMO_REF,
+  assertHighPersistSnapshot,
+  assertHomoReconciliationGate,
+  buildHighPersistPlan,
+  emitHighPersistSql,
+  isYesHotelHomoUrl,
+  reconciliationKey,
+  summarizeHighPersistPlan,
+} from "./persist-high.ts";
 export { formatOmieSicrediDryRun, reconReportLeaksPii } from "./report.ts";
 export {
   bandForScore,
@@ -32,6 +43,7 @@ export {
   RECON_PERIOD_START,
   SUGGESTED_SCORE_MIN,
 } from "./types.ts";
+export type { HighPersistPlan } from "./persist-high.ts";
 export type {
   InternalTransferCandidate,
   PossibleAggregationCandidate,
