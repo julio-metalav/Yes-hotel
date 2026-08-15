@@ -6,19 +6,22 @@ import {
   AGGREGATION_MAX_N,
   GROUPING_MAX_CANDIDATES,
   GROUPING_MAX_COMBINATIONS,
-  GROUPING_MAX_MS,
   OMIE_SICREDI_RULE_VERSION,
+  type PossibleAggregationCandidate,
+  type PossibleAggregationDirection,
+  type PossibleAggregationWindow,
   type ReconEntry,
   type ReconGroup,
 } from "./types.ts";
 
-export type GroupingLayer = "person_date" | "person_window" | "date_batch" | "window_batch";
+export type GroupingLayer = "person_date" | "person_window";
+export type DiagnosticLayer = "date_batch" | "window_batch";
 
 export type SubsetSearchResult =
   | { status: "unique"; entries: ReconEntry[]; combinations: number }
   | { status: "none"; combinations: number }
   | { status: "ambiguous"; combinations: number }
-  | { status: "limit"; combinations: number; reason: "candidates" | "combinations" | "time" };
+  | { status: "limit"; combinations: number; reason: "candidates" | "combinations" };
 
 export function findUniqueSubset(candidates: readonly ReconEntry[], target: number): SubsetSearchResult {
   const items = candidates
@@ -30,15 +33,9 @@ export function findUniqueSubset(candidates: readonly ReconEntry[], target: numb
 
   const found: number[][] = [];
   let combinations = 0;
-  let timedOut = false;
-  const started = Date.now();
 
   const walk = (start: number, chosen: number[], sum: number) => {
     if (found.length > 1) return;
-    if (Date.now() - started > GROUPING_MAX_MS) {
-      timedOut = true;
-      return;
-    }
     if (chosen.length >= 2 && sum === target) {
       found.push([...chosen]);
       return;
@@ -56,7 +53,6 @@ export function findUniqueSubset(candidates: readonly ReconEntry[], target: numb
     }
   };
   walk(0, [], 0);
-  if (timedOut) return { status: "limit", combinations, reason: "time" };
   if (combinations > GROUPING_MAX_COMBINATIONS) return { status: "limit", combinations, reason: "combinations" };
   if (found.length === 0) return { status: "none", combinations };
   if (found.length > 1) return { status: "ambiguous", combinations };
@@ -102,27 +98,31 @@ function toGroup(
       candidate_count: band === "ambiguous" ? 2 : 1,
       internal_transfer_excluded: true,
       grouping_layer: layer,
-      party_match: layer === "person_date" || layer === "person_window" ? "exact_normalized" : "no_match",
-      name_match: layer === "person_date" || layer === "person_window" ? "normalized_exact" : "none",
+      party_match: "exact_normalized",
+      name_match: "normalized_exact",
       rule_id: OMIE_SICREDI_RULE_VERSION,
     },
   };
 }
 
-export function findManyToOneGroups(
+function personsIn(pool: readonly ReconEntry[]): string[] {
+  return [...new Set(pool.map((row) => normalizeFinancialPartyName(row.person_name)).filter(Boolean))].sort();
+}
+
+export function findPersonGrouping(
   remainingOmie: readonly ReconEntry[],
   remainingBank: readonly ReconEntry[],
 ): {
   groups: ReconGroup[];
   ambiguous: ReconGroup[];
   searchLimits: number;
-  searchLimitReasons: { candidates: number; combinations: number; time: number };
+  searchLimitReasons: { candidates: number; combinations: number };
 } {
   const usedOmie = new Set<string>();
   const usedBank = new Set<string>();
   const groups: ReconGroup[] = [];
   const ambiguous: ReconGroup[] = [];
-  const searchLimitReasons = { candidates: 0, combinations: 0, time: 0 };
+  const searchLimitReasons = { candidates: 0, combinations: 0 };
   let searchLimits = 0;
   const banks = [...remainingBank].sort((a, b) => a.id.localeCompare(b.id));
 
@@ -146,6 +146,8 @@ export function findManyToOneGroups(
       return "ambiguous";
     }
     if (result.status !== "unique") return "none";
+    const names = new Set(result.entries.map((row) => normalizeFinancialPartyName(row.person_name)));
+    if (names.size !== 1 || [...names][0] === "") return "none";
     const distance = Math.max(
       ...result.entries.map((row) => dateDistanceDays(row.settlement_date, bank.settlement_date)),
     );
@@ -156,14 +158,12 @@ export function findManyToOneGroups(
   };
 
   for (const bank of banks) {
-    const target = bankMatchAmountCents(bank);
-    if (target == null) continue;
+    if (usedBank.has(bank.id)) continue;
     const sameDate = remainingOmie.filter(
       (row) => !usedOmie.has(row.id) && compatibleOmie(bank, row) && row.settlement_date === bank.settlement_date,
     );
-    const persons = [...new Set(sameDate.map((row) => normalizeFinancialPartyName(row.person_name)).filter(Boolean))].sort();
     let done = false;
-    for (const person of persons) {
+    for (const person of personsIn(sameDate)) {
       const pool = sameDate.filter((row) => normalizeFinancialPartyName(row.person_name) === person);
       const outcome = tryLayer(bank, "person_date", pool, "high");
       if (outcome !== "none") {
@@ -179,8 +179,7 @@ export function findManyToOneGroups(
         compatibleOmie(bank, row) &&
         dateDistanceDays(row.settlement_date, bank.settlement_date) <= 1,
     );
-    const windowPersons = [...new Set(windowed.map((row) => normalizeFinancialPartyName(row.person_name)).filter(Boolean))].sort();
-    for (const person of windowPersons) {
+    for (const person of personsIn(windowed)) {
       const pool = windowed.filter((row) => normalizeFinancialPartyName(row.person_name) === person);
       const outcome = tryLayer(bank, "person_window", pool, "suggested");
       if (outcome !== "none") {
@@ -189,8 +188,6 @@ export function findManyToOneGroups(
       }
     }
     if (done) continue;
-    if (tryLayer(bank, "date_batch", sameDate, "suggested") !== "none") continue;
-    tryLayer(bank, "window_batch", windowed, "suggested");
   }
 
   return {
@@ -199,4 +196,80 @@ export function findManyToOneGroups(
     searchLimits,
     searchLimitReasons,
   };
+}
+
+function diagnosticDirection(bank: ReconEntry): PossibleAggregationDirection | null {
+  if (bank.source_kind === "bank_credit") return "ar_credit";
+  if (bank.source_kind === "bank_debit") return "ap_debit";
+  return null;
+}
+
+function toDiagnostic(
+  bank: ReconEntry,
+  window: PossibleAggregationWindow,
+  result: SubsetSearchResult,
+  pool: readonly ReconEntry[],
+): PossibleAggregationCandidate | null {
+  const direction = diagnosticDirection(bank);
+  const amount = bankMatchAmountCents(bank);
+  if (!direction || amount == null) return null;
+  const unique = result.status === "unique";
+  const omieRows = unique ? result.entries : pool.slice(0, AGGREGATION_MAX_N);
+  return {
+    bank_entry_id: bank.id,
+    omie_entry_ids: omieRows.map((row) => row.id).sort(),
+    omie_count: unique ? result.entries.length : pool.length,
+    amount_cents: amount,
+    amount_exact: unique || result.status === "ambiguous",
+    date_window: window,
+    unique_combination: unique,
+    candidate_count: unique ? 1 : result.status === "ambiguous" ? 2 : pool.length,
+    search_limit: result.status === "limit",
+    direction,
+  };
+}
+
+export function diagnoseBatchAggregations(
+  remainingOmie: readonly ReconEntry[],
+  remainingBank: readonly ReconEntry[],
+): { candidates: PossibleAggregationCandidate[]; searchLimits: number } {
+  const candidates: PossibleAggregationCandidate[] = [];
+  let searchLimits = 0;
+  const banks = [...remainingBank].sort((a, b) => a.id.localeCompare(b.id));
+
+  for (const bank of banks) {
+    const target = bankMatchAmountCents(bank);
+    if (target == null || target <= 0) continue;
+    const sameDate = remainingOmie.filter(
+      (row) => compatibleOmie(bank, row) && row.settlement_date === bank.settlement_date,
+    );
+    const sameDayResult = findUniqueSubset(sameDate, target);
+    if (sameDayResult.status === "limit") searchLimits += 1;
+    if (sameDayResult.status !== "none") {
+      const row = toDiagnostic(bank, "same_day", sameDayResult, sameDate);
+      if (row) candidates.push(row);
+      continue;
+    }
+
+    const windowed = remainingOmie.filter(
+      (row) => compatibleOmie(bank, row) && dateDistanceDays(row.settlement_date, bank.settlement_date) <= 1,
+    );
+    const windowResult = findUniqueSubset(windowed, target);
+    if (windowResult.status === "limit") searchLimits += 1;
+    if (windowResult.status === "none") continue;
+    const row = toDiagnostic(bank, "d1", windowResult, windowed);
+    if (row) candidates.push(row);
+  }
+
+  return {
+    candidates: candidates.sort((a, b) => a.bank_entry_id.localeCompare(b.bank_entry_id)),
+    searchLimits,
+  };
+}
+
+export function findManyToOneGroups(
+  remainingOmie: readonly ReconEntry[],
+  remainingBank: readonly ReconEntry[],
+): ReturnType<typeof findPersonGrouping> {
+  return findPersonGrouping(remainingOmie, remainingBank);
 }
