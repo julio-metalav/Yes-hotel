@@ -8,10 +8,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { scoreEvidenceIsStructured } from "../src/lib/financial/index.ts";
 import {
+  GROUPING_MAX_CANDIDATES,
   OMIE_SICREDI_RULE_VERSION,
   compareFinancialParty,
   descriptionLooksLikeTransfer,
   findInternalTransferCandidates,
+  findUniqueSubset,
   formatOmieSicrediDryRun,
   normalizeFinancialPartyName,
   reconReportLeaksPii,
@@ -521,11 +523,321 @@ console.log("\n=== Omie ↔ Sicredi recon V1 ===\n");
     ],
   });
   const text = formatOmieSicrediDryRun(result);
-  assert.match(text, /rule_version: omie_sicredi_v1/);
+  assert.match(text, /rule_version: omie_sicredi_v1\.1/);
   assert.doesNotMatch(text, /CLIENTE SINTETICO/);
   assert.doesNotMatch(text, /52998224725/);
   assert.equal(reconReportLeaksPii(text), false);
   ok("dry-run sem PII");
+}
+
+{
+  const debit = entry({
+    id: "nk-d",
+    source_system: "sicredi",
+    source_kind: "bank_debit",
+    direction: "debit",
+    account_code: "sicredi_principal",
+    description: "MOVIMENTO INTERNO",
+    gross_amount_cents: 88000,
+    settlement_date: "2026-02-20",
+  });
+  const credit = entry({
+    id: "nk-c",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_0911",
+    description: "CREDITO CONTA",
+    gross_amount_cents: 88000,
+    settlement_date: "2026-02-20",
+  });
+  const result = reconcileOmieSicredi({ entries: [debit, credit] });
+  assert.equal(result.stats.transfer_high_count, 1);
+  assert.equal(result.transfers[0]?.score_evidence.memo_transfer_signal, false);
+  assert.equal(result.transfers[0]?.score_evidence.unique_counterpart, true);
+  ok("transferência high sem keyword no MEMO");
+}
+
+{
+  const debit = entry({
+    id: "nk2-d",
+    source_system: "sicredi",
+    source_kind: "bank_debit",
+    direction: "debit",
+    account_code: "sicredi_principal",
+    description: "MOVIMENTO A",
+    gross_amount_cents: 44000,
+    settlement_date: "2026-02-21",
+  });
+  const c1 = entry({
+    id: "nk2-c1",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_0911",
+    description: "MOVIMENTO B",
+    gross_amount_cents: 44000,
+    settlement_date: "2026-02-21",
+  });
+  const c2 = { ...c1, id: "nk2-c2", description: "MOVIMENTO C" };
+  const result = reconcileOmieSicredi({ entries: [debit, c1, c2] });
+  assert.equal(result.stats.transfer_high_count, 0);
+  assert.ok(result.stats.transfer_ambiguous_count >= 1);
+  ok("transferência sem keyword com 2 candidatos → ambiguous");
+}
+
+{
+  const o1 = entry({
+    id: "mix-o1",
+    source_system: "omie",
+    source_kind: "omie_receivable",
+    direction: "credit",
+    person_name: "CLIENTE A",
+    settled_amount_cents: 10000,
+    settlement_date: "2026-07-10",
+  });
+  const o2 = entry({
+    id: "mix-o2",
+    source_system: "omie",
+    source_kind: "omie_receivable",
+    direction: "credit",
+    person_name: "CLIENTE B",
+    settled_amount_cents: 15000,
+    settlement_date: "2026-07-10",
+  });
+  const bank = entry({
+    id: "mix-b",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_principal",
+    description: "LOTE DIA",
+    gross_amount_cents: 25000,
+    settlement_date: "2026-07-10",
+  });
+  const result = reconcileOmieSicredi({ entries: [o1, o2, bank] });
+  assert.equal(result.stats.aggregation_count, 1);
+  assert.equal(result.stats.aggregation_ar_count, 1);
+  assert.equal(result.stats.aggregation_ar_entries, 2);
+  ok("2 AR pessoas diferentes → 1 crédito");
+}
+
+{
+  const rows = [1, 2, 3].map((n) =>
+    entry({
+      id: `three-o${n}`,
+      source_system: "omie",
+      source_kind: "omie_receivable",
+      direction: "credit",
+      person_name: "CLIENTE TRIO",
+      settled_amount_cents: 10000 * n,
+      settlement_date: "2026-07-11",
+    }),
+  );
+  const bank = entry({
+    id: "three-b",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_principal",
+    description: "CLIENTE TRIO",
+    gross_amount_cents: 60000,
+    settlement_date: "2026-07-11",
+  });
+  const result = reconcileOmieSicredi({ entries: [...rows, bank] });
+  assert.equal(result.stats.aggregation_count, 1);
+  assert.equal(result.stats.aggregation_entries, 3);
+  ok("3 AR → 1 crédito");
+}
+
+{
+  const o1 = entry({
+    id: "apg-o1",
+    source_system: "omie",
+    source_kind: "omie_payable",
+    direction: "debit",
+    person_name: "FORN LOTE",
+    settled_amount_cents: 30000,
+    settlement_date: "2026-07-12",
+  });
+  const o2 = { ...o1, id: "apg-o2", settled_amount_cents: 20000 };
+  const bank = entry({
+    id: "apg-b",
+    source_system: "sicredi",
+    source_kind: "bank_debit",
+    direction: "debit",
+    account_code: "sicredi_principal",
+    description: "FORN LOTE",
+    gross_amount_cents: 50000,
+    settlement_date: "2026-07-12",
+  });
+  const result = reconcileOmieSicredi({ entries: [o1, o2, bank] });
+  assert.equal(result.stats.aggregation_ap_count, 1);
+  assert.equal(result.stats.aggregation_ap_cents, 50000);
+  ok("2 AP → 1 débito");
+}
+
+{
+  const o1 = entry({
+    id: "win-o1",
+    source_system: "omie",
+    source_kind: "omie_receivable",
+    direction: "credit",
+    person_name: "CLIENTE JANELA",
+    settled_amount_cents: 12000,
+    settlement_date: "2026-07-13",
+  });
+  const o2 = { ...o1, id: "win-o2", settled_amount_cents: 8000, settlement_date: "2026-07-14" };
+  const bank = entry({
+    id: "win-b",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_principal",
+    description: "CLIENTE JANELA",
+    gross_amount_cents: 20000,
+    settlement_date: "2026-07-14",
+  });
+  const result = reconcileOmieSicredi({ entries: [o1, o2, bank] });
+  assert.equal(result.stats.aggregation_count, 1);
+  assert.equal(result.groups.find((g) => g.kind === "many_to_one")?.score_evidence.grouping_layer, "person_window");
+  ok("grupo N:1 em janela D+1");
+}
+
+{
+  const o1 = entry({
+    id: "ambg-o1",
+    source_system: "omie",
+    source_kind: "omie_receivable",
+    direction: "credit",
+    person_name: "CLIENTE AMB",
+    settled_amount_cents: 10000,
+    settlement_date: "2026-07-15",
+  });
+  const o2 = { ...o1, id: "ambg-o2" };
+  const o3 = { ...o1, id: "ambg-o3" };
+  const bank = entry({
+    id: "ambg-b",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_principal",
+    description: "CLIENTE AMB",
+    gross_amount_cents: 20000,
+    settlement_date: "2026-07-15",
+  });
+  const result = reconcileOmieSicredi({ entries: [o1, o2, o3, bank] });
+  assert.equal(result.stats.aggregation_count, 0);
+  assert.ok(result.stats.ambiguous_count >= 1);
+  ok("duas combinações possíveis → ambiguous");
+}
+
+{
+  const rows = Array.from({ length: 9 }, (_, i) =>
+    entry({
+      id: `n9-o${i}`,
+      source_system: "omie",
+      source_kind: "omie_receivable",
+      direction: "credit",
+      person_name: "CLIENTE NOVE",
+      settled_amount_cents: 1000,
+      settlement_date: "2026-07-16",
+    }),
+  );
+  const bank = entry({
+    id: "n9-b",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_principal",
+    description: "CLIENTE NOVE",
+    gross_amount_cents: 9000,
+    settlement_date: "2026-07-16",
+  });
+  const result = reconcileOmieSicredi({ entries: [...rows, bank] });
+  assert.equal(result.stats.aggregation_count, 0);
+  ok("N > 8 não agrupa a soma total");
+}
+
+{
+  const omieHigh = entry({
+    id: "reuse-o",
+    source_system: "omie",
+    source_kind: "omie_receivable",
+    direction: "credit",
+    person_name: "CLIENTE REUSO",
+    settled_amount_cents: 50000,
+    settlement_date: "2026-07-17",
+  });
+  const extra = { ...omieHigh, id: "reuse-o2", settled_amount_cents: 20000, person_name: "OUTRO REUSO" };
+  const bankHigh = entry({
+    id: "reuse-bh",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_principal",
+    description: "CLIENTE REUSO",
+    gross_amount_cents: 50000,
+    settlement_date: "2026-07-17",
+  });
+  const bankLot = entry({
+    id: "reuse-bl",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_principal",
+    description: "LOTE",
+    gross_amount_cents: 70000,
+    settlement_date: "2026-07-17",
+  });
+  const result = reconcileOmieSicredi({ entries: [omieHigh, extra, bankHigh, bankLot] });
+  assert.equal(result.stats.high_count, 1);
+  assert.equal(result.stats.aggregation_count, 0);
+  ok("entry já usada em high não é reutilizada no N:1");
+}
+
+{
+  const o1 = entry({
+    id: "cent-o1",
+    source_system: "omie",
+    source_kind: "omie_receivable",
+    direction: "credit",
+    person_name: "CLIENTE CENT",
+    settled_amount_cents: 10000,
+    settlement_date: "2026-07-18",
+  });
+  const o2 = { ...o1, id: "cent-o2", settled_amount_cents: 10001 };
+  const bank = entry({
+    id: "cent-b",
+    source_system: "sicredi",
+    source_kind: "bank_credit",
+    direction: "credit",
+    account_code: "sicredi_principal",
+    description: "CLIENTE CENT",
+    gross_amount_cents: 20000,
+    settlement_date: "2026-07-18",
+  });
+  const result = reconcileOmieSicredi({ entries: [o1, o2, bank] });
+  assert.equal(result.stats.aggregation_count, 0);
+  ok("lote com centavo diferente não agrupa");
+}
+
+{
+  const pool = Array.from({ length: GROUPING_MAX_CANDIDATES + 1 }, (_, i) =>
+    entry({
+      id: `lim-o${i}`,
+      source_system: "omie",
+      source_kind: "omie_receivable",
+      direction: "credit",
+      person_name: "LIMITE",
+      settled_amount_cents: 100,
+      settlement_date: "2026-07-19",
+    }),
+  );
+  const search = findUniqueSubset(pool, 200);
+  assert.equal(search.status, "limit");
+  if (search.status === "limit") assert.equal(search.reason, "candidates");
+  ok("limite de busca de agrupamento");
 }
 
 {

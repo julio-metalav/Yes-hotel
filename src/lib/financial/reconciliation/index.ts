@@ -2,7 +2,7 @@ export { collectOneToOneCandidates, resolveOneToOneGroups } from "./candidate-se
 export { dateDistanceDays, inPeriod } from "./dates.ts";
 export { reconcileOmieSicredi } from "./engine.ts";
 export { buildFindings } from "./findings.ts";
-export { findManyToOneGroups } from "./grouping.ts";
+export { findManyToOneGroups, findUniqueSubset } from "./grouping.ts";
 export {
   descriptionLooksLikeTransfer,
   findInternalTransferCandidates,
@@ -25,6 +25,7 @@ export {
 } from "./score.ts";
 export {
   AGGREGATION_MAX_N,
+  GROUPING_MAX_CANDIDATES,
   HIGH_SCORE_MIN,
   OMIE_SICREDI_RULE_VERSION,
   RECON_PERIOD_END,

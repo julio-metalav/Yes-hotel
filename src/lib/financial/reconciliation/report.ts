@@ -1,4 +1,4 @@
-import type { ReconResult, ReconSample } from "./types.ts";
+import { GROUPING_MAX_CANDIDATES, type ReconResult, type ReconSample } from "./types.ts";
 
 function formatCents(cents: number): string {
   const sign = cents < 0 ? "-" : "";
@@ -21,17 +21,23 @@ function sampleLine(sample: ReconSample): string {
 
 export function formatOmieSicrediDryRun(result: ReconResult): string {
   const s = result.stats;
+  const layerCount = (layer: string) =>
+    result.groups.filter((group) => group.kind === "many_to_one" && group.score_evidence.grouping_layer === layer).length;
   const lines = [
     `rule_version: ${result.rule_version}`,
     `período: ${s.period_start} → ${s.period_end}`,
     `Sicredi considerado: ${s.sicredi_count} (créditos ${s.sicredi_credit_count}/${formatCents(s.sicredi_credit_cents)}; débitos ${s.sicredi_debit_count}/${formatCents(s.sicredi_debit_cents)})`,
     `Omie AR: ${s.omie_ar_count} settled ${formatCents(s.omie_ar_settled_cents)}`,
     `Omie AP: ${s.omie_ap_count} settled ${formatCents(s.omie_ap_settled_cents)}`,
-    `transferências internas: ${s.transfer_count} (high ${s.transfer_high_count} / ambíguas ${s.transfer_ambiguous_count}) valor high ${formatCents(s.transfer_cents)}`,
+    `transferências internas: ${s.transfer_count} (high ${s.transfer_high_count}/${formatCents(s.transfer_cents)}; ambíguas ${s.transfer_ambiguous_count}/${formatCents(s.transfer_ambiguous_cents)})`,
     `matches 1:1 high: ${s.high_count} / ${formatCents(s.high_cents)}`,
     `matches 1:1 suggested: ${s.suggested_count} / ${formatCents(s.suggested_cents)}`,
     `matches ambiguous: ${s.ambiguous_count} / ${formatCents(s.ambiguous_cents)}`,
-    `groups 1:N: ${s.aggregation_count} / ${formatCents(s.aggregation_cents)}`,
+    `groups N:1: ${s.aggregation_count} grupos / ${s.aggregation_entries} entries / ${formatCents(s.aggregation_cents)} (high ${s.aggregation_high_count}; suggested ${s.aggregation_suggested_count})`,
+    `N:1 camadas: A pessoa+data ${layerCount("person_date")} / B pessoa+D+1 ${layerCount("person_window")} / C lote data ${layerCount("date_batch")} / D lote D+1 ${layerCount("window_batch")}`,
+    `N:1 AR→crédito: ${s.aggregation_ar_count} / ${s.aggregation_ar_entries} entries / ${formatCents(s.aggregation_ar_cents)}`,
+    `N:1 AP→débito: ${s.aggregation_ap_count} / ${s.aggregation_ap_entries} entries / ${formatCents(s.aggregation_ap_cents)}`,
+    `grouping_search_limit: ${s.grouping_search_limit} (candidatos>${GROUPING_MAX_CANDIDATES} ${s.grouping_search_limit_candidates}; combinações ${s.grouping_search_limit_combinations}; tempo ${s.grouping_search_limit_time})`,
     `Omie AR sem banco: ${s.omie_ar_unmatched_count} / ${formatCents(s.omie_ar_unmatched_cents)}`,
     `Omie AP sem banco: ${s.omie_ap_unmatched_count} / ${formatCents(s.omie_ap_unmatched_cents)}`,
     `banco créditos sem Omie: ${s.bank_credit_unmatched_count} / ${formatCents(s.bank_credit_unmatched_cents)}`,

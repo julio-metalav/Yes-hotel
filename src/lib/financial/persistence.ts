@@ -88,6 +88,16 @@ export function scoreEvidenceIsStructured(value: unknown): value is FinancialSco
   }
   if ("direction_match" in row && typeof row.direction_match !== "boolean") return false;
   if ("internal_transfer_excluded" in row && typeof row.internal_transfer_excluded !== "boolean") return false;
+  if ("unique_counterpart" in row && typeof row.unique_counterpart !== "boolean") return false;
+  if ("memo_transfer_signal" in row && typeof row.memo_transfer_signal !== "boolean") return false;
+  if ("grouping_search_limit" in row && typeof row.grouping_search_limit !== "boolean") return false;
+  if (
+    "grouping_layer" in row &&
+    row.grouping_layer != null &&
+    !["person_date", "person_window", "date_batch", "window_batch"].includes(String(row.grouping_layer))
+  ) {
+    return false;
+  }
   return true;
 }
 

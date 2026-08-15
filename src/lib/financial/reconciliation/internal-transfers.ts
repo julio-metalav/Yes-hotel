@@ -6,7 +6,6 @@ import { bankMatchAmountCents } from "./score.ts";
 import {
   OMIE_SICREDI_RULE_VERSION,
   TRANSFER_WINDOW_DAYS,
-  YES_HOTEL_BANK_CODES,
   type InternalTransferCandidate,
   type ReconEntry,
   type YesHotelBankCode,
@@ -24,24 +23,31 @@ export function descriptionLooksLikeTransfer(raw: string | null | undefined): bo
   return TRANSFER_TOKENS.some((token) => normalized.includes(token));
 }
 
-function descriptionCompatible(debit: ReconEntry, credit: ReconEntry): boolean {
-  const debitText = debit.description || debit.person_name;
-  const creditText = credit.description || credit.person_name;
-  const debitHas = Boolean(normalizeFinancialPartyName(debitText));
-  const creditHas = Boolean(normalizeFinancialPartyName(creditText));
-  if (!debitHas && !creditHas) return true;
-  return descriptionLooksLikeTransfer(debitText) || descriptionLooksLikeTransfer(creditText);
+function memoTransferSignal(debit: ReconEntry, credit: ReconEntry): boolean {
+  return descriptionLooksLikeTransfer(debit.description || debit.person_name) ||
+    descriptionLooksLikeTransfer(credit.description || credit.person_name);
 }
 
-function evidence(amount: number, distance: number, counterparts: number): FinancialScoreEvidence {
+function evidence(input: {
+  amount: number;
+  distance: number;
+  unique: boolean;
+  memo: boolean;
+  source: YesHotelBankCode;
+  target: YesHotelBankCode;
+}): FinancialScoreEvidence {
   return {
     amount_exact: true,
-    amount_cents: amount,
-    date_distance_days: distance,
+    amount_cents: input.amount,
+    date_distance_days: input.distance,
     direction_compatible: true,
     direction_match: true,
     same_account: false,
-    candidate_count: counterparts,
+    candidate_count: input.unique ? 1 : 2,
+    unique_counterpart: input.unique,
+    memo_transfer_signal: input.memo,
+    source_account: input.source,
+    target_account: input.target,
     internal_transfer_excluded: false,
     rule_id: OMIE_SICREDI_RULE_VERSION,
   };
@@ -57,8 +63,7 @@ export function findInternalTransferCandidates(entries: readonly ReconEntry[]): 
   );
   const debits = bank.filter((row) => row.direction === "debit");
   const credits = bank.filter((row) => row.direction === "credit");
-  const rawPairs: Array<Omit<InternalTransferCandidate, "confidence" | "counterpart_count"> & { counterpart_count: number }> =
-    [];
+  const rawPairs: InternalTransferCandidate[] = [];
 
   for (const debit of debits) {
     const amount = bankMatchAmountCents(debit);
@@ -69,6 +74,8 @@ export function findInternalTransferCandidates(entries: readonly ReconEntry[]): 
       return dateDistanceDays(debit.settlement_date, credit.settlement_date) <= TRANSFER_WINDOW_DAYS;
     });
     for (const credit of matches) {
+      const unique = matches.length === 1;
+      const memo = memoTransferSignal(debit, credit);
       rawPairs.push({
         debit_entry_id: debit.id,
         credit_entry_id: credit.id,
@@ -76,9 +83,17 @@ export function findInternalTransferCandidates(entries: readonly ReconEntry[]): 
         date_distance_days: dateDistanceDays(debit.settlement_date, credit.settlement_date),
         debit_account: debit.account_code as YesHotelBankCode,
         credit_account: credit.account_code as YesHotelBankCode,
-        description_compatible: descriptionCompatible(debit, credit),
+        description_compatible: memo,
         counterpart_count: matches.length,
-        score_evidence: evidence(amount, dateDistanceDays(debit.settlement_date, credit.settlement_date), matches.length),
+        confidence: unique ? "high" : "ambiguous",
+        score_evidence: evidence({
+          amount,
+          distance: dateDistanceDays(debit.settlement_date, credit.settlement_date),
+          unique,
+          memo,
+          source: debit.account_code as YesHotelBankCode,
+          target: credit.account_code as YesHotelBankCode,
+        }),
       });
     }
   }
@@ -97,20 +112,36 @@ export function findInternalTransferCandidates(entries: readonly ReconEntry[]): 
 
   for (const pair of sorted) {
     const creditCount = creditCounts.get(pair.credit_entry_id) ?? 0;
-    const counterparts = Math.max(pair.counterpart_count, creditCount);
     const unique = pair.counterpart_count === 1 && creditCount === 1;
-    if (!pair.description_compatible) continue;
+    const memo = pair.description_compatible;
+    const next: InternalTransferCandidate = {
+      ...pair,
+      counterpart_count: Math.max(pair.counterpart_count, creditCount),
+      confidence: unique ? "high" : "ambiguous",
+      score_evidence: evidence({
+        amount: pair.amount_cents,
+        distance: pair.date_distance_days,
+        unique,
+        memo,
+        source: pair.debit_account,
+        target: pair.credit_account,
+      }),
+    };
     if (!unique) {
-      out.push({ ...pair, counterpart_count: counterparts, confidence: "ambiguous" });
+      out.push(next);
       continue;
     }
     if (usedDebit.has(pair.debit_entry_id) || usedCredit.has(pair.credit_entry_id)) {
-      out.push({ ...pair, counterpart_count: counterparts, confidence: "ambiguous" });
+      out.push({
+        ...next,
+        confidence: "ambiguous",
+        score_evidence: { ...next.score_evidence, unique_counterpart: false, candidate_count: 2 },
+      });
       continue;
     }
     usedDebit.add(pair.debit_entry_id);
     usedCredit.add(pair.credit_entry_id);
-    out.push({ ...pair, counterpart_count: 1, confidence: "high" });
+    out.push({ ...next, counterpart_count: 1, confidence: "high" });
   }
 
   return out.sort((a, b) => `${a.debit_entry_id}|${a.credit_entry_id}`.localeCompare(`${b.debit_entry_id}|${b.credit_entry_id}`));
@@ -129,5 +160,3 @@ export function transferBankEntryIds(transfers: readonly InternalTransferCandida
 export function stableId(parts: readonly string[]): string {
   return createHash("sha256").update(parts.join("|")).digest("hex");
 }
-
-void YES_HOTEL_BANK_CODES;

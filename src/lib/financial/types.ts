@@ -117,6 +117,12 @@ export type FinancialScoreEvidence = {
   external_id_match?: boolean;
   candidate_count?: number;
   internal_transfer_excluded?: boolean;
+  unique_counterpart?: boolean;
+  memo_transfer_signal?: boolean;
+  source_account?: string;
+  target_account?: string;
+  grouping_layer?: "person_date" | "person_window" | "date_batch" | "window_batch";
+  grouping_search_limit?: boolean;
   rule_id?: string;
 };
 
