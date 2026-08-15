@@ -9,16 +9,15 @@ import type {
   FinancialSourceSystem,
 } from "../types.ts";
 
-export const OMIE_SICREDI_RULE_VERSION = "omie_sicredi_v1.1";
+export const OMIE_SICREDI_RULE_VERSION = "omie_sicredi_v1.2";
 export const RECON_PERIOD_START = "2026-01-01";
 export const RECON_PERIOD_END = "2026-07-31";
 export const MAX_DATE_WINDOW_DAYS = 2;
 export const TRANSFER_WINDOW_DAYS = 1;
 export const AGGREGATION_MAX_N = 8;
 export const AGGREGATION_DATE_WINDOW_DAYS = 1;
-export const GROUPING_MAX_CANDIDATES = 16;
-export const GROUPING_MAX_COMBINATIONS = 2048;
-export const GROUPING_MAX_MS = 20;
+export const GROUPING_MAX_CANDIDATES = 24;
+export const GROUPING_MAX_COMBINATIONS = 8192;
 export const HIGH_SCORE_MIN = 90;
 export const SUGGESTED_SCORE_MIN = 75;
 
@@ -90,6 +89,31 @@ export type ReconFinding = {
   note: string;
 };
 
+export type PossibleAggregationWindow = "same_day" | "d1";
+export type PossibleAggregationDirection = "ar_credit" | "ap_debit";
+
+export type PossibleAggregationCandidate = {
+  bank_entry_id: string;
+  omie_entry_ids: string[];
+  omie_count: number;
+  amount_cents: number;
+  amount_exact: boolean;
+  date_window: PossibleAggregationWindow;
+  unique_combination: boolean;
+  candidate_count: number;
+  search_limit: boolean;
+  direction: PossibleAggregationDirection;
+};
+
+export type PossibleAggregationBucketStats = {
+  bank_count: number;
+  omie_entries: number;
+  amount_cents: number;
+  unique_count: number;
+  ambiguous_count: number;
+  search_limit: number;
+};
+
 export type ScoreHistogram = Record<string, number>;
 
 export type ReconStats = {
@@ -125,11 +149,32 @@ export type ReconStats = {
   aggregation_ap_count: number;
   aggregation_ap_entries: number;
   aggregation_ap_cents: number;
+  aggregation_a_count: number;
+  aggregation_a_entries: number;
+  aggregation_a_cents: number;
+  aggregation_b_count: number;
+  aggregation_b_entries: number;
+  aggregation_b_cents: number;
   grouping_search_limit: number;
   grouping_search_limit_candidates: number;
   grouping_search_limit_combinations: number;
-  grouping_search_limit_time: number;
   transfer_ambiguous_cents: number;
+  possible_agg_c_ar: PossibleAggregationBucketStats;
+  possible_agg_d_ar: PossibleAggregationBucketStats;
+  possible_agg_c_ap: PossibleAggregationBucketStats;
+  possible_agg_d_ap: PossibleAggregationBucketStats;
+  high_entries_consumed: number;
+  high_ar_cents: number;
+  high_ap_cents: number;
+  high_omie_settled_coverage_pct: number;
+  high_bank_credit_coverage_pct: number;
+  high_bank_debit_coverage_pct: number;
+  high_collision_count: number;
+  high_amount_date_only_count: number;
+  high_party_exact_normalized: number;
+  high_party_token_exact: number;
+  high_party_contains_safe: number;
+  high_party_no_match: number;
   omie_ar_unmatched_count: number;
   omie_ar_unmatched_cents: number;
   omie_ap_unmatched_count: number;
@@ -156,6 +201,7 @@ export type ReconResult = {
   transfers: InternalTransferCandidate[];
   groups: ReconGroup[];
   findings: ReconFinding[];
+  possible_aggregations: PossibleAggregationCandidate[];
   stats: ReconStats;
   samples: ReconSample[];
 };

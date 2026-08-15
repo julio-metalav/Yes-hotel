@@ -4,7 +4,7 @@
  * npm run financial:reconcile-omie-sicredi -- --dry-run
  * npm run financial:reconcile-omie-sicredi -- --from-json tmp/recon-entries.json --dry-run
  *
- * Persistência recusada nesta V1.
+ * Persistência recusada nesta V1.2.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";

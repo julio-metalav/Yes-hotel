@@ -2,7 +2,7 @@ export { collectOneToOneCandidates, resolveOneToOneGroups } from "./candidate-se
 export { dateDistanceDays, inPeriod } from "./dates.ts";
 export { reconcileOmieSicredi } from "./engine.ts";
 export { buildFindings } from "./findings.ts";
-export { findManyToOneGroups, findUniqueSubset } from "./grouping.ts";
+export { diagnoseBatchAggregations, findManyToOneGroups, findPersonGrouping, findUniqueSubset } from "./grouping.ts";
 export {
   descriptionLooksLikeTransfer,
   findInternalTransferCandidates,
@@ -34,6 +34,7 @@ export {
 } from "./types.ts";
 export type {
   InternalTransferCandidate,
+  PossibleAggregationCandidate,
   ReconEntry,
   ReconFinding,
   ReconGroup,
