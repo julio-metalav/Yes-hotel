@@ -18,6 +18,8 @@
   var filtersForm = document.querySelector("#fin-filters");
 
   var ANALYSIS_ERROR = "Não foi possível calcular a análise neste momento.";
+  var ANALYSIS_LOADING = "Calculando pendências...";
+  var ENTRY_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   var state = {
     page: 1,
     periodStart: "",
@@ -120,7 +122,8 @@
       return null;
     });
     if (!response.ok) {
-      throw new Error((data && (data.error || data.message)) || "Falha na revisão financeira.");
+      var raw = (data && (data.error || data.message)) || "Falha na revisão financeira.";
+      throw new Error(/invalid input syntax for type uuid/i.test(raw) ? "Identificador financeiro inválido." : raw);
     }
     return data;
   }
@@ -394,8 +397,11 @@
     var filters = currentFilters();
     if (listTitleElement) listTitleElement.textContent = VIEW_TITLES[filters.view] || "Lista";
     setListNote(filters.view);
-    if (listMetaElement) listMetaElement.textContent = "Carregando…";
     var persistedView = filters.view === "high" || filters.view === "internal_transfer";
+    if (listMetaElement) listMetaElement.textContent = persistedView ? "Carregando…" : ANALYSIS_LOADING;
+    if (!persistedView && listBodyElement) {
+      listBodyElement.innerHTML = '<tr><td colspan="9">' + ANALYSIS_LOADING + "</td></tr>";
+    }
     var action = persistedView ? "high_list" : analysisActionFor(filters.view);
     if (action === "analysis") state.analysisLoading = true;
     if (action === "possible_aggregations") state.possibleLoading = true;
@@ -500,16 +506,27 @@
       .join("");
   }
 
-  async function openReviewCase(row) {
-    var filters = currentFilters();
-    var data = await invokeEdge(decideUrl(), "review_case", {
-      omie_entry_id: row.getAttribute("data-omie") || undefined,
-      bank_entry_id: row.getAttribute("data-bank") || undefined,
-      entry_id: row.getAttribute("data-id"),
+  function financialEntryId(value) {
+    var text = String(value || "").trim();
+    return ENTRY_UUID_RE.test(text) ? text : "";
+  }
+
+  function reviewCasePayload(row, filters) {
+    var omieId = financialEntryId(row.getAttribute("data-omie"));
+    var bankId = financialEntryId(row.getAttribute("data-bank"));
+    var payload = {
       period_start: filters.period_start,
       period_end: filters.period_end,
       review_type: filters.view,
-    });
+    };
+    if (omieId) payload.omie_entry_id = omieId;
+    if (bankId) payload.bank_entry_id = bankId;
+    return payload;
+  }
+
+  async function openReviewCase(row) {
+    var filters = currentFilters();
+    var data = await invokeEdge(decideUrl(), "review_case", reviewCasePayload(row, filters));
     var actions = data.allowed_actions || [];
     var decision =
       '<form id="fin-decision-form" class="fin-decision" data-review-type="' +
@@ -565,10 +582,9 @@
     var selected = form.querySelector('input[name="selected_bank_entry_id"]:checked');
     var payload = {
       review_type: form.getAttribute("data-review-type"),
-      omie_entry_id: form.getAttribute("data-omie") || undefined,
-      bank_entry_id: (selected && selected.value) || form.getAttribute("data-bank") || undefined,
-      entry_id: form.getAttribute("data-entry") || undefined,
-      selected_bank_entry_id: selected && selected.value,
+      omie_entry_id: financialEntryId(form.getAttribute("data-omie")) || undefined,
+      bank_entry_id: financialEntryId((selected && selected.value) || form.getAttribute("data-bank")) || undefined,
+      selected_bank_entry_id: selected && financialEntryId(selected.value) || undefined,
       reason: form.reason && form.reason.value,
       period_start: currentFilters().period_start,
       period_end: currentFilters().period_end,
@@ -641,6 +657,9 @@
         var box = document.querySelector("#fin-decision-error");
         if (box) box.textContent = error instanceof Error ? error.message : "Falha ao gravar decisão.";
       });
+    });
+    document.querySelector("#fin-detail-close")?.addEventListener("click", function () {
+      if (detailElement) detailElement.classList.add("hidden");
     });
     logoutButtonElement?.addEventListener("click", async function () {
       if (auth && auth.logout) await auth.logout();

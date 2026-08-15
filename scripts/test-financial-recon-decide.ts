@@ -12,8 +12,12 @@ import {
   buildReviewOnlyPlan,
   collectConservativeCandidates,
   explainEvidence,
+  friendlyDecideError,
+  INVALID_FINANCIAL_ENTRY_ID,
   isDecideAction,
+  isFinancialEntryUuid,
   reconcileOmieSicredi,
+  resolveReviewCaseIds,
   sameDecision,
   suggestedReviewKey,
   uiStatusLabel,
@@ -257,6 +261,33 @@ const nearBank = entry({
   assert.equal(result.stats.high_count, 1);
   assert.equal(result.groups[0]?.status, "auto_matched");
   ok("601-equivalente: high automático continua auto_matched; confirmação humana usa confirmed");
+}
+
+{
+  const hash = "721fb11a847b0e5c27271139eb00244790008ef005d20e36882f4d9ef8d5219e";
+  assert.equal(isFinancialEntryUuid(omie.id), true);
+  assert.equal(isFinancialEntryUuid(bank.id), true);
+  assert.equal(isFinancialEntryUuid(hash), false);
+  const suggestedIds = resolveReviewCaseIds({
+    omie_entry_id: omie.id,
+    bank_entry_id: bank.id,
+    entry_id: hash,
+  });
+  assert.equal(suggestedIds.omie_entry_id, omie.id);
+  assert.equal(suggestedIds.bank_entry_id, bank.id);
+  assert.equal(suggestedIds.lookup_ids.includes(hash), false);
+  const ambiguousIds = resolveReviewCaseIds({ omie_entry_id: omie.id, bank_entry_id: bank.id });
+  assert.equal(ambiguousIds.omie_entry_id, omie.id);
+  const unmatchedOmieIds = resolveReviewCaseIds({ omie_entry_id: omie.id });
+  assert.deepEqual(unmatchedOmieIds.lookup_ids, [omie.id]);
+  const unmatchedBankIds = resolveReviewCaseIds({ bank_entry_id: bank.id });
+  assert.deepEqual(unmatchedBankIds.lookup_ids, [bank.id]);
+  assert.throws(() => resolveReviewCaseIds({ entry_id: hash }), /Identificador financeiro inválido/);
+  assert.throws(() => resolveReviewCaseIds({ omie_entry_id: hash }), /Identificador financeiro inválido/);
+  const mapped = friendlyDecideError(new Error(`invalid input syntax for type uuid: "${hash}"`));
+  assert.equal(mapped.message, INVALID_FINANCIAL_ENTRY_ID);
+  assert.doesNotMatch(mapped.message, /invalid input syntax/);
+  ok("Revisar usa UUIDs reais; hash nunca vai para financial_entries.id; SQL cru não vaza");
 }
 
 {

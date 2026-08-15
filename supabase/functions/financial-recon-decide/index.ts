@@ -7,11 +7,16 @@ import {
   buildReviewOnlyPlan,
   collectConservativeCandidates,
   explainEvidence,
+  friendlyDecideError,
+  INVALID_FINANCIAL_ENTRY_ID,
   isDecideAction,
+  isFinancialEntryUuid,
   maskFitid,
   maskPersonName,
+  parseOptionalFinancialEntryId,
   pendingCounts,
   redactDescription,
+  resolveReviewCaseIds,
   sameDecision,
   toReconEntry,
   type HumanReviewRecord,
@@ -99,12 +104,16 @@ function attachAccountCode(row: Record<string, unknown>, accounts: ReadonlyMap<s
 }
 
 async function loadEntriesByIds(ids: string[]): Promise<ReconEntry[]> {
-  if (!ids.length) return [];
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!unique.length) return [];
+  if (unique.some((id) => !isFinancialEntryUuid(id))) {
+    throw Object.assign(new Error(INVALID_FINANCIAL_ENTRY_ID), { status: 400 });
+  }
   const accounts = await loadAccountCodeById();
   const { data, error } = await adminClient
     .from("financial_entries")
     .select(`${ANALYSIS_ENTRY_SELECT}, open_amount_cents, source_record_id, financial_accounts ( code, account_mask )`)
-    .in("id", ids)
+    .in("id", unique)
     .eq("lifecycle_status", "active");
   if (error) throw new Error(error.message);
   return (data ?? []).map((row) => toReconEntry(attachAccountCode(row as Record<string, unknown>, accounts)));
@@ -354,12 +363,17 @@ Deno.serve(async (request) => {
     }
 
     if (action === "review_case") {
-      const omieId = body.omie_entry_id ? String(body.omie_entry_id) : "";
-      const bankId = body.bank_entry_id ? String(body.bank_entry_id) : "";
-      const focusId = String(body.entry_id ?? omieId ?? bankId);
+      const ids = resolveReviewCaseIds({
+        omie_entry_id: body.omie_entry_id,
+        bank_entry_id: body.bank_entry_id,
+        entry_id: body.entry_id,
+      });
+      const omieId = ids.omie_entry_id ?? "";
+      const bankId = ids.bank_entry_id ?? "";
+      const focusId = omieId || bankId;
       const periodStart = String(body.period_start ?? "2026-01-01");
       const periodEnd = String(body.period_end ?? "2026-07-31");
-      const wanted = [omieId, bankId, focusId].filter(Boolean);
+      const wanted = ids.lookup_ids;
       const [focusEntries, pool, used] = await Promise.all([
         loadEntriesByIds(wanted),
         loadPeriodEntries(periodStart, periodEnd),
@@ -397,15 +411,27 @@ Deno.serve(async (request) => {
       return jsonResponse(payload);
     }
 
-    const omieId = body.omie_entry_id ? String(body.omie_entry_id) : "";
-    const bankId = body.bank_entry_id ? String(body.bank_entry_id) : "";
-    const entryId = body.entry_id ? String(body.entry_id) : "";
+    const writeIds = resolveReviewCaseIds({
+      omie_entry_id: body.omie_entry_id,
+      bank_entry_id: body.bank_entry_id,
+      entry_id: isFinancialEntryUuid(body.entry_id) ? body.entry_id : undefined,
+    });
+    const omieId = writeIds.omie_entry_id ?? "";
+    const bankId = writeIds.bank_entry_id ?? "";
+    const entryId = isFinancialEntryUuid(body.entry_id) ? String(body.entry_id).trim() : "";
     const reviewType = String(body.review_type ?? (omieId && bankId ? "suggested" : omieId ? "unmatched_omie" : "unmatched_bank"));
-    const candidateIds = Array.isArray(body.candidate_entry_ids) ? body.candidate_entry_ids.map(String) : [];
+    const candidateIds = Array.isArray(body.candidate_entry_ids)
+      ? body.candidate_entry_ids.map((id) => {
+          if (!isFinancialEntryUuid(id)) {
+            throw Object.assign(new Error(INVALID_FINANCIAL_ENTRY_ID), { status: 400 });
+          }
+          return String(id).trim();
+        })
+      : [];
 
     if (action === "confirm_match") {
-      const chosenBank = String(body.selected_bank_entry_id ?? bankId);
-      const chosenOmie = String(body.selected_omie_entry_id ?? omieId);
+      const chosenBank = parseOptionalFinancialEntryId(body.selected_bank_entry_id) ?? bankId;
+      const chosenOmie = parseOptionalFinancialEntryId(body.selected_omie_entry_id) ?? omieId;
       const loaded = await loadEntriesByIds([chosenOmie, chosenBank]);
       const omie = loaded.find((row) => row.id === chosenOmie);
       const bank = loaded.find((row) => row.id === chosenBank);
@@ -428,8 +454,8 @@ Deno.serve(async (request) => {
     }
 
     if (action === "mark_internal_transfer") {
-      const debitId = String(body.debit_entry_id ?? "");
-      const creditId = String(body.credit_entry_id ?? "");
+      const debitId = parseOptionalFinancialEntryId(body.debit_entry_id) ?? "";
+      const creditId = parseOptionalFinancialEntryId(body.credit_entry_id) ?? "";
       const periodStart = String(body.period_start ?? "2026-01-01");
       const periodEnd = String(body.period_end ?? "2026-07-31");
       const [pair, pool, used, keys] = await Promise.all([
@@ -476,7 +502,7 @@ Deno.serve(async (request) => {
 
     return jsonResponse({ error: "action nao implementada." }, 400);
   } catch (error) {
-    const status = Number((error as { status?: number }).status ?? 400);
-    return jsonResponse({ error: error instanceof Error ? error.message : "Falha na decisao financeira." }, status);
+    const mapped = friendlyDecideError(error);
+    return jsonResponse({ error: mapped.message }, mapped.status);
   }
 });

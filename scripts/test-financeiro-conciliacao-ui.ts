@@ -80,6 +80,16 @@ assert.doesNotMatch(html, /raw_payload/);
 assert.match(pageSrc, /group_detail/);
 assert.match(pageSrc, /financial-recon-review/);
 assert.match(pageSrc, /data-review/);
+assert.match(pageSrc, /function reviewCasePayload/);
+assert.match(pageSrc, /function financialEntryId/);
+assert.doesNotMatch(pageSrc, /entry_id:\s*row\.getAttribute\("data-id"\)/);
+assert.match(pageSrc, /Calculando pendências/);
+assert.match(html, /Pendências — Suggested/);
+assert.match(html, /fin-detail-close/);
+assert.match(decideSrc, /resolveReviewCaseIds/);
+assert.match(decideSrc, /INVALID_FINANCIAL_ENTRY_ID/);
+assert.match(decideSrc, /friendlyDecideError/);
+assert.match(pageSrc, /Identificador financeiro inválido/);
 ok("UI admin escreve só via edge decide; sem PII/raw payload/service role");
 
 assert.match(pageSrc, /Transferência interna — não é receita nem despesa/);
