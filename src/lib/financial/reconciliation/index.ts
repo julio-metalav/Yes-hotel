@@ -1,3 +1,30 @@
+export {
+  ADMIN_AUDIT_DTO,
+  accountLabel,
+  adminAuditDtoLeaksSensitive,
+  assertAdminAuditDtoSafe,
+  buildAdminReviewCase,
+  candidateStatus,
+  directionLabel,
+  displayImportFilename,
+  omieTypeLabel,
+  partyMatchLabel,
+  presentAdminBank,
+  presentAdminCandidates,
+  presentAdminOmie,
+  presentCorrespondence,
+  sanitizeImportOrigin,
+  toAuditEntry,
+  whyReviewLabel,
+} from "./admin-audit-view.ts";
+export type {
+  AdminBankSide,
+  AdminCandidate,
+  AdminCorrespondence,
+  AdminOmieSide,
+  AuditEntry,
+  ImportOrigin,
+} from "./admin-audit-view.ts";
 export { collectOneToOneCandidates, resolveOneToOneGroups } from "./candidate-search.ts";
 export {
   DECIDE_ACTIONS,

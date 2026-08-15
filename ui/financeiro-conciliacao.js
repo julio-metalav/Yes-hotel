@@ -28,6 +28,7 @@
     analysisKpis: false,
     analysisLoading: false,
     possibleLoading: false,
+    lastAudit: null,
   };
 
   var VIEW_TITLES = {
@@ -93,6 +94,16 @@
   function formatMoneyCents(cents) {
     if (cents == null) return "—";
     return (Number(cents) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  }
+
+  function formatDateBr(value) {
+    var match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return match ? match[3] + "/" + match[2] + "/" + match[1] : String(value || "");
+  }
+
+  function dlRow(label, value) {
+    if (value == null || value === "") return "";
+    return "<dt>" + escapeHtml(label) + "</dt><dd>" + escapeHtml(String(value)) + "</dd>";
   }
 
   function formatCount(value) {
@@ -482,28 +493,284 @@
     }
   }
 
-  function candidateOptions(candidates) {
-    return (candidates || [])
+  function candidateRadioName(reviewType) {
+    return reviewType === "unmatched_bank" ? "selected_omie_entry_id" : "selected_bank_entry_id";
+  }
+
+  function candidateTable(candidates, reviewType) {
+    if (!candidates || !candidates.length) return "";
+    var radioName = candidateRadioName(reviewType);
+    var rows = candidates
       .map(function (row) {
         return (
-          '<label class="fin-candidate">' +
-          '<input type="radio" name="selected_bank_entry_id" value="' +
+          "<tr>" +
+          "<td><input type=\"radio\" name=\"" +
+          radioName +
+          "\" value=\"" +
           escapeHtml(row.entry_id) +
-          '" ' +
+          "\" " +
           (row.diagnostic_only || row.blocked ? "disabled" : "") +
-          " />" +
-          "<span>" +
+          " /></td>" +
+          "<td>" +
+          escapeHtml(formatDateBr(row.settlement_date)) +
+          "</td>" +
+          "<td>" +
           escapeHtml(formatMoneyCents(row.amount_cents)) +
-          " · score " +
-          escapeHtml(row.score == null ? "—" : String(row.score)) +
-          " · " +
-          escapeHtml(row.evidence_label) +
-          (row.diagnostic_only ? " (só diagnóstico)" : "") +
-          (row.blocked ? " (já usado)" : "") +
-          "</span></label>"
+          "</td>" +
+          "<td>" +
+          escapeHtml(row.description || row.person_name || "—") +
+          "</td>" +
+          "<td>" +
+          escapeHtml(row.account_label || row.direction_label || "—") +
+          "</td>" +
+          "<td>" +
+          escapeHtml(row.date_distance_days == null ? "—" : String(row.date_distance_days)) +
+          "</td>" +
+          "<td>" +
+          escapeHtml(row.amount_delta_cents == null ? "—" : formatMoneyCents(row.amount_delta_cents)) +
+          "</td>" +
+          "<td>" +
+          escapeHtml(row.status_label || "—") +
+          (row.blocked ? " · já usado" : "") +
+          "</td></tr>"
         );
       })
       .join("");
+    return (
+      '<div class="fin-table-wrap"><table class="gestao-channel-table fin-table fin-candidate-table">' +
+      "<thead><tr><th></th><th>Data</th><th>Valor</th><th>Nome / histórico</th><th>Conta</th><th>Dias</th><th>Diferença</th><th>Status</th></tr></thead>" +
+      "<tbody>" +
+      rows +
+      "</tbody></table></div>"
+    );
+  }
+
+  function originBlock(title, side) {
+    if (!side) return "";
+    var body =
+      dlRow("Tipo da fonte", side.source_type) +
+      dlRow("Arquivo", side.filename) +
+      dlRow("Parser", side.parser_name) +
+      dlRow("Versão do parser", side.parser_version) +
+      dlRow("Importado em", side.imported_at ? formatDateBr(side.imported_at) : "") +
+      dlRow("Linha da fonte", side.source_row) +
+      dlRow("FITID / registro", side.source_record_id) +
+      dlRow("Conta", side.account_label);
+    if (!body) return "";
+    return "<div><h4>" + escapeHtml(title) + "</h4><dl>" + body + "</dl></div>";
+  }
+
+  function omieAmountCents(omie) {
+    if (!omie) return null;
+    if (omie.settled_amount_cents != null) return omie.settled_amount_cents;
+    return omie.gross_amount_cents;
+  }
+
+  function candidateAsBank(row) {
+    if (!row) return null;
+    return {
+      id: row.entry_id,
+      settlement_date: row.settlement_date,
+      direction_label: row.direction_label,
+      amount_cents: row.amount_cents,
+      account_label: row.account_label,
+      description: row.description,
+      person_name: row.person_name,
+      source_record_id: row.source_record_id,
+      amount_delta_cents: row.amount_delta_cents,
+      date_distance_days: row.date_distance_days,
+    };
+  }
+
+  function displayedBank(data) {
+    if (!data) return null;
+    if (data.review_type === "unmatched_bank") return data.bank || null;
+    var form = document.querySelector("#fin-decision-form");
+    var selected = form && form.querySelector('input[name="selected_bank_entry_id"]:checked');
+    if (selected) {
+      var row = (data.candidates || []).find(function (item) {
+        return item.entry_id === selected.value;
+      });
+      if (row) return candidateAsBank(row);
+    }
+    return data.bank || null;
+  }
+
+  function previewBank(data) {
+    var selected = displayedBank(data);
+    if (selected) return selected;
+    if (!data || data.review_type === "unmatched_bank") return null;
+    var first = (data.candidates || []).find(function (row) {
+      return !row.blocked;
+    });
+    return first ? candidateAsBank(first) : null;
+  }
+
+  function displayedOmie(data) {
+    if (!data) return null;
+    if (data.review_type !== "unmatched_bank") return data.omie || null;
+    var form = document.querySelector("#fin-decision-form");
+    var selected = form && form.querySelector('input[name="selected_omie_entry_id"]:checked');
+    if (selected) {
+      var row = (data.candidates || []).find(function (item) {
+        return item.entry_id === selected.value;
+      });
+      if (row) {
+        return {
+          id: row.entry_id,
+          person_name: row.person_name,
+          settled_amount_cents: row.amount_cents,
+          gross_amount_cents: row.amount_cents,
+        };
+      }
+    }
+    return data.omie || null;
+  }
+
+  function omieSideHtml(omie) {
+    if (!omie) {
+      return (
+        '<div class="fin-omie-empty"><h3>Omie</h3>' +
+        "<p>Nenhum lançamento Omie associado a este movimento.</p></div>"
+      );
+    }
+    return (
+      "<div><h3>Omie</h3><dl>" +
+      dlRow("Pessoa", omie.person_name) +
+      dlRow("Data de pagamento/recebimento", formatDateBr(omie.settlement_date)) +
+      dlRow("Tipo", omie.type_label) +
+      dlRow("Valor original", formatMoneyCents(omie.gross_amount_cents)) +
+      dlRow("Valor pago/recebido", formatMoneyCents(omie.settled_amount_cents)) +
+      dlRow("Saldo em aberto", formatMoneyCents(omie.open_amount_cents)) +
+      dlRow("Impostos", omie.tax_cents == null ? "" : formatMoneyCents(omie.tax_cents)) +
+      dlRow("Descrição", omie.description) +
+      dlRow("Categoria da fonte", omie.category_source) +
+      dlRow("Documento", omie.document_number) +
+      dlRow("Parcela", omie.installment) +
+      dlRow("Emissão", omie.issue_date ? formatDateBr(omie.issue_date) : "") +
+      dlRow("Vencimento", omie.due_date ? formatDateBr(omie.due_date) : "") +
+      dlRow("Competência", omie.competence_date ? formatDateBr(omie.competence_date) : "") +
+      dlRow("Forma de pagamento", omie.payment_method) +
+      dlRow("Referência externa", omie.external_reference) +
+      "</dl></div>"
+    );
+  }
+
+  function sicrediSideHtml(bank, corr) {
+    if (!bank) {
+      return (
+        '<div class="fin-sicredi-empty" id="fin-sicredi-panel">' +
+        "<h3>Possível movimento no Sicredi</h3>" +
+        "<p>Nenhum movimento bancário candidato foi encontrado.</p></div>"
+      );
+    }
+    var amountDelta = bank.amount_delta_cents != null ? bank.amount_delta_cents : corr && corr.amount_delta_cents;
+    var dateDelta = bank.date_distance_days != null ? bank.date_distance_days : corr && corr.date_distance_days;
+    return (
+      '<div id="fin-sicredi-panel"><h3>Possível movimento no Sicredi</h3><dl>' +
+      dlRow("Data", formatDateBr(bank.settlement_date)) +
+      dlRow("Conta Yes", bank.account_label) +
+      dlRow("Crédito/débito", bank.direction_label) +
+      dlRow("Valor", formatMoneyCents(bank.amount_cents)) +
+      dlRow("Histórico bancário", bank.description) +
+      dlRow("Pessoa no extrato", bank.person_name) +
+      dlRow("FITID", bank.source_record_id) +
+      dlRow("Referência bancária", bank.external_reference) +
+      (amountDelta == null ? "" : dlRow("Diferença de valor", formatMoneyCents(amountDelta))) +
+      (dateDelta == null ? "" : dlRow("Diferença de dias", String(dateDelta))) +
+      (bank.looks_like_transfer ? dlRow("Sinal de transferência", "Histórico compatível com transferência interna") : "") +
+      "</dl></div>"
+    );
+  }
+
+  function evidenceHtml(corr) {
+    var lines = (corr && corr.evidence_lines) || [];
+    if (!lines.length && corr) {
+      lines = [corr.amount_delta_label, corr.date_delta_label, corr.party_match_label, corr.why_label].filter(Boolean);
+    }
+    return (
+      '<section class="fin-correspondence"><h3>Evidência</h3><ul>' +
+      lines
+        .map(function (line) {
+          return "<li>" + escapeHtml(line) + "</li>";
+        })
+        .join("") +
+      "</ul></section>"
+    );
+  }
+
+  function hasSelectableCandidate(candidates) {
+    return (candidates || []).some(function (row) {
+      return !row.diagnostic_only && !row.blocked;
+    });
+  }
+
+  function canConfirmPair(data) {
+    var omie = displayedOmie(data);
+    var bank = displayedBank(data);
+    return !!(financialEntryId(omie && omie.id) && financialEntryId(bank && bank.id));
+  }
+
+  function refreshAuditDecision() {
+    var data = state.lastAudit;
+    if (!data) return;
+    var form = document.querySelector("#fin-decision-form");
+    var panel = document.querySelector("#fin-sicredi-panel");
+    var preview = document.querySelector("#fin-associate-preview");
+    var confirmBtn = form && form.querySelector('button[value="confirm_match"]');
+    var bank = displayedBank(data);
+    var omie = displayedOmie(data);
+    if (panel && data.review_type !== "unmatched_bank") {
+      panel.outerHTML = sicrediSideHtml(previewBank(data), data.correspondence || {});
+    }
+    var ready = canConfirmPair(data);
+    if (confirmBtn) confirmBtn.disabled = !ready;
+    if (preview) {
+      if (ready) {
+        preview.hidden = false;
+        preview.textContent =
+          "Você está prestes a associar: Omie " +
+          formatMoneyCents(omieAmountCents(omie)) +
+          " com Sicredi " +
+          formatMoneyCents(bank && bank.amount_cents);
+      } else {
+        preview.hidden = true;
+        preview.textContent = "";
+      }
+    }
+  }
+
+  function renderAdminAudit(data, decisionHtml) {
+    if (!(detailElement instanceof HTMLElement) || !(detailBodyElement instanceof HTMLElement)) return;
+    state.lastAudit = data;
+    detailElement.classList.remove("hidden");
+    var omie = data.omie || null;
+    var bank = previewBank(data);
+    var corr = data.correspondence || {};
+    var tech =
+      '<details class="fin-technical"><summary>Informações técnicas</summary>' +
+      (data.origin ? '<div class="fin-detail-grid">' + originBlock("Omie", data.origin.omie) + originBlock("Sicredi", data.origin.sicredi) + "</div>" : "") +
+      (data.technical
+        ? "<dl>" +
+          dlRow("Regra", data.technical.rule_version) +
+          dlRow("Tipo da fila", data.technical.review_type) +
+          dlRow("Omie entry", data.technical.omie_entry_id) +
+          dlRow("Sicredi entry", data.technical.bank_entry_id) +
+          dlRow("Score", data.technical.score) +
+          dlRow("party_match", data.technical.party_match) +
+          dlRow("candidate_count", data.technical.candidate_count) +
+          "</dl>"
+        : "") +
+      "</details>";
+    detailBodyElement.innerHTML =
+      '<div class="fin-detail-grid">' +
+      omieSideHtml(omie) +
+      sicrediSideHtml(bank, corr) +
+      "</div>" +
+      evidenceHtml(corr) +
+      (decisionHtml || "") +
+      tech;
+    refreshAuditDecision();
   }
 
   function financialEntryId(value) {
@@ -528,6 +795,10 @@
     var filters = currentFilters();
     var data = await invokeEdge(decideUrl(), "review_case", reviewCasePayload(row, filters));
     var actions = data.allowed_actions || [];
+    var showConfirm =
+      actions.indexOf("confirm_match") >= 0 &&
+      !!(data.bank || data.omie) &&
+      !!(data.bank || hasSelectableCandidate(data.candidates));
     var decision =
       '<form id="fin-decision-form" class="fin-decision" data-review-type="' +
       escapeHtml(filters.view) +
@@ -536,15 +807,19 @@
       '" data-bank="' +
       escapeHtml((data.bank && data.bank.id) || "") +
       '" data-entry="' +
-      escapeHtml((data.focus && data.focus.id) || "") +
+      escapeHtml(data.focus_id || "") +
       '"><h3>Decisão</h3>' +
       (data.candidates && data.candidates.length
-        ? "<fieldset><legend>Candidatos</legend>" + candidateOptions(data.candidates) + "</fieldset>"
+        ? '<section class="fin-candidates"><h3>Candidatos</h3>' +
+          candidateTable(data.candidates, filters.view) +
+          "</section>"
         : "") +
-      '<label>Motivo / nota<input name="reason" maxlength="500" /></label>' +
+      '<p id="fin-associate-preview" class="fin-associate-preview" hidden></p>' +
+      '<label class="fin-note-label">Observação da revisão<textarea name="reason" maxlength="500" rows="4" placeholder="Opcional"></textarea></label>' +
       '<p id="fin-decision-error" class="fin-decision-error"></p><div class="fin-decision-actions">';
-    if (actions.indexOf("confirm_match") >= 0) {
-      decision += '<button type="submit" class="op-btn" name="decide" value="confirm_match">Confirmar conciliação</button>';
+    if (showConfirm) {
+      decision +=
+        '<button type="submit" class="op-btn" name="decide" value="confirm_match" disabled>Confirmar conciliação</button>';
     }
     if (actions.indexOf("reject_suggestion") >= 0 && filters.view === "suggested") {
       decision += '<button type="submit" class="op-btn op-btn--ghost" name="decide" value="reject_suggestion">Rejeitar sugestão</button>';
@@ -562,29 +837,28 @@
       decision += '<button type="submit" class="op-btn op-btn--ghost" name="decide" value="mark_possible_aggregation">Possível agrupamento</button>';
     }
     decision += "</div></form>";
-    renderDetail({
-      kind: filters.view === "internal_transfer" ? "internal_transfer" : "AR",
-      status: "pending_review",
-      rule_version: data.rule_version,
-      created_at: null,
-      omie: data.omie,
-      bank: data.bank,
-      transfer_debit: null,
-      transfer_credit: null,
-      evidence_summary: data.evidence_label ? [data.evidence_label] : [],
-      score_evidence: data.score_evidence || {},
-      decision_html: decision,
-    });
+    renderAdminAudit(data, decision);
   }
 
   async function submitDecision(form, submitter) {
-    var action = (submitter && submitter.getAttribute("name") === "decide" && submitter.value) || "confirm_match";
-    var selected = form.querySelector('input[name="selected_bank_entry_id"]:checked');
+    var action = (submitter && submitter.getAttribute("name") === "decide" && submitter.value) || "";
+    var selectedBank = form.querySelector('input[name="selected_bank_entry_id"]:checked');
+    var selectedOmie = form.querySelector('input[name="selected_omie_entry_id"]:checked');
+    var omieId =
+      financialEntryId((selectedOmie && selectedOmie.value) || form.getAttribute("data-omie")) || "";
+    var bankId =
+      financialEntryId((selectedBank && selectedBank.value) || form.getAttribute("data-bank")) || "";
+    if (action === "confirm_match" && (!omieId || !bankId)) {
+      var box = document.querySelector("#fin-decision-error");
+      if (box) box.textContent = "Selecione o movimento Sicredi para confirmar a conciliação.";
+      return;
+    }
     var payload = {
       review_type: form.getAttribute("data-review-type"),
-      omie_entry_id: financialEntryId(form.getAttribute("data-omie")) || undefined,
-      bank_entry_id: financialEntryId((selected && selected.value) || form.getAttribute("data-bank")) || undefined,
-      selected_bank_entry_id: selected && financialEntryId(selected.value) || undefined,
+      omie_entry_id: omieId || undefined,
+      bank_entry_id: bankId || undefined,
+      selected_bank_entry_id: selectedBank && financialEntryId(selectedBank.value) || undefined,
+      selected_omie_entry_id: selectedOmie && financialEntryId(selectedOmie.value) || undefined,
       reason: form.reason && form.reason.value,
       period_start: currentFilters().period_start,
       period_end: currentFilters().period_end,
@@ -601,6 +875,7 @@
       buttons.forEach(function (button) {
         button.disabled = false;
       });
+      refreshAuditDecision();
     }
   }
 
@@ -648,6 +923,12 @@
           detailBodyElement.textContent = error instanceof Error ? error.message : "Falha ao abrir caso.";
         }
       });
+    });
+    detailBodyElement?.addEventListener("change", function (event) {
+      var input = event.target;
+      if (!(input instanceof HTMLInputElement) || input.type !== "radio") return;
+      if (input.name !== "selected_bank_entry_id" && input.name !== "selected_omie_entry_id") return;
+      refreshAuditDecision();
     });
     detailBodyElement?.addEventListener("submit", function (event) {
       var form = event.target;
