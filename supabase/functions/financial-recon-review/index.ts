@@ -455,7 +455,8 @@ Deno.serve(async (request) => {
       return jsonResponse(payload);
     }
 
-    const includePossibleAggregations = action === "possible_aggregations";
+    const includePossibleAggregations =
+      action === "possible_aggregations" || filters.view === "possible_aggregation";
     const fetchStarted = Date.now();
     const [entries, persistedGroups] = await Promise.all([
       loadAnalysisEntries(filters.period_start, filters.period_end),

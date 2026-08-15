@@ -329,6 +329,7 @@ console.log("\n=== Revisão financeira Omie ↔ Sicredi ===\n");
   assert.match(edge, /includePossibleAggregations/);
   assert.match(edge, /includeReportExtras: false/);
   assert.match(edge, /possible_aggregations/);
+  assert.match(edge, /filters\.view === "possible_aggregation"/);
   assert.doesNotMatch(edge, /raw_payload/);
   assert.ok(!ANALYSIS_ENTRY_SELECT.includes("metadata"));
   assert.ok(!ANALYSIS_ENTRY_COLUMNS.includes("open_amount_cents" as never));
