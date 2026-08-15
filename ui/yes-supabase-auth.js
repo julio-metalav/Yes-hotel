@@ -83,6 +83,10 @@
     return user?.role === "admin" || user?.role === "recepcao";
   }
 
+  function canAccessFinancialRecon(user) {
+    return user?.role === "admin";
+  }
+
   function mapProfile(profileRow) {
     if (!profileRow) {
       return null;
@@ -511,6 +515,7 @@
     canAccessUserManagement,
     canAccessBreakfast,
     canAccessManagement,
+    canAccessFinancialRecon,
     hasUsers,
     bootstrapFirstAdmin,
     login,

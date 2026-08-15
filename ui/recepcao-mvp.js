@@ -105,6 +105,13 @@ async function initRecepcaoPage() {
   document.querySelectorAll('[data-nav="gestao"]').forEach((node) => {
     node.classList.toggle("hidden", !canManage);
   });
+  const canFinancial =
+    typeof auth.canAccessFinancialRecon === "function"
+      ? auth.canAccessFinancialRecon(currentUser)
+      : currentUser.role === "admin";
+  document.querySelectorAll('[data-nav="financeiro"]').forEach((node) => {
+    node.classList.toggle("hidden", !canFinancial);
+  });
 
   if (
     sessionUserElement instanceof HTMLElement &&

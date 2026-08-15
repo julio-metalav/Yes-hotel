@@ -27,6 +27,37 @@ export {
 } from "./persist-high.ts";
 export { formatOmieSicrediDryRun, reconReportLeaksPii } from "./report.ts";
 export {
+  REVIEW_ALLOWED_ACTIONS,
+  REVIEW_PAGE_SIZE,
+  REVIEW_VIEW_TYPES,
+  assertReviewDtoSafe,
+  buildAnalysisLists,
+  emptyAnalysisKpis,
+  filterAnalysisRows,
+  formatScoreEvidence,
+  isReviewAction,
+  kpisFromPersisted,
+  maskFitid,
+  maskPersonName,
+  mergeAnalysisKpis,
+  normalizeReviewFilters,
+  paginateRows,
+  redactDescription,
+  reviewDtoLeaksSensitive,
+  sanitizePersistedDetail,
+  sanitizePersistedListRow,
+  summarizeScoreEvidence,
+  toReconEntry,
+} from "./review-view.ts";
+export type {
+  ReviewAction,
+  ReviewFilters,
+  ReviewGroupDetail,
+  ReviewKpis,
+  ReviewListRow,
+  ReviewViewType,
+} from "./review-view.ts";
+export {
   bandForScore,
   bankMatchAmountCents,
   directionCompatible,

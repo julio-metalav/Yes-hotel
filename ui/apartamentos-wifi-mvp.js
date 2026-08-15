@@ -46,6 +46,13 @@
     document.querySelectorAll('[data-nav="gestao"]').forEach(function (node) {
       node.classList.toggle("hidden", !canManage);
     });
+    var canFinancial =
+      typeof auth.canAccessFinancialRecon === "function"
+        ? auth.canAccessFinancialRecon(user)
+        : user.role === "admin";
+    document.querySelectorAll('[data-nav="financeiro"]').forEach(function (node) {
+      node.classList.toggle("hidden", !canFinancial);
+    });
 
     return auth.getSupabaseClient();
   }

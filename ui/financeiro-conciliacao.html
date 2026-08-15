@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yes Hotel — Conciliação financeira</title>
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=53" />
+    <link rel="stylesheet" href="./gestao-saude-hotel.css?v=2" />
+    <link rel="stylesheet" href="./financeiro-conciliacao.css?v=1" />
+  </head>
+  <body class="op-body checkin-view gestao-view fin-recon-view">
+    <div id="access-state" class="op-access hidden" aria-live="polite"></div>
+
+    <div id="content-panel" class="op-app hidden">
+      <aside class="yes-sidebar" id="fin-sidebar" aria-label="Áreas operacionais">
+        <div class="yes-sidebar-brand">
+          <img src="./assets/yes-hotel-logo.png" alt="Yes Hotel" width="153" height="89" />
+          <button
+            type="button"
+            class="op-icon-button yes-sidebar-close"
+            id="fin-sidebar-close"
+            aria-label="Fechar menu"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <nav aria-label="Navegação principal">
+          <span class="yes-sidebar-label">Áreas operacionais</span>
+          <a href="./checkin-operacional-mvp.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
+            </svg>
+            <span>Operação</span>
+          </a>
+          <a href="./cafe-da-manha-mvp.html" data-nav="cafe">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17 8h1a3 3 0 1 1 0 6h-1M3 8h14v7a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Zm3-6v3M10 2v3M14 2v3" />
+            </svg>
+            <span>Café da manhã</span>
+          </a>
+          <a href="./gestao-saude-hotel.html" data-nav="gestao">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 3v18h18M7 16v-5M12 16V8M17 16v-9" />
+            </svg>
+            <span>Gestão</span>
+          </a>
+          <a class="active" href="./financeiro-conciliacao.html" aria-current="page" data-nav="financeiro">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v18M4 8h6l-2.5 5H4Zm10 0h6l-2.5 5H14Z" />
+            </svg>
+            <span>Conciliação</span>
+          </a>
+        </nav>
+        <div class="yes-sidebar-foot">
+          Financeiro · Omie ↔ Sicredi<br />
+          <strong>Somente leitura · admin</strong>
+        </div>
+      </aside>
+
+      <button
+        type="button"
+        class="op-sidebar-backdrop"
+        id="fin-sidebar-backdrop"
+        aria-label="Fechar navegação"
+        tabindex="-1"
+      ></button>
+
+      <div class="yes-workspace">
+        <header class="op-header">
+          <div class="op-header__left">
+            <button
+              type="button"
+              class="op-icon-button op-menu-toggle"
+              id="fin-menu-toggle"
+              aria-label="Abrir menu"
+              aria-controls="fin-sidebar"
+              aria-expanded="false"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <img
+              class="op-header-logo"
+              src="./assets/yes-hotel-logo.png"
+              alt="Yes Hotel"
+              width="153"
+              height="89"
+            />
+            <div class="op-header__heading">
+              <span class="op-header__eyebrow">Financeiro</span>
+              <h1 class="op-header__title">Conciliação</h1>
+            </div>
+          </div>
+          <div class="op-header__right">
+            <p id="session-user" class="op-header__user" aria-live="polite">
+              <strong id="fin-session-user-name"></strong>
+              <span id="fin-session-user-role" class="op-header__role"></span>
+            </p>
+            <button type="button" class="op-btn op-btn--ghost" id="logout-button">
+              <span>Sair</span>
+            </button>
+          </div>
+        </header>
+
+        <main class="op-content gestao-content">
+          <div class="gestao-demo-banner" role="status">
+            SOMENTE LEITURA — Omie ↔ Sicredi — análise V1.2 em memória não persiste suggested/ambiguous
+          </div>
+          <p class="gestao-footnote">
+            High e transferências internas vêm das tabelas persistidas. Suggested, ambiguous e não
+            conciliados são calculados no servidor sem gravação. Transferência interna não entra em
+            receita/despesa.
+          </p>
+
+          <section class="yes-kpis gestao-kpis fin-kpis" id="fin-kpis" aria-label="Indicadores financeiros"></section>
+
+          <section class="gestao-panel" aria-labelledby="fin-filters-title">
+            <h2 id="fin-filters-title">Filtros</h2>
+            <form id="fin-filters" class="fin-filters" action="#" method="get">
+              <label>
+                De
+                <input type="date" name="period_start" id="fin-period-start" />
+              </label>
+              <label>
+                Até
+                <input type="date" name="period_end" id="fin-period-end" />
+              </label>
+              <label>
+                Origem
+                <select name="origin" id="fin-origin">
+                  <option value="all">Todas</option>
+                  <option value="omie">Omie</option>
+                  <option value="sicredi">Sicredi</option>
+                </select>
+              </label>
+              <label>
+                Tipo
+                <select name="view" id="fin-view">
+                  <option value="high">Reconciliado high</option>
+                  <option value="suggested">Suggested</option>
+                  <option value="ambiguous">Ambiguous</option>
+                  <option value="unmatched_omie">Não conciliado Omie</option>
+                  <option value="unmatched_bank">Não conciliado banco</option>
+                  <option value="internal_transfer">Transferência interna</option>
+                  <option value="possible_aggregation">Possíveis agrupamentos</option>
+                </select>
+              </label>
+              <label>
+                Direção
+                <select name="direction" id="fin-direction">
+                  <option value="all">Todas</option>
+                  <option value="credit">Crédito</option>
+                  <option value="debit">Débito</option>
+                </select>
+              </label>
+              <label>
+                Conta Sicredi
+                <select name="account_code" id="fin-account">
+                  <option value="all">Todas</option>
+                </select>
+              </label>
+              <button type="submit" class="op-btn" id="fin-apply-filters">Aplicar filtros</button>
+            </form>
+          </section>
+
+          <section class="gestao-panel" aria-labelledby="fin-list-title">
+            <div class="fin-list-head">
+              <h2 id="fin-list-title">Conciliados high</h2>
+              <p id="fin-list-meta" class="fin-list-meta"></p>
+            </div>
+            <p id="fin-list-note" class="fin-list-note" hidden></p>
+            <div class="fin-table-wrap">
+              <table class="gestao-channel-table fin-table">
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Tipo</th>
+                    <th>Valor</th>
+                    <th>Omie</th>
+                    <th>Sicredi</th>
+                    <th>Status</th>
+                    <th>Score</th>
+                    <th>Evidência</th>
+                  </tr>
+                </thead>
+                <tbody id="fin-list-body">
+                  <tr>
+                    <td colspan="8">Carregando…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="fin-pager" id="fin-pager"></div>
+          </section>
+
+          <section class="gestao-panel fin-detail hidden" id="fin-detail" aria-labelledby="fin-detail-title">
+            <h2 id="fin-detail-title">Detalhe</h2>
+            <div id="fin-detail-body"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script defer src="./yes-supabase-config.js"></script>
+    <script defer src="./yes-supabase-auth.js"></script>
+    <script defer src="./financeiro-conciliacao.js?v=1"></script>
+  </body>
+</html>

@@ -360,6 +360,13 @@
     document.querySelectorAll('[data-nav="cafe"]').forEach(function (node) {
       node.classList.toggle("hidden", !canBreakfast);
     });
+    var canFinancial =
+      typeof auth.canAccessFinancialRecon === "function"
+        ? auth.canAccessFinancialRecon(currentUser)
+        : currentUser.role === "admin";
+    document.querySelectorAll('[data-nav="financeiro"]').forEach(function (node) {
+      node.classList.toggle("hidden", !canFinancial);
+    });
 
     if (!historico || !historico.periods) {
       showAccessState(
