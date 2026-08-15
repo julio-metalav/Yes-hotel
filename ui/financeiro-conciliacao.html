@@ -175,7 +175,7 @@
 
           <section class="gestao-panel" aria-labelledby="fin-list-title">
             <div class="fin-list-head">
-              <h2 id="fin-list-title">Conciliados high</h2>
+              <h2 id="fin-list-title">Pendências — Suggested</h2>
               <p id="fin-list-meta" class="fin-list-meta"></p>
             </div>
             <p id="fin-list-note" class="fin-list-note" hidden></p>
@@ -196,7 +196,7 @@
                 </thead>
                 <tbody id="fin-list-body">
                   <tr>
-                    <td colspan="9">Carregando…</td>
+                    <td colspan="9">Calculando pendências...</td>
                   </tr>
                 </tbody>
               </table>
@@ -205,7 +205,10 @@
           </section>
 
           <section class="gestao-panel fin-detail hidden" id="fin-detail" aria-labelledby="fin-detail-title">
-            <h2 id="fin-detail-title">Detalhe</h2>
+            <div class="fin-list-head">
+              <h2 id="fin-detail-title">Detalhe</h2>
+              <button type="button" class="op-btn op-btn--ghost" id="fin-detail-close">Fechar</button>
+            </div>
             <div id="fin-detail-body"></div>
           </section>
         </main>
@@ -215,6 +218,6 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
-    <script defer src="./financeiro-conciliacao.js?v=3"></script>
+    <script defer src="./financeiro-conciliacao.js?v=4"></script>
   </body>
 </html>

@@ -121,6 +121,59 @@ export function isDecideAction(value: unknown): value is DecideAction {
   return typeof value === "string" && (DECIDE_ACTIONS as readonly string[]).includes(value);
 }
 
+export const INVALID_FINANCIAL_ENTRY_ID = "Identificador financeiro inválido.";
+const FINANCIAL_ENTRY_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isFinancialEntryUuid(value: unknown): value is string {
+  return typeof value === "string" && FINANCIAL_ENTRY_UUID_RE.test(value.trim());
+}
+
+export function parseOptionalFinancialEntryId(value: unknown): string | null {
+  if (value == null) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  if (!isFinancialEntryUuid(trimmed)) {
+    throw Object.assign(new Error(INVALID_FINANCIAL_ENTRY_ID), { status: 400 });
+  }
+  return trimmed;
+}
+
+export function resolveReviewCaseIds(input: {
+  omie_entry_id?: unknown;
+  bank_entry_id?: unknown;
+  entry_id?: unknown;
+}): { omie_entry_id: string | null; bank_entry_id: string | null; lookup_ids: string[] } {
+  const omie_entry_id = parseOptionalFinancialEntryId(input.omie_entry_id);
+  const bank_entry_id = parseOptionalFinancialEntryId(input.bank_entry_id);
+  let extra: string | null = null;
+  if (input.entry_id != null && String(input.entry_id).trim()) {
+    const raw = String(input.entry_id).trim();
+    if (isFinancialEntryUuid(raw)) extra = raw;
+    else if (!omie_entry_id && !bank_entry_id) {
+      throw Object.assign(new Error(INVALID_FINANCIAL_ENTRY_ID), { status: 400 });
+    }
+  }
+  const lookup_ids = [...new Set([omie_entry_id, bank_entry_id, extra].filter((id): id is string => !!id))];
+  if (!lookup_ids.length) {
+    throw Object.assign(new Error(INVALID_FINANCIAL_ENTRY_ID), { status: 400 });
+  }
+  return { omie_entry_id, bank_entry_id, lookup_ids };
+}
+
+export function isRawUuidSqlError(message: string): boolean {
+  return /invalid input syntax for type uuid/i.test(message);
+}
+
+export function friendlyDecideError(error: unknown): { message: string; status: number } {
+  const status = Number((error as { status?: number }).status ?? 400);
+  const message = error instanceof Error ? error.message : "Falha na decisao financeira.";
+  if (isRawUuidSqlError(message)) {
+    return { message: INVALID_FINANCIAL_ENTRY_ID, status: 400 };
+  }
+  return { message, status };
+}
+
 export function humanReviewKey(parts: readonly string[]): string {
   return createHash("sha256").update(parts.join("|")).digest("hex");
 }

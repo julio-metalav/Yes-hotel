@@ -275,6 +275,10 @@ console.log("\n=== Revisão financeira Omie ↔ Sicredi ===\n");
   assert.ok(lists.suggested.every((row) => row.persisted === false));
   assert.ok(lists.unmatched_omie.some((row) => row.label === "Não conciliado"));
   assert.ok(lists.unmatched_bank.some((row) => row.label === "Não conciliado"));
+  assert.ok(lists.suggested.every((row) => !!row.omie_entry_id && !!row.bank_entry_id));
+  assert.ok(lists.suggested.every((row) => row.id !== row.omie_entry_id && row.id !== row.bank_entry_id));
+  assert.ok(lists.unmatched_omie.every((row) => row.omie_entry_id === row.id && !row.bank_entry_id));
+  assert.ok(lists.unmatched_bank.every((row) => row.bank_entry_id === row.id && !row.omie_entry_id));
   const filtered = filterAnalysisRows(lists.unmatched_bank, {
     origin: "sicredi",
     direction: "credit",
@@ -305,7 +309,7 @@ console.log("\n=== Revisão financeira Omie ↔ Sicredi ===\n");
   assert.equal(kpis.high_unpersisted_count, 0);
   assert.ok((kpis.unmatched_omie_count ?? 0) >= 1);
   assertReviewDtoSafe({ lists, kpis });
-  ok("suggested/ambiguous/unmatched read-only via engine");
+  ok("suggested/ambiguous/unmatched read-only via engine; DTO carrega IDs reais das entries");
 }
 
 {
