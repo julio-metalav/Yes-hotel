@@ -89,8 +89,8 @@ assert.match(pageSrc, /possible_aggregations/);
 assert.match(pageSrc, /Não foi possível calcular a análise neste momento/);
 assert.match(pageSrc, /High recomputado/);
 assert.match(pageSrc, /ainda não persistidos/);
-assert.match(pageSrc, /Lista persistida: 593 high/);
-assert.match(html, /High persistido: 593/);
+assert.match(pageSrc, /Lista persistida: 601 high/);
+assert.match(html, /High persistido: 601/);
 assert.match(html, /601 high/);
 ok("internal transfer, unmatched e possible aggregation com etiquetas corretas");
 

@@ -15,16 +15,22 @@ export {
   normalizeFinancialPartyName,
 } from "./normalize-party.ts";
 export {
+  OMIE_SICREDI_HIGH_DELTA_EXPECT,
   OMIE_SICREDI_HIGH_PERSIST_EXPECT,
   OMIE_SICREDI_LIVE_ANALYSIS_EXPECT,
   YES_HOTEL_HOMO_REF,
+  assertHighDeltaCount,
   assertHighPersistSnapshot,
   assertHomoReconciliationGate,
+  assertIncrementalHighGroups,
+  assertLiveRecomputeSnapshot,
   buildHighPersistPlan,
+  diffHighPersistPlan,
   emitHighPersistSql,
   isYesHotelHomoUrl,
   reconciliationKey,
   summarizeHighPersistPlan,
+  toDeltaPersistPlan,
 } from "./persist-high.ts";
 export { formatOmieSicrediDryRun, reconReportLeaksPii } from "./report.ts";
 export {

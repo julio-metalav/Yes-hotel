@@ -347,7 +347,7 @@
       unmatched_bank: "Não conciliado. Não é erro nem fraude.",
       possible_aggregation: "Diagnóstico — não conciliado. Sem confirmação.",
       internal_transfer: "Transferência interna — não misturar com receita/despesa.",
-      high: "Lista persistida: 593 high. Analysis recomputa 601; 8 ainda não persistidos.",
+      high: "Lista persistida: 601 high. Analysis recomputa 601; delta 0.",
     };
     var text = notes[view] || "";
     listNoteElement.hidden = !text;
