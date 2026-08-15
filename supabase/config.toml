@@ -79,3 +79,7 @@ verify_jwt = false
 # Revisão financeira Omie ↔ Sicredi. Somente leitura. Auth própria (JWT admin).
 [functions.financial-recon-review]
 verify_jwt = false
+
+# Decisão humana de conciliação. Escrita isolada. Auth própria (JWT admin).
+[functions.financial-recon-decide]
+verify_jwt = false

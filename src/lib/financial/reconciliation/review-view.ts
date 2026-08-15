@@ -2,6 +2,7 @@
  * DTO de revisão financeira Omie ↔ Sicredi (PR F).
  * Somente leitura. Não persiste suggested/ambiguous. Não altera o motor.
  */
+import { explainEvidence } from "./human-review.ts";
 import { reconReportLeaksPii } from "./report.ts";
 import { bankMatchAmountCents, omieMatchAmountCents } from "./score.ts";
 import {
@@ -126,9 +127,13 @@ export type ReviewListRow = {
   status: string;
   score: number | null;
   evidence_summary: string[];
+  evidence_label: string | null;
   persisted: boolean;
   diagnostic_only: boolean;
   label: string;
+  omie_entry_id: string | null;
+  bank_entry_id: string | null;
+  candidate_entry_ids: string[];
 };
 
 export type ReviewOmieSide = {
@@ -198,7 +203,7 @@ export function normalizeReviewFilters(input: {
   defaultEnd: string;
 }): ReviewFilters {
   const origin = input.origin === "omie" || input.origin === "sicredi" ? input.origin : "all";
-  const view = isReviewViewType(input.view) ? input.view : "high";
+  const view = isReviewViewType(input.view) ? input.view : "suggested";
   const direction = input.direction === "credit" || input.direction === "debit" ? input.direction : "all";
   const page = Number.isInteger(input.page) && Number(input.page) > 0 ? Number(input.page) : 1;
   const pageSize =
@@ -472,9 +477,13 @@ export function sanitizePersistedListRow(input: {
     status: input.status,
     score: input.confidence,
     evidence_summary: summarizeScoreEvidence(input.score_evidence, input.rule_version ?? OMIE_SICREDI_RULE_VERSION),
+    evidence_label: explainEvidence(input.confidence, input.score_evidence),
     persisted: true,
     diagnostic_only: false,
-    label: isTransfer ? "Transferência interna" : "Conciliado high",
+    label: isTransfer ? "Transferência interna" : "Conciliado automaticamente",
+    omie_entry_id: input.omie?.id ?? null,
+    bank_entry_id: input.bank?.id ?? null,
+    candidate_entry_ids: [],
   };
 }
 
@@ -514,6 +523,10 @@ export function sanitizePersistedDetail(input: {
     transfer_credit: isTransfer && input.credit ? bankSide(input.credit, input.credit_mask ?? null) : null,
     score_evidence: formatScoreEvidence(input.score_evidence),
     evidence_summary: summarizeScoreEvidence(input.score_evidence, input.rule_version ?? OMIE_SICREDI_RULE_VERSION),
+    evidence_label: null,
+    omie_entry_id: input.omie?.id ?? null,
+    bank_entry_id: input.bank?.id ?? null,
+    candidate_entry_ids: [],
   };
 }
 
@@ -540,9 +553,13 @@ export function sanitizeAnalysisGroupRow(
     status: group.status,
     score: group.confidence,
     evidence_summary: summarizeScoreEvidence(group.score_evidence, group.rule_version),
+    evidence_label: explainEvidence(group.confidence, group.score_evidence),
     persisted: false,
     diagnostic_only: false,
-    label: group.band === "suggested" ? "Suggested — não persistido" : "Ambiguous — não persistido",
+    label: group.band === "suggested" ? "Suggested — pendente de auditoria" : "Ambiguous — pendente de auditoria",
+    omie_entry_id: omie?.id ?? null,
+    bank_entry_id: bank?.id ?? null,
+    candidate_entry_ids: group.bank_entry_ids,
   };
 }
 
@@ -560,9 +577,13 @@ export function sanitizeUnmatchedRow(entry: ReconEntry, side: "omie" | "bank"): 
     status: "unmatched",
     score: null,
     evidence_summary: ["Não conciliado"],
+    evidence_label: "Não conciliado. Não é erro nem fraude.",
     persisted: false,
     diagnostic_only: false,
     label: "Não conciliado",
+    omie_entry_id: side === "omie" ? entry.id : null,
+    bank_entry_id: side === "bank" ? entry.id : null,
+    candidate_entry_ids: [],
   };
 }
 
@@ -587,9 +608,13 @@ export function sanitizePossibleAggregationRow(
       row.date_window === "same_day" ? "D0" : "D+1",
       row.unique_combination ? "unique" : "ambiguous",
     ],
+    evidence_label: "Diagnóstico de possível agrupamento. Sem confirmação automática.",
     persisted: false,
     diagnostic_only: true,
     label: "Diagnóstico — não conciliado",
+    omie_entry_id: row.omie_entry_ids[0] ?? null,
+    bank_entry_id: row.bank_entry_id,
+    candidate_entry_ids: row.omie_entry_ids,
   };
 }
 
@@ -644,12 +669,16 @@ export function buildAnalysisLists(result: ReconResult, entries: readonly ReconE
   const unmatchedBank = entries
     .filter((row) => inReviewScope(row) && row.source_system === "sicredi" && !consumed.has(row.id))
     .map((row) => sanitizeUnmatchedRow(row, "bank"));
+  const byAmount = <T extends { amount_cents: number }>(rows: T[]) =>
+    [...rows].sort((a, b) => b.amount_cents - a.amount_cents);
   return {
-    suggested,
-    ambiguous,
-    unmatched_omie: unmatchedOmie,
-    unmatched_bank: unmatchedBank,
-    possible_aggregation: result.possible_aggregations.map((row) => sanitizePossibleAggregationRow(row, byId)),
+    suggested: byAmount(suggested),
+    ambiguous: byAmount(ambiguous),
+    unmatched_omie: byAmount(unmatchedOmie),
+    unmatched_bank: byAmount(unmatchedBank),
+    possible_aggregation: byAmount(
+      result.possible_aggregations.map((row) => sanitizePossibleAggregationRow(row, byId)),
+    ),
   };
 }
 

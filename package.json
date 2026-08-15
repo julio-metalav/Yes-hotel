@@ -81,6 +81,7 @@
     "financial:import-omie-ar-ap": "tsx scripts/import-financial-omie-ar-ap.ts",
     "test:yes:financial-omie-sicredi-recon": "tsx scripts/test-financial-omie-sicredi-recon.ts",
     "test:yes:financial-recon-review": "tsx scripts/test-financial-recon-review.ts",
+    "test:yes:financial-recon-decide": "tsx scripts/test-financial-recon-decide.ts",
     "test:yes:financeiro-conciliacao-ui": "tsx scripts/test-financeiro-conciliacao-ui.ts",
     "financial:reconcile-omie-sicredi": "tsx scripts/reconcile-financial-omie-sicredi.ts",
     "test:yes:gestao-saude-hotel-ui": "tsx scripts/test-gestao-saude-hotel-ui.ts",

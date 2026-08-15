@@ -110,6 +110,32 @@
   padding-left: 18px;
 }
 
+.fin-recon-view .fin-decision {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--op-border);
+}
+
+.fin-recon-view .fin-decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.fin-recon-view .fin-candidate {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+.fin-recon-view .fin-decision-error {
+  color: #b42318;
+  min-height: 1.2em;
+}
+
 .fin-recon-view .fin-transfer-note {
   margin: 0 0 12px;
   padding: 8px 10px;
