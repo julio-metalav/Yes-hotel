@@ -311,11 +311,11 @@ console.log("\n=== Revisão financeira Omie ↔ Sicredi ===\n");
 {
   const live = OMIE_SICREDI_LIVE_ANALYSIS_EXPECT;
   const persisted = OMIE_SICREDI_HIGH_PERSIST_EXPECT;
-  assert.equal(persisted.high_count, 593);
-  assert.equal(live.high_persisted_count, 593);
+  assert.equal(persisted.high_count, 601);
+  assert.equal(live.high_persisted_count, 601);
   assert.equal(live.high_recomputed_count, 601);
-  assert.equal(live.high_unpersisted_count, 8);
-  assert.equal(live.high_recomputed_count - live.high_persisted_count, 8);
+  assert.equal(live.high_unpersisted_count, 0);
+  assert.equal(live.high_recomputed_count - live.high_persisted_count, 0);
   assert.equal(live.suggested_count, 819);
   assert.equal(live.ambiguous_count, 20);
   const kpis = mergeAnalysisKpis(
@@ -355,10 +355,10 @@ console.log("\n=== Revisão financeira Omie ↔ Sicredi ===\n");
       possible_agg_d_ap: { bank_count: 0, omie_entries: 0, amount_cents: 0, unique_count: 0, ambiguous_count: 0, search_limit: 0 },
     } as Parameters<typeof mergeAnalysisKpis>[1],
   );
-  assert.equal(kpis.high_count, 593);
+  assert.equal(kpis.high_count, 601);
   assert.equal(kpis.high_recomputed_count, 601);
-  assert.equal(kpis.high_unpersisted_count, 8);
-  ok("contrato live 601 vs persistido 593; delta 8 não persistido");
+  assert.equal(kpis.high_unpersisted_count, 0);
+  ok("contrato live 601 persistido = recomputado; delta 0");
 }
 
 {

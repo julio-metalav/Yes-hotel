@@ -9,11 +9,16 @@ import { fileURLToPath } from "node:url";
 import { scoreEvidenceIsStructured } from "../src/lib/financial/index.ts";
 import {
   GROUPING_MAX_CANDIDATES,
+  OMIE_SICREDI_HIGH_DELTA_EXPECT,
+  OMIE_SICREDI_HIGH_PERSIST_EXPECT,
   OMIE_SICREDI_RULE_VERSION,
+  assertHighDeltaCount,
   assertHighPersistSnapshot,
   assertHomoReconciliationGate,
+  assertIncrementalHighGroups,
   buildHighPersistPlan,
   compareFinancialParty,
+  diffHighPersistPlan,
   descriptionLooksLikeTransfer,
   emitHighPersistSql,
   findInternalTransferCandidates,
@@ -25,6 +30,7 @@ import {
   reconcileOmieSicredi,
   reconciliationKey,
   scoreOmieBankPair,
+  toDeltaPersistPlan,
   type ReconEntry,
 } from "../src/lib/financial/reconciliation/index.ts";
 
@@ -1177,6 +1183,13 @@ console.log("\n=== Omie ↔ Sicredi recon V1.2 ===\n");
   );
   assert.notEqual(persistHighNoGate.status, 0);
   assert.match(persistHighNoGate.stderr + persistHighNoGate.stdout, /Persistência recusada/i);
+  const persistDeltaNoGate = spawnSync(
+    process.execPath,
+    [tsxCli, "scripts/reconcile-financial-omie-sicredi.ts", "--from-json", file, "--persist-high-delta"],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.notEqual(persistDeltaNoGate.status, 0);
+  assert.match(persistDeltaNoGate.stderr + persistDeltaNoGate.stdout, /Persistência recusada/i);
   ok("CLI dry-run; persistência recusada");
 }
 
@@ -1361,6 +1374,108 @@ console.log("\n=== Omie ↔ Sicredi recon V1.2 ===\n");
   });
   assert.throws(() => assertHighPersistSnapshot(tiny), /divergiu do contrato high/);
   ok("gate HOMO/PROD e snapshot high");
+}
+
+{
+  const suffixes = ["ALFA", "BETA", "GAMA", "DELTA", "EPSL", "ZETA", "ETA", "THETA"] as const;
+  const amounts = [60550, 57100, 34450, 30275, 38712, 86924, 34450, 57350] as const;
+  const entries: ReconEntry[] = suffixes.flatMap((suffix, i) => {
+    const n = String(i + 1).padStart(2, "0");
+    return [
+      entry({
+        id: `bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb${n}`,
+        source_system: "omie",
+        source_kind: "omie_receivable",
+        direction: "credit",
+        person_name: `HOTEL YES CENTRO ${suffix}`,
+        settled_amount_cents: amounts[i],
+        settlement_date: "2026-03-10",
+      }),
+      entry({
+        id: `cccccccc-cccc-4ccc-8ccc-cccccccccc${n}`,
+        source_system: "sicredi",
+        source_kind: "bank_credit",
+        direction: "credit",
+        account_code: "sicredi_principal",
+        description: `YES CENTRO ${suffix}`,
+        gross_amount_cents: amounts[i],
+        settlement_date: "2026-03-10",
+      }),
+    ];
+  });
+  const result = reconcileOmieSicredi({ entries });
+  assert.equal(result.stats.high_count, 8);
+  assert.equal(result.stats.high_cents, OMIE_SICREDI_HIGH_DELTA_EXPECT.missing_cents);
+  assert.equal(result.stats.high_party_token_exact, 8);
+  const plan = buildHighPersistPlan(result);
+  assert.equal(plan.groups.every((group) => group.confidence === 93), true);
+  const existing = new Set(plan.groups.map((group) => group.reconciliation_key));
+  const idem = diffHighPersistPlan(plan, existing);
+  assert.equal(assertHighDeltaCount({
+    ...idem,
+    existing_one_to_one: OMIE_SICREDI_HIGH_PERSIST_EXPECT.high_count,
+    existing_transfers: OMIE_SICREDI_HIGH_DELTA_EXPECT.existing_transfers,
+    extra_keys: 0,
+    missing_one_to_one: 0,
+    missing_transfers: 0,
+    missing_cents: 0,
+    missing_groups: [],
+    existing_keys: OMIE_SICREDI_HIGH_PERSIST_EXPECT.high_count + 2,
+  }), "idempotent");
+  const emptyDiff = diffHighPersistPlan(plan, new Set());
+  assert.equal(emptyDiff.missing_one_to_one, 8);
+  assert.equal(emptyDiff.missing_cents, 399811);
+  assertIncrementalHighGroups(emptyDiff.missing_groups, entries, result, new Set());
+  const deltaPlan = toDeltaPersistPlan(emptyDiff);
+  const sql = emitHighPersistSql(deltaPlan);
+  assert.equal(deltaPlan.transfer_count, 0);
+  assert.equal(deltaPlan.one_to_one_count, 8);
+  assert.match(sql, /begin;/);
+  assert.match(sql, /commit;/);
+  assert.equal(deltaPlan.groups.every((group) => group.match_method === "one_to_one"), true);
+  assert.doesNotMatch(sql, /insert into public.financial_audit_findings/i);
+  assert.throws(
+    () =>
+      assertHighDeltaCount({
+        ...emptyDiff,
+        existing_one_to_one: 590,
+        existing_transfers: 2,
+        extra_keys: 0,
+      }),
+    /Keys 1:1 já persistidas/,
+  );
+  assert.throws(
+    () =>
+      assertHighDeltaCount({
+        existing_keys: 595,
+        existing_one_to_one: 593,
+        existing_transfers: 2,
+        extra_keys: 0,
+        missing_groups: emptyDiff.missing_groups.slice(0, 7),
+        missing_one_to_one: 7,
+        missing_transfers: 0,
+        missing_cents: 300000,
+      }),
+    /Delta 1:1=7/,
+  );
+  const first = emptyDiff.missing_groups[0]!;
+  assert.throws(
+    () =>
+      assertIncrementalHighGroups(
+        emptyDiff.missing_groups.map((group, i) =>
+          i === 0 ? { ...group, confidence: 75, score_evidence: { ...group.score_evidence, party_match: "contains_safe" } } : group,
+        ),
+        entries,
+        result,
+        new Set(),
+      ),
+    /Delta score=75/,
+  );
+  assert.throws(
+    () => assertIncrementalHighGroups(emptyDiff.missing_groups, entries, result, new Set([first.legs[0]!.entry_id])),
+    /já possui leg persistida/,
+  );
+  ok("delta 8 high: key diff, validação AR/D0/token_exact/93, SQL só 1:1");
 }
 
 console.log(`\n${passed} testes ok\n`);

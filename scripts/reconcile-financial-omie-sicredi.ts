@@ -4,6 +4,7 @@
  * npm run financial:reconcile-omie-sicredi -- --dry-run
  * npm run financial:reconcile-omie-sicredi -- --from-json tmp/recon-entries.json --dry-run
  * npm run financial:reconcile-omie-sicredi -- --persist-high --allow-homo-reconciliation
+ * npm run financial:reconcile-omie-sicredi -- --persist-high-delta --allow-homo-reconciliation
  */
 import "dotenv/config";
 import { spawnSync } from "node:child_process";
@@ -14,13 +15,18 @@ import {
   RECON_PERIOD_END,
   RECON_PERIOD_START,
   YES_HOTEL_HOMO_REF,
+  assertHighDeltaCount,
   assertHomoReconciliationGate,
+  assertIncrementalHighGroups,
+  assertLiveRecomputeSnapshot,
   buildHighPersistPlan,
+  diffHighPersistPlan,
   emitHighPersistSql,
   formatOmieSicrediDryRun,
   reconReportLeaksPii,
   reconcileOmieSicredi,
   summarizeHighPersistPlan,
+  toDeltaPersistPlan,
   type ReconEntry,
 } from "../src/lib/financial/reconciliation/index.ts";
 
@@ -37,7 +43,9 @@ function usage(): never {
   npm run financial:reconcile-omie-sicredi -- --dry-run
   npm run financial:reconcile-omie-sicredi -- --from-json <entries.json> --dry-run
   npm run financial:reconcile-omie-sicredi -- --persist-high --allow-homo-reconciliation
-  npm run financial:reconcile-omie-sicredi -- --persist-high --allow-homo-reconciliation --emit-sql <arquivo.sql>`);
+  npm run financial:reconcile-omie-sicredi -- --persist-high --allow-homo-reconciliation --emit-sql <arquivo.sql>
+  npm run financial:reconcile-omie-sicredi -- --persist-high-delta --allow-homo-reconciliation
+  npm run financial:reconcile-omie-sicredi -- --persist-high-delta --allow-homo-reconciliation --emit-sql <arquivo.sql>`);
   process.exit(2);
 }
 
@@ -63,6 +71,21 @@ where e.lifecycle_status = 'active'
   and e.settlement_date between '${RECON_PERIOD_START}' and '${RECON_PERIOD_END}'
   and e.source_system in ('omie', 'sicredi')
 order by e.id;
+`;
+
+const EXISTING_KEYS_SQL = `
+select reconciliation_key
+from public.financial_reconciliation_groups
+where rule_version = '${OMIE_SICREDI_RULE_VERSION}'
+order by reconciliation_key;
+`;
+
+const EXISTING_LEGS_SQL = `
+select l.entry_id::text as entry_id
+from public.financial_reconciliation_legs l
+join public.financial_reconciliation_groups g on g.id = l.group_id
+where g.rule_version = '${OMIE_SICREDI_RULE_VERSION}'
+order by l.entry_id;
 `;
 
 function readJsonText(path: string): string {
@@ -139,20 +162,66 @@ function fetchHomoEntries(): ReconEntry[] {
   return parseRows(runLinkedSql(sqlPath));
 }
 
+function parseJsonRows(raw: string): Record<string, unknown>[] {
+  const parsed = JSON.parse(raw) as unknown;
+  const rows = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === "object" && Array.isArray((parsed as { rows?: unknown }).rows)
+      ? (parsed as { rows: unknown[] }).rows
+      : null;
+  if (!rows) throw new Error("JSON de chaves/legs inválido");
+  return rows.map((row) => (typeof row === "string" ? { value: row } : (row as Record<string, unknown>)));
+}
+
+function parseTextSet(raw: string, field: string): Set<string> {
+  return new Set(
+    parseJsonRows(raw).map((row) => String(row[field] ?? row.value ?? row.reconciliation_key ?? row.entry_id)),
+  );
+}
+
+function loadTextSet(flag: string, sql: string, field: string, tmpName: string): Set<string> {
+  const fromFile = argValue(flag);
+  if (fromFile) return parseTextSet(readJsonText(resolve(fromFile)), field);
+  const sqlPath = resolve(tmpName);
+  mkdirSync(dirname(sqlPath), { recursive: true });
+  writeFileSync(sqlPath, sql, "utf8");
+  return parseTextSet(runLinkedSql(sqlPath), field);
+}
+
+function applyOrEmitSql(sql: string, emitSql: string | undefined, tmpName: string, label: string): void {
+  if (emitSql) {
+    const outPath = resolve(emitSql);
+    mkdirSync(dirname(outPath), { recursive: true });
+    writeFileSync(outPath, sql, "utf8");
+    console.log(`sql_emitido: ${outPath}`);
+    console.log("persistido: NÃO (somente SQL)");
+    return;
+  }
+  const sqlPath = resolve(tmpName);
+  mkdirSync(dirname(sqlPath), { recursive: true });
+  writeFileSync(sqlPath, sql, "utf8");
+  const applied = runLinkedSql(sqlPath);
+  console.log(`${label}: applied`);
+  console.log(applied.slice(applied.indexOf("{") >= 0 ? applied.indexOf("{") : 0));
+}
+
 function main() {
   if (hasFlag("--persist") || hasFlag("--apply")) {
-    console.error("Persistência recusada. Use --persist-high --allow-homo-reconciliation. Nenhum dado foi gravado.");
+    console.error(
+      "Persistência recusada. Use --persist-high ou --persist-high-delta --allow-homo-reconciliation. Nenhum dado foi gravado.",
+    );
     process.exit(2);
   }
 
   const persistHigh = hasFlag("--persist-high");
+  const persistHighDelta = hasFlag("--persist-high-delta");
   const emitSql = argValue("--emit-sql");
-  const apply = persistHigh && !emitSql;
+  const apply = (persistHigh || persistHighDelta) && !emitSql;
 
-  if (persistHigh || emitSql) {
+  if (persistHigh || persistHighDelta || emitSql) {
     try {
       assertHomoReconciliationGate({
-        persistHigh,
+        persistHigh: persistHigh || persistHighDelta,
         allowHomo: hasFlag("--allow-homo-reconciliation"),
         url: process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
         apply,
@@ -163,7 +232,7 @@ function main() {
     }
   }
 
-  if (!persistHigh && !hasFlag("--dry-run") && !argValue("--from-json")) usage();
+  if (!persistHigh && !persistHighDelta && !hasFlag("--dry-run") && !argValue("--from-json")) usage();
 
   const fromJson = argValue("--from-json");
   const entries = fromJson ? parseRows(readJsonText(resolve(fromJson))) : fetchHomoEntries();
@@ -181,29 +250,53 @@ function main() {
   console.log(`entries_lidas: ${entries.length}`);
   console.log(`parser_rule: ${OMIE_SICREDI_RULE_VERSION}`);
 
-  if (!persistHigh && !emitSql) return;
+  if (!persistHigh && !persistHighDelta && !emitSql) return;
 
   try {
+    if (persistHighDelta) {
+      assertLiveRecomputeSnapshot(result);
+      const plan = buildHighPersistPlan(result, {
+        requireExpectedSnapshot: true,
+        requireUuid: true,
+      });
+      const existingKeys = loadTextSet(
+        "--existing-keys-json",
+        EXISTING_KEYS_SQL,
+        "reconciliation_key",
+        "tmp/recon-existing-keys.sql",
+      );
+      const existingLegs = loadTextSet(
+        "--existing-legs-json",
+        EXISTING_LEGS_SQL,
+        "entry_id",
+        "tmp/recon-existing-legs.sql",
+      );
+      const diff = diffHighPersistPlan(plan, existingKeys);
+      console.log(
+        `persistidos_encontrados: ${diff.existing_one_to_one} 1:1 + ${diff.existing_transfers} transfer`,
+      );
+      console.log(`delta_nao_persistido: ${diff.missing_one_to_one} / ${diff.missing_cents} cents`);
+      const mode = assertHighDeltaCount(diff);
+      if (mode === "idempotent") {
+        console.log("delta: 0 (idempotente)");
+        console.log("groups_novos: 0");
+        console.log("legs_novos: 0");
+        console.log("persistido: NÃO (nada a inserir)");
+        return;
+      }
+      assertIncrementalHighGroups(diff.missing_groups, entries, result, existingLegs);
+      const deltaPlan = toDeltaPersistPlan(diff);
+      console.log(summarizeHighPersistPlan(deltaPlan));
+      applyOrEmitSql(emitHighPersistSql(deltaPlan), emitSql, "tmp/recon-high-delta.sql", "persist_high_delta");
+      return;
+    }
+
     const plan = buildHighPersistPlan(result, {
       requireExpectedSnapshot: true,
       requireUuid: true,
     });
-    const sql = emitHighPersistSql(plan);
     console.log(summarizeHighPersistPlan(plan));
-    if (emitSql) {
-      const outPath = resolve(emitSql);
-      mkdirSync(dirname(outPath), { recursive: true });
-      writeFileSync(outPath, sql, "utf8");
-      console.log(`sql_emitido: ${outPath}`);
-      console.log("persistido: NÃO (somente SQL)");
-      return;
-    }
-    const sqlPath = resolve("tmp/recon-high-persist.sql");
-    mkdirSync(dirname(sqlPath), { recursive: true });
-    writeFileSync(sqlPath, sql, "utf8");
-    const applied = runLinkedSql(sqlPath);
-    console.log("persist_high: applied");
-    console.log(applied.slice(applied.indexOf("{") >= 0 ? applied.indexOf("{") : 0));
+    applyOrEmitSql(emitHighPersistSql(plan), emitSql, "tmp/recon-high-persist.sql", "persist_high");
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exit(2);
