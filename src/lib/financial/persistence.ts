@@ -73,6 +73,21 @@ export function scoreEvidenceIsStructured(value: unknown): value is FinancialSco
   ) {
     return false;
   }
+  if (
+    "party_match" in row &&
+    row.party_match != null &&
+    !["exact_normalized", "token_exact", "contains_safe", "no_match"].includes(String(row.party_match))
+  ) {
+    return false;
+  }
+  if ("amount_cents" in row && row.amount_cents != null && (!Number.isInteger(row.amount_cents) || Number(row.amount_cents) < 0)) {
+    return false;
+  }
+  if ("candidate_count" in row && row.candidate_count != null && (!Number.isInteger(row.candidate_count) || Number(row.candidate_count) < 0)) {
+    return false;
+  }
+  if ("direction_match" in row && typeof row.direction_match !== "boolean") return false;
+  if ("internal_transfer_excluded" in row && typeof row.internal_transfer_excluded !== "boolean") return false;
   return true;
 }
 
