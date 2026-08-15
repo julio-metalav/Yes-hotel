@@ -7,9 +7,14 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  ANALYSIS_ENTRY_COLUMNS,
+  ANALYSIS_ENTRY_SELECT,
+  ANALYSIS_SOURCE_KINDS,
   OMIE_SICREDI_RULE_VERSION,
+  REVIEW_ALLOWED_ACTIONS,
   assertReviewDtoSafe,
   buildAnalysisLists,
+  collectOneToOneCandidates,
   filterAnalysisRows,
   kpisFromPersisted,
   maskFitid,
@@ -22,8 +27,10 @@ import {
   reviewDtoLeaksSensitive,
   sanitizePersistedDetail,
   sanitizePersistedListRow,
+  scoreOmieBankPair,
   summarizeScoreEvidence,
   type ReconEntry,
+  type ReconResult,
 } from "../src/lib/financial/reconciliation/index.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -315,7 +322,329 @@ console.log("\n=== Revisão financeira Omie ↔ Sicredi ===\n");
   assert.doesNotMatch(edge, /persist-high/);
   assert.match(edge, /Use POST/);
   assert.match(edge, /from "\.\.\/\.\.\/\.\.\/src\/lib\/financial\/reconciliation\/engine\.ts"/);
+  assert.match(edge, /ANALYSIS_ENTRY_SELECT/);
+  assert.match(edge, /\.gte\("settlement_date"/);
+  assert.match(edge, /\.lte\("settlement_date"/);
+  assert.match(edge, /source_kind/);
+  assert.match(edge, /includePossibleAggregations/);
+  assert.match(edge, /includeReportExtras: false/);
+  assert.match(edge, /possible_aggregations/);
+  assert.doesNotMatch(edge, /raw_payload/);
+  assert.ok(!ANALYSIS_ENTRY_SELECT.includes("metadata"));
+  assert.ok(!ANALYSIS_ENTRY_COLUMNS.includes("open_amount_cents" as never));
+  assert.ok(ANALYSIS_SOURCE_KINDS.includes("omie_receivable"));
+  assert.ok(REVIEW_ALLOWED_ACTIONS.includes("possible_aggregations"));
   ok("edge function admin-only, read-only, reutiliza engine");
+}
+
+function logicalCore(result: ReconResult) {
+  return {
+    high: [result.stats.high_count, result.stats.high_cents],
+    transfer: [result.stats.transfer_high_count, result.stats.transfer_cents],
+    suggested: [result.stats.suggested_count, result.stats.suggested_cents],
+    ambiguous: [result.stats.ambiguous_count, result.stats.ambiguous_cents],
+    unmatched: [
+      result.stats.omie_ar_unmatched_count,
+      result.stats.omie_ar_unmatched_cents,
+      result.stats.omie_ap_unmatched_count,
+      result.stats.omie_ap_unmatched_cents,
+      result.stats.bank_credit_unmatched_count,
+      result.stats.bank_credit_unmatched_cents,
+      result.stats.bank_debit_unmatched_count,
+      result.stats.bank_debit_unmatched_cents,
+    ],
+    group_ids: result.groups.map((group) => group.id),
+    ambiguous_ids: result.ambiguous.map((group) => group.id),
+  };
+}
+
+function bruteForceCandidates(omieEntries: ReconEntry[], bankEntries: ReconEntry[]) {
+  const out: Array<{ omieId: string; bankId: string; score: number }> = [];
+  for (const omie of omieEntries) {
+    for (const bank of bankEntries) {
+      const scored = scoreOmieBankPair(omie, bank);
+      if (!scored || !scored.amountExact) continue;
+      out.push({ omieId: omie.id, bankId: bank.id, score: scored.score });
+    }
+  }
+  return out.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return `${a.omieId}|${a.bankId}`.localeCompare(`${b.omieId}|${b.bankId}`);
+  });
+}
+
+{
+  const omie = [
+    entry({
+      id: "o1",
+      source_system: "omie",
+      source_kind: "omie_receivable",
+      direction: "credit",
+      person_name: "ALFA LTDA",
+      settled_amount_cents: 10000,
+      settlement_date: "2026-03-10",
+    }),
+    entry({
+      id: "o2",
+      source_system: "omie",
+      source_kind: "omie_payable",
+      direction: "debit",
+      person_name: "BETA LTDA",
+      settled_amount_cents: 20000,
+      settlement_date: "2026-03-11",
+    }),
+    entry({
+      id: "o3",
+      source_system: "omie",
+      source_kind: "omie_receivable",
+      direction: "credit",
+      person_name: "GAMA",
+      settled_amount_cents: 33300,
+      settlement_date: "2026-03-12",
+    }),
+  ];
+  const bank = [
+    entry({
+      id: "b1",
+      source_system: "sicredi",
+      source_kind: "bank_credit",
+      direction: "credit",
+      person_name: "ALFA",
+      description: "CRED ALFA LTDA",
+      gross_amount_cents: 10000,
+      settlement_date: "2026-03-10",
+    }),
+    entry({
+      id: "b2",
+      source_system: "sicredi",
+      source_kind: "bank_debit",
+      direction: "debit",
+      description: "PAGTO BETA",
+      gross_amount_cents: 20000,
+      settlement_date: "2026-03-12",
+    }),
+    entry({
+      id: "b3",
+      source_system: "sicredi",
+      source_kind: "bank_credit",
+      direction: "credit",
+      description: "CRED OUTRO",
+      gross_amount_cents: 99900,
+      settlement_date: "2026-03-12",
+    }),
+  ];
+  const indexed = collectOneToOneCandidates(omie, bank, new Set()).map((row) => ({
+    omieId: row.omie.id,
+    bankId: row.bank.id,
+    score: row.score,
+  }));
+  assert.deepEqual(indexed, bruteForceCandidates(omie, bank));
+  ok("índice 1:1 produz os mesmos candidatos e a mesma ordem");
+}
+
+{
+  const entries = [
+    entry({
+      id: "o-high",
+      source_system: "omie",
+      source_kind: "omie_receivable",
+      direction: "credit",
+      person_name: "CLIENTE ALFA LTDA",
+      settled_amount_cents: 200000,
+      settlement_date: "2026-03-10",
+    }),
+    entry({
+      id: "b-high",
+      source_system: "sicredi",
+      source_kind: "bank_credit",
+      direction: "credit",
+      person_name: "CLIENTE ALFA",
+      description: "CRED CLIENTE ALFA",
+      gross_amount_cents: 200000,
+      settlement_date: "2026-03-10",
+    }),
+    entry({
+      id: "o-sug",
+      source_system: "omie",
+      source_kind: "omie_payable",
+      direction: "debit",
+      person_name: "FORNECEDOR BETA",
+      settled_amount_cents: 80000,
+      settlement_date: "2026-03-11",
+    }),
+    entry({
+      id: "b-sug",
+      source_system: "sicredi",
+      source_kind: "bank_debit",
+      direction: "debit",
+      description: "PAGTO DIVERSO",
+      gross_amount_cents: 80000,
+      settlement_date: "2026-03-11",
+    }),
+    entry({
+      id: "o-open",
+      source_system: "omie",
+      source_kind: "omie_receivable",
+      direction: "credit",
+      person_name: "CLIENTE GAMA",
+      settled_amount_cents: 50000,
+      settlement_date: "2026-03-20",
+    }),
+    entry({
+      id: "b-open",
+      source_system: "sicredi",
+      source_kind: "bank_credit",
+      direction: "credit",
+      description: "CRED DESCONHECIDO",
+      gross_amount_cents: 33000,
+      settlement_date: "2026-03-21",
+    }),
+    entry({
+      id: "o-c1",
+      source_system: "omie",
+      source_kind: "omie_receivable",
+      direction: "credit",
+      person_name: "LOTE C",
+      settled_amount_cents: 10000,
+      settlement_date: "2026-03-15",
+    }),
+    entry({
+      id: "o-c2",
+      source_system: "omie",
+      source_kind: "omie_receivable",
+      direction: "credit",
+      person_name: "LOTE C",
+      settled_amount_cents: 15000,
+      settlement_date: "2026-03-15",
+    }),
+    entry({
+      id: "b-c",
+      source_system: "sicredi",
+      source_kind: "bank_credit",
+      direction: "credit",
+      description: "CRED LOTE",
+      gross_amount_cents: 25000,
+      settlement_date: "2026-03-15",
+    }),
+  ];
+  const full = reconcileOmieSicredi({
+    entries,
+    periodStart: "2026-03-01",
+    periodEnd: "2026-03-31",
+  });
+  const analysis = reconcileOmieSicredi({
+    entries,
+    periodStart: "2026-03-01",
+    periodEnd: "2026-03-31",
+    includePossibleAggregations: false,
+    includeReportExtras: false,
+  });
+  const diagnostics = reconcileOmieSicredi({
+    entries,
+    periodStart: "2026-03-01",
+    periodEnd: "2026-03-31",
+    includePossibleAggregations: true,
+    includeReportExtras: false,
+  });
+  assert.deepEqual(logicalCore(analysis), logicalCore(full));
+  assert.deepEqual(logicalCore(diagnostics), logicalCore(full));
+  assert.equal(analysis.findings.length, 0);
+  assert.equal(analysis.samples.length, 0);
+  assert.equal(analysis.possible_aggregations.length, 0);
+  assert.deepEqual(diagnostics.possible_aggregations, full.possible_aggregations);
+  const listsFull = buildAnalysisLists(full, entries);
+  const listsAnalysis = buildAnalysisLists(analysis, entries);
+  assert.equal(listsAnalysis.suggested.length, listsFull.suggested.length);
+  assert.equal(listsAnalysis.ambiguous.length, listsFull.ambiguous.length);
+  assert.equal(listsAnalysis.unmatched_omie.length, listsFull.unmatched_omie.length);
+  assert.equal(listsAnalysis.unmatched_bank.length, listsFull.unmatched_bank.length);
+  assert.equal(listsAnalysis.possible_aggregation.length, 0);
+  assert.equal(listsFull.unmatched_omie.length, listsAnalysis.unmatched_omie.length);
+  ok("analysis sem C/D/findings preserva suggested/ambiguous/unmatched");
+}
+
+{
+  const outside = entry({
+    id: "o-out",
+    source_system: "omie",
+    source_kind: "omie_receivable",
+    direction: "credit",
+    person_name: "FORA",
+    settled_amount_cents: 11100,
+    settlement_date: "2025-12-31",
+  });
+  const inside = entry({
+    id: "o-in",
+    source_system: "omie",
+    source_kind: "omie_receivable",
+    direction: "credit",
+    person_name: "DENTRO",
+    settled_amount_cents: 22200,
+    settlement_date: "2026-02-01",
+  });
+  const result = reconcileOmieSicredi({
+    entries: [outside, inside],
+    periodStart: "2026-01-01",
+    periodEnd: "2026-07-31",
+  });
+  assert.equal(result.stats.omie_ar_count, 1);
+  assert.equal(result.stats.omie_ar_settled_cents, 22200);
+  ok("filtro de período usa a mesma semântica V1.2 (string >= / <=)");
+}
+
+{
+  const first = reconcileOmieSicredi({
+    entries: [
+      entry({
+        id: "o-d",
+        source_system: "omie",
+        source_kind: "omie_receivable",
+        direction: "credit",
+        person_name: "DELTA",
+        settled_amount_cents: 44000,
+        settlement_date: "2026-04-01",
+      }),
+      entry({
+        id: "b-d",
+        source_system: "sicredi",
+        source_kind: "bank_credit",
+        direction: "credit",
+        person_name: "DELTA",
+        description: "CRED DELTA",
+        gross_amount_cents: 44000,
+        settlement_date: "2026-04-01",
+      }),
+    ],
+    periodStart: "2026-01-01",
+    periodEnd: "2026-07-31",
+  });
+  const second = reconcileOmieSicredi({
+    entries: [
+      entry({
+        id: "b-d",
+        source_system: "sicredi",
+        source_kind: "bank_credit",
+        direction: "credit",
+        person_name: "DELTA",
+        description: "CRED DELTA",
+        gross_amount_cents: 44000,
+        settlement_date: "2026-04-01",
+      }),
+      entry({
+        id: "o-d",
+        source_system: "omie",
+        source_kind: "omie_receivable",
+        direction: "credit",
+        person_name: "DELTA",
+        settled_amount_cents: 44000,
+        settlement_date: "2026-04-01",
+      }),
+    ],
+    periodStart: "2026-01-01",
+    periodEnd: "2026-07-31",
+  });
+  assert.deepEqual(logicalCore(first), logicalCore(second));
+  ok("determinismo: mesma entrada em ordem diferente");
 }
 
 console.log(`\n${passed} checks OK\n`);

@@ -27,6 +27,9 @@ export {
 } from "./persist-high.ts";
 export { formatOmieSicrediDryRun, reconReportLeaksPii } from "./report.ts";
 export {
+  ANALYSIS_ENTRY_COLUMNS,
+  ANALYSIS_ENTRY_SELECT,
+  ANALYSIS_SOURCE_KINDS,
   REVIEW_ALLOWED_ACTIONS,
   REVIEW_PAGE_SIZE,
   REVIEW_VIEW_TYPES,

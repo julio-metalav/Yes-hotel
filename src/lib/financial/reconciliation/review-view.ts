@@ -16,7 +16,36 @@ import type { FinancialScoreEvidence } from "../types.ts";
 
 export const REVIEW_PAGE_SIZE = 25;
 export const REVIEW_DESCRIPTION_MAX = 28;
-export const REVIEW_ALLOWED_ACTIONS = ["overview", "high_list", "group_detail", "analysis"] as const;
+export const REVIEW_ALLOWED_ACTIONS = [
+  "overview",
+  "high_list",
+  "group_detail",
+  "analysis",
+  "possible_aggregations",
+] as const;
+
+/** Campos suficientes para o engine V1.2. Sem raw_payload, timestamps, documento ou máscara de conta. */
+export const ANALYSIS_ENTRY_COLUMNS = [
+  "id",
+  "account_id",
+  "source_system",
+  "source_kind",
+  "direction",
+  "person_name",
+  "description",
+  "gross_amount_cents",
+  "settled_amount_cents",
+  "settlement_date",
+] as const;
+
+export const ANALYSIS_SOURCE_KINDS = [
+  "omie_receivable",
+  "omie_payable",
+  "bank_credit",
+  "bank_debit",
+] as const;
+
+export const ANALYSIS_ENTRY_SELECT = ANALYSIS_ENTRY_COLUMNS.join(", ");
 export type ReviewAction = (typeof REVIEW_ALLOWED_ACTIONS)[number];
 
 export const REVIEW_VIEW_TYPES = [
@@ -591,28 +620,12 @@ export function buildAnalysisLists(result: ReconResult, entries: readonly ReconE
     consumed.add(transfer.debit_entry_id);
     consumed.add(transfer.credit_entry_id);
   }
-  const ambiguous = result.findings
-    .filter((finding) => finding.finding_type === "duplicate_possible" && finding.note === "ambiguous_match")
-    .map((finding) => {
-      const omie = finding.entry_ids.map((id) => byId.get(id)).find((row) => row?.source_system === "omie") ?? null;
-      const bank = finding.entry_ids.map((id) => byId.get(id)).find((row) => row?.source_system === "sicredi") ?? null;
-      return {
-        id: finding.id,
-        date: omie?.settlement_date ?? bank?.settlement_date ?? null,
-        kind: omieKindFromSource(omie?.source_kind) ?? "unmatched",
-        amount_cents: finding.amount_cents,
-        omie_label: maskPersonName(omie?.person_name ?? null),
-        bank_label: redactDescription(bank?.description ?? null),
-        account_code: bank?.account_code ?? null,
-        direction: bank?.direction ?? omie?.direction ?? null,
-        status: "ambiguous",
-        score: null,
-        evidence_summary: ["Não conciliado", "ambiguous"],
-        persisted: false,
-        diagnostic_only: false,
-        label: "Ambiguous — não persistido",
-      } satisfies ReviewListRow;
-    });
+  const ambiguous = result.ambiguous.map((group) => sanitizeAnalysisGroupRow(group, byId)).map((row) => ({
+    ...row,
+    status: "ambiguous",
+    label: "Ambiguous — não persistido",
+    evidence_summary: ["Não conciliado", "ambiguous"],
+  }));
   const unmatchedOmie = entries
     .filter((row) => inReviewScope(row) && row.source_system === "omie" && !consumed.has(row.id))
     .map((row) => sanitizeUnmatchedRow(row, "omie"));
