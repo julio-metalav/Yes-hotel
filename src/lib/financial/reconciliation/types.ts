@@ -9,13 +9,16 @@ import type {
   FinancialSourceSystem,
 } from "../types.ts";
 
-export const OMIE_SICREDI_RULE_VERSION = "omie_sicredi_v1";
+export const OMIE_SICREDI_RULE_VERSION = "omie_sicredi_v1.1";
 export const RECON_PERIOD_START = "2026-01-01";
 export const RECON_PERIOD_END = "2026-07-31";
 export const MAX_DATE_WINDOW_DAYS = 2;
 export const TRANSFER_WINDOW_DAYS = 1;
-export const AGGREGATION_MAX_N = 10;
+export const AGGREGATION_MAX_N = 8;
 export const AGGREGATION_DATE_WINDOW_DAYS = 1;
+export const GROUPING_MAX_CANDIDATES = 16;
+export const GROUPING_MAX_COMBINATIONS = 2048;
+export const GROUPING_MAX_MS = 20;
 export const HIGH_SCORE_MIN = 90;
 export const SUGGESTED_SCORE_MIN = 75;
 
@@ -113,6 +116,20 @@ export type ReconStats = {
   ambiguous_cents: number;
   aggregation_count: number;
   aggregation_cents: number;
+  aggregation_entries: number;
+  aggregation_high_count: number;
+  aggregation_suggested_count: number;
+  aggregation_ar_count: number;
+  aggregation_ar_entries: number;
+  aggregation_ar_cents: number;
+  aggregation_ap_count: number;
+  aggregation_ap_entries: number;
+  aggregation_ap_cents: number;
+  grouping_search_limit: number;
+  grouping_search_limit_candidates: number;
+  grouping_search_limit_combinations: number;
+  grouping_search_limit_time: number;
+  transfer_ambiguous_cents: number;
   omie_ar_unmatched_count: number;
   omie_ar_unmatched_cents: number;
   omie_ap_unmatched_count: number;

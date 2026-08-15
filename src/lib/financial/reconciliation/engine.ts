@@ -5,9 +5,11 @@ import { findManyToOneGroups } from "./grouping.ts";
 import { findInternalTransferCandidates, transferBankEntryIds } from "./internal-transfers.ts";
 import { bankMatchAmountCents, omieMatchAmountCents } from "./score.ts";
 import {
+  HIGH_SCORE_MIN,
   OMIE_SICREDI_RULE_VERSION,
   RECON_PERIOD_END,
   RECON_PERIOD_START,
+  SUGGESTED_SCORE_MIN,
   type ReconEntry,
   type ReconResult,
   type ReconSample,
@@ -77,31 +79,57 @@ export function reconcileOmieSicredi(input: {
   const transferIds = transferBankEntryIds(transfers);
   const bankForOmie = bank.filter((row) => !transferIds.has(row.id));
 
-  const candidates = collectOneToOneCandidates(omie, bankForOmie, transferIds);
-  const resolved = resolveOneToOneGroups(candidates);
-  const oneToOne = resolved.groups;
-  const ambiguous = resolved.ambiguous;
+  const takenOmie = new Set<string>();
+  const takenBank = new Set<string>(transferIds);
 
-  const takenOmie = new Set([
-    ...oneToOne.flatMap((group) => group.omie_entry_ids),
-    ...ambiguous.flatMap((group) => group.omie_entry_ids),
-  ]);
-  const takenBank = new Set([
-    ...oneToOne.flatMap((group) => group.bank_entry_ids),
-    ...ambiguous.flatMap((group) => group.bank_entry_ids),
-    ...transferIds,
-  ]);
-
-  const aggregations = findManyToOneGroups(
-    omie.filter((row) => !takenOmie.has(row.id)),
-    bankForOmie.filter((row) => !takenBank.has(row.id)),
-  );
-  for (const group of aggregations) {
+  const allCandidates = collectOneToOneCandidates(omie, bankForOmie, takenBank, takenOmie);
+  const highPass = resolveOneToOneGroups(allCandidates, { minScore: HIGH_SCORE_MIN, allocateTies: false });
+  for (const group of highPass.groups) {
     for (const id of group.omie_entry_ids) takenOmie.add(id);
     for (const id of group.bank_entry_ids) takenBank.add(id);
   }
 
-  const groups = [...oneToOne, ...aggregations].sort((a, b) => a.id.localeCompare(b.id));
+  const grouped = findManyToOneGroups(
+    omie.filter((row) => !takenOmie.has(row.id)),
+    bankForOmie.filter((row) => !takenBank.has(row.id)),
+  );
+  for (const group of grouped.groups) {
+    for (const id of group.omie_entry_ids) takenOmie.add(id);
+    for (const id of group.bank_entry_ids) takenBank.add(id);
+  }
+
+  const leftoverCandidates = collectOneToOneCandidates(omie, bankForOmie, takenBank, takenOmie);
+  const leftoverHigh = resolveOneToOneGroups(leftoverCandidates, { minScore: HIGH_SCORE_MIN, allocateTies: false });
+  for (const group of leftoverHigh.groups) {
+    for (const id of group.omie_entry_ids) takenOmie.add(id);
+    for (const id of group.bank_entry_ids) takenBank.add(id);
+  }
+
+  const suggestedPass = resolveOneToOneGroups(leftoverCandidates, {
+    minScore: SUGGESTED_SCORE_MIN,
+    maxScore: HIGH_SCORE_MIN - 1,
+    allocateTies: false,
+  });
+  const stillFree = (id: string, side: "omie" | "bank") => (side === "omie" ? !takenOmie.has(id) : !takenBank.has(id));
+  const suggestedGroups = suggestedPass.groups.filter(
+    (group) => group.omie_entry_ids.every((id) => stillFree(id, "omie")) && group.bank_entry_ids.every((id) => stillFree(id, "bank")),
+  );
+  for (const group of suggestedGroups) {
+    for (const id of group.omie_entry_ids) takenOmie.add(id);
+    for (const id of group.bank_entry_ids) takenBank.add(id);
+  }
+
+  const tieCandidates = [...highPass.leftoverTies, ...leftoverHigh.leftoverTies, ...suggestedPass.leftoverTies].filter(
+    (row) => stillFree(row.omie.id, "omie") && stillFree(row.bank.id, "bank"),
+  );
+  const ambiguousPass = resolveOneToOneGroups(tieCandidates, { minScore: SUGGESTED_SCORE_MIN, allocateTies: true });
+  const ambiguous = [...ambiguousPass.ambiguous, ...grouped.ambiguous];
+  for (const group of ambiguousPass.ambiguous) {
+    for (const id of group.omie_entry_ids) takenOmie.add(id);
+  }
+
+  const oneToOneHigh = [...highPass.groups, ...leftoverHigh.groups];
+  const groups = [...oneToOneHigh, ...suggestedGroups, ...grouped.groups].sort((a, b) => a.id.localeCompare(b.id));
   const unmatchedOmie = omie.filter((row) => !takenOmie.has(row.id));
   const unmatchedBank = bank.filter((row) => !takenBank.has(row.id));
 
@@ -114,15 +142,22 @@ export function reconcileOmieSicredi(input: {
     unmatchedBank,
   });
 
-  const high = groups.filter((group) => group.band === "high");
-  const suggested = groups.filter((group) => group.band === "suggested" && group.kind === "one_to_one");
+  const high = groups.filter((group) => group.kind === "one_to_one" && group.band === "high");
+  const suggested = groups.filter((group) => group.kind === "one_to_one" && group.band === "suggested");
+  const aggregations = grouped.groups;
+  const arAgg = aggregations.filter((group) =>
+    group.omie_entry_ids.some((id) => omie.find((row) => row.id === id)?.source_kind === "omie_receivable"),
+  );
+  const apAgg = aggregations.filter((group) =>
+    group.omie_entry_ids.some((id) => omie.find((row) => row.id === id)?.source_kind === "omie_payable"),
+  );
   const arUnmatched = unmatchedOmie.filter((row) => row.source_kind === "omie_receivable");
   const apUnmatched = unmatchedOmie.filter((row) => row.source_kind === "omie_payable");
   const creditUnmatched = unmatchedBank.filter((row) => row.direction === "credit");
   const debitUnmatched = unmatchedBank.filter((row) => row.direction === "debit");
 
   const histogram: Record<string, number> = { "0-74": 0, "75-89": 0, "90-100": 0 };
-  for (const row of candidates) {
+  for (const row of allCandidates) {
     if (row.score >= 90) histogram["90-100"] += 1;
     else if (row.score >= 75) histogram["75-89"] += 1;
     else histogram["0-74"] += 1;
@@ -148,6 +183,7 @@ export function reconcileOmieSicredi(input: {
     transfer_high_count: transfers.filter((row) => row.confidence === "high").length,
     transfer_ambiguous_count: transfers.filter((row) => row.confidence === "ambiguous").length,
     transfer_cents: sum(transfers.filter((row) => row.confidence === "high").map((row) => row.amount_cents)),
+    transfer_ambiguous_cents: sum(transfers.filter((row) => row.confidence === "ambiguous").map((row) => row.amount_cents)),
     high_count: high.length,
     high_cents: sum(high.map((group) => group.matched_amount_cents)),
     suggested_count: suggested.length,
@@ -156,6 +192,19 @@ export function reconcileOmieSicredi(input: {
     ambiguous_cents: sum(ambiguous.map((group) => group.matched_amount_cents)),
     aggregation_count: aggregations.length,
     aggregation_cents: sum(aggregations.map((group) => group.matched_amount_cents)),
+    aggregation_entries: aggregations.reduce((acc, group) => acc + group.omie_entry_ids.length, 0),
+    aggregation_high_count: aggregations.filter((group) => group.band === "high").length,
+    aggregation_suggested_count: aggregations.filter((group) => group.band === "suggested").length,
+    aggregation_ar_count: arAgg.length,
+    aggregation_ar_entries: arAgg.reduce((acc, group) => acc + group.omie_entry_ids.length, 0),
+    aggregation_ar_cents: sum(arAgg.map((group) => group.matched_amount_cents)),
+    aggregation_ap_count: apAgg.length,
+    aggregation_ap_entries: apAgg.reduce((acc, group) => acc + group.omie_entry_ids.length, 0),
+    aggregation_ap_cents: sum(apAgg.map((group) => group.matched_amount_cents)),
+    grouping_search_limit: grouped.searchLimits,
+    grouping_search_limit_candidates: grouped.searchLimitReasons.candidates,
+    grouping_search_limit_combinations: grouped.searchLimitReasons.combinations,
+    grouping_search_limit_time: grouped.searchLimitReasons.time,
     omie_ar_unmatched_count: arUnmatched.length,
     omie_ar_unmatched_cents: sum(arUnmatched.map((row) => omieMatchAmountCents(row) ?? 0)),
     omie_ap_unmatched_count: apUnmatched.length,

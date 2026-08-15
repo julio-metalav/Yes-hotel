@@ -1,11 +1,6 @@
+import { HIGH_SCORE_MIN, SUGGESTED_SCORE_MIN, OMIE_SICREDI_RULE_VERSION, type MatchBand, type ReconEntry, type ReconGroup } from "./types.ts";
 import { bandForScore, omieMatchAmountCents, scoreOmieBankPair } from "./score.ts";
 import { stableId } from "./internal-transfers.ts";
-import {
-  OMIE_SICREDI_RULE_VERSION,
-  type MatchBand,
-  type ReconEntry,
-  type ReconGroup,
-} from "./types.ts";
 
 export type ScoredCandidate = {
   omie: ReconEntry;
@@ -21,9 +16,11 @@ export function collectOneToOneCandidates(
   omieEntries: readonly ReconEntry[],
   bankEntries: readonly ReconEntry[],
   excludedBankIds: ReadonlySet<string>,
+  excludedOmieIds: ReadonlySet<string> = new Set(),
 ): ScoredCandidate[] {
   const out: ScoredCandidate[] = [];
   for (const omie of omieEntries) {
+    if (excludedOmieIds.has(omie.id)) continue;
     if ((omieMatchAmountCents(omie) ?? 0) <= 0) continue;
     for (const bank of bankEntries) {
       if (excludedBankIds.has(bank.id)) continue;
@@ -46,12 +43,17 @@ export function collectOneToOneCandidates(
   });
 }
 
-export function resolveOneToOneGroups(candidates: readonly ScoredCandidate[]): {
-  groups: ReconGroup[];
-  ambiguous: ReconGroup[];
-} {
+export function resolveOneToOneGroups(
+  candidates: readonly ScoredCandidate[],
+  input: { minScore: number; maxScore?: number; allocateTies: boolean },
+): { groups: ReconGroup[]; ambiguous: ReconGroup[]; leftoverTies: ScoredCandidate[] } {
+  const filtered = candidates.filter((row) => {
+    if (row.score < input.minScore) return false;
+    if (input.maxScore != null && row.score > input.maxScore) return false;
+    return true;
+  });
   const byOmie = new Map<string, ScoredCandidate[]>();
-  for (const row of candidates) {
+  for (const row of filtered) {
     const list = byOmie.get(row.omie.id) ?? [];
     list.push(row);
     byOmie.set(row.omie.id, list);
@@ -61,6 +63,7 @@ export function resolveOneToOneGroups(candidates: readonly ScoredCandidate[]): {
   const usedBank = new Set<string>();
   const groups: ReconGroup[] = [];
   const ambiguous: ReconGroup[] = [];
+  const leftoverTies: ScoredCandidate[] = [];
 
   const omieIds = [...byOmie.keys()].sort();
   for (const omieId of omieIds) {
@@ -70,39 +73,49 @@ export function resolveOneToOneGroups(candidates: readonly ScoredCandidate[]): {
     const tied = list.filter((row) => row.score === top);
     const uniqueBanks = new Set(tied.map((row) => row.bank.id));
     if (uniqueBanks.size > 1) {
-      const first = tied[0]!;
-      ambiguous.push(
-        toGroup(
-          "ambiguous",
-          first.score,
-          [first.omie.id],
-          tied.map((row) => row.bank.id).sort(),
-          { ...first.evidence, candidate_count: uniqueBanks.size },
-        ),
-      );
-      usedOmie.add(omieId);
+      if (input.allocateTies) {
+        const first = tied[0]!;
+        ambiguous.push(
+          toGroup(
+            "ambiguous",
+            first.score,
+            [first.omie.id],
+            tied.map((row) => row.bank.id).sort(),
+            { ...first.evidence, candidate_count: uniqueBanks.size },
+          ),
+        );
+        usedOmie.add(omieId);
+      } else {
+        leftoverTies.push(...tied);
+      }
       continue;
     }
     const winner = tied[0]!;
-    const bankAlsoWanted = candidates.filter(
+    const bankAlsoWanted = filtered.filter(
       (row) => row.bank.id === winner.bank.id && row.omie.id !== omieId && row.score === top && !usedOmie.has(row.omie.id),
     );
     if (bankAlsoWanted.length) {
-      ambiguous.push(
-        toGroup(
-          "ambiguous",
-          winner.score,
-          [omieId, ...bankAlsoWanted.map((row) => row.omie.id)].sort(),
-          [winner.bank.id],
-          { ...winner.evidence, candidate_count: 1 + bankAlsoWanted.length },
-        ),
-      );
-      usedOmie.add(omieId);
-      for (const row of bankAlsoWanted) usedOmie.add(row.omie.id);
+      if (input.allocateTies) {
+        ambiguous.push(
+          toGroup(
+            "ambiguous",
+            winner.score,
+            [omieId, ...bankAlsoWanted.map((row) => row.omie.id)].sort(),
+            [winner.bank.id],
+            { ...winner.evidence, candidate_count: 1 + bankAlsoWanted.length },
+          ),
+        );
+        usedOmie.add(omieId);
+        for (const row of bankAlsoWanted) usedOmie.add(row.omie.id);
+      } else {
+        leftoverTies.push(winner, ...bankAlsoWanted);
+      }
       continue;
     }
     const band = bandForScore(winner.score, winner.amountExact, 1);
     if (!band || band === "ambiguous") continue;
+    if (band === "high" && winner.score < HIGH_SCORE_MIN) continue;
+    if (band === "suggested" && winner.score >= HIGH_SCORE_MIN) continue;
     groups.push(
       toGroup(band, winner.score, [winner.omie.id], [winner.bank.id], { ...winner.evidence, candidate_count: 1 }),
     );
@@ -110,7 +123,7 @@ export function resolveOneToOneGroups(candidates: readonly ScoredCandidate[]): {
     usedBank.add(winner.bank.id);
   }
 
-  return { groups, ambiguous };
+  return { groups, ambiguous, leftoverTies };
 }
 
 function toGroup(
@@ -133,3 +146,5 @@ function toGroup(
     score_evidence: evidence,
   };
 }
+
+export { SUGGESTED_SCORE_MIN };
