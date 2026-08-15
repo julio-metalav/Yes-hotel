@@ -4,6 +4,8 @@ Motor determinístico (`rule_version=omie_sicredi_v1.2`). Sem IA, HITS, Stone, P
 
 Persistência HIGH (HOMO only): `--persist-high --allow-homo-reconciliation`. Somente transfer high + 1:1 high (`status=auto_matched`, revisável). Suggested/ambiguous/C/D/findings não entram. Idempotência por `reconciliation_key`. PROD aborta.
 
+Contrato live Jan–Jul (facts atuais): analysis recomputa **601** high / R$ 708.211,87. Persistido permanece **593** high + 2 transfers. Delta **8** high válidos (score 93, `token_exact`, D0, únicos) ainda não persistidos. Suggested 819 / ambiguous 20. O snapshot histórico 593/824/22 veio de JSON intermediário e não é o live.
+
 ## Valor
 
 Banco usa `gross_amount_cents`. Omie usa `settled_amount_cents`. Não assume `gross = settled + open`.

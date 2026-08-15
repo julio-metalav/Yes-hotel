@@ -5,6 +5,8 @@ import {
   type ReconEntry,
 } from "../../../src/lib/financial/reconciliation/types.ts";
 import {
+  ANALYSIS_ENTRY_SELECT,
+  ANALYSIS_SOURCE_KINDS,
   assertReviewDtoSafe,
   buildAnalysisLists,
   filterAnalysisRows,
@@ -34,8 +36,13 @@ if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
   throw new Error("SUPABASE_URL, SUPABASE_ANON_KEY e SUPABASE_SERVICE_ROLE_KEY sao obrigatorias.");
 }
 
-const ENTRY_SELECT =
-  "id, account_id, source_system, source_kind, source_import_id, source_record_id, direction, person_name, description, gross_amount_cents, settled_amount_cents, open_amount_cents, settlement_date, financial_accounts ( code, account_mask )";
+/** high_list / group_detail: precisa de FITID mascarado e máscara de conta. Sem payload bruto. */
+const ENTRY_SELECT_PERSISTED =
+  "id, account_id, source_system, source_kind, source_record_id, direction, person_name, description, gross_amount_cents, settled_amount_cents, open_amount_cents, settlement_date, financial_accounts ( code, account_mask )";
+
+/** overview: só agregados. Sem nome, descrição ou payload. */
+const ENTRY_SELECT_OVERVIEW =
+  "id, source_system, source_kind, direction, settled_amount_cents, gross_amount_cents, settlement_date";
 
 const WRITE_ACTIONS = new Set([
   "persist",
@@ -115,19 +122,53 @@ function inPeriod(date: string, start: string, end: string): boolean {
   return date >= start && date <= end;
 }
 
-async function loadEntries(periodStart: string, periodEnd: string): Promise<ReconEntry[]> {
+async function loadAccountCodeById(): Promise<Map<string, string>> {
+  const { data, error } = await adminClient.from("financial_accounts").select("id, code");
+  if (error) throw new Error(error.message);
+  return new Map((data ?? []).map((row) => [String(row.id), String(row.code)]));
+}
+
+function attachAccountCode(row: Record<string, unknown>, accounts: ReadonlyMap<string, string>): Record<string, unknown> {
+  const accountId = row.account_id == null ? null : String(row.account_id);
+  return {
+    ...row,
+    account_code: row.account_code ?? (accountId ? accounts.get(accountId) ?? null : null),
+  };
+}
+
+async function loadOverviewFacts(periodStart: string, periodEnd: string): Promise<ReconEntry[]> {
   const rows = await fetchAll<Record<string, unknown>>((from, to) =>
     adminClient
       .from("financial_entries")
-      .select(ENTRY_SELECT)
+      .select(ENTRY_SELECT_OVERVIEW)
       .eq("lifecycle_status", "active")
       .in("source_system", ["omie", "sicredi"])
+      .in("source_kind", [...ANALYSIS_SOURCE_KINDS])
       .gte("settlement_date", periodStart)
       .lte("settlement_date", periodEnd)
       .order("id")
       .range(from, to),
   );
   return rows.map(toReconEntry);
+}
+
+async function loadAnalysisEntries(periodStart: string, periodEnd: string): Promise<ReconEntry[]> {
+  const [accounts, rows] = await Promise.all([
+    loadAccountCodeById(),
+    fetchAll<Record<string, unknown>>((from, to) =>
+      adminClient
+        .from("financial_entries")
+        .select(ANALYSIS_ENTRY_SELECT)
+        .eq("lifecycle_status", "active")
+        .in("source_system", ["omie", "sicredi"])
+        .in("source_kind", [...ANALYSIS_SOURCE_KINDS])
+        .gte("settlement_date", periodStart)
+        .lte("settlement_date", periodEnd)
+        .order("id")
+        .range(from, to),
+    ),
+  ]);
+  return rows.map((row) => toReconEntry(attachAccountCode(row, accounts)));
 }
 
 async function loadPeriodBounds(): Promise<{ start: string; end: string; accounts: string[] }> {
@@ -227,7 +268,7 @@ async function loadEntriesByIds(ids: string[]) {
     const chunk = ids.slice(i, i + 200);
     const { data, error } = await adminClient
       .from("financial_entries")
-      .select(ENTRY_SELECT)
+      .select(ENTRY_SELECT_PERSISTED)
       .in("id", chunk);
     if (error) throw new Error(error.message);
     rows.push(...((data ?? []) as Record<string, unknown>[]));
@@ -361,7 +402,7 @@ Deno.serve(async (request) => {
 
     if (action === "overview") {
       const [entries, groups, findings] = await Promise.all([
-        loadEntries(filters.period_start, filters.period_end),
+        loadOverviewFacts(filters.period_start, filters.period_end),
         loadPersistedGroups(),
         adminClient.from("financial_audit_findings").select("id", { count: "exact", head: true }),
       ]);
@@ -377,6 +418,7 @@ Deno.serve(async (request) => {
         kpis,
         persisted_groups: groups.length,
         persisted_legs: null,
+        rows_loaded: entries.length,
       };
       assertReviewDtoSafe(payload);
       return jsonResponse(payload);
@@ -413,19 +455,35 @@ Deno.serve(async (request) => {
       return jsonResponse(payload);
     }
 
-    const entries = await loadEntries(filters.period_start, filters.period_end);
+    const includePossibleAggregations =
+      action === "possible_aggregations" || filters.view === "possible_aggregation";
+    const fetchStarted = Date.now();
+    const [entries, persistedGroups] = await Promise.all([
+      loadAnalysisEntries(filters.period_start, filters.period_end),
+      loadPersistedGroups(),
+    ]);
+    const fetchMs = Date.now() - fetchStarted;
+    const engineStarted = Date.now();
     const result = reconcileOmieSicredi({
       entries,
       periodStart: filters.period_start,
       periodEnd: filters.period_end,
+      includePossibleAggregations,
+      includeReportExtras: false,
     });
+    const engineMs = Date.now() - engineStarted;
     const lists = buildAnalysisLists(result, entries);
-    const listKey = filters.view === "high" || filters.view === "internal_transfer" ? "suggested" : filters.view;
+    const listKey = includePossibleAggregations
+      ? "possible_aggregation"
+      : filters.view === "high" || filters.view === "internal_transfer"
+        ? "suggested"
+        : filters.view;
     const source = lists[listKey as keyof typeof lists] ?? [];
     const filtered = filterAnalysisRows(source, filters);
-    const groups = await loadPersistedGroups();
-    const findings = await adminClient.from("financial_audit_findings").select("id", { count: "exact", head: true });
-    const kpis = mergeAnalysisKpis(persistedKpisFromEntries(entries, groups, findings.count ?? 0), result.stats);
+    const kpis = mergeAnalysisKpis(
+      persistedKpisFromEntries(entries, persistedGroups, 0),
+      result.stats,
+    );
     const payload = {
       action,
       read_only: true,
@@ -443,7 +501,20 @@ Deno.serve(async (request) => {
         bank_debit_count: result.stats.bank_debit_unmatched_count,
         bank_debit_cents: result.stats.bank_debit_unmatched_cents,
       },
+      possible_aggregation_breakdown: includePossibleAggregations
+        ? {
+            c_ar: result.stats.possible_agg_c_ar,
+            d_ar: result.stats.possible_agg_d_ar,
+            c_ap: result.stats.possible_agg_c_ap,
+            d_ap: result.stats.possible_agg_d_ap,
+          }
+        : null,
       page: paginateRows(filtered, filters.page, filters.page_size),
+      perf: {
+        fetch_ms: fetchMs,
+        engine_ms: engineMs,
+        rows: entries.length,
+      },
     };
     assertReviewDtoSafe(payload);
     return jsonResponse(payload);

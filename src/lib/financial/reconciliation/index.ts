@@ -16,6 +16,7 @@ export {
 } from "./normalize-party.ts";
 export {
   OMIE_SICREDI_HIGH_PERSIST_EXPECT,
+  OMIE_SICREDI_LIVE_ANALYSIS_EXPECT,
   YES_HOTEL_HOMO_REF,
   assertHighPersistSnapshot,
   assertHomoReconciliationGate,
@@ -27,6 +28,9 @@ export {
 } from "./persist-high.ts";
 export { formatOmieSicrediDryRun, reconReportLeaksPii } from "./report.ts";
 export {
+  ANALYSIS_ENTRY_COLUMNS,
+  ANALYSIS_ENTRY_SELECT,
+  ANALYSIS_SOURCE_KINDS,
   REVIEW_ALLOWED_ACTIONS,
   REVIEW_PAGE_SIZE,
   REVIEW_VIEW_TYPES,

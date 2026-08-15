@@ -117,9 +117,9 @@
             SOMENTE LEITURA — Omie ↔ Sicredi — análise V1.2 em memória não persiste suggested/ambiguous
           </div>
           <p class="gestao-footnote">
-            High e transferências internas vêm das tabelas persistidas. Suggested, ambiguous e não
-            conciliados são calculados no servidor sem gravação. Transferência interna não entra em
-            receita/despesa.
+            High persistido: 593 + 2 transferências. Analysis recomputa 601 high (8 ainda não
+            persistidos). Suggested, ambiguous e não conciliados são calculados no servidor sem
+            gravação. Transferência interna não entra em receita/despesa.
           </p>
 
           <section class="yes-kpis gestao-kpis fin-kpis" id="fin-kpis" aria-label="Indicadores financeiros"></section>
@@ -214,6 +214,6 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
-    <script defer src="./financeiro-conciliacao.js?v=1"></script>
+    <script defer src="./financeiro-conciliacao.js?v=2"></script>
   </body>
 </html>

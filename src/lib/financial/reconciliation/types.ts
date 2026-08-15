@@ -200,6 +200,7 @@ export type ReconResult = {
   rule_version: typeof OMIE_SICREDI_RULE_VERSION;
   transfers: InternalTransferCandidate[];
   groups: ReconGroup[];
+  ambiguous: ReconGroup[];
   findings: ReconFinding[];
   possible_aggregations: PossibleAggregationCandidate[];
   stats: ReconStats;

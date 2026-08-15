@@ -1,5 +1,5 @@
 import { HIGH_SCORE_MIN, SUGGESTED_SCORE_MIN, OMIE_SICREDI_RULE_VERSION, type MatchBand, type ReconEntry, type ReconGroup } from "./types.ts";
-import { bandForScore, omieMatchAmountCents, scoreOmieBankPair } from "./score.ts";
+import { bandForScore, bankMatchAmountCents, omieMatchAmountCents, scoreOmieBankPair } from "./score.ts";
 import { stableId } from "./internal-transfers.ts";
 
 export type ScoredCandidate = {
@@ -12,18 +12,42 @@ export type ScoredCandidate = {
   evidence: ReconGroup["score_evidence"];
 };
 
+function bankAmountKey(direction: ReconEntry["direction"], amountCents: number): string {
+  return `${direction}|${amountCents}`;
+}
+
+/** Mesmos candidatos que o scan completo: só valor exato + direção compatível entram no score. */
 export function collectOneToOneCandidates(
   omieEntries: readonly ReconEntry[],
   bankEntries: readonly ReconEntry[],
   excludedBankIds: ReadonlySet<string>,
   excludedOmieIds: ReadonlySet<string> = new Set(),
 ): ScoredCandidate[] {
+  const byAmountDir = new Map<string, ReconEntry[]>();
+  for (const bank of bankEntries) {
+    if (excludedBankIds.has(bank.id)) continue;
+    const amount = bankMatchAmountCents(bank);
+    if (amount == null || amount <= 0) continue;
+    const key = bankAmountKey(bank.direction, amount);
+    const list = byAmountDir.get(key);
+    if (list) list.push(bank);
+    else byAmountDir.set(key, [bank]);
+  }
+
   const out: ScoredCandidate[] = [];
   for (const omie of omieEntries) {
     if (excludedOmieIds.has(omie.id)) continue;
-    if ((omieMatchAmountCents(omie) ?? 0) <= 0) continue;
-    for (const bank of bankEntries) {
-      if (excludedBankIds.has(bank.id)) continue;
+    const amount = omieMatchAmountCents(omie);
+    if (amount == null || amount <= 0) continue;
+    const direction = omie.source_kind === "omie_receivable"
+      ? "credit"
+      : omie.source_kind === "omie_payable"
+        ? "debit"
+        : null;
+    if (!direction) continue;
+    const banks = byAmountDir.get(bankAmountKey(direction, amount));
+    if (!banks) continue;
+    for (const bank of banks) {
       const scored = scoreOmieBankPair(omie, bank);
       if (!scored || !scored.amountExact) continue;
       out.push({

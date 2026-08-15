@@ -17,12 +17,15 @@
   var detailBodyElement = document.querySelector("#fin-detail-body");
   var filtersForm = document.querySelector("#fin-filters");
 
+  var ANALYSIS_ERROR = "Não foi possível calcular a análise neste momento.";
   var state = {
     page: 1,
     periodStart: "",
     periodEnd: "",
     kpis: null,
     analysisKpis: false,
+    analysisLoading: false,
+    possibleLoading: false,
   };
 
   var VIEW_TITLES = {
@@ -113,6 +116,9 @@
       return null;
     });
     if (!response.ok) {
+      if (action === "analysis" || action === "possible_aggregations") {
+        throw new Error(ANALYSIS_ERROR);
+      }
       throw new Error((data && (data.error || data.message)) || "Falha na revisão financeira.");
     }
     return data;
@@ -152,7 +158,15 @@
       kpiCard("Omie AP", kpis.omie_ap_count, kpis.omie_ap_cents),
       kpiCard("Sicredi créditos", kpis.sicredi_credit_count, kpis.sicredi_credit_cents),
       kpiCard("Sicredi débitos", kpis.sicredi_debit_count, kpis.sicredi_debit_cents),
-      kpiCard("Conciliados high", kpis.high_count, kpis.high_cents),
+      kpiCard("Conciliados high", kpis.high_count, kpis.high_cents, "persistido"),
+      kpiCard(
+        "High recomputado",
+        kpis.high_recomputed_count,
+        kpis.high_recomputed_cents,
+        kpis.high_unpersisted_count
+          ? kpis.high_unpersisted_count + " ainda não persistidos"
+          : "análise",
+      ),
       kpiCard("Suggested", kpis.suggested_count, kpis.suggested_cents, "análise"),
       kpiCard("Ambiguous", kpis.ambiguous_count, kpis.ambiguous_cents, "análise"),
       kpiCard("Omie sem banco", kpis.unmatched_omie_count, kpis.unmatched_omie_cents, "não conciliado"),
@@ -333,11 +347,24 @@
       unmatched_bank: "Não conciliado. Não é erro nem fraude.",
       possible_aggregation: "Diagnóstico — não conciliado. Sem confirmação.",
       internal_transfer: "Transferência interna — não misturar com receita/despesa.",
-      high: "",
+      high: "Lista persistida: 593 high. Analysis recomputa 601; 8 ainda não persistidos.",
     };
     var text = notes[view] || "";
     listNoteElement.hidden = !text;
     listNoteElement.textContent = text;
+  }
+
+  function analysisActionFor(view) {
+    if (view === "possible_aggregation") return "possible_aggregations";
+    return "analysis";
+  }
+
+  function mergePossibleKpis(base, extra) {
+    if (!base || !extra) return extra || base;
+    return Object.assign({}, base, {
+      possible_aggregation_count: extra.possible_aggregation_count,
+      possible_aggregation_cents: extra.possible_aggregation_cents,
+    });
   }
 
   async function loadList() {
@@ -346,18 +373,40 @@
     setListNote(filters.view);
     if (listMetaElement) listMetaElement.textContent = "Carregando…";
     var persistedView = filters.view === "high" || filters.view === "internal_transfer";
-    var data = await invokeReview(persistedView ? "high_list" : "analysis", filters);
-    if (data.kpis) {
-      state.kpis = data.kpis;
-      state.analysisKpis = !persistedView;
-      renderKpis(data.kpis);
-    }
-    renderRows(data.page);
-    renderPager(data.page);
-    if (listMetaElement) {
-      listMetaElement.textContent =
-        (data.page && data.page.total != null ? data.page.total + " itens" : "") +
-        (persistedView ? " · persistido" : " · análise read-only");
+    var action = persistedView ? "high_list" : analysisActionFor(filters.view);
+    if (action === "analysis") state.analysisLoading = true;
+    if (action === "possible_aggregations") state.possibleLoading = true;
+    try {
+      var data = await invokeReview(action, filters);
+      if (data.kpis) {
+        state.kpis = action === "possible_aggregations" ? mergePossibleKpis(state.kpis, data.kpis) : data.kpis;
+        state.analysisKpis = !persistedView;
+        renderKpis(state.kpis);
+      }
+      renderRows(data.page);
+      renderPager(data.page);
+      if (listMetaElement) {
+        listMetaElement.textContent =
+          (data.page && data.page.total != null ? data.page.total + " itens" : "") +
+          (persistedView ? " · persistido" : " · análise read-only");
+      }
+    } catch (error) {
+      if (!persistedView) {
+        if (listBodyElement) {
+          listBodyElement.innerHTML =
+            '<tr><td colspan="8">' + escapeHtml(ANALYSIS_ERROR) + "</td></tr>";
+        }
+        if (listMetaElement) listMetaElement.textContent = ANALYSIS_ERROR;
+        if (listNoteElement instanceof HTMLElement) {
+          listNoteElement.hidden = false;
+          listNoteElement.textContent = ANALYSIS_ERROR;
+        }
+        return;
+      }
+      throw error;
+    } finally {
+      if (action === "analysis") state.analysisLoading = false;
+      if (action === "possible_aggregations") state.possibleLoading = false;
     }
   }
 
@@ -382,19 +431,25 @@
     state.kpis = data.kpis;
     renderKpis(data.kpis);
     await loadList();
-    try {
-      var analysis = await invokeReview("analysis", Object.assign(currentFilters(), { view: "suggested", page: 1 }));
-      if (analysis.kpis) {
-        state.kpis = analysis.kpis;
-        state.analysisKpis = true;
-        renderKpis(analysis.kpis);
-      }
-    } catch (error) {
-      if (listNoteElement instanceof HTMLElement && document.querySelector("#fin-view")?.value === "high") {
-        listNoteElement.hidden = false;
-        listNoteElement.textContent =
-          "Análise pendente: " + (error instanceof Error ? error.message : "endpoint indisponível");
-      }
+    if (document.querySelector("#fin-view")?.value === "high") {
+      state.analysisLoading = true;
+      invokeReview("analysis", Object.assign(currentFilters(), { view: "suggested", page: 1 }))
+        .then(function (analysis) {
+          if (analysis.kpis) {
+            state.kpis = analysis.kpis;
+            state.analysisKpis = true;
+            renderKpis(analysis.kpis);
+          }
+        })
+        .catch(function () {
+          if (listNoteElement instanceof HTMLElement) {
+            listNoteElement.hidden = false;
+            listNoteElement.textContent = ANALYSIS_ERROR;
+          }
+        })
+        .finally(function () {
+          state.analysisLoading = false;
+        });
     }
   }
 

@@ -99,10 +99,16 @@ function omieKind(groups: readonly ReconGroup[], omie: readonly ReconEntry[], ki
   );
 }
 
+function emptyBucket(): PossibleAggregationBucketStats {
+  return { bank_count: 0, omie_entries: 0, amount_cents: 0, unique_count: 0, ambiguous_count: 0, search_limit: 0 };
+}
+
 export function reconcileOmieSicredi(input: {
   entries: readonly ReconEntry[];
   periodStart?: string;
   periodEnd?: string;
+  includePossibleAggregations?: boolean;
+  includeReportExtras?: boolean;
 }): ReconResult {
   const periodStart = input.periodStart ?? RECON_PERIOD_START;
   const periodEnd = input.periodEnd ?? RECON_PERIOD_END;
@@ -143,33 +149,37 @@ export function reconcileOmieSicredi(input: {
   );
   const ambiguousPass = resolveOneToOneGroups(tieCandidates, { minScore: SUGGESTED_SCORE_MIN, allocateTies: true });
 
-  const grouped = findPersonGrouping(
-    omie.filter((row) => !takenOmie.has(row.id)),
-    bankForOmie.filter((row) => !takenBank.has(row.id)),
-  );
+  const remainingOmie = omie.filter((row) => !takenOmie.has(row.id));
+  const remainingBank = bankForOmie.filter((row) => !takenBank.has(row.id));
+  const grouped = findPersonGrouping(remainingOmie, remainingBank);
   for (const group of grouped.groups) {
     for (const id of group.omie_entry_ids) takenOmie.add(id);
     for (const id of group.bank_entry_ids) takenBank.add(id);
   }
 
-  const diagnostic = diagnoseBatchAggregations(
-    omie.filter((row) => !takenOmie.has(row.id)),
-    bankForOmie.filter((row) => !takenBank.has(row.id)),
-  );
+  const includePossibleAggregations = input.includePossibleAggregations !== false;
+  const includeReportExtras = input.includeReportExtras !== false;
+  const leftoverOmie = omie.filter((row) => !takenOmie.has(row.id));
+  const leftoverBank = bankForOmie.filter((row) => !takenBank.has(row.id));
+  const diagnostic = includePossibleAggregations
+    ? diagnoseBatchAggregations(leftoverOmie, leftoverBank)
+    : { candidates: [] as PossibleAggregationCandidate[], searchLimits: 0 };
 
   const ambiguous = [...ambiguousPass.ambiguous, ...grouped.ambiguous];
   const groups = [...highPass.groups, ...suggestedPass.groups, ...grouped.groups].sort((a, b) => a.id.localeCompare(b.id));
   const unmatchedOmie = omie.filter((row) => !takenOmie.has(row.id));
   const unmatchedBank = bank.filter((row) => !takenBank.has(row.id));
 
-  const findings = buildFindings({
-    entries,
-    transfers,
-    groups,
-    ambiguous,
-    unmatchedOmie,
-    unmatchedBank,
-  });
+  const findings = includeReportExtras
+    ? buildFindings({
+        entries,
+        transfers,
+        groups,
+        ambiguous,
+        unmatchedOmie,
+        unmatchedBank,
+      })
+    : [];
 
   const high = groups.filter((group) => group.kind === "one_to_one" && group.band === "high");
   const suggested = groups.filter((group) => group.kind === "one_to_one" && group.band === "suggested");
@@ -212,10 +222,18 @@ export function reconcileOmieSicredi(input: {
   }
 
   const possible = diagnostic.candidates;
-  const cAr = possible.filter((row) => row.direction === "ar_credit" && row.date_window === "same_day");
-  const dAr = possible.filter((row) => row.direction === "ar_credit" && row.date_window === "d1");
-  const cAp = possible.filter((row) => row.direction === "ap_debit" && row.date_window === "same_day");
-  const dAp = possible.filter((row) => row.direction === "ap_debit" && row.date_window === "d1");
+  const cAr = includePossibleAggregations
+    ? possible.filter((row) => row.direction === "ar_credit" && row.date_window === "same_day")
+    : [];
+  const dAr = includePossibleAggregations
+    ? possible.filter((row) => row.direction === "ar_credit" && row.date_window === "d1")
+    : [];
+  const cAp = includePossibleAggregations
+    ? possible.filter((row) => row.direction === "ap_debit" && row.date_window === "same_day")
+    : [];
+  const dAp = includePossibleAggregations
+    ? possible.filter((row) => row.direction === "ap_debit" && row.date_window === "d1")
+    : [];
 
   const omieArSettled = sum(
     omie.filter((row) => row.source_kind === "omie_receivable").map((row) => omieMatchAmountCents(row) ?? 0),
@@ -285,10 +303,10 @@ export function reconcileOmieSicredi(input: {
     bank_credit_unmatched_cents: sum(creditUnmatched.map((row) => bankMatchAmountCents(row) ?? 0)),
     bank_debit_unmatched_count: debitUnmatched.length,
     bank_debit_unmatched_cents: sum(debitUnmatched.map((row) => bankMatchAmountCents(row) ?? 0)),
-    possible_agg_c_ar: bucketStats(cAr),
-    possible_agg_d_ar: bucketStats(dAr),
-    possible_agg_c_ap: bucketStats(cAp),
-    possible_agg_d_ap: bucketStats(dAp),
+    possible_agg_c_ar: includePossibleAggregations ? bucketStats(cAr) : emptyBucket(),
+    possible_agg_d_ar: includePossibleAggregations ? bucketStats(dAr) : emptyBucket(),
+    possible_agg_c_ap: includePossibleAggregations ? bucketStats(cAp) : emptyBucket(),
+    possible_agg_d_ap: includePossibleAggregations ? bucketStats(dAp) : emptyBucket(),
     high_entries_consumed: new Set(highEntryIds).size,
     high_ar_cents: highArCents,
     high_ap_cents: highApCents,
@@ -304,8 +322,8 @@ export function reconcileOmieSicredi(input: {
     score_histogram: histogram,
   };
 
-  const byId = new Map(entries.map((row) => [row.id, row]));
-  const samples: ReconSample[] = [
+  const byId = includeReportExtras ? new Map(entries.map((row) => [row.id, row])) : new Map<string, ReconEntry>();
+  const samples: ReconSample[] = includeReportExtras ? [
     ...samplesFor(
       "internal_transfer_high",
       transferHigh.map((row) => ({
@@ -374,12 +392,13 @@ export function reconcileOmieSicredi(input: {
           fitid: byId.get(row.bank_entry_id)?.source_record_id ?? null,
         })),
     ),
-  ];
+  ] : [];
 
   return {
     rule_version: OMIE_SICREDI_RULE_VERSION,
     transfers,
     groups,
+    ambiguous,
     findings,
     possible_aggregations: possible,
     stats,

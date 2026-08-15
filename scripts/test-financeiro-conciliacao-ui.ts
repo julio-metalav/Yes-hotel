@@ -85,11 +85,21 @@ assert.match(pageSrc, /Transferência interna — não é receita nem despesa/);
 assert.match(pageSrc, /Não conciliado\. Não é erro nem fraude/);
 assert.match(pageSrc, /Diagnóstico — não conciliado/);
 assert.match(pageSrc, /Suggested — análise em memória/);
+assert.match(pageSrc, /possible_aggregations/);
+assert.match(pageSrc, /Não foi possível calcular a análise neste momento/);
+assert.match(pageSrc, /High recomputado/);
+assert.match(pageSrc, /ainda não persistidos/);
+assert.match(pageSrc, /Lista persistida: 593 high/);
+assert.match(html, /High persistido: 593/);
+assert.match(html, /601 high/);
 ok("internal transfer, unmatched e possible aggregation com etiquetas corretas");
 
 assert.match(edgeSrc, /Acesso restrito a admin/);
 assert.match(edgeSrc, /Revisao financeira e somente leitura/);
 assert.doesNotMatch(edgeSrc, /raw_payload/);
+assert.match(edgeSrc, /ANALYSIS_ENTRY_SELECT/);
+assert.match(edgeSrc, /includePossibleAggregations/);
+assert.match(edgeSrc, /possible_aggregations/);
 ok("backend read-only admin-only sem raw_payload");
 
 console.log(`\n${cases} checks OK\n`);
