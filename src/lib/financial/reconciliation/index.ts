@@ -1,4 +1,23 @@
 export { collectOneToOneCandidates, resolveOneToOneGroups } from "./candidate-search.ts";
+export {
+  DECIDE_ACTIONS,
+  HUMAN_REVIEW_RULE_VERSION,
+  applyReviewDecisions,
+  ambiguousNoneReviewKey,
+  buildConfirmMatchPlan,
+  buildInternalTransferPlan,
+  buildReviewOnlyPlan,
+  collectConservativeCandidates,
+  explainEvidence,
+  humanReviewKey,
+  isDecideAction,
+  pendingCounts,
+  sameDecision,
+  sortByAmountDesc,
+  suggestedReviewKey,
+  uiStatusLabel,
+  unmatchedReviewKey,
+} from "./human-review.ts";
 export { dateDistanceDays, inPeriod } from "./dates.ts";
 export { reconcileOmieSicredi } from "./engine.ts";
 export { buildFindings } from "./findings.ts";
@@ -85,6 +104,15 @@ export {
   SUGGESTED_SCORE_MIN,
 } from "./types.ts";
 export type { HighPersistPlan } from "./persist-high.ts";
+export type {
+  ConfirmMatchPlan,
+  ConservativeCandidate,
+  DecideAction,
+  HumanReviewRecord,
+  HumanReviewStatus,
+  HumanReviewType,
+  ReviewOnlyPlan,
+} from "./human-review.ts";
 export type {
   InternalTransferCandidate,
   PossibleAggregationCandidate,

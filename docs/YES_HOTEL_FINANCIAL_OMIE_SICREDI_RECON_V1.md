@@ -6,6 +6,8 @@ Persistência HIGH (HOMO only): `--persist-high --allow-homo-reconciliation` (pl
 
 Contrato live Jan–Jul (facts atuais): analysis recomputa **601** high / R$ 708.211,87. Persistido: **601** high + 2 transfers. Delta **0**. Suggested 819 / ambiguous 20.
 
+Revisão humana (PR G): fila de auditoria em `financial-recon-decide`. Confirmação grava `groups.status=confirmed` (enum já existente). Rejeição/manter unmatched vai para `financial_reconciliation_reviews` (append-only). Suggested/ambiguous rejeitados não reaparecem. High automático não é rejeitável nesta rodada. Zero UPDATE em `financial_entries`.
+
 ## Valor
 
 Banco usa `gross_amount_cents`. Omie usa `settled_amount_cents`. Não assume `gross = settled + open`.

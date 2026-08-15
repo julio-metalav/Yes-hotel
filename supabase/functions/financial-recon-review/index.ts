@@ -5,6 +5,11 @@ import {
   type ReconEntry,
 } from "../../../src/lib/financial/reconciliation/types.ts";
 import {
+  applyReviewDecisions,
+  pendingCounts,
+  type HumanReviewRecord,
+} from "../../../src/lib/financial/reconciliation/index.ts";
+import {
   ANALYSIS_ENTRY_SELECT,
   ANALYSIS_SOURCE_KINDS,
   assertReviewDtoSafe,
@@ -234,6 +239,33 @@ function persistedKpisFromEntries(
   });
 }
 
+async function loadReviews(): Promise<HumanReviewRecord[]> {
+  let rows: Record<string, unknown>[] = [];
+  try {
+    rows = await fetchAll<Record<string, unknown>>((from, to) =>
+      adminClient
+        .from("financial_reconciliation_reviews")
+        .select("review_key, review_type, status, action, omie_entry_id, bank_entry_id, candidate_entry_ids, resulting_group_id")
+        .order("created_at", { ascending: false })
+        .range(from, to),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("financial_reconciliation_reviews")) return [];
+    throw error;
+  }
+  return rows.map((row) => ({
+    review_key: String(row.review_key),
+    review_type: row.review_type as HumanReviewRecord["review_type"],
+    status: row.status as HumanReviewRecord["status"],
+    action: String(row.action),
+    omie_entry_id: row.omie_entry_id == null ? null : String(row.omie_entry_id),
+    bank_entry_id: row.bank_entry_id == null ? null : String(row.bank_entry_id),
+    candidate_entry_ids: Array.isArray(row.candidate_entry_ids) ? row.candidate_entry_ids.map(String) : [],
+    resulting_group_id: row.resulting_group_id == null ? null : String(row.resulting_group_id),
+  }));
+}
+
 async function loadPersistedGroups() {
   return await fetchAll<Record<string, unknown>>((from, to) =>
     adminClient
@@ -458,9 +490,10 @@ Deno.serve(async (request) => {
     const includePossibleAggregations =
       action === "possible_aggregations" || filters.view === "possible_aggregation";
     const fetchStarted = Date.now();
-    const [entries, persistedGroups] = await Promise.all([
+    const [entries, persistedGroups, reviews] = await Promise.all([
       loadAnalysisEntries(filters.period_start, filters.period_end),
       loadPersistedGroups(),
+      loadReviews(),
     ]);
     const fetchMs = Date.now() - fetchStarted;
     const engineStarted = Date.now();
@@ -472,7 +505,8 @@ Deno.serve(async (request) => {
       includeReportExtras: false,
     });
     const engineMs = Date.now() - engineStarted;
-    const lists = buildAnalysisLists(result, entries);
+    const lists = applyReviewDecisions(buildAnalysisLists(result, entries), reviews);
+    const pending = pendingCounts(lists);
     const listKey = includePossibleAggregations
       ? "possible_aggregation"
       : filters.view === "high" || filters.view === "internal_transfer"
@@ -480,10 +514,10 @@ Deno.serve(async (request) => {
         : filters.view;
     const source = lists[listKey as keyof typeof lists] ?? [];
     const filtered = filterAnalysisRows(source, filters);
-    const kpis = mergeAnalysisKpis(
-      persistedKpisFromEntries(entries, persistedGroups, 0),
-      result.stats,
-    );
+    const kpis = {
+      ...mergeAnalysisKpis(persistedKpisFromEntries(entries, persistedGroups, 0), result.stats),
+      ...pending,
+    };
     const payload = {
       action,
       read_only: true,

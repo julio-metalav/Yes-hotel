@@ -29,13 +29,13 @@
   };
 
   var VIEW_TITLES = {
-    high: "Conciliados high",
-    suggested: "Suggested — análise em memória",
-    ambiguous: "Ambiguous — análise em memória",
-    unmatched_omie: "Não conciliado — Omie sem banco",
-    unmatched_bank: "Não conciliado — banco sem Omie",
+    high: "Conciliados automaticamente",
+    suggested: "Pendências — Suggested",
+    ambiguous: "Pendências — Ambiguous",
+    unmatched_omie: "Pendências — Omie sem banco",
+    unmatched_bank: "Pendências — banco sem Omie",
     internal_transfer: "Transferências internas",
-    possible_aggregation: "Possíveis agrupamentos",
+    possible_aggregation: "Pendências — possíveis agrupamentos",
   };
 
   function showAccessState(title, message, actionLabel) {
@@ -102,12 +102,16 @@
     return String(config.url || "").replace(/\/$/, "") + "/functions/v1/financial-recon-review";
   }
 
-  async function invokeReview(action, payload) {
+  function decideUrl() {
+    return String(config.url || "").replace(/\/$/, "") + "/functions/v1/financial-recon-decide";
+  }
+
+  async function invokeEdge(url, action, payload) {
     if (!auth || typeof auth.getEdgeFunctionFetchHeaders !== "function") {
       throw new Error("Auth indisponível.");
     }
     var headers = await auth.getEdgeFunctionFetchHeaders();
-    var response = await fetch(reviewUrl(), {
+    var response = await fetch(url, {
       method: "POST",
       headers: headers,
       body: JSON.stringify(Object.assign({ action: action }, payload || {})),
@@ -116,12 +120,20 @@
       return null;
     });
     if (!response.ok) {
-      if (action === "analysis" || action === "possible_aggregations") {
-        throw new Error(ANALYSIS_ERROR);
-      }
       throw new Error((data && (data.error || data.message)) || "Falha na revisão financeira.");
     }
     return data;
+  }
+
+  async function invokeReview(action, payload) {
+    try {
+      return await invokeEdge(reviewUrl(), action, payload);
+    } catch (error) {
+      if (action === "analysis" || action === "possible_aggregations") {
+        throw new Error(ANALYSIS_ERROR);
+      }
+      throw error;
+    }
   }
 
   function currentFilters() {
@@ -129,7 +141,7 @@
       period_start: document.querySelector("#fin-period-start")?.value || state.periodStart,
       period_end: document.querySelector("#fin-period-end")?.value || state.periodEnd,
       origin: document.querySelector("#fin-origin")?.value || "all",
-      view: document.querySelector("#fin-view")?.value || "high",
+      view: document.querySelector("#fin-view")?.value || "suggested",
       direction: document.querySelector("#fin-direction")?.value || "all",
       account_code: document.querySelector("#fin-account")?.value || "all",
       page: state.page,
@@ -186,16 +198,23 @@
     if (!(listBodyElement instanceof HTMLElement)) return;
     var rows = (page && page.rows) || [];
     if (!rows.length) {
-      listBodyElement.innerHTML = '<tr><td colspan="8">Nenhum item neste filtro.</td></tr>';
+      listBodyElement.innerHTML = '<tr><td colspan="9">Nenhum item neste filtro.</td></tr>';
       return;
     }
     listBodyElement.innerHTML = rows
       .map(function (row) {
+        var cta = row.persisted
+          ? '<button type="button" class="op-btn op-btn--ghost" data-open="1">Ver</button>'
+          : '<button type="button" class="op-btn" data-review="1">Revisar</button>';
         return (
           "<tr data-id=\"" +
           escapeHtml(row.id) +
           "\" data-persisted=\"" +
           (row.persisted ? "1" : "0") +
+          "\" data-omie=\"" +
+          escapeHtml(row.omie_entry_id || "") +
+          "\" data-bank=\"" +
+          escapeHtml(row.bank_entry_id || "") +
           "\">" +
           "<td>" +
           escapeHtml(row.date || "—") +
@@ -219,7 +238,10 @@
           escapeHtml(row.score == null ? "—" : String(row.score)) +
           "</td>" +
           "<td>" +
-          escapeHtml((row.evidence_summary || []).join(" · ")) +
+          escapeHtml(row.evidence_label || (row.evidence_summary || []).join(" · ") || "—") +
+          "</td>" +
+          "<td>" +
+          cta +
           "</td>" +
           "</tr>"
         );
@@ -335,19 +357,20 @@
       escapeHtml(detail.status) +
       " · created_at " +
       escapeHtml(detail.created_at || "—") +
-      "</p></div>";
+      "</p></div>" +
+      (detail.decision_html || "");
   }
 
   function setListNote(view) {
     if (!(listNoteElement instanceof HTMLElement)) return;
     var notes = {
-      suggested: "Análise V1.2 em memória. Não persistido. Sem confirmação nesta rodada.",
-      ambiguous: "Análise V1.2 em memória. Não persistido. Sem confirmação nesta rodada.",
-      unmatched_omie: "Não conciliado. Não é erro nem fraude.",
+      suggested: "Maior valor primeiro. Confirmar cria grupo humano; rejeitar impede a sugestão de reaparecer.",
+      ambiguous: "Escolha um candidato ou marque nenhum destes. Não é fraude.",
+      unmatched_omie: "Não conciliado. Não é erro nem fraude. Dá para associar manualmente ou manter.",
       unmatched_bank: "Não conciliado. Não é erro nem fraude.",
-      possible_aggregation: "Diagnóstico — não conciliado. Sem confirmação.",
-      internal_transfer: "Transferência interna — não misturar com receita/despesa.",
-      high: "Lista persistida: 601 high. Analysis recomputa 601; delta 0.",
+      possible_aggregation: "Diagnóstico — não conciliado. Sem auto-match.",
+      internal_transfer: "Transferência interna — não misturar com receita/despesa. Somente visualização.",
+      high: "Conciliados automaticamente: 601 high. Somente visualização nesta rodada.",
     };
     var text = notes[view] || "";
     listNoteElement.hidden = !text;
@@ -394,7 +417,7 @@
       if (!persistedView) {
         if (listBodyElement) {
           listBodyElement.innerHTML =
-            '<tr><td colspan="8">' + escapeHtml(ANALYSIS_ERROR) + "</td></tr>";
+            '<tr><td colspan="9">' + escapeHtml(ANALYSIS_ERROR) + "</td></tr>";
         }
         if (listMetaElement) listMetaElement.textContent = ANALYSIS_ERROR;
         if (listNoteElement instanceof HTMLElement) {
@@ -453,6 +476,118 @@
     }
   }
 
+  function candidateOptions(candidates) {
+    return (candidates || [])
+      .map(function (row) {
+        return (
+          '<label class="fin-candidate">' +
+          '<input type="radio" name="selected_bank_entry_id" value="' +
+          escapeHtml(row.entry_id) +
+          '" ' +
+          (row.diagnostic_only || row.blocked ? "disabled" : "") +
+          " />" +
+          "<span>" +
+          escapeHtml(formatMoneyCents(row.amount_cents)) +
+          " · score " +
+          escapeHtml(row.score == null ? "—" : String(row.score)) +
+          " · " +
+          escapeHtml(row.evidence_label) +
+          (row.diagnostic_only ? " (só diagnóstico)" : "") +
+          (row.blocked ? " (já usado)" : "") +
+          "</span></label>"
+        );
+      })
+      .join("");
+  }
+
+  async function openReviewCase(row) {
+    var filters = currentFilters();
+    var data = await invokeEdge(decideUrl(), "review_case", {
+      omie_entry_id: row.getAttribute("data-omie") || undefined,
+      bank_entry_id: row.getAttribute("data-bank") || undefined,
+      entry_id: row.getAttribute("data-id"),
+      period_start: filters.period_start,
+      period_end: filters.period_end,
+      review_type: filters.view,
+    });
+    var actions = data.allowed_actions || [];
+    var decision =
+      '<form id="fin-decision-form" class="fin-decision" data-review-type="' +
+      escapeHtml(filters.view) +
+      '" data-omie="' +
+      escapeHtml((data.omie && data.omie.id) || "") +
+      '" data-bank="' +
+      escapeHtml((data.bank && data.bank.id) || "") +
+      '" data-entry="' +
+      escapeHtml((data.focus && data.focus.id) || "") +
+      '"><h3>Decisão</h3>' +
+      (data.candidates && data.candidates.length
+        ? "<fieldset><legend>Candidatos</legend>" + candidateOptions(data.candidates) + "</fieldset>"
+        : "") +
+      '<label>Motivo / nota<input name="reason" maxlength="500" /></label>' +
+      '<p id="fin-decision-error" class="fin-decision-error"></p><div class="fin-decision-actions">';
+    if (actions.indexOf("confirm_match") >= 0) {
+      decision += '<button type="submit" class="op-btn" name="decide" value="confirm_match">Confirmar conciliação</button>';
+    }
+    if (actions.indexOf("reject_suggestion") >= 0 && filters.view === "suggested") {
+      decision += '<button type="submit" class="op-btn op-btn--ghost" name="decide" value="reject_suggestion">Rejeitar sugestão</button>';
+    }
+    if (actions.indexOf("reject_ambiguous") >= 0 && filters.view === "ambiguous") {
+      decision += '<button type="submit" class="op-btn op-btn--ghost" name="decide" value="reject_ambiguous">Nenhum destes</button>';
+    }
+    if (actions.indexOf("mark_unmatched") >= 0) {
+      decision += '<button type="submit" class="op-btn op-btn--ghost" name="decide" value="mark_unmatched">Manter não conciliado</button>';
+    }
+    if (actions.indexOf("mark_awaiting_settlement") >= 0) {
+      decision += '<button type="submit" class="op-btn op-btn--ghost" name="decide" value="mark_awaiting_settlement">Aguardando liquidação</button>';
+    }
+    if (actions.indexOf("mark_possible_aggregation") >= 0) {
+      decision += '<button type="submit" class="op-btn op-btn--ghost" name="decide" value="mark_possible_aggregation">Possível agrupamento</button>';
+    }
+    decision += "</div></form>";
+    renderDetail({
+      kind: filters.view === "internal_transfer" ? "internal_transfer" : "AR",
+      status: "pending_review",
+      rule_version: data.rule_version,
+      created_at: null,
+      omie: data.omie,
+      bank: data.bank,
+      transfer_debit: null,
+      transfer_credit: null,
+      evidence_summary: data.evidence_label ? [data.evidence_label] : [],
+      score_evidence: data.score_evidence || {},
+      decision_html: decision,
+    });
+  }
+
+  async function submitDecision(form, submitter) {
+    var action = (submitter && submitter.getAttribute("name") === "decide" && submitter.value) || "confirm_match";
+    var selected = form.querySelector('input[name="selected_bank_entry_id"]:checked');
+    var payload = {
+      review_type: form.getAttribute("data-review-type"),
+      omie_entry_id: form.getAttribute("data-omie") || undefined,
+      bank_entry_id: (selected && selected.value) || form.getAttribute("data-bank") || undefined,
+      entry_id: form.getAttribute("data-entry") || undefined,
+      selected_bank_entry_id: selected && selected.value,
+      reason: form.reason && form.reason.value,
+      period_start: currentFilters().period_start,
+      period_end: currentFilters().period_end,
+    };
+    var buttons = form.querySelectorAll("button");
+    buttons.forEach(function (button) {
+      button.disabled = true;
+    });
+    try {
+      await invokeEdge(decideUrl(), action, payload);
+      if (detailElement) detailElement.classList.add("hidden");
+      await loadList();
+    } finally {
+      buttons.forEach(function (button) {
+        button.disabled = false;
+      });
+    }
+  }
+
   function bindEvents() {
     filtersForm?.addEventListener("submit", function (event) {
       event.preventDefault();
@@ -460,7 +595,7 @@
       loadList().catch(function (error) {
         if (listBodyElement) {
           listBodyElement.innerHTML =
-            '<tr><td colspan="8">' + escapeHtml(error instanceof Error ? error.message : "Falha") + "</td></tr>";
+            '<tr><td colspan="9">' + escapeHtml(error instanceof Error ? error.message : "Falha") + "</td></tr>";
         }
       });
     });
@@ -474,21 +609,38 @@
     listBodyElement?.addEventListener("click", function (event) {
       var row = event.target.closest("tr[data-id]");
       if (!(row instanceof HTMLElement)) return;
-      if (row.getAttribute("data-persisted") !== "1") return;
       listBodyElement.querySelectorAll("tr[aria-selected]").forEach(function (node) {
         node.removeAttribute("aria-selected");
       });
       row.setAttribute("aria-selected", "true");
-      invokeReview("group_detail", { group_id: row.getAttribute("data-id") })
-        .then(function (data) {
-          renderDetail(data.detail);
-        })
-        .catch(function (error) {
-          if (detailBodyElement) {
-            detailElement?.classList.remove("hidden");
-            detailBodyElement.textContent = error instanceof Error ? error.message : "Falha ao abrir detalhe.";
-          }
-        });
+      if (row.getAttribute("data-persisted") === "1") {
+        invokeReview("group_detail", { group_id: row.getAttribute("data-id") })
+          .then(function (data) {
+            renderDetail(data.detail);
+          })
+          .catch(function (error) {
+            if (detailBodyElement) {
+              detailElement?.classList.remove("hidden");
+              detailBodyElement.textContent = error instanceof Error ? error.message : "Falha ao abrir detalhe.";
+            }
+          });
+        return;
+      }
+      openReviewCase(row).catch(function (error) {
+        if (detailBodyElement) {
+          detailElement?.classList.remove("hidden");
+          detailBodyElement.textContent = error instanceof Error ? error.message : "Falha ao abrir caso.";
+        }
+      });
+    });
+    detailBodyElement?.addEventListener("submit", function (event) {
+      var form = event.target;
+      if (!(form instanceof HTMLFormElement) || form.id !== "fin-decision-form") return;
+      event.preventDefault();
+      submitDecision(form, event.submitter).catch(function (error) {
+        var box = document.querySelector("#fin-decision-error");
+        if (box) box.textContent = error instanceof Error ? error.message : "Falha ao gravar decisão.";
+      });
     });
     logoutButtonElement?.addEventListener("click", async function () {
       if (auth && auth.logout) await auth.logout();
@@ -542,7 +694,7 @@
     } catch (error) {
       if (listBodyElement) {
         listBodyElement.innerHTML =
-          '<tr><td colspan="8">' +
+          '<tr><td colspan="9">' +
           escapeHtml(error instanceof Error ? error.message : "Falha ao carregar conciliação.") +
           "</td></tr>";
       }
