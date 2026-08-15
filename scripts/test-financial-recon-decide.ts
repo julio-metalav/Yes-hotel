@@ -11,13 +11,21 @@ import {
   buildInternalTransferPlan,
   buildReviewOnlyPlan,
   collectConservativeCandidates,
+  adminAuditDtoLeaksSensitive,
+  assertAdminAuditDtoSafe,
+  buildAdminReviewCase,
+  displayImportFilename,
   explainEvidence,
   friendlyDecideError,
   INVALID_FINANCIAL_ENTRY_ID,
   isDecideAction,
   isFinancialEntryUuid,
+  maskPersonName,
+  presentAdminOmie,
+  presentCorrespondence,
   reconcileOmieSicredi,
   resolveReviewCaseIds,
+  toAuditEntry,
   sameDecision,
   suggestedReviewKey,
   uiStatusLabel,
@@ -288,6 +296,92 @@ const nearBank = entry({
   assert.equal(mapped.message, INVALID_FINANCIAL_ENTRY_ID);
   assert.doesNotMatch(mapped.message, /invalid input syntax/);
   ok("Revisar usa UUIDs reais; hash nunca vai para financial_entries.id; SQL cru não vaza");
+}
+
+{
+  const auditOmie = toAuditEntry(omie, { tax_cents: 0, source_row: 12, source_import_id: "imp-1" });
+  const auditBank = toAuditEntry(bank, { source_row: 4, source_import_id: "imp-2", external_reference: "REF-1" });
+  const presented = presentAdminOmie(auditOmie);
+  assert.equal(presented?.person_name, "HOTEL YES CENTRO ALFA");
+  assert.notEqual(presented?.person_name, maskPersonName(omie.person_name));
+  const candidates = collectConservativeCandidates(omie, [bank, nearBank]);
+  const payload = buildAdminReviewCase({
+    review_type: "suggested",
+    omie: auditOmie,
+    bank: auditBank,
+    focus: auditOmie,
+    score: 85,
+    evidence: { amount_exact: true, date_distance_days: 0, party_match: "contains_safe", candidate_count: 1 },
+    candidates,
+    pool: [omie, bank, nearBank],
+    used: new Set(),
+    imports: new Map([
+      ["imp-1", { id: "imp-1", source_type: "omie_ar_ap", filename: "omie.xlsx", parser_name: "omie_ar_ap", parser_version: "omie_ar_ap@1.0.0", imported_at: "2026-08-01T00:00:00Z" }],
+      ["imp-2", { id: "imp-2", source_type: "ofx_bank", filename: "sicredi.ofx", parser_name: "ofx_sicredi", parser_version: "ofx@1.0.0", imported_at: "2026-08-01T00:00:00Z" }],
+    ]),
+    allowed_actions: ["confirm_match", "reject_suggestion"],
+  });
+  assert.equal(payload.dto, "admin_audit");
+  assert.equal(payload.read_only, true);
+  assert.equal(payload.omie?.person_name, "HOTEL YES CENTRO ALFA");
+  assert.equal(payload.bank?.description, "YES CENTRO ALFA");
+  assert.ok((payload.candidates[0]?.description || "").length > 0);
+  assert.equal(payload.origin.omie?.filename, "omie.xlsx");
+  assert.equal(payload.origin.omie?.parser_name, "omie_ar_ap");
+  assert.equal(payload.omie?.installment, null);
+  assert.equal(displayImportFilename("C:\\\\Users\\\\julio\\\\omie.xlsx"), "omie.xlsx");
+  assert.ok(!JSON.stringify(payload).includes("raw_payload"));
+  assert.ok(!JSON.stringify(payload).includes("service_role"));
+  assert.deepEqual(adminAuditDtoLeaksSensitive(payload), []);
+  assert.ok(payload.correspondence.evidence_lines.includes("O valor é exatamente igual."));
+  assert.ok(payload.correspondence.evidence_lines.includes("A movimentação ocorreu no mesmo dia."));
+  assert.ok(payload.correspondence.evidence_lines.includes("O nome é compatível."));
+  assert.equal(payload.omie?.type_label, "Conta a receber");
+  assert.throws(
+    () => assertAdminAuditDtoSafe({ raw_payload: { fitid: "x" } }),
+    /raw_payload/,
+  );
+  ok("detalhe admin traz nome/descrição completos; lista/mascaramento separado; sem raw_payload");
+}
+
+{
+  const exact = presentCorrespondence({
+    review_type: "suggested",
+    omie,
+    bank,
+    score: 85,
+    evidence: { amount_exact: true, date_distance_days: 0, party_match: "token_exact", candidate_count: 1 },
+    candidate_count: 1,
+    usable_candidate_count: 1,
+  });
+  assert.deepEqual(exact.evidence_lines, [
+    "O valor é exatamente igual.",
+    "A movimentação ocorreu no mesmo dia.",
+    "O nome é compatível.",
+  ]);
+  const unmatched = presentCorrespondence({
+    review_type: "unmatched_omie",
+    omie,
+    bank: null,
+    score: null,
+    evidence: null,
+    candidate_count: 2,
+    usable_candidate_count: 0,
+  });
+  assert.ok(unmatched.evidence_lines.includes("Há mais de um movimento possível."));
+  assert.ok(unmatched.evidence_lines.includes("Nenhum candidato atingiu confiança suficiente."));
+  const ambiguous = presentCorrespondence({
+    review_type: "ambiguous",
+    omie,
+    bank: null,
+    score: 70,
+    evidence: { amount_exact: false, date_distance_days: 2, party_match: "no_match", candidate_count: 3 },
+    candidate_count: 3,
+    usable_candidate_count: 3,
+  });
+  assert.ok(ambiguous.evidence_lines.includes("Há mais de um movimento possível."));
+  assert.ok(ambiguous.evidence_lines.includes("O nome não foi confirmado."));
+  ok("evidência do detalhe em frases humanas; técnicos fora do DTO principal");
 }
 
 {

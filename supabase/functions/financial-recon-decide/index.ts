@@ -2,27 +2,29 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
   applyReviewDecisions,
   assertReviewDtoSafe,
+  buildAdminReviewCase,
   buildConfirmMatchPlan,
   buildInternalTransferPlan,
   buildReviewOnlyPlan,
   collectConservativeCandidates,
-  explainEvidence,
   friendlyDecideError,
   INVALID_FINANCIAL_ENTRY_ID,
   isDecideAction,
   isFinancialEntryUuid,
-  maskFitid,
-  maskPersonName,
   parseOptionalFinancialEntryId,
   pendingCounts,
-  redactDescription,
   resolveReviewCaseIds,
   sameDecision,
+  sanitizeImportOrigin,
+  toAuditEntry,
   toReconEntry,
+  type AuditEntry,
   type HumanReviewRecord,
+  type ImportOrigin,
   type ReconEntry,
 } from "../../../src/lib/financial/reconciliation/index.ts";
 import { HUMAN_REVIEW_RULE_VERSION } from "../../../src/lib/financial/reconciliation/human-review.ts";
+import { AUDIT_ENTRY_EXTRA_COLUMNS } from "../../../src/lib/financial/reconciliation/admin-audit-view.ts";
 import { ANALYSIS_ENTRY_SELECT, ANALYSIS_SOURCE_KINDS } from "../../../src/lib/financial/reconciliation/review-view.ts";
 import { scoreOmieBankPair } from "../../../src/lib/financial/reconciliation/score.ts";
 
@@ -119,6 +121,37 @@ async function loadEntriesByIds(ids: string[]): Promise<ReconEntry[]> {
   return (data ?? []).map((row) => toReconEntry(attachAccountCode(row as Record<string, unknown>, accounts)));
 }
 
+async function loadAuditEntriesByIds(ids: string[]): Promise<AuditEntry[]> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!unique.length) return [];
+  if (unique.some((id) => !isFinancialEntryUuid(id))) {
+    throw Object.assign(new Error(INVALID_FINANCIAL_ENTRY_ID), { status: 400 });
+  }
+  const accounts = await loadAccountCodeById();
+  const extra = AUDIT_ENTRY_EXTRA_COLUMNS.join(", ");
+  const { data, error } = await adminClient
+    .from("financial_entries")
+    .select(`${ANALYSIS_ENTRY_SELECT}, ${extra}, financial_accounts ( code )`)
+    .in("id", unique)
+    .eq("lifecycle_status", "active");
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => {
+    const attached = attachAccountCode(row as Record<string, unknown>, accounts);
+    return toAuditEntry(toReconEntry(attached), attached);
+  });
+}
+
+async function loadImportOrigins(importIds: string[]): Promise<Map<string, ImportOrigin>> {
+  const unique = [...new Set(importIds.filter(Boolean))];
+  if (!unique.length) return new Map();
+  const { data, error } = await adminClient
+    .from("financial_imports")
+    .select("id, source_type, original_filename, parser_name, parser_version, imported_at")
+    .in("id", unique);
+  if (error) throw new Error(error.message);
+  return new Map((data ?? []).map((row) => [String(row.id), sanitizeImportOrigin(row as Record<string, unknown>)]));
+}
+
 async function loadPeriodEntries(periodStart: string, periodEnd: string): Promise<ReconEntry[]> {
   const accounts = await loadAccountCodeById();
   const rows = await fetchAll<Record<string, unknown>>((from, to) =>
@@ -175,27 +208,6 @@ async function loadReviews(): Promise<HumanReviewRecord[]> {
     candidate_entry_ids: Array.isArray(row.candidate_entry_ids) ? row.candidate_entry_ids.map(String) : [],
     resulting_group_id: row.resulting_group_id == null ? null : String(row.resulting_group_id),
   }));
-}
-
-function sanitizeEntry(entry: ReconEntry, extra?: { account_mask?: string | null }) {
-  const isOmie = entry.source_system === "omie";
-  return {
-    id: entry.id,
-    source_system: entry.source_system,
-    source_kind: entry.source_kind,
-    type: entry.source_kind === "omie_receivable" ? "AR" : entry.source_kind === "omie_payable" ? "AP" : null,
-    settlement_date: entry.settlement_date,
-    person_name_masked: isOmie ? maskPersonName(entry.person_name) : null,
-    gross_amount_cents: entry.gross_amount_cents,
-    settled_amount_cents: entry.settled_amount_cents,
-    open_amount_cents: entry.open_amount_cents,
-    amount_cents: isOmie ? entry.settled_amount_cents : entry.gross_amount_cents,
-    account_code: entry.account_code,
-    account_mask: extra?.account_mask ?? null,
-    direction: entry.direction,
-    description_redacted: isOmie ? null : redactDescription(entry.description),
-    fitid_masked: isOmie ? null : maskFitid(entry.source_record_id),
-  };
 }
 
 async function insertReview(row: Record<string, unknown>) {
@@ -375,39 +387,37 @@ Deno.serve(async (request) => {
       const periodEnd = String(body.period_end ?? "2026-07-31");
       const wanted = ids.lookup_ids;
       const [focusEntries, pool, used] = await Promise.all([
-        loadEntriesByIds(wanted),
+        loadAuditEntriesByIds(wanted),
         loadPeriodEntries(periodStart, periodEnd),
         loadUsedEntryIds(),
       ]);
       const byId = new Map(focusEntries.map((row) => [row.id, row]));
-      const omie = omieId ? byId.get(omieId) : focusEntries.find((row) => row.source_system === "omie");
-      const bank = bankId ? byId.get(bankId) : focusEntries.find((row) => row.source_system === "sicredi");
+      const omie = omieId ? byId.get(omieId) ?? null : focusEntries.find((row) => row.source_system === "omie") ?? null;
+      const bank = bankId ? byId.get(bankId) ?? null : focusEntries.find((row) => row.source_system === "sicredi") ?? null;
       const focus = byId.get(focusId) ?? omie ?? bank;
       if (!focus) return jsonResponse({ error: "Caso nao encontrado." }, 404);
       const scored = omie && bank ? scoreOmieBankPair(omie, bank) : null;
-      const candidates = collectConservativeCandidates(focus, pool).map((row) => ({
-        ...row,
-        blocked: used.has(row.entry_id),
-      }));
-      const payload = {
-        action,
-        read_only: false,
-        rule_version: HUMAN_REVIEW_RULE_VERSION,
-        omie: omie ? sanitizeEntry(omie) : null,
-        bank: bank ? sanitizeEntry(bank) : null,
-        focus: sanitizeEntry(focus),
+      const candidates = collectConservativeCandidates(focus, pool);
+      const imports = await loadImportOrigins(
+        [omie?.source_import_id, bank?.source_import_id].filter((id): id is string => !!id),
+      );
+      const payload = buildAdminReviewCase({
+        review_type: String(body.review_type ?? (omie && bank ? "suggested" : omie ? "unmatched_omie" : "unmatched_bank")),
+        omie,
+        bank,
+        focus,
         score: scored?.score ?? null,
-        evidence_label: explainEvidence(scored?.score ?? null, scored?.evidence ?? null),
-        score_evidence: scored?.evidence ?? null,
+        evidence: scored?.evidence ?? null,
         candidates,
-        used_entries: [omie?.id, bank?.id, focus.id].filter((id): id is string => !!id && used.has(id)),
+        pool,
+        used,
+        imports,
         allowed_actions: used.has(focus.id)
           ? []
           : omie && bank
             ? ["confirm_match", "reject_suggestion", "reject_ambiguous"]
             : ["confirm_match", "mark_unmatched", "mark_awaiting_settlement", "mark_possible_aggregation", "mark_internal_transfer"],
-      };
-      assertReviewDtoSafe(payload);
+      });
       return jsonResponse(payload);
     }
 

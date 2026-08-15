@@ -99,6 +99,51 @@
 .fin-recon-view .fin-detail-grid dd {
   margin: 0;
   font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.fin-recon-view .fin-sicredi-empty,
+.fin-recon-view .fin-omie-empty {
+  padding: 12px 14px;
+  border: 1px dashed var(--op-border);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.03);
+}
+
+.fin-recon-view .fin-sicredi-empty p,
+.fin-recon-view .fin-omie-empty p {
+  margin: 8px 0 0;
+  color: var(--op-text-muted);
+  font-size: 14px;
+}
+
+.fin-recon-view .fin-correspondence,
+.fin-recon-view .fin-origin,
+.fin-recon-view .fin-candidates,
+.fin-recon-view .fin-technical {
+  margin-top: 16px;
+}
+
+.fin-recon-view .fin-correspondence ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.fin-recon-view .fin-candidate-table td {
+  vertical-align: top;
+  font-size: 13px;
+}
+
+.fin-recon-view .fin-technical {
+  color: var(--op-text-muted);
+  font-size: 13px;
+}
+
+.fin-recon-view .fin-technical dl {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 6px 10px;
+  margin: 8px 0 0;
 }
 
 .fin-recon-view .fin-evidence {
@@ -114,6 +159,40 @@
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--op-border);
+}
+
+.fin-recon-view .fin-associate-preview {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--op-border);
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.06);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.fin-recon-view .fin-note-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+  color: var(--op-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fin-recon-view .fin-note-label textarea {
+  min-height: 88px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--op-border);
+  border-radius: 8px;
+  background: var(--op-surface);
+  color: var(--op-text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  resize: vertical;
 }
 
 .fin-recon-view .fin-decision-actions {

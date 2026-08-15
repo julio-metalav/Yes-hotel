@@ -276,6 +276,7 @@ console.log("\n=== Revisão financeira Omie ↔ Sicredi ===\n");
   assert.ok(lists.unmatched_omie.some((row) => row.label === "Não conciliado"));
   assert.ok(lists.unmatched_bank.some((row) => row.label === "Não conciliado"));
   assert.ok(lists.suggested.every((row) => !!row.omie_entry_id && !!row.bank_entry_id));
+  assert.ok(lists.suggested.every((row) => !row.omie_label || row.omie_label.includes("***")));
   assert.ok(lists.suggested.every((row) => row.id !== row.omie_entry_id && row.id !== row.bank_entry_id));
   assert.ok(lists.unmatched_omie.every((row) => row.omie_entry_id === row.id && !row.bank_entry_id));
   assert.ok(lists.unmatched_bank.every((row) => row.bank_entry_id === row.id && !row.omie_entry_id));
