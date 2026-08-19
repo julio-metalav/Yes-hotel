@@ -140,6 +140,27 @@ export interface HitsGuest {
   [key: string]: unknown;
 }
 
+/** Parâmetros oficiais de GET /Datashare/RevenueManagement/Guests. */
+export interface HitsGuestSearchParams {
+  entityId?: string;
+  since?: string;
+  /** 1=Passaporte, 2=CPF, 3=RG, 7=Certidão de nascimento. */
+  docType?: 1 | 2 | 3 | 7;
+  doc?: string;
+  email?: string;
+  page?: number;
+  size?: number;
+}
+
+export type HitsGuestListResponse =
+  | HitsGuest[]
+  | {
+      data?: HitsGuest[];
+      items?: HitsGuest[];
+      results?: HitsGuest[];
+      [key: string]: unknown;
+    };
+
 /** DTO externo — ReservationDetailDto (detalhe). */
 export interface HitsReservationDetails {
   idReservation?: number | string;

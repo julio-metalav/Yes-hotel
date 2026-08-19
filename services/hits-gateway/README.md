@@ -36,8 +36,9 @@ Mesmo código. Secrets e URLs separados. Nenhuma credencial de PROD no HOMO.
 | GET | `/health` | não | nenhum |
 | GET | `/v1/reservations` | Bearer | `GET /Datashare/WebCheckinOut/Reservations` |
 | GET | `/v1/reservations/:id` | Bearer | `GET /Datashare/WebCheckinOut/Reservation/{id}` |
+| GET | `/v1/guests` | Bearer | `GET /Datashare/RevenueManagement/Guests` |
 
-POST/PUT/PATCH/DELETE em `/v1/reservations` → **405**, sem HITS.  
+POST/PUT/PATCH/DELETE em `/v1/reservations` e `/v1/guests` → **405**, sem HITS.
 `/Authorize`, `/Datashare`, CheckIn **não existem** neste serviço.
 
 `GET /health` responde só:
@@ -47,6 +48,8 @@ POST/PUT/PATCH/DELETE em `/v1/reservations` → **405**, sem HITS.
 ```
 
 Query de lista: `Type`, `Status`, `InitialDate`, `FinalDate`, `ReservationIntegrationId`, `Page`, `Size` (contrato do `HitsClient`). Outros parâmetros são ignorados. `Size` teto 100.
+
+Query de hóspedes: `EntityId`, `Since`, `DocType`, `Doc`, `Email`, `Page`, `Size`. `DocType`: 1=passaporte, 2=CPF, 3=RG, 7=certidão de nascimento. Outros parâmetros são ignorados e `Size` tem teto 100. Como `Doc` e `Email` são dados pessoais, o gateway remove a query string dos logs e o Nginx deve desativar o access log dessa rota.
 
 ## GATEWAY_TOKEN
 
@@ -84,7 +87,7 @@ Sem `HITS_*` completos: `/health` ok; `/v1/*` autenticado → 503. Sem chamada �
 
 ## trustProxy / Nginx
 
-O Fastify confia em `X-Forwarded-*` **apenas** de `127.0.0.1` e `::1` (Nginx no mesmo host).  
+O Fastify confia em `X-Forwarded-*` **apenas** de `127.0.0.1` e `::1` (Nginx no mesmo host).
 O exemplo Nginx define `X-Forwarded-For $remote_addr` (não concatena o header do cliente).
 
 ## Deploy HOMO (ainda não executar)

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { HitsApiError, HitsError } from "../../../src/lib/integrations/hits/errors.ts";
 import {
   createHitsFixtureFetch,
+  fixtureGuestsList,
   fixtureReservationDetails,
   fixtureReservationsList,
 } from "../../../src/lib/integrations/hits/fixtures.ts";
@@ -10,7 +11,11 @@ import type { HitsConfig } from "../../../src/lib/integrations/hits/config.ts";
 import { GATEWAY_VERSION } from "../src/version.ts";
 import { buildApp } from "../src/app.ts";
 import { createHitsReadClient, type HitsReadClient } from "../src/hits-client.ts";
-import { parseReservationId, parseReservationListQuery } from "../src/query.ts";
+import {
+  parseGuestListQuery,
+  parseReservationId,
+  parseReservationListQuery,
+} from "../src/query.ts";
 import { loadGatewayConfig } from "../src/config.ts";
 
 const TOKEN = "test-gateway-token-not-a-real-value";
@@ -147,6 +152,49 @@ test("GET /v1/reservations/:id com id válido (HitsClient mockado)", async () =>
   });
 });
 
+test("GET /v1/guests com token válido consulta o HitsClient", async () => {
+  const client = createHitsReadClient(syntheticHitsConfig(), {
+    fetchImpl: createHitsFixtureFetch("happy") as never,
+  });
+  await withApp(client, async (app) => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/v1/guests?EntityId=700001&Page=0&Size=100&ignored=value",
+      headers: AUTH,
+    });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json(), fixtureGuestsList);
+  });
+});
+
+test("GET /v1/guests rejeita filtros inválidos sem chamar HITS", async () => {
+  let called = 0;
+  const mock: HitsReadClient = {
+    listReservations: async () => [],
+    getReservation: async () => ({}),
+    listGuests: async () => {
+      called += 1;
+      return [];
+    },
+  };
+  await withApp(mock, async (app) => {
+    const badDocType = await app.inject({
+      method: "GET",
+      url: "/v1/guests?DocType=9",
+      headers: AUTH,
+    });
+    assert.equal(badDocType.statusCode, 400);
+
+    const badDoc = await app.inject({
+      method: "GET",
+      url: "/v1/guests?Doc=123%26redirect%3Dhttps%3A%2F%2Fevil.example",
+      headers: AUTH,
+    });
+    assert.equal(badDoc.statusCode, 400);
+    assert.equal(called, 0);
+  });
+});
+
 test("GET /v1/reservations/:id rejeita id inválido", async () => {
   let called = 0;
   const mock: HitsReadClient = {
@@ -265,6 +313,26 @@ test("POST/PUT/PATCH/DELETE em reservas → 405 e não chama HITS", async () => 
   });
 });
 
+test("POST/PUT/PATCH/DELETE em hóspedes → 405 e não chama HITS", async () => {
+  let called = 0;
+  const mock: HitsReadClient = {
+    listReservations: async () => [],
+    getReservation: async () => ({}),
+    listGuests: async () => {
+      called += 1;
+      return [];
+    },
+  };
+  await withApp(mock, async (app) => {
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"] as const) {
+      const res = await app.inject({ method, url: "/v1/guests", headers: AUTH });
+      assert.equal(res.statusCode, 405, method);
+      assert.equal(res.json().code, "method_not_allowed");
+    }
+    assert.equal(called, 0);
+  });
+});
+
 test("rotas HITS cruas não existem no gateway", async () => {
   let called = 0;
   const mock: HitsReadClient = {
@@ -331,6 +399,35 @@ test("query allowlist: Type inválido 400; extras ignorados", () => {
       finalDate: "2026-03-31",
       page: 0,
       size: 20,
+    });
+  }
+});
+
+test("query de hóspedes: allowlist, enums e teto de paginação", () => {
+  assert.equal(parseGuestListQuery({ DocType: "9" }).ok, false);
+  assert.equal(parseGuestListQuery({ EntityId: "abc" }).ok, false);
+  assert.equal(parseGuestListQuery({ Email: "invalido" }).ok, false);
+
+  const ok = parseGuestListQuery({
+    EntityId: "700001",
+    Since: "2026-08-19T10:30:00Z",
+    DocType: "2",
+    Doc: "123.456.789-00",
+    Email: "guest@example.invalid",
+    Page: "0",
+    Size: "999",
+    url: "https://evil.example",
+  });
+  assert.equal(ok.ok, true);
+  if (ok.ok) {
+    assert.deepEqual(ok.value, {
+      entityId: "700001",
+      since: "2026-08-19T10:30:00Z",
+      docType: 2,
+      doc: "123.456.789-00",
+      email: "guest@example.invalid",
+      page: 0,
+      size: 100,
     });
   }
 });
