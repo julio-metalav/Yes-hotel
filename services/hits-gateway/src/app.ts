@@ -6,6 +6,7 @@ import { isValidGatewayBearer } from "./auth.ts";
 import { TRUSTED_PROXY_ADDRESSES } from "./config.ts";
 import { containsSensitiveLeak, gatewayErrorBody } from "./http-errors.ts";
 import type { HitsReadClient } from "./hits-client.ts";
+import { registerGuestRoutes } from "./routes/guests.ts";
 import { registerHealthRoute } from "./routes/health.ts";
 import { registerReservationRoutes } from "./routes/reservations.ts";
 
@@ -50,6 +51,19 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
                 "err.stack",
               ],
               remove: true,
+            },
+            serializers: {
+              req(request: { method?: string; url?: string; hostname?: string; ip?: string }) {
+                return {
+                  method: request.method,
+                  url:
+                    typeof request.url === "string"
+                      ? request.url.split("?")[0]
+                      : undefined,
+                  hostname: request.hostname,
+                  remoteAddress: request.ip,
+                };
+              },
             },
           },
     trustProxy,
@@ -111,6 +125,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   registerHealthRoute(app);
   registerReservationRoutes(app, options.hitsClient);
+  registerGuestRoutes(app, options.hitsClient);
 
   app.setNotFoundHandler((request, reply) => {
     reply

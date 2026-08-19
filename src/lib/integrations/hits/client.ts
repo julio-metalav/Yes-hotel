@@ -19,6 +19,8 @@ import type {
   HitsAccessToken,
   HitsCheckInRequest,
   HitsCheckInResult,
+  HitsGuestListResponse,
+  HitsGuestSearchParams,
   HitsIntegrationStatus,
   HitsProperty,
   HitsReservationDetails,
@@ -336,6 +338,34 @@ export class HitsClient {
     });
 
     return res.body as HitsReservationDetails;
+  }
+
+  async listRevenueManagementGuests(
+    params: HitsGuestSearchParams = {},
+  ): Promise<HitsGuestListResponse> {
+    this.assertIntegrationEnabled("listRevenueManagementGuests");
+    this.assertAuthContract();
+    this.assertSecretAndProperty();
+    const session = await this.ensureSession();
+
+    const qs = new URLSearchParams();
+    if (params.entityId) qs.set("EntityId", params.entityId);
+    if (params.since) qs.set("Since", params.since);
+    if (params.docType !== undefined) qs.set("DocType", String(params.docType));
+    if (params.doc) qs.set("Doc", params.doc);
+    if (params.email) qs.set("Email", params.email);
+    if (params.page !== undefined) qs.set("Page", String(params.page));
+    if (params.size !== undefined) qs.set("Size", String(params.size));
+    const suffix = qs.size > 0 ? `?${qs.toString()}` : "";
+
+    const res = await this.transport.request({
+      method: "GET",
+      url: `${this.config.apiBaseUrl}/Datashare/RevenueManagement/Guests${suffix}`,
+      headers: this.authenticatedHeaders(session.token),
+      timeoutMs: this.config.requestTimeoutMs,
+    });
+
+    return res.body as HitsGuestListResponse;
   }
 
   /**

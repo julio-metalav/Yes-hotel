@@ -6,6 +6,7 @@ import type {
   HitsAccessSecret,
   HitsAccessToken,
   HitsCheckInResult,
+  HitsGuestListResponse,
   HitsProperty,
   HitsReservationDetails,
   HitsReservationSummary,
@@ -94,6 +95,17 @@ export const fixtureReservationDetails: HitsReservationDetails = {
     },
   ],
 };
+
+export const fixtureGuestsList: HitsGuestListResponse = [
+  {
+    idEntity: 1,
+    name: "Hóspede Sintético Homolog",
+    contactMail: "sintetico@example.invalid",
+    main: true,
+    documentType: "CPF",
+    docCpfCnpjPassport: "00000000000",
+  },
+];
 
 export const fixtureReservationNotFound = {
   httpStatus: 404,
@@ -194,6 +206,10 @@ export function createHitsFixtureFetch(scenario: string = "happy"): typeof fetch
         return jsonResponse(200, fixtureReservationAlreadyCheckedIn);
       }
       return jsonResponse(200, fixtureReservationDetails);
+    }
+
+    if (url.includes("/Datashare/RevenueManagement/Guests") && method === "GET") {
+      return jsonResponse(200, fixtureGuestsList);
     }
 
     if (url.includes("/CheckIn") && method === "POST") {
