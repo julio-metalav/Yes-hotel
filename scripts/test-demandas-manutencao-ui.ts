@@ -3,6 +3,7 @@
  * Sem I/O de rede. Sem aplicar migration.
  */
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createContext, runInContext } from "node:vm";
@@ -401,6 +402,57 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(edgeSrc, /cleanup/);
   assert.match(edgeSrc, /file\.size/);
   ok("edge inspeciona magic bytes, autoriza antes e faz cleanup verificável");
+}
+
+{
+  const genPath = join(root, "scripts/generate-yes-supabase-config.mjs");
+  const homoUrl = "https://kzprrnbafamuozhyikgb.supabase.co";
+  const homoAnon =
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsInJlZiI6Imt6cHJybmJhZmFtdW96aHlpa2diIn0.e30";
+  const prodUrl = "https://minmmecajnmjqlgacfoz.supabase.co";
+  function runGen(env: Record<string, string>) {
+    return spawnSync(process.execPath, [genPath], {
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    });
+  }
+  const missing = runGen({
+    VERCEL_ENV: "preview",
+    YES_HOTEL_SUPABASE_URL: "",
+    YES_HOTEL_SUPABASE_ANON_KEY: "",
+  });
+  assert.notEqual(missing.status, 0);
+  assert.match(`${missing.stderr}${missing.stdout}`, /YES_HOTEL_SUPABASE_URL/);
+  const previewProd = runGen({
+    VERCEL_ENV: "preview",
+    YES_HOTEL_SUPABASE_URL: prodUrl,
+    YES_HOTEL_SUPABASE_ANON_KEY: homoAnon,
+  });
+  assert.notEqual(previewProd.status, 0);
+  assert.match(`${previewProd.stderr}${previewProd.stdout}`, /project_ref de producao/);
+  const previewOk = runGen({
+    VERCEL_ENV: "preview",
+    YES_HOTEL_SUPABASE_URL: homoUrl,
+    YES_HOTEL_SUPABASE_ANON_KEY: homoAnon,
+  });
+  assert.equal(previewOk.status, 0, previewOk.stderr);
+  const prodHomo = runGen({
+    VERCEL_ENV: "production",
+    YES_HOTEL_SUPABASE_URL: homoUrl,
+    YES_HOTEL_SUPABASE_ANON_KEY: homoAnon,
+  });
+  assert.notEqual(prodHomo.status, 0);
+  assert.match(`${prodHomo.stderr}${prodHomo.stdout}`, /project_ref de homologacao/);
+  const production = runGen({ VERCEL_ENV: "production" });
+  assert.equal(production.status, 0, production.stderr);
+  const bootstrap = read("ui/api/bootstrap-status.js");
+  assert.match(bootstrap, /Preview isolado recusou backend de producao/);
+  assert.match(bootstrap, /YES_HOTEL_SUPABASE_SERVICE_ROLE_KEY/);
+  assert.doesNotMatch(read("ui/yes-supabase-config.js"), /anonKey: "[^"]*service_role/);
+  assert.match(read("ui/yes-supabase-config.js"), /isolateYesHotelSupabase/);
+  assert.match(photoSrc, /image\/png/);
+  assert.match(photoSrc, /image\/webp/);
+  ok("Preview falha fechado e Production permanece no ref de produção");
 }
 
 console.log(`\nOK test-demandas-manutencao-ui (${cases} casos)\n`);

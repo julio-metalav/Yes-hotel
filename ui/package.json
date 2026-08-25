@@ -1,0 +1,8 @@
+{
+  "name": "yes-hotel-ui",
+  "private": true,
+  "description": "UI estática operacional. O build Vercel gera yes-supabase-config.js por ambiente.",
+  "scripts": {
+    "vercel-build": "node ../scripts/generate-yes-supabase-config.mjs --write"
+  }
+}

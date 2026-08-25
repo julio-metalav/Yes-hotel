@@ -32,6 +32,15 @@
       throw new Error("Arquivo de imagem obrigatorio.");
     }
 
+    const mime = String(file.type || "").toLowerCase();
+    if (
+      (mime === "image/jpeg" || mime === "image/png" || mime === "image/webp") &&
+      file.size > 0 &&
+      file.size <= MAX_BYTES
+    ) {
+      return file;
+    }
+
     const bitmap = await loadImage(file);
     const width = bitmap.width || bitmap.naturalWidth;
     const height = bitmap.height || bitmap.naturalHeight;
