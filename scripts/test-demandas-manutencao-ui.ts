@@ -179,6 +179,53 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
 }
 
 {
+  const listaMatch = sql.match(
+    /create or replace view public\.demandas_lista\s+with \(security_invoker = true\) as([\s\S]*?);/,
+  );
+  assert.ok(listaMatch, "demandas_lista deve existir como security_invoker");
+  const listaBody = listaMatch[1];
+  assert.doesNotMatch(
+    listaBody,
+    /join\s+public\.usuarios_internos/i,
+    "demandas_lista não pode JOIN direto com usuarios_internos",
+  );
+  assert.match(listaBody, /public\.demandas_usuario_nome\(d\.criador_id\) as criador_nome/);
+  assert.match(listaBody, /public\.demandas_usuario_nome\(d\.supervisor_id\) as supervisor_nome/);
+  assert.match(listaBody, /public\.demandas_usuario_nome\(d\.executor_id\) as executor_nome/);
+  assert.doesNotMatch(listaBody, /telefone_whatsapp/);
+
+  const helperMatch = sql.match(
+    /create or replace function public\.demandas_usuario_nome\(p_usuario_id uuid\)([\s\S]*?)\$\$;/,
+  );
+  assert.ok(helperMatch, "helper demandas_usuario_nome deve existir");
+  const helperBody = helperMatch[1];
+  assert.match(helperBody, /security definer/i);
+  assert.match(helperBody, /stable/i);
+  assert.match(helperBody, /set search_path = pg_catalog, public/);
+  assert.match(helperBody, /perform public\.demandas_require_actor\(\)/);
+  assert.match(helperBody, /select u\.nome/);
+  assert.doesNotMatch(helperBody, /telefone_whatsapp|email_login|perfil_usuario/);
+  assert.match(sql, /revoke all on function public\.demandas_usuario_nome\(uuid\) from public, anon/);
+  assert.match(sql, /grant execute on function public\.demandas_usuario_nome\(uuid\) to authenticated/);
+  assert.doesNotMatch(
+    sql,
+    /revoke all on function public\.demandas_usuario_nome\(uuid\) from public, anon, authenticated/,
+  );
+  assert.match(pageSrc, /from\(["']demandas_lista["']\)/);
+  assert.match(renderSrc, /criador_nome/);
+  assert.match(renderSrc, /supervisor_nome/);
+  assert.match(renderSrc, /executor_nome/);
+  ok("demandas_lista usa helper de nome sem JOIN em usuarios_internos");
+}
+
+{
+  assert.match(html, /id="create-submit-btn"/);
+  assert.match(pageSrc, /createSubmitBtn\.textContent = "Criar"/);
+  assert.match(pageSrc, /createSubmitBtn\.textContent = "Salvar alterações"/);
+  ok("botão principal: Criar no modo criação e Salvar alterações no modo edição");
+}
+
+{
   assert.doesNotMatch(pageSrc, /\.innerHTML\s*=/);
   assert.doesNotMatch(pageSrc, /innerHTML\s*\+=/);
   assert.doesNotMatch(renderSrc, /\.innerHTML\s*=/);

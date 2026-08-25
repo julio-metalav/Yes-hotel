@@ -1471,21 +1471,42 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
--- 7) View de listagem (security_invoker)
+-- 7) Helper de nome (SECURITY DEFINER mínimo) + view security_invoker
 -- ---------------------------------------------------------------------------
+-- A RLS de usuarios_internos só permite ler o próprio perfil. A view
+-- security_invoker não pode JOIN direto; este helper valida o chamador e
+-- devolve somente o nome (inclusive de usuários depois inativados).
+create or replace function public.demandas_usuario_nome(p_usuario_id uuid)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+  v_nome text;
+begin
+  perform public.demandas_require_actor();
+
+  select u.nome
+    into v_nome
+  from public.usuarios_internos u
+  where u.id = p_usuario_id;
+
+  return v_nome;
+end;
+$$;
+
 create or replace view public.demandas_lista
 with (security_invoker = true) as
 select
   d.*,
   (d.data_prevista_conclusao < public.demandas_today_campo_grande()
     and d.status not in ('concluida', 'cancelada')) as vencida,
-  c.nome as criador_nome,
-  s.nome as supervisor_nome,
-  e.nome as executor_nome
-from public.demandas d
-join public.usuarios_internos c on c.id = d.criador_id
-join public.usuarios_internos s on s.id = d.supervisor_id
-join public.usuarios_internos e on e.id = d.executor_id;
+  public.demandas_usuario_nome(d.criador_id) as criador_nome,
+  public.demandas_usuario_nome(d.supervisor_id) as supervisor_nome,
+  public.demandas_usuario_nome(d.executor_id) as executor_nome
+from public.demandas d;
 
 -- ---------------------------------------------------------------------------
 -- 7b) Proteção de WhatsApp de usuário com demanda aberta
@@ -1673,6 +1694,7 @@ revoke all on function public.demandas_registrar_anexo(uuid, text, text, text, i
 revoke all on function public.demandas_autorizar_anexo(uuid, text) from public, anon;
 revoke all on function public.demandas_liberar_agendadas() from public, anon;
 revoke all on function public.demandas_listar_usuarios_atribuiveis() from public, anon;
+revoke all on function public.demandas_usuario_nome(uuid) from public, anon;
 
 grant execute on function public.is_yes_hotel_demandas_reader() to authenticated;
 grant execute on function public.demandas_today_campo_grande() to authenticated;
@@ -1691,6 +1713,7 @@ grant execute on function public.demandas_registrar_anexo(uuid, text, text, text
 grant execute on function public.demandas_autorizar_anexo(uuid, text) to authenticated;
 grant execute on function public.demandas_liberar_agendadas() to authenticated;
 grant execute on function public.demandas_listar_usuarios_atribuiveis() to authenticated;
+grant execute on function public.demandas_usuario_nome(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 9) Storage privado demandas-fotos

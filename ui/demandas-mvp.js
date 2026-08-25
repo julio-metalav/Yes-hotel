@@ -25,6 +25,7 @@ const contentPanelElement = document.querySelector("#content-panel");
 const createFormElement = document.querySelector("#create-form");
 const createPanelElement = document.querySelector("#create-panel");
 const createTitleElement = document.querySelector("#create-panel-title");
+const createSubmitBtn = document.querySelector("#create-submit-btn");
 
 function showNotice(message, variant) {
   if (!(noticeElement instanceof HTMLElement)) {
@@ -295,6 +296,9 @@ function resetCreateForm() {
   if (createTitleElement) {
     createTitleElement.textContent = "Criar demanda";
   }
+  if (createSubmitBtn) {
+    createSubmitBtn.textContent = "Criar";
+  }
   fillAssigneeSelects();
 }
 
@@ -312,6 +316,9 @@ function openEditPanel(row) {
   createFormElement.dataset.rowVersion = String(row.row_version);
   if (createTitleElement) {
     createTitleElement.textContent = "Editar demanda";
+  }
+  if (createSubmitBtn) {
+    createSubmitBtn.textContent = "Salvar alterações";
   }
   createFormElement.elements.titulo.value = row.titulo || "";
   createFormElement.elements.descricao.value = row.descricao || "";
