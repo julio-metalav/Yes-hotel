@@ -4,10 +4,9 @@
  */
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const root = resolve(process.cwd());
 let cases = 0;
 function ok(name: string) {
   cases += 1;
