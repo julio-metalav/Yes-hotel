@@ -144,6 +144,7 @@
 }
 
 .demandas-camera-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -153,6 +154,10 @@
   background: #176070;
   color: #fff;
   font-weight: 600;
+}
+
+.demandas-camera-btn--gallery {
+  background: #2f4f55;
 }
 
 .demandas-camera-btn input {

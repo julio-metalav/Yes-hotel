@@ -58,11 +58,21 @@ export type DemandasAnexo = {
 };
 
 export type DemandasGeoCheckRow = {
+  id: string;
   demanda_id: string;
   usuario_id: string;
   etapa: DemandasGeoEtapa;
   resultado: string;
 };
+
+export type DemandasAcaoResultado =
+  | { ok: true; demanda: DemandasEngineDemanda }
+  | {
+      ok: false;
+      code: string;
+      message: string;
+      geo_check_id: string | null;
+    };
 
 export type DemandasEngineDemanda = DemandasRecord & {
   titulo: string;
@@ -87,6 +97,7 @@ export class DemandasEngine {
   anexos: DemandasAnexo[] = [];
   geoChecks: DemandasGeoCheckRow[] = [];
   geoConfig: DemandasGeoConfig | null = null;
+  storageObjects = new Set<string>();
   clock: Clock;
 
   constructor(clock?: Partial<Clock>) {
@@ -181,12 +192,12 @@ export class DemandasEngine {
     return events.at(-1)?.criado_em ?? null;
   }
 
-  private checkGeo(
+  private recordGeo(
     demanda: DemandasEngineDemanda,
     user: DemandasActor,
     etapa: DemandasGeoEtapa,
     coords: { latitude: number; longitude: number; precisao_metros: number | null },
-  ): void {
+  ): DemandasAcaoResultado | { ok: true; approved: true } {
     const result = evaluateDemandasGeoCheck({
       latitude: coords.latitude,
       longitude: coords.longitude,
@@ -194,19 +205,29 @@ export class DemandasEngine {
       sem_local_especifico: demanda.sem_local_especifico,
       config: this.geoConfig,
     });
+    const geoId = nextId("geo");
     this.geoChecks.push({
+      id: geoId,
       demanda_id: demanda.id,
       usuario_id: user.id,
       etapa,
       resultado: result.code,
     });
-    if (!result.approved) {
-      throw new Error(
-        result.code === "nao_configurada"
-          ? "demandas_geo_nao_configurada"
-          : "demandas_geo_recusada",
-      );
+    if (result.approved) {
+      return { ok: true, approved: true };
     }
+    const code =
+      result.code === "nao_configurada"
+        ? "demandas_geo_nao_configurada"
+        : result.code === "coordenada_invalida"
+          ? "demandas_coordenada_invalida"
+          : "demandas_geo_recusada";
+    return {
+      ok: false,
+      code,
+      message: result.message ?? code,
+      geo_check_id: geoId,
+    };
   }
 
   liberarAgendada(demanda: DemandasEngineDemanda, user: DemandasActor): void {
@@ -317,10 +338,24 @@ export class DemandasEngine {
     demandaId: string,
     rowVersion: number,
     coords: { latitude: number; longitude: number; precisao_metros: number | null },
-  ): DemandasEngineDemanda {
+  ): DemandasAcaoResultado {
     const actor = this.actor(actorId);
     const demanda = this.demanda(demandaId);
     this.requireAction("iniciar", actor, demanda);
+    if (demanda.status === "agendada" && demanda.data_programada_inicio > this.clock.todayYmd) {
+      throw new Error("demandas_ainda_agendada");
+    }
+    if (
+      demanda.status !== "agendada" &&
+      demanda.status !== "nao_iniciada" &&
+      demanda.status !== "em_correcao"
+    ) {
+      throw new Error("demandas_transicao_invalida");
+    }
+    const geo = this.recordGeo(demanda, actor, "inicio", coords);
+    if (!geo.ok) {
+      return geo;
+    }
     this.liberarAgendada(demanda, actor);
     if (!canStartScheduled(demanda, this.clock.todayYmd)) {
       throw new Error("demandas_ainda_agendada");
@@ -328,13 +363,12 @@ export class DemandasEngine {
     if (demanda.status !== "nao_iniciada" && demanda.status !== "em_correcao") {
       throw new Error("demandas_transicao_invalida");
     }
-    this.checkGeo(demanda, actor, "inicio", coords);
     const next = statusAposAcao("iniciar", demanda.status);
     this.bump(demanda, rowVersion);
     const anterior = demanda.status;
     demanda.status = next;
     this.appendHistorico(demanda, actor, "iniciar", anterior, next, null);
-    return demanda;
+    return { ok: true, demanda };
   }
 
   pausar(actorId: string, demandaId: string, rowVersion: number, motivo: string | null): DemandasEngineDemanda {
@@ -378,12 +412,15 @@ export class DemandasEngine {
     demandaId: string,
     rowVersion: number,
     coords: { latitude: number; longitude: number; precisao_metros: number | null },
-  ): DemandasEngineDemanda {
+  ): DemandasAcaoResultado {
     const actor = this.actor(actorId);
     const demanda = this.demanda(demandaId);
     this.requireAction("enviar_validacao", actor, demanda);
     const next = statusAposAcao("enviar_validacao", demanda.status);
-    this.checkGeo(demanda, actor, "envio_validacao", coords);
+    const geo = this.recordGeo(demanda, actor, "envio_validacao", coords);
+    if (!geo.ok) {
+      return geo;
+    }
     const lastEvent = this.lastRejeicaoOuReabertura(demanda.id);
     if (
       fotoObrigatoriaNoEnvio({
@@ -399,7 +436,7 @@ export class DemandasEngine {
     const anterior = demanda.status;
     demanda.status = next;
     this.appendHistorico(demanda, actor, "enviar_validacao", anterior, next, null);
-    return demanda;
+    return { ok: true, demanda };
   }
 
   aprovar(actorId: string, demandaId: string, rowVersion: number): DemandasEngineDemanda {
@@ -471,6 +508,19 @@ export class DemandasEngine {
     return demanda;
   }
 
+  autorizarAnexo(actorId: string, demandaId: string, etapa: DemandasAnexoEtapa): { ok: true; demanda_id: string } {
+    const actor = this.actor(actorId);
+    const demanda = this.demanda(demandaId);
+    this.requireAction("incluir_foto", actor, demanda);
+    if (demanda.status === "cancelada") {
+      throw new Error("demandas_transicao_invalida");
+    }
+    if (!["antes", "durante", "finalizacao", "correcao"].includes(etapa)) {
+      throw new Error("demandas_etapa_invalida");
+    }
+    return { ok: true, demanda_id: demanda.id };
+  }
+
   incluirFoto(input: {
     actorId: string;
     demandaId: string;
@@ -480,9 +530,15 @@ export class DemandasEngine {
     tamanho_bytes: number;
     created_at?: string;
   }): DemandasAnexo {
+    this.autorizarAnexo(input.actorId, input.demandaId, input.etapa);
     const actor = this.actor(input.actorId);
     const demanda = this.demanda(input.demandaId);
-    this.requireAction("incluir_foto", actor, demanda);
+    if (!input.storage_path.startsWith(`${demanda.id}/`)) {
+      throw new Error("demandas_storage_path_invalido");
+    }
+    if (!this.storageObjects.has(input.storage_path)) {
+      throw new Error("demandas_objeto_inexistente");
+    }
     const anexo: DemandasAnexo = {
       id: nextId("anexo"),
       demanda_id: demanda.id,

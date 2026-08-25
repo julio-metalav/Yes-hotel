@@ -13,7 +13,7 @@
   const ACCESS_TOKEN_STORAGE_KEY = "yesHotelSupabaseAccessToken";
   const APP_SESSION_DURATION_MS = Number(config.appSessionHours || 4) * 60 * 60 * 1000;
   const PROFILE_COLUMNS =
-    "id, auth_user_id, nome, email_login, perfil_usuario, ativo, telefone_whatsapp, created_at, updated_at";
+    "id, auth_user_id, nome, email_login, perfil_usuario, ativo, created_at, updated_at";
   const ADMIN_FUNCTION_NAME = "internal-users-admin";
   const ADMIN_FUNCTION_URL = config.url
     ? `${config.url}/functions/v1/${ADMIN_FUNCTION_NAME}`
@@ -103,7 +103,6 @@
       email: profileRow.email_login,
       role: profileRow.perfil_usuario,
       active: profileRow.ativo,
-      telefoneWhatsapp: profileRow.telefone_whatsapp || "",
       createdAt: profileRow.created_at,
       updatedAt: profileRow.updated_at,
     };

@@ -47,7 +47,6 @@ export type DemandasPerfil = (typeof DEMANDAS_PERFIS_ATIVOS)[number];
 
 export const DEMANDAS_ALLOWED_PHOTO_MIME = [
   "image/jpeg",
-  "image/jpg",
   "image/png",
   "image/webp",
 ] as const;

@@ -47,3 +47,28 @@ export function telefoneWhatsappIsAssignable(value: unknown): boolean {
     return false;
   }
 }
+
+export function isDemandasStatusAberto(status: string): boolean {
+  return status !== "concluida" && status !== "cancelada";
+}
+
+export function assertPodeRemoverTelefoneWhatsapp(input: {
+  userId: string;
+  telefoneAtual: string | null | undefined;
+  telefoneNovo: string | null;
+  atribuicoes: Array<{ supervisor_id: string; executor_id: string; status: string }>;
+}): void {
+  const tinhaTelefone = Boolean(String(input.telefoneAtual ?? "").trim());
+  const ficaraSemTelefone = input.telefoneNovo == null;
+  if (!tinhaTelefone || !ficaraSemTelefone) {
+    return;
+  }
+  const aberta = input.atribuicoes.some(
+    (row) =>
+      isDemandasStatusAberto(row.status) &&
+      (row.supervisor_id === input.userId || row.executor_id === input.userId),
+  );
+  if (aberta) {
+    throw new Error("demandas_telefone_atribuido_aberto");
+  }
+}

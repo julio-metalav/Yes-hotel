@@ -1,5 +1,7 @@
 -- Fundação Demandas — Manutenção Predial (ciclo manual).
--- NÃO aplicar nesta etapa. Sem geração automática, cron, DigiSac ou Meta Lav.
+-- NÃO aplicar nesta etapa em produção sem homologação.
+-- Ordem recomendada: aplicar esta migration ANTES de ativar o módulo na operação.
+-- Sem geração automática, cron, DigiSac ou Meta Lav.
 
 -- ---------------------------------------------------------------------------
 -- 1) usuarios_internos.telefone_whatsapp (nullable)
@@ -132,6 +134,7 @@ create table if not exists public.hotel_geo_config_historico (
 create or replace function public.hotel_geo_config_historico_append_only()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   raise exception 'hotel_geo_config_historico é append-only: UPDATE/DELETE proibidos';
@@ -244,6 +247,7 @@ create trigger demandas_updated_at
 create or replace function public.demandas_forbid_delete()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   raise exception 'demandas_delete_proibido';
@@ -306,6 +310,7 @@ create index if not exists demandas_historico_demanda_idx
 create or replace function public.demandas_historico_append_only()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   raise exception 'demandas_historico é append-only: UPDATE/DELETE proibidos';
@@ -333,7 +338,7 @@ create table if not exists public.demandas_anexos (
   created_at timestamptz not null default now(),
   constraint demandas_anexos_storage_path_key unique (storage_path),
   constraint demandas_anexos_mime_check check (
-    mime in ('image/jpeg', 'image/jpg', 'image/png', 'image/webp')
+    mime in ('image/jpeg', 'image/png', 'image/webp')
   )
 );
 
@@ -343,6 +348,7 @@ create index if not exists demandas_anexos_demanda_idx
 create or replace function public.demandas_anexos_forbid_delete()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   raise exception 'demandas_anexos_delete_proibido';
@@ -376,6 +382,7 @@ create index if not exists demandas_geo_checks_demanda_idx
 create or replace function public.demandas_geo_checks_append_only()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   raise exception 'demandas_geo_checks é append-only: UPDATE/DELETE proibidos';
@@ -519,6 +526,7 @@ create or replace function public.demandas_is_admin(p_user public.usuarios_inter
 returns boolean
 language sql
 immutable
+set search_path = public
 as $$
   select lower(p_user.perfil_usuario) = 'admin' and p_user.ativo;
 $$;
@@ -545,7 +553,7 @@ create or replace function public.demandas_enforce_geo(
   p_longitude double precision,
   p_precisao_metros double precision
 )
-returns void
+returns jsonb
 language plpgsql
 security definer
 set search_path = public
@@ -554,6 +562,9 @@ declare
   v_cfg public.hotel_geo_config%rowtype;
   v_dist double precision;
   v_result text;
+  v_id uuid;
+  v_code text;
+  v_message text;
 begin
   if p_demanda.sem_local_especifico then
     insert into public.demandas_geo_checks (
@@ -562,8 +573,13 @@ begin
     ) values (
       p_demanda.id, p_actor.id, p_etapa, p_latitude, p_longitude, p_precisao_metros,
       null, null, 'dispensada'
+    )
+    returning id into v_id;
+    return jsonb_build_object(
+      'approved', true,
+      'code', 'dispensada',
+      'geo_check_id', v_id
     );
-    return;
   end if;
 
   select * into v_cfg from public.hotel_geo_config where id = true;
@@ -574,8 +590,14 @@ begin
     ) values (
       p_demanda.id, p_actor.id, p_etapa, p_latitude, p_longitude, p_precisao_metros,
       null, null, 'nao_configurada'
+    )
+    returning id into v_id;
+    return jsonb_build_object(
+      'approved', false,
+      'code', 'demandas_geo_nao_configurada',
+      'message', 'Geolocalização do hotel ainda não foi configurada.',
+      'geo_check_id', v_id
     );
-    raise exception 'demandas_geo_nao_configurada';
   end if;
 
   if p_latitude is null or p_longitude is null
@@ -587,8 +609,14 @@ begin
     ) values (
       p_demanda.id, p_actor.id, p_etapa, p_latitude, p_longitude, p_precisao_metros,
       null, v_cfg.raio_metros, 'coordenada_invalida'
+    )
+    returning id into v_id;
+    return jsonb_build_object(
+      'approved', false,
+      'code', 'demandas_coordenada_invalida',
+      'message', 'Coordenadas de geolocalização inválidas.',
+      'geo_check_id', v_id
     );
-    raise exception 'demandas_coordenada_invalida';
   end if;
 
   v_dist := public.demandas_haversine_meters(
@@ -597,8 +625,16 @@ begin
 
   if v_dist <= v_cfg.raio_metros then
     v_result := 'aprovada';
+    v_code := 'demandas_geo_aprovada';
+    v_message := null;
   else
     v_result := 'recusada';
+    v_code := 'demandas_geo_recusada';
+    v_message := format(
+      'Fora do raio permitido (%s m > %s m).',
+      round(v_dist)::text,
+      v_cfg.raio_metros::text
+    );
   end if;
 
   insert into public.demandas_geo_checks (
@@ -607,11 +643,15 @@ begin
   ) values (
     p_demanda.id, p_actor.id, p_etapa, p_latitude, p_longitude, p_precisao_metros,
     v_dist, v_cfg.raio_metros, v_result
-  );
+  )
+  returning id into v_id;
 
-  if v_result <> 'aprovada' then
-    raise exception 'demandas_geo_recusada';
-  end if;
+  return jsonb_build_object(
+    'approved', v_result = 'aprovada',
+    'code', v_code,
+    'message', v_message,
+    'geo_check_id', v_id
+  );
 end;
 $$;
 
@@ -841,7 +881,7 @@ create or replace function public.demandas_iniciar(
   p_longitude double precision default null,
   p_precisao_metros double precision default null
 )
-returns public.demandas
+returns jsonb
 language plpgsql
 security definer
 set search_path = public
@@ -851,6 +891,7 @@ declare
   v_row public.demandas%rowtype;
   v_today date := public.demandas_today_campo_grande();
   v_prev text;
+  v_geo jsonb;
 begin
   v_actor := public.demandas_require_actor();
   v_row := public.demandas_lock(p_demanda_id, p_row_version);
@@ -863,6 +904,23 @@ begin
     if v_row.data_programada_inicio > v_today then
       raise exception 'demandas_ainda_agendada';
     end if;
+  elsif v_row.status not in ('nao_iniciada', 'em_correcao') then
+    raise exception 'demandas_transicao_invalida';
+  end if;
+
+  v_geo := public.demandas_enforce_geo(
+    v_row, v_actor, 'inicio', p_latitude, p_longitude, p_precisao_metros
+  );
+  if coalesce((v_geo->>'approved')::boolean, false) is not true then
+    return jsonb_build_object(
+      'ok', false,
+      'code', v_geo->>'code',
+      'message', coalesce(v_geo->>'message', v_geo->>'code'),
+      'geo_check_id', v_geo->'geo_check_id'
+    );
+  end if;
+
+  if v_row.status = 'agendada' then
     v_prev := v_row.status;
     update public.demandas
     set status = 'nao_iniciada',
@@ -876,14 +934,6 @@ begin
       null, 'rpc'
     );
   end if;
-
-  if v_row.status not in ('nao_iniciada', 'em_correcao') then
-    raise exception 'demandas_transicao_invalida';
-  end if;
-
-  perform public.demandas_enforce_geo(
-    v_row, v_actor, 'inicio', p_latitude, p_longitude, p_precisao_metros
-  );
 
   v_prev := v_row.status;
   update public.demandas
@@ -899,7 +949,7 @@ begin
     jsonb_build_object('status', v_row.status),
     null, 'rpc'
   );
-  return v_row;
+  return jsonb_build_object('ok', true, 'demanda', to_jsonb(v_row));
 end;
 $$;
 
@@ -1001,7 +1051,7 @@ create or replace function public.demandas_enviar_validacao(
   p_longitude double precision default null,
   p_precisao_metros double precision default null
 )
-returns public.demandas
+returns jsonb
 language plpgsql
 security definer
 set search_path = public
@@ -1010,6 +1060,7 @@ declare
   v_actor public.usuarios_internos%rowtype;
   v_row public.demandas%rowtype;
   v_prev text;
+  v_geo jsonb;
 begin
   v_actor := public.demandas_require_actor();
   v_row := public.demandas_lock(p_demanda_id, p_row_version);
@@ -1021,11 +1072,20 @@ begin
     raise exception 'demandas_transicao_invalida';
   end if;
 
-  perform public.demandas_close_open_pause(v_row.id);
-  perform public.demandas_enforce_geo(
+  v_geo := public.demandas_enforce_geo(
     v_row, v_actor, 'envio_validacao', p_latitude, p_longitude, p_precisao_metros
   );
+  if coalesce((v_geo->>'approved')::boolean, false) is not true then
+    return jsonb_build_object(
+      'ok', false,
+      'code', v_geo->>'code',
+      'message', coalesce(v_geo->>'message', v_geo->>'code'),
+      'geo_check_id', v_geo->'geo_check_id'
+    );
+  end if;
+
   perform public.demandas_assert_foto_envio(v_row);
+  perform public.demandas_close_open_pause(v_row.id);
 
   v_prev := v_row.status;
   update public.demandas
@@ -1041,7 +1101,7 @@ begin
     jsonb_build_object('status', v_row.status),
     null, 'rpc'
   );
-  return v_row;
+  return jsonb_build_object('ok', true, 'demanda', to_jsonb(v_row));
 end;
 $$;
 
@@ -1282,6 +1342,41 @@ begin
 end;
 $$;
 
+create or replace function public.demandas_autorizar_anexo(
+  p_demanda_id uuid,
+  p_etapa text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor public.usuarios_internos%rowtype;
+  v_row public.demandas%rowtype;
+begin
+  v_actor := public.demandas_require_actor();
+
+  select * into v_row from public.demandas where id = p_demanda_id;
+  if not found then
+    raise exception 'demandas_nao_encontrada';
+  end if;
+  if v_row.status = 'cancelada' then
+    raise exception 'demandas_transicao_invalida';
+  end if;
+  if v_row.executor_id <> v_actor.id
+     and v_row.criador_id <> v_actor.id
+     and not public.demandas_is_admin(v_actor) then
+    raise exception 'demandas_forbidden';
+  end if;
+  if p_etapa not in ('antes', 'durante', 'finalizacao', 'correcao') then
+    raise exception 'demandas_etapa_invalida';
+  end if;
+
+  return jsonb_build_object('ok', true, 'demanda_id', v_row.id);
+end;
+$$;
+
 create or replace function public.demandas_registrar_anexo(
   p_demanda_id uuid,
   p_storage_path text,
@@ -1298,32 +1393,45 @@ declare
   v_actor public.usuarios_internos%rowtype;
   v_row public.demandas%rowtype;
   v_anexo public.demandas_anexos%rowtype;
+  v_ext text;
+  v_expected_ext text;
 begin
+  perform public.demandas_autorizar_anexo(p_demanda_id, p_etapa);
   v_actor := public.demandas_require_actor();
 
   select * into v_row from public.demandas where id = p_demanda_id for update;
   if not found then
     raise exception 'demandas_nao_encontrada';
   end if;
-  if v_row.status = 'cancelada' then
-    raise exception 'demandas_transicao_invalida';
-  end if;
-  if v_row.executor_id <> v_actor.id
-     and v_row.criador_id <> v_actor.id
-     and not public.demandas_is_admin(v_actor) then
-    raise exception 'demandas_forbidden';
-  end if;
-  if p_etapa not in ('antes', 'durante', 'finalizacao', 'correcao') then
-    raise exception 'demandas_etapa_invalida';
-  end if;
-  if p_mime not in ('image/jpeg', 'image/jpg', 'image/png', 'image/webp') then
+
+  if p_mime not in ('image/jpeg', 'image/png', 'image/webp') then
     raise exception 'demandas_mime_invalido';
   end if;
   if p_tamanho_bytes is null or p_tamanho_bytes <= 0 or p_tamanho_bytes > 2097152 then
     raise exception 'demandas_arquivo_grande';
   end if;
-  if p_storage_path is null or position(v_row.id::text in p_storage_path) <> 1 then
+
+  v_expected_ext := case p_mime
+    when 'image/png' then 'png'
+    when 'image/webp' then 'webp'
+    else 'jpg'
+  end;
+  v_ext := lower(regexp_replace(coalesce(p_storage_path, ''), '.*\.', ''));
+  if v_ext is distinct from v_expected_ext then
     raise exception 'demandas_storage_path_invalido';
+  end if;
+  if p_storage_path is null
+     or p_storage_path !~ ('^' || v_row.id::text || '/[0-9a-fA-F-]{36}\.(jpg|png|webp)$') then
+    raise exception 'demandas_storage_path_invalido';
+  end if;
+
+  if not exists (
+    select 1
+    from storage.objects obj
+    where obj.bucket_id = 'demandas-fotos'
+      and obj.name = p_storage_path
+  ) then
+    raise exception 'demandas_objeto_inexistente';
   end if;
 
   insert into public.demandas_anexos (
@@ -1346,14 +1454,14 @@ create or replace function public.demandas_listar_usuarios_atribuiveis()
 returns table (
   id uuid,
   nome text,
-  telefone_whatsapp text
+  perfil_usuario text
 )
 language sql
 stable
 security definer
 set search_path = public
 as $$
-  select u.id, u.nome, u.telefone_whatsapp
+  select u.id, u.nome, u.perfil_usuario
   from public.usuarios_internos u
   where public.is_yes_hotel_demandas_reader()
     and u.ativo = true
@@ -1373,13 +1481,52 @@ select
     and d.status not in ('concluida', 'cancelada')) as vencida,
   c.nome as criador_nome,
   s.nome as supervisor_nome,
-  e.nome as executor_nome,
-  s.telefone_whatsapp as supervisor_telefone,
-  e.telefone_whatsapp as executor_telefone
+  e.nome as executor_nome
 from public.demandas d
 join public.usuarios_internos c on c.id = d.criador_id
 join public.usuarios_internos s on s.id = d.supervisor_id
 join public.usuarios_internos e on e.id = d.executor_id;
+
+-- ---------------------------------------------------------------------------
+-- 7b) Proteção de WhatsApp de usuário com demanda aberta
+-- ---------------------------------------------------------------------------
+create or replace function public.demandas_usuario_tem_demanda_aberta(p_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.demandas d
+    where (d.supervisor_id = p_user_id or d.executor_id = p_user_id)
+      and d.status not in ('concluida', 'cancelada')
+  );
+$$;
+
+create or replace function public.demandas_proteger_telefone_atribuido()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.telefone_whatsapp is not null
+     and btrim(old.telefone_whatsapp) <> ''
+     and (new.telefone_whatsapp is null or btrim(new.telefone_whatsapp) = '')
+     and public.demandas_usuario_tem_demanda_aberta(new.id) then
+    raise exception 'demandas_telefone_atribuido_aberto';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists usuarios_internos_proteger_telefone_demandas
+  on public.usuarios_internos;
+create trigger usuarios_internos_proteger_telefone_demandas
+  before update of telefone_whatsapp on public.usuarios_internos
+  for each row execute function public.demandas_proteger_telefone_atribuido();
 
 -- ---------------------------------------------------------------------------
 -- 8) RLS / grants
@@ -1490,6 +1637,10 @@ grant select, insert on public.demandas_geo_checks to service_role;
 grant select, insert, update on public.demandas_modelos_programados to service_role;
 grant select, insert, update on public.demandas_ocorrencias_programadas to service_role;
 
+-- EXECUTE padrão de PUBLIC é revogado em toda função nova.
+revoke all on function public.demandas_normalize_telefone_whatsapp(text) from public, anon, authenticated;
+revoke all on function public.demandas_haversine_meters(double precision, double precision, double precision, double precision) from public, anon, authenticated;
+revoke all on function public.demandas_is_admin(public.usuarios_internos) from public, anon, authenticated;
 revoke all on function public.demandas_require_actor() from public, anon, authenticated;
 revoke all on function public.demandas_lock(uuid, integer) from public, anon, authenticated;
 revoke all on function public.demandas_append_historico(uuid, uuid, text, jsonb, jsonb, text, text) from public, anon, authenticated;
@@ -1497,11 +1648,34 @@ revoke all on function public.demandas_assert_usuario_atribuivel(uuid) from publ
 revoke all on function public.demandas_enforce_geo(public.demandas, public.usuarios_internos, text, double precision, double precision, double precision) from public, anon, authenticated;
 revoke all on function public.demandas_assert_foto_envio(public.demandas) from public, anon, authenticated;
 revoke all on function public.demandas_close_open_pause(uuid) from public, anon, authenticated;
+revoke all on function public.demandas_usuario_tem_demanda_aberta(uuid) from public, anon, authenticated;
+revoke all on function public.hotel_geo_config_historico_append_only() from public, anon, authenticated;
+revoke all on function public.demandas_historico_append_only() from public, anon, authenticated;
+revoke all on function public.demandas_geo_checks_append_only() from public, anon, authenticated;
+revoke all on function public.demandas_forbid_delete() from public, anon, authenticated;
+revoke all on function public.demandas_anexos_forbid_delete() from public, anon, authenticated;
+revoke all on function public.demandas_proteger_telefone_atribuido() from public, anon, authenticated;
+
+revoke all on function public.is_yes_hotel_demandas_reader() from public, anon;
+revoke all on function public.demandas_today_campo_grande() from public, anon;
+revoke all on function public.demandas_criar(text, text, text, text, date, date, uuid, uuid, boolean, boolean) from public, anon;
+revoke all on function public.demandas_editar(uuid, integer, text, text, text, text, date, date, uuid, uuid, boolean, boolean) from public, anon;
+revoke all on function public.demandas_iniciar(uuid, integer, double precision, double precision, double precision) from public, anon;
+revoke all on function public.demandas_pausar(uuid, integer, text) from public, anon;
+revoke all on function public.demandas_retomar(uuid, integer) from public, anon;
+revoke all on function public.demandas_enviar_validacao(uuid, integer, double precision, double precision, double precision) from public, anon;
+revoke all on function public.demandas_aprovar(uuid, integer) from public, anon;
+revoke all on function public.demandas_rejeitar(uuid, integer, text) from public, anon;
+revoke all on function public.demandas_cancelar(uuid, integer, text) from public, anon;
+revoke all on function public.demandas_reabrir(uuid, integer, text) from public, anon;
+revoke all on function public.demandas_atualizar_geo_config(double precision, double precision, numeric) from public, anon;
+revoke all on function public.demandas_registrar_anexo(uuid, text, text, text, integer) from public, anon;
+revoke all on function public.demandas_autorizar_anexo(uuid, text) from public, anon;
+revoke all on function public.demandas_liberar_agendadas() from public, anon;
+revoke all on function public.demandas_listar_usuarios_atribuiveis() from public, anon;
 
 grant execute on function public.is_yes_hotel_demandas_reader() to authenticated;
-grant execute on function public.demandas_normalize_telefone_whatsapp(text) to authenticated;
 grant execute on function public.demandas_today_campo_grande() to authenticated;
-grant execute on function public.demandas_haversine_meters(double precision, double precision, double precision, double precision) to authenticated;
 grant execute on function public.demandas_criar(text, text, text, text, date, date, uuid, uuid, boolean, boolean) to authenticated;
 grant execute on function public.demandas_editar(uuid, integer, text, text, text, text, date, date, uuid, uuid, boolean, boolean) to authenticated;
 grant execute on function public.demandas_iniciar(uuid, integer, double precision, double precision, double precision) to authenticated;
@@ -1514,6 +1688,7 @@ grant execute on function public.demandas_cancelar(uuid, integer, text) to authe
 grant execute on function public.demandas_reabrir(uuid, integer, text) to authenticated;
 grant execute on function public.demandas_atualizar_geo_config(double precision, double precision, numeric) to authenticated;
 grant execute on function public.demandas_registrar_anexo(uuid, text, text, text, integer) to authenticated;
+grant execute on function public.demandas_autorizar_anexo(uuid, text) to authenticated;
 grant execute on function public.demandas_liberar_agendadas() to authenticated;
 grant execute on function public.demandas_listar_usuarios_atribuiveis() to authenticated;
 
@@ -1526,7 +1701,7 @@ values (
   'demandas-fotos',
   false,
   2097152,
-  array['image/jpeg', 'image/jpg', 'image/png', 'image/webp']::text[]
+  array['image/jpeg', 'image/png', 'image/webp']::text[]
 )
 on conflict (id) do update set
   public = excluded.public,

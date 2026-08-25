@@ -183,7 +183,7 @@
           </section>
 
           <section id="create-panel" class="demandas-panel hidden">
-            <h2>Criar demanda</h2>
+            <h2 id="create-panel-title">Criar demanda</h2>
             <form id="create-form" class="demandas-form-grid">
               <label class="span-2">Título <input name="titulo" required maxlength="180" /></label>
               <label class="span-2">
@@ -247,13 +247,21 @@
             <div class="demandas-photo-row">
               <label class="demandas-camera-btn">
                 <input
-                  id="photo-input"
+                  id="photo-input-camera"
                   type="file"
                   accept="image/*"
                   capture="environment"
                 />
                 <span aria-hidden="true">📷</span>
-                Incluir foto
+                Tirar foto
+              </label>
+              <label class="demandas-camera-btn demandas-camera-btn--gallery">
+                <input
+                  id="photo-input-gallery"
+                  type="file"
+                  accept="image/*"
+                />
+                Escolher da galeria
               </label>
               <select id="photo-etapa">
                 <option value="antes">Antes</option>
@@ -274,6 +282,7 @@
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js?v=4"></script>
     <script defer src="./yes-demandas-photo.js?v=1"></script>
-    <script defer src="./demandas-mvp.js?v=1"></script>
+    <script defer src="./demandas-render.js?v=1"></script>
+    <script defer src="./demandas-mvp.js?v=2"></script>
   </body>
 </html>

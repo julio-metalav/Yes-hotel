@@ -14,6 +14,7 @@ export * from "./credential-release-policy.ts";
 export * from "./demandas-telefone.ts";
 export * from "./demandas-geo.ts";
 export * from "./demandas-policy.ts";
+export * from "./demandas-foto.ts";
 export * from "./demandas-engine.ts";
 export * from "./first-room-access-policy.ts";
 export * from "./fnrh-audit-sanitize.ts";

@@ -1,5 +1,6 @@
 const auth = window.YesHotelAuthApp;
 const photoHelper = window.YesHotelDemandasPhoto;
+const render = window.YesHotelDemandasRender;
 
 const STATUS_LABEL = {
   agendada: "Agendada",
@@ -16,10 +17,14 @@ let currentUser = null;
 let rows = [];
 let selected = null;
 let atribuiveis = [];
+let formMode = "create";
 
 const noticeElement = document.querySelector("#demandas-notice");
 const accessStateElement = document.querySelector("#access-state");
 const contentPanelElement = document.querySelector("#content-panel");
+const createFormElement = document.querySelector("#create-form");
+const createPanelElement = document.querySelector("#create-panel");
+const createTitleElement = document.querySelector("#create-panel-title");
 
 function showNotice(message, variant) {
   if (!(noticeElement instanceof HTMLElement)) {
@@ -44,7 +49,7 @@ function showAccessState(title, message) {
   paragraph.textContent = message;
   const action = document.createElement("a");
   action.className = "primary-link";
-  action.href = "./usuarios-login-mvp.html";
+  action.setAttribute("href", "./usuarios-login-mvp.html");
   action.textContent = "Ir para login";
   accessStateElement.append(heading, paragraph, action);
 }
@@ -128,30 +133,38 @@ function canPhoto(row) {
   );
 }
 
+function unwrapRpc(data) {
+  if (data && typeof data === "object" && data.ok === false) {
+    throw new Error(data.message || data.code || "Acao recusada.");
+  }
+  if (data && typeof data === "object" && data.ok === true && data.demanda) {
+    return data.demanda;
+  }
+  return data;
+}
+
 async function rpc(name, args) {
   const { data, error } = await client().rpc(name, args);
   if (error) {
     throw new Error(error.message);
   }
-  return data;
+  return unwrapRpc(data);
+}
+
+function fillAssigneeSelects() {
+  const supervisor = document.querySelector('[name="supervisor_id"]');
+  const executor = document.querySelector('[name="executor_id"]');
+  render.fillAssigneeSelect(supervisor, atribuiveis);
+  render.fillAssigneeSelect(executor, atribuiveis);
+  if (executor instanceof HTMLSelectElement && atribuiveis[1] && formMode === "create") {
+    executor.value = atribuiveis[1].id;
+  }
+  syncAssigneeSelects();
 }
 
 async function loadAtribuiveis() {
   atribuiveis = (await rpc("demandas_listar_usuarios_atribuiveis")) || [];
-  const supervisor = document.querySelector('[name="supervisor_id"]');
-  const executor = document.querySelector('[name="executor_id"]');
-  if (!(supervisor instanceof HTMLSelectElement) || !(executor instanceof HTMLSelectElement)) {
-    return;
-  }
-  const options = atribuiveis
-    .map((user) => `<option value="${user.id}">${user.nome}</option>`)
-    .join("");
-  supervisor.innerHTML = options;
-  executor.innerHTML = options;
-  if (atribuiveis[1]) {
-    executor.value = atribuiveis[1].id;
-  }
-  syncAssigneeSelects();
+  fillAssigneeSelects();
 }
 
 function syncAssigneeSelects() {
@@ -238,21 +251,10 @@ function renderList() {
     return;
   }
   list.forEach((row) => {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = `demandas-card${isOverdue(row) ? " is-vencida" : ""}`;
-    card.innerHTML = `
-      <strong>${row.titulo}</strong>
-      <div class="demandas-card-meta">
-        <span class="demandas-badge">${STATUS_LABEL[row.status] || row.status}</span>
-        ${isOverdue(row) ? '<span class="demandas-badge is-vencida">Vencida</span>' : ""}
-        <span>${row.tipo}</span>
-        <span>${row.prioridade}</span>
-        <span>Início ${row.data_programada_inicio}</span>
-        <span>Conclusão ${row.data_prevista_conclusao}</span>
-        <span>Executor: ${row.executor_nome}</span>
-      </div>
-    `;
+    const card = render.buildCard(row, {
+      overdue: isOverdue(row),
+      statusLabel: STATUS_LABEL[row.status] || row.status,
+    });
     card.addEventListener("click", () => {
       openDetail(row.id).catch((error) => {
         showNotice(error.message, "error");
@@ -283,6 +285,49 @@ async function captureGeo() {
   });
 }
 
+function resetCreateForm() {
+  formMode = "create";
+  if (createFormElement instanceof HTMLFormElement) {
+    createFormElement.reset();
+    delete createFormElement.dataset.demandaId;
+    delete createFormElement.dataset.rowVersion;
+  }
+  if (createTitleElement) {
+    createTitleElement.textContent = "Criar demanda";
+  }
+  fillAssigneeSelects();
+}
+
+function openCreatePanel() {
+  resetCreateForm();
+  createPanelElement?.classList.remove("hidden");
+}
+
+function openEditPanel(row) {
+  if (!(createFormElement instanceof HTMLFormElement)) {
+    return;
+  }
+  formMode = "edit";
+  createFormElement.dataset.demandaId = row.id;
+  createFormElement.dataset.rowVersion = String(row.row_version);
+  if (createTitleElement) {
+    createTitleElement.textContent = "Editar demanda";
+  }
+  createFormElement.elements.titulo.value = row.titulo || "";
+  createFormElement.elements.descricao.value = row.descricao || "";
+  createFormElement.elements.tipo.value = row.tipo || "corretiva";
+  createFormElement.elements.prioridade.value = row.prioridade || "media";
+  createFormElement.elements.data_programada_inicio.value = row.data_programada_inicio || "";
+  createFormElement.elements.data_prevista_conclusao.value = row.data_prevista_conclusao || "";
+  createFormElement.elements.supervisor_id.value = row.supervisor_id || "";
+  createFormElement.elements.executor_id.value = row.executor_id || "";
+  createFormElement.elements.exigir_foto.checked = Boolean(row.exigir_foto);
+  createFormElement.elements.sem_local_especifico.checked = Boolean(row.sem_local_especifico);
+  syncAssigneeSelects();
+  createPanelElement?.classList.remove("hidden");
+  createPanelElement?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 async function openDetail(id) {
   const { data, error } = await client()
     .from("demandas_lista")
@@ -296,21 +341,12 @@ async function openDetail(id) {
   document.querySelector("#detail-panel")?.classList.remove("hidden");
   document.querySelector("#detail-title").textContent = data.titulo;
   const body = document.querySelector("#detail-body");
-  body.innerHTML = `
-    <p>${data.descricao}</p>
-    <p class="demandas-card-meta">
-      <span class="demandas-badge">${STATUS_LABEL[data.status]}</span>
-      ${isOverdue(data) ? '<span class="demandas-badge is-vencida">Vencida</span>' : ""}
-      <span>${data.tipo} · ${data.prioridade}</span>
-      <span>Criador: ${data.criador_nome}</span>
-      <span>Supervisor: ${data.supervisor_nome}</span>
-      <span>Executor: ${data.executor_nome}</span>
-      <span>Início programado: ${data.data_programada_inicio}</span>
-      <span>Conclusão prevista: ${data.data_prevista_conclusao}</span>
-      <span>${data.exigir_foto ? "Foto obrigatória" : "Foto facultativa"}</span>
-      <span>${data.sem_local_especifico ? "Sem local específico" : "Exige geolocalização"}</span>
-    </p>
-  `;
+  body.replaceChildren(
+    render.buildDetail(data, {
+      overdue: isOverdue(data),
+      statusLabel: STATUS_LABEL[data.status] || data.status,
+    }),
+  );
   renderActions(data);
   await Promise.all([loadHistorico(data.id), loadFotos(data.id)]);
 }
@@ -329,6 +365,11 @@ function addAction(host, label, handler) {
 function renderActions(row) {
   const host = document.querySelector("#detail-actions");
   host.replaceChildren();
+  if (canEdit(row) && row.status !== "concluida" && row.status !== "cancelada") {
+    addAction(host, "Editar", async () => {
+      openEditPanel(row);
+    });
+  }
   if (canExecute(row) && (row.status === "nao_iniciada" || row.status === "em_correcao" || row.status === "agendada")) {
     addAction(host, "Iniciar", () => act("demandas_iniciar", true));
   }
@@ -437,12 +478,16 @@ async function loadHistorico(id) {
   const host = document.querySelector("#historico-list");
   host.replaceChildren();
   (data || []).forEach((item) => {
-    const li = document.createElement("li");
     const when = new Date(item.criado_em).toLocaleString("pt-BR", {
       timeZone: "America/Campo_Grande",
     });
-    li.textContent = `${when} · ${item.acao}${item.justificativa ? ` — ${item.justificativa}` : ""}`;
-    host.append(li);
+    host.append(
+      render.buildHistoricoItem({
+        whenLabel: when,
+        acao: item.acao,
+        justificativa: item.justificativa,
+      }),
+    );
   });
 }
 
@@ -460,13 +505,15 @@ async function loadFotos(id) {
   for (const anexo of data || []) {
     const wrap = document.createElement("figure");
     const img = document.createElement("img");
-    img.alt = anexo.etapa;
+    img.alt = String(anexo.etapa || "foto");
     const { data: signed } = await client()
       .storage.from("demandas-fotos")
       .createSignedUrl(anexo.storage_path, 60);
-    img.src = signed?.signedUrl || "";
+    if (signed?.signedUrl) {
+      img.setAttribute("src", signed.signedUrl);
+    }
     const cap = document.createElement("figcaption");
-    cap.textContent = anexo.etapa;
+    cap.textContent = String(anexo.etapa || "");
     wrap.append(img, cap);
     host.append(wrap);
   }
@@ -499,6 +546,22 @@ async function uploadPhoto(file) {
     throw new Error(body.error || "Falha no upload da foto.");
   }
   await afterMutation();
+}
+
+function bindPhotoInput(input) {
+  input?.addEventListener("change", async (event) => {
+    const target = event.target;
+    const file = target.files && target.files[0];
+    target.value = "";
+    if (!file) {
+      return;
+    }
+    try {
+      await uploadPhoto(file);
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "Falha no upload.", "error");
+    }
+  });
 }
 
 async function loadGeoConfig() {
@@ -584,10 +647,11 @@ document.querySelector('[name="supervisor_id"]')?.addEventListener("change", syn
 document.querySelector('[name="executor_id"]')?.addEventListener("change", syncAssigneeSelects);
 
 document.querySelector("#btn-nova")?.addEventListener("click", () => {
-  document.querySelector("#create-panel")?.classList.remove("hidden");
+  openCreatePanel();
 });
 document.querySelector("#btn-cancelar-criar")?.addEventListener("click", () => {
-  document.querySelector("#create-panel")?.classList.add("hidden");
+  resetCreateForm();
+  createPanelElement?.classList.add("hidden");
 });
 
 document.querySelector("#create-form")?.addEventListener("submit", async (event) => {
@@ -598,7 +662,7 @@ document.querySelector("#create-form")?.addEventListener("submit", async (event)
     if (data.get("supervisor_id") === data.get("executor_id")) {
       throw new Error("Supervisor e executor precisam ser pessoas diferentes.");
     }
-    await rpc("demandas_criar", {
+    const payload = {
       p_titulo: data.get("titulo"),
       p_descricao: data.get("descricao"),
       p_tipo: data.get("tipo"),
@@ -609,13 +673,25 @@ document.querySelector("#create-form")?.addEventListener("submit", async (event)
       p_executor_id: data.get("executor_id"),
       p_exigir_foto: data.get("exigir_foto") === "on",
       p_sem_local_especifico: data.get("sem_local_especifico") === "on",
-    });
-    form.reset();
-    document.querySelector("#create-panel")?.classList.add("hidden");
-    showNotice("Demanda criada.");
+    };
+    const editingSelectedId = formMode === "edit" ? selected?.id : null;
+    if (formMode === "edit" && form.dataset.demandaId) {
+      payload.p_demanda_id = form.dataset.demandaId;
+      payload.p_row_version = Number(form.dataset.rowVersion);
+      await rpc("demandas_editar", payload);
+      showNotice("Demanda atualizada.");
+    } else {
+      await rpc("demandas_criar", payload);
+      showNotice("Demanda criada.");
+    }
+    resetCreateForm();
+    createPanelElement?.classList.add("hidden");
     await refreshList();
+    if (editingSelectedId) {
+      await openDetail(editingSelectedId);
+    }
   } catch (error) {
-    showNotice(error instanceof Error ? error.message : "Falha ao criar.", "error");
+    showNotice(error instanceof Error ? error.message : "Falha ao salvar.", "error");
   }
 });
 
@@ -634,19 +710,8 @@ document.querySelector("#geo-form")?.addEventListener("submit", async (event) =>
   }
 });
 
-document.querySelector("#photo-input")?.addEventListener("change", async (event) => {
-  const input = event.target;
-  const file = input.files && input.files[0];
-  input.value = "";
-  if (!file) {
-    return;
-  }
-  try {
-    await uploadPhoto(file);
-  } catch (error) {
-    showNotice(error instanceof Error ? error.message : "Falha no upload.", "error");
-  }
-});
+bindPhotoInput(document.querySelector("#photo-input-camera"));
+bindPhotoInput(document.querySelector("#photo-input-gallery"));
 
 init().catch((error) => {
   showAccessState(

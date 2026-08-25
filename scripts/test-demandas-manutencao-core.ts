@@ -14,6 +14,10 @@ import {
   initialDemandasStatus,
   isDemandasOverdue,
   normalizeTelefoneWhatsapp,
+  detectDemandasImageBytes,
+  DEMANDAS_MAX_PHOTO_BYTES,
+  canPerformDemandasAction,
+  assertPodeRemoverTelefoneWhatsapp,
   DemandasEngine,
   evaluateDemandasGeoCheck,
   transitionIsAllowed,
@@ -65,6 +69,27 @@ function criar(engine: DemandasEngine, actorId: string, extra: Record<string, un
     sem_local_especifico: false,
     ...extra,
   });
+}
+
+function mustOk(result: { ok: boolean; demanda?: unknown; code?: string }) {
+  assert.equal(result.ok, true, JSON.stringify(result));
+  return result.demanda;
+}
+
+function addFoto(
+  engine: DemandasEngine,
+  input: {
+    actorId: string;
+    demandaId: string;
+    etapa: "antes" | "durante" | "finalizacao" | "correcao";
+    storage_path: string;
+    mime: string;
+    tamanho_bytes: number;
+    created_at?: string;
+  },
+) {
+  engine.storageObjects.add(input.storage_path);
+  return engine.incluirFoto(input);
 }
 
 const coords = { latitude: -20.469, longitude: -54.62, precisao_metros: 12 };
@@ -206,7 +231,7 @@ console.log("\n=== Demandas manutenção predial — núcleo ===\n");
 {
   const engine = setup();
   const row = criar(engine, "recepcao");
-  engine.iniciar("exe", row.id, 1, coords);
+  mustOk(engine.iniciar("exe", row.id, 1, coords));
   assert.throws(() =>
     engine.editar({
       actorId: "exe",
@@ -245,8 +270,8 @@ console.log("\n=== Demandas manutenção predial — núcleo ===\n");
 {
   const engine = setup();
   const row = criar(engine, "admin", { executor_id: "admin", supervisor_id: "sup" });
-  engine.iniciar("admin", row.id, 1, coords);
-  engine.enviarValidacao("admin", row.id, 2, coords);
+  mustOk(engine.iniciar("admin", row.id, 1, coords));
+  mustOk(engine.enviarValidacao("admin", row.id, 2, coords));
   assert.throws(() => engine.aprovar("admin", row.id, 3));
   engine.aprovar("sup", row.id, 3);
   assert.equal(engine.demandaSnapshot(row.id).status, "concluida");
@@ -267,14 +292,14 @@ console.log("\n=== Demandas manutenção predial — núcleo ===\n");
 {
   const engine = setup();
   const row = criar(engine, "cafe");
-  engine.iniciar("exe", row.id, 1, coords);
+  mustOk(engine.iniciar("exe", row.id, 1, coords));
   engine.pausar("exe", row.id, 2, "chuva");
   assert.throws(() => engine.pausar("exe", row.id, 3, "de novo"));
   engine.retomar("exe", row.id, 3);
-  engine.enviarValidacao("exe", row.id, 4, coords);
+  mustOk(engine.enviarValidacao("exe", row.id, 4, coords));
   engine.rejeitar("sup", row.id, 5, "refazer silicone");
-  engine.iniciar("exe", row.id, 6, coords);
-  engine.enviarValidacao("exe", row.id, 7, coords);
+  mustOk(engine.iniciar("exe", row.id, 6, coords));
+  mustOk(engine.enviarValidacao("exe", row.id, 7, coords));
   engine.aprovar("sup", row.id, 8);
   engine.reabrir("cafe", row.id, 9, "vazou de novo");
   assert.equal(engine.demandaSnapshot(row.id).status, "em_correcao");
@@ -293,18 +318,18 @@ console.log("\n=== Demandas manutenção predial — núcleo ===\n");
 {
   const engine = setup();
   const row = criar(engine, "admin", { exigir_foto: false });
-  engine.iniciar("exe", row.id, 1, coords);
-  engine.enviarValidacao("exe", row.id, 2, coords);
+  mustOk(engine.iniciar("exe", row.id, 1, coords));
+  mustOk(engine.enviarValidacao("exe", row.id, 2, coords));
   ok("foto facultativa permite envio");
 }
 
 {
   const engine = setup();
   const row = criar(engine, "admin", { exigir_foto: true });
-  engine.iniciar("exe", row.id, 1, coords);
+  mustOk(engine.iniciar("exe", row.id, 1, coords));
   assert.throws(() => engine.enviarValidacao("exe", row.id, 2, coords));
   engine.clock.nowIso = "2026-08-24T12:01:00.000Z";
-  engine.incluirFoto({
+  addFoto(engine, {
     actorId: "exe",
     demandaId: row.id,
     etapa: "durante",
@@ -313,12 +338,12 @@ console.log("\n=== Demandas manutenção predial — núcleo ===\n");
     tamanho_bytes: 1200,
     created_at: "2026-08-24T12:01:00.000Z",
   });
-  engine.enviarValidacao("exe", row.id, 2, coords);
+  mustOk(engine.enviarValidacao("exe", row.id, 2, coords));
   engine.rejeitar("sup", row.id, 3, "foto ruim");
-  engine.iniciar("exe", row.id, 4, coords);
+  mustOk(engine.iniciar("exe", row.id, 4, coords));
   assert.throws(() => engine.enviarValidacao("exe", row.id, 5, coords));
   engine.clock.nowIso = "2026-08-24T13:00:00.000Z";
-  engine.incluirFoto({
+  addFoto(engine, {
     actorId: "exe",
     demandaId: row.id,
     etapa: "correcao",
@@ -327,7 +352,7 @@ console.log("\n=== Demandas manutenção predial — núcleo ===\n");
     tamanho_bytes: 1300,
     created_at: "2026-08-24T13:00:00.000Z",
   });
-  engine.enviarValidacao("exe", row.id, 5, coords);
+  mustOk(engine.enviarValidacao("exe", row.id, 5, coords));
   ok("foto obrigatória e nova foto após rejeição");
 }
 
@@ -335,15 +360,23 @@ console.log("\n=== Demandas manutenção predial — núcleo ===\n");
   const engine = setup();
   const row = criar(engine, "admin", { sem_local_especifico: true });
   engine.geoConfig = null;
-  engine.iniciar("exe", row.id, 1, { latitude: 0, longitude: 0, precisao_metros: null });
+  mustOk(engine.iniciar("exe", row.id, 1, { latitude: 0, longitude: 0, precisao_metros: null }));
   const blocked = setup();
   blocked.geoConfig = null;
   const other = criar(blocked, "admin");
-  assert.throws(() =>
-    blocked.iniciar("exe", other.id, 1, coords),
-  );
+  const statusAntes = blocked.demandaSnapshot(other.id).status;
+  const histAntes = blocked.historico.length;
+  const recusada = blocked.iniciar("exe", other.id, 1, coords);
+  assert.equal(recusada.ok, false);
+  if (recusada.ok) {
+    throw new Error("geo deveria falhar");
+  }
+  assert.equal(recusada.code, "demandas_geo_nao_configurada");
+  assert.ok(recusada.geo_check_id);
+  assert.equal(blocked.demandaSnapshot(other.id).status, statusAntes);
+  assert.equal(blocked.historico.length, histAntes);
   assert.equal(blocked.geoChecks.at(-1)?.resultado, "nao_configurada");
-  ok("geo obrigatória, tentativa recusada registrada, dispensa sem local");
+  ok("geo obrigatória, tentativa recusada persistida, demanda inalterada, dispensa sem local");
 }
 
 {
@@ -377,6 +410,115 @@ console.log("\n=== Demandas manutenção predial — núcleo ===\n");
   assert.equal(dashboardCardVisible("financeiro", admin), true);
   assert.equal(dashboardCardVisible("gestao", recepcao), true);
   ok("cards do dashboard comum por perfil");
+}
+
+{
+  const engine = setup();
+  const row = criar(engine, "admin");
+  const fora = {
+    latitude: -20.48,
+    longitude: -54.62,
+    precisao_metros: 8,
+  };
+  const statusAntes = engine.demandaSnapshot(row.id).status;
+  const histAntes = engine.historico.filter((h) => h.acao === "iniciar").length;
+  const recusada = engine.iniciar("exe", row.id, 1, fora);
+  assert.equal(recusada.ok, false);
+  if (recusada.ok) {
+    throw new Error("fora do raio deveria falhar");
+  }
+  assert.equal(recusada.code, "demandas_geo_recusada");
+  assert.ok(recusada.geo_check_id);
+  assert.equal(engine.demandaSnapshot(row.id).status, statusAntes);
+  assert.equal(engine.historico.filter((h) => h.acao === "iniciar").length, histAntes);
+  assert.equal(engine.geoChecks.at(-1)?.resultado, "recusada");
+  mustOk(engine.iniciar("exe", row.id, 1, coords));
+  assert.equal(engine.demandaSnapshot(row.id).status, "em_andamento");
+  assert.equal(engine.geoChecks.at(-1)?.resultado, "aprovada");
+  ok("fora do raio persiste recusa; dentro do raio transiciona");
+}
+
+{
+  const engine = setup();
+  const row = criar(engine, "admin");
+  const n = engine.geoChecks.length;
+  assert.throws(() => engine.iniciar("cafe", row.id, 1, coords));
+  assert.equal(engine.geoChecks.length, n);
+  assert.equal(engine.demandaSnapshot(row.id).status, "nao_iniciada");
+  ok("não autorizado não registra geocheck");
+}
+
+{
+  const jpeg = Uint8Array.of(0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10);
+  const png = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00);
+  const webp = Uint8Array.of(
+    0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+  );
+  assert.equal(detectDemandasImageBytes(jpeg).ok, true);
+  assert.equal(detectDemandasImageBytes(png).ok, true);
+  assert.equal(detectDemandasImageBytes(webp).ok, true);
+  const htmlAsJpeg = new TextEncoder().encode("<html><img src=x onerror=alert(1)></html>");
+  assert.equal(detectDemandasImageBytes(htmlAsJpeg).ok, false);
+  assert.equal(detectDemandasImageBytes(Uint8Array.of(1, 2, 3, 4, 5)).ok, false);
+  assert.equal(detectDemandasImageBytes(new TextEncoder().encode("<svg onload=alert(1)>")).ok, false);
+  const huge = new Uint8Array(DEMANDAS_MAX_PHOTO_BYTES + 1);
+  huge.set([0xff, 0xd8, 0xff], 0);
+  assert.equal(detectDemandasImageBytes(huge).ok, false);
+  ok("magic bytes: jpeg/png/webp ok; html, lixo, svg e oversized recusados");
+}
+
+{
+  const engine = setup();
+  const row = criar(engine, "admin");
+  engine.autorizarAnexo("exe", row.id, "durante");
+  assert.throws(() =>
+    engine.incluirFoto({
+      actorId: "exe",
+      demandaId: row.id,
+      etapa: "durante",
+      storage_path: `${row.id}/missing.jpg`,
+      mime: "image/jpeg",
+      tamanho_bytes: 10,
+    }),
+  );
+  assert.throws(() => engine.autorizarAnexo("cafe", row.id, "durante"));
+  ok("pré-autorização e objeto inexistente recusado no registro");
+}
+
+{
+  const engine = setup();
+  const row = criar(engine, "recepcao");
+  const criador = engine.users.get("recepcao")!;
+  const executor = engine.users.get("exe")!;
+  const supervisor = engine.users.get("sup")!;
+  assert.equal(canPerformDemandasAction("editar", criador, row), true);
+  assert.equal(canPerformDemandasAction("editar", executor, row), false);
+  assert.equal(canPerformDemandasAction("editar", supervisor, row), false);
+  ok("criador edita; executor/supervisor sem edição");
+}
+
+{
+  assert.throws(() =>
+    assertPodeRemoverTelefoneWhatsapp({
+      userId: "exe",
+      telefoneAtual: PHONE,
+      telefoneNovo: null,
+      atribuicoes: [{ supervisor_id: "sup", executor_id: "exe", status: "em_andamento" }],
+    }),
+  );
+  assertPodeRemoverTelefoneWhatsapp({
+    userId: "exe",
+    telefoneAtual: PHONE,
+    telefoneNovo: "+5567888888888",
+    atribuicoes: [{ supervisor_id: "sup", executor_id: "exe", status: "em_andamento" }],
+  });
+  assertPodeRemoverTelefoneWhatsapp({
+    userId: "exe",
+    telefoneAtual: PHONE,
+    telefoneNovo: null,
+    atribuicoes: [{ supervisor_id: "sup", executor_id: "exe", status: "concluida" }],
+  });
+  ok("telefone não pode ser removido com demanda aberta; troca válida e demanda encerrada ok");
 }
 
 {
