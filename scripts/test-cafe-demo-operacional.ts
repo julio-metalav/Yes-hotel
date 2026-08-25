@@ -271,7 +271,7 @@ assert.match(
 assert.match(uiSource, /usuarios-login-mvp\.html\?next=cafe-demo/);
 assert.match(loginJs, /get\("next"\) === "cafe-demo"/);
 assert.match(loginJs, /cafe-da-manha-mvp\.html\?demo=1/);
-assert.match(loginHtml, /usuarios-login-mvp\.js\?v=7/);
+assert.match(loginHtml, /usuarios-login-mvp\.js\?v=8/);
 assert.match(uiSource, /const localDataset = demoMode \? demoDataset : testDataset/);
 assert.equal(resolveCafeBreakfastEntitlementFromHits({ guestCount: 2 }).kind, "nao_mapeado");
 assert.match(sql, /cafe_kind := 'nao_mapeado';\s*quantidade_direito := 0;/);

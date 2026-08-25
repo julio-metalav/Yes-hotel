@@ -37,21 +37,36 @@ function redirectUserByRole(user) {
     return true;
   }
 
-  if (auth.canAccessUserManagement(user)) {
-    return false;
-  }
-
-  if (user.role === "recepcao") {
-    window.location.href = "./recepcao-mvp.html";
-    return true;
-  }
-
-  if (user.role === "cafe") {
-    window.location.href = "./cafe-da-manha-mvp.html";
-    return true;
-  }
-
   return false;
+}
+
+function applyDashboardCards(user) {
+  const isAdmin = user?.role === "admin";
+  const isCafe = user?.role === "cafe";
+  const canManage =
+    typeof auth.canAccessManagement === "function"
+      ? auth.canAccessManagement(user)
+      : user?.role === "admin" || user?.role === "recepcao";
+  const canFinancial =
+    typeof auth.canAccessFinancialRecon === "function"
+      ? auth.canAccessFinancialRecon(user)
+      : user?.role === "admin";
+
+  document.querySelectorAll('[data-nav="checkin"]').forEach((node) => {
+    node.classList.toggle("hidden", isCafe);
+  });
+  document.querySelectorAll('[data-nav="gestao"]').forEach((node) => {
+    node.classList.toggle("hidden", !canManage);
+  });
+  document.querySelectorAll('[data-nav="financeiro"]').forEach((node) => {
+    node.classList.toggle("hidden", !canFinancial);
+  });
+  document.querySelectorAll('[data-nav="usuarios"]').forEach((node) => {
+    node.classList.toggle("hidden", !isAdmin);
+  });
+  document.querySelectorAll(".dashboard-admin-only").forEach((node) => {
+    node.classList.toggle("hidden", !isAdmin);
+  });
 }
 
 function showNotice(message, variant = "success") {
@@ -120,6 +135,9 @@ function resetUserForm() {
   userFormElement.elements.userId.value = "";
   userFormElement.elements.role.value = "recepcao";
   userFormElement.elements.active.checked = true;
+  if (userFormElement.elements.telefoneWhatsapp) {
+    userFormElement.elements.telefoneWhatsapp.value = "";
+  }
 
   if (userFormTitleElement instanceof HTMLElement) {
     userFormTitleElement.textContent = "Novo usuário";
@@ -137,6 +155,10 @@ function populateUserForm(user) {
   userFormElement.elements.password.value = "";
   userFormElement.elements.role.value = user.role;
   userFormElement.elements.active.checked = Boolean(user.active);
+  if (userFormElement.elements.telefoneWhatsapp) {
+    userFormElement.elements.telefoneWhatsapp.value =
+      user.telefoneWhatsapp || user.telefone_whatsapp || "";
+  }
 
   if (userFormTitleElement instanceof HTMLElement) {
     userFormTitleElement.textContent = "Editar usuário";
@@ -173,7 +195,11 @@ async function renderUsersList() {
     const role = document.createElement("span");
     role.className = "user-card-role";
     role.textContent = auth.getRoleLabel(user.role);
-    meta.append(email, role);
+    const phone = document.createElement("span");
+    phone.className = "user-card-phone";
+    phone.textContent =
+      user.telefoneWhatsapp || user.telefone_whatsapp || "Sem WhatsApp";
+    meta.append(email, role, phone);
     main.append(title, meta);
 
     const side = document.createElement("div");
@@ -208,7 +234,7 @@ async function renderUsersList() {
   });
 }
 
-async function renderAdminPanel() {
+async function renderDashboard() {
   const currentUser = await auth.getCurrentUser();
 
   if (!currentUser) {
@@ -216,14 +242,12 @@ async function renderAdminPanel() {
     return;
   }
 
-  if (!auth.canAccessUserManagement(currentUser)) {
-    redirectUserByRole(currentUser);
-    return;
-  }
-
   showOnlyPanel(appPanelElement);
+  applyDashboardCards(currentUser);
   resetUserForm();
-  await renderUsersList();
+  if (auth.canAccessUserManagement(currentUser)) {
+    await renderUsersList();
+  }
   hideErrorNoticeOnly();
 
   if (
@@ -253,12 +277,7 @@ async function renderPageState() {
       return;
     }
 
-    if (!auth.canAccessUserManagement(currentUser)) {
-      redirectUserByRole(currentUser);
-      return;
-    }
-
-    await renderAdminPanel();
+    await renderDashboard();
     return;
   }
 
@@ -292,7 +311,7 @@ bootstrapFormElement?.addEventListener("submit", async (event) => {
     });
     await auth.login(formData.get("email"), formData.get("password"));
     showNotice("Primeiro admin criado com sucesso.");
-    await renderAdminPanel();
+    await renderDashboard();
   } catch (error) {
     showNotice(error instanceof Error ? error.message : "Falha ao criar admin.", "error");
   }
@@ -384,12 +403,7 @@ loginFormElement?.addEventListener("submit", async (event) => {
       return;
     }
 
-    if (auth.canAccessUserManagement(user)) {
-      await renderAdminPanel();
-      return;
-    }
-
-    redirectUserByRole(user);
+    await renderDashboard();
   } catch (error) {
     showNotice(error instanceof Error ? error.message : "Falha no login.", "error");
   } finally {
@@ -419,6 +433,7 @@ userFormElement?.addEventListener("submit", async (event) => {
         password: formData.get("password"),
         role: formData.get("role"),
         active: formData.get("active") === "on",
+        telefoneWhatsapp: formData.get("telefoneWhatsapp"),
       });
       showNotice("Usuario atualizado com sucesso.");
     } else {
@@ -428,11 +443,12 @@ userFormElement?.addEventListener("submit", async (event) => {
         password: formData.get("password"),
         role: formData.get("role"),
         active: formData.get("active") === "on",
+        telefoneWhatsapp: formData.get("telefoneWhatsapp"),
       });
       showNotice("Usuario criado com sucesso.");
     }
 
-    await renderAdminPanel();
+    await renderDashboard();
   } catch (error) {
     showNotice(error instanceof Error ? error.message : "Falha ao salvar usuario.", "error");
   }

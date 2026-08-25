@@ -58,9 +58,32 @@ function mapProfileRow(row: Record<string, unknown>) {
     email: row.email_login,
     role: row.perfil_usuario,
     active: row.ativo,
+    telefoneWhatsapp: row.telefone_whatsapp ?? "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function normalizeTelefoneWhatsapp(value: unknown): string | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return null;
+  }
+  let digits = raw.replace(/\D/g, "");
+  if (digits.startsWith("00")) {
+    digits = digits.slice(2);
+  }
+  if (digits.length === 10 || digits.length === 11) {
+    digits = `55${digits}`;
+  }
+  if ((digits.length !== 12 && digits.length !== 13) || !digits.startsWith("55")) {
+    throw new Error("Telefone/WhatsApp invalido. Use DDD + numero brasileiro.");
+  }
+  const local = digits.slice(2);
+  if (local.length === 11 && local[2] !== "9") {
+    throw new Error("Telefone/WhatsApp invalido. Celular deve ter 9 apos o DDD.");
+  }
+  return `+${digits}`;
 }
 
 const adminClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
@@ -226,6 +249,7 @@ async function createUser(request: Request, payload: Record<string, unknown>) {
   const password = ensureRequiredText(payload.password, "Senha");
   const role = normalizeRole(payload.role);
   const active = Boolean(payload.active);
+  const telefoneWhatsapp = normalizeTelefoneWhatsapp(payload.telefoneWhatsapp);
 
   const { data: createdAuthUser, error: createAuthError } =
     await adminClient.auth.admin.createUser({
@@ -257,6 +281,7 @@ async function createUser(request: Request, payload: Record<string, unknown>) {
       email_login: email,
       perfil_usuario: role,
       ativo: active,
+      telefone_whatsapp: telefoneWhatsapp,
     })
     .select("*")
     .single();
@@ -287,6 +312,7 @@ async function updateUser(request: Request, payload: Record<string, unknown>) {
   const role = normalizeRole(payload.role);
   const active = Boolean(payload.active);
   const password = String(payload.password ?? "").trim();
+  const telefoneWhatsapp = normalizeTelefoneWhatsapp(payload.telefoneWhatsapp);
 
   const { data: currentProfile, error: currentProfileError } = await adminClient
     .from("usuarios_internos")
@@ -349,6 +375,7 @@ async function updateUser(request: Request, payload: Record<string, unknown>) {
       email_login: email,
       perfil_usuario: role,
       ativo: active,
+      telefone_whatsapp: telefoneWhatsapp,
       updated_at: new Date().toISOString(),
     })
     .eq("id", userId)
