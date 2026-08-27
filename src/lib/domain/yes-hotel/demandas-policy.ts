@@ -4,7 +4,6 @@
  */
 
 import { hotelLocalParts } from "./cafe-operational-date.ts";
-import { telefoneWhatsappIsAssignable } from "./demandas-telefone.ts";
 
 export const DEMANDAS_TIMEZONE = "America/Campo_Grande";
 export const DEMANDAS_FOTOS_BUCKET = "demandas-fotos";
@@ -238,21 +237,20 @@ export function transitionIsAllowed(
   return (DEMANDAS_TRANSITIONS[from] ?? []).includes(to);
 }
 
+export function assertUsuarioAtribuivel(user: DemandasActor): void {
+  if (!canAccessDemandas(user)) {
+    throw new Error("demandas_usuario_inativo");
+  }
+}
+
 export function assertAssignablePair(input: {
   supervisor: DemandasActor;
   executor: DemandasActor;
 }): void {
-  if (!input.supervisor.active || !input.executor.active) {
-    throw new Error("demandas_usuario_inativo");
-  }
+  assertUsuarioAtribuivel(input.supervisor);
+  assertUsuarioAtribuivel(input.executor);
   if (input.supervisor.id === input.executor.id) {
     throw new Error("demandas_supervisor_igual_executor");
-  }
-  if (!telefoneWhatsappIsAssignable(input.supervisor.telefone_whatsapp)) {
-    throw new Error("demandas_telefone_obrigatorio");
-  }
-  if (!telefoneWhatsappIsAssignable(input.executor.telefone_whatsapp)) {
-    throw new Error("demandas_telefone_obrigatorio");
   }
 }
 

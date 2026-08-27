@@ -4,6 +4,7 @@
  */
 
 import { evaluateDemandasGeoCheck, type DemandasGeoConfig } from "./demandas-geo.ts";
+import { demandasDigisacNotificacaoStatus } from "./demandas-telefone.ts";
 import {
   type DemandasAcao,
   type DemandasActor,
@@ -15,6 +16,7 @@ import {
   type DemandasTipo,
   assertAssignablePair,
   assertDates,
+  canAccessDemandas,
   canPerformDemandasAction,
   canStartScheduled,
   fotoObrigatoriaNoEnvio,
@@ -116,6 +118,21 @@ export class DemandasEngine {
       throw new Error("demandas_usuario_inativo");
     }
     return user;
+  }
+
+  listarAtribuiveis(): Array<{
+    id: string;
+    nome: string;
+    perfil_usuario: string;
+  }> {
+    return [...this.users.values()]
+      .filter((user) => canAccessDemandas(user))
+      .map((user) => ({
+        id: user.id,
+        nome: user.id,
+        perfil_usuario: String(user.role),
+      }))
+      .sort((a, b) => a.nome.localeCompare(b.nome));
   }
 
   private demanda(id: string): DemandasEngineDemanda {
@@ -288,7 +305,15 @@ export class DemandasEngine {
       deleted: false,
     };
     this.demandas.set(row.id, row);
-    this.appendHistorico(row, actor, "criar", null, { status }, null);
+    this.appendHistorico(row, actor, "criar", null, {
+      status,
+      supervisor_digisac: demandasDigisacNotificacaoStatus(
+        supervisor.telefone_whatsapp,
+      ),
+      executor_digisac: demandasDigisacNotificacaoStatus(
+        executor.telefone_whatsapp,
+      ),
+    }, null);
     return row;
   }
 
@@ -329,7 +354,15 @@ export class DemandasEngine {
     demanda.executor_id = executor.id;
     demanda.exigir_foto = input.exigir_foto;
     demanda.sem_local_especifico = input.sem_local_especifico;
-    this.appendHistorico(demanda, actor, "editar", anterior, { ...demanda }, null);
+    this.appendHistorico(demanda, actor, "editar", anterior, {
+      ...demanda,
+      supervisor_digisac: demandasDigisacNotificacaoStatus(
+        supervisor.telefone_whatsapp,
+      ),
+      executor_digisac: demandasDigisacNotificacaoStatus(
+        executor.telefone_whatsapp,
+      ),
+    }, null);
     return demanda;
   }
 

@@ -28,6 +28,7 @@ const files = [
   "ui/yes-demandas-photo.js",
   "supabase/functions/demandas-foto-upload/index.ts",
   "supabase/migrations/20260825033658_demandas_manutencao_predial_core_v1.sql",
+  "supabase/migrations/20260827181500_demandas_atribuicao_sem_telefone_obrigatorio.sql",
 ];
 for (const rel of files) {
   assert.equal(existsSync(join(root, rel)), true, `falta ${rel}`);
@@ -35,6 +36,9 @@ for (const rel of files) {
 ok("arquivos da tela, edge e migration existem");
 
 const sql = read("supabase/migrations/20260825033658_demandas_manutencao_predial_core_v1.sql");
+const sqlAtribuicao = read(
+  "supabase/migrations/20260827181500_demandas_atribuicao_sem_telefone_obrigatorio.sql",
+);
 const html = read("ui/demandas-mvp.html");
 const pageSrc = read("ui/demandas-mvp.js");
 const renderSrc = read("ui/demandas-render.js");
@@ -137,6 +141,9 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(loginJs, /cafe-da-manha-mvp\.html\?demo=1/);
   assert.match(authSrc, /function canAccessDemandas/);
   assert.match(loginHtml, /telefoneWhatsapp/);
+  assert.match(loginHtml, /Telefone \/ WhatsApp/);
+  assert.match(loginHtml, /\+5567999887766/);
+  assert.doesNotMatch(loginHtml, /name="telefoneWhatsapp"[^>]*required/);
   assert.match(usersEdge, /telefone_whatsapp/);
   assert.match(loginHtml, /usuarios-login-mvp\.js\?v=8/);
   ok("dashboard comum, telefone e regressão do redirect de login");
@@ -176,7 +183,39 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
     sql,
     /create or replace function public\.demandas_listar_usuarios_atribuiveis\(\)[\s\S]*telefone_whatsapp text/,
   );
-  ok("telefones ausentes da view e da RPC de atribuíveis");
+  assert.match(
+    sqlAtribuicao,
+    /create or replace function public\.demandas_listar_usuarios_atribuiveis\(\)/,
+  );
+  assert.doesNotMatch(
+    sqlAtribuicao,
+    /u\.telefone_whatsapp is not null/,
+  );
+  assert.doesNotMatch(
+    sqlAtribuicao,
+    /btrim\(u\.telefone_whatsapp\)/,
+  );
+  assert.match(
+    sqlAtribuicao,
+    /lower\(u\.perfil_usuario\) in \('admin', 'recepcao', 'cafe'\)/,
+  );
+  const listarMatch = sqlAtribuicao.match(
+    /create or replace function public\.demandas_listar_usuarios_atribuiveis\(\)([\s\S]*?)\$\$;/,
+  );
+  assert.ok(listarMatch, "RPC demandas_listar_usuarios_atribuiveis na migration nova");
+  assert.match(listarMatch[1], /returns table \(/);
+  assert.match(listarMatch[1], /id uuid/);
+  assert.match(listarMatch[1], /nome text/);
+  assert.match(listarMatch[1], /perfil_usuario text/);
+  assert.doesNotMatch(listarMatch[1], /telefone_whatsapp/);
+  assert.match(
+    sqlAtribuicao,
+    /drop trigger if exists usuarios_internos_proteger_telefone_demandas/,
+  );
+  assert.match(sqlAtribuicao, /demandas_digisac_notificacao_status/);
+  assert.match(sqlAtribuicao, /pendente_sem_telefone/);
+  assert.doesNotMatch(pageSrc, /p_supervisor_telefone|p_executor_telefone|telefone_whatsapp/);
+  ok("telefones ausentes da view e da RPC de atribuíveis; atribuição sem WhatsApp");
 }
 
 {
@@ -373,6 +412,23 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
 }
 
 {
+  assert.doesNotMatch(sqlAtribuicao, /demandas_telefone_obrigatorio/);
+  assert.match(
+    sqlAtribuicao,
+    /revoke all on function public\.demandas_digisac_notificacao_status\(uuid\) from public, anon, authenticated/i,
+  );
+  assert.doesNotMatch(
+    sqlAtribuicao,
+    /grant execute on function public\.demandas_digisac_notificacao_status/,
+  );
+  assert.doesNotMatch(
+    sqlAtribuicao,
+    /grant execute on function public\.demandas_assert_usuario_atribuivel/,
+  );
+  ok("assert atribuível sem WhatsApp; helper DigiSac sem telefone e sem GRANT authenticated");
+}
+
+{
   assert.match(sql, /grant execute on function public\.demandas_criar/);
   assert.match(sql, /grant execute on function public\.demandas_autorizar_anexo/);
   assert.match(sql, /grant execute on function public\.is_yes_hotel_demandas_reader\(\) to authenticated/);
@@ -389,11 +445,12 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
     /PROFILE_COLUMNS =\s*"id, auth_user_id, nome, email_login, perfil_usuario, ativo, telefone_whatsapp/,
   );
   assert.doesNotMatch(authSrc, /telefone_whatsapp, created_at/);
-  assert.match(usersEdge, /demandas_telefone_atribuido_aberto|demanda aberta/);
-  assert.match(sql, /demandas_proteger_telefone_atribuido/);
+  assert.doesNotMatch(usersEdge, /demanda aberta/);
+  assert.doesNotMatch(usersEdge, /userHasOpenDemandaAssignment/);
+  assert.match(sqlAtribuicao, /drop trigger if exists usuarios_internos_proteger_telefone_demandas/);
   assert.match(sql, /set search_path = public/);
   assert.match(sql, /demandas_is_admin\(p_user public\.usuarios_internos\)[\s\S]*set search_path = public/);
-  ok("login desacoplado do telefone; proteção de atribuído e search_path");
+  ok("login desacoplado do telefone; WhatsApp opcional e search_path");
 }
 
 {
