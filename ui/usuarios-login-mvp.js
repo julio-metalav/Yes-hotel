@@ -64,6 +64,9 @@ function applyDashboardCards(user) {
   document.querySelectorAll('[data-nav="wifi"]').forEach((node) => {
     node.classList.toggle("hidden", !canManage);
   });
+  document.querySelectorAll('[data-nav="geo"]').forEach((node) => {
+    node.classList.toggle("hidden", !isAdmin);
+  });
   document.querySelectorAll('[data-nav="usuarios"]').forEach((node) => {
     node.classList.toggle("hidden", !isAdmin);
   });

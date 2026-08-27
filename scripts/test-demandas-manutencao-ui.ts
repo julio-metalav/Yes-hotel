@@ -145,7 +145,7 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(loginHtml, /\+5567999887766/);
   assert.doesNotMatch(loginHtml, /name="telefoneWhatsapp"[^>]*required/);
   assert.match(usersEdge, /telefone_whatsapp/);
-  assert.match(loginHtml, /usuarios-login-mvp\.js\?v=9/);
+  assert.match(loginHtml, /usuarios-login-mvp\.js\?v=10/);
   ok("dashboard comum, telefone e regressão do redirect de login");
 }
 
@@ -557,9 +557,10 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(html, />Nova demanda</);
   assert.match(html, /id="kpi-validacao"/);
   assert.match(html, /Aguardando validação/);
-  assert.match(html, /<details id="geo-details">/);
-  assert.match(html, /Configuração de localização/);
-  assert.doesNotMatch(html, /<details id="geo-details"[^>]*\sopen/);
+  assert.doesNotMatch(html, /id="geo-admin"/);
+  assert.doesNotMatch(html, /id="geo-details"/);
+  assert.doesNotMatch(html, /id="geo-form"/);
+  assert.doesNotMatch(html, /Configuração de localização/);
   assert.doesNotMatch(html, /id="filter-escopo"/);
   assert.doesNotMatch(html, /id="nav-minhas"[^>]*class="active"/);
 
@@ -571,7 +572,7 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.doesNotMatch(navMinhas[0], /\bactive\b/);
   assert.match(navTodas[0], /\bactive\b/);
   assert.doesNotMatch(navMinhas[0], /data-nav="demandas"/);
-  ok("HTML separa Demandas e Minhas demandas com menu e geo recolhida");
+  ok("HTML separa Demandas e Minhas demandas com menu exclusivo");
 }
 
 {
@@ -581,8 +582,6 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(pageSrc, /title\.textContent = minhas \? "Minhas demandas" : "Demandas"/);
   assert.match(pageSrc, /navMinhas\?\.classList\.toggle\("active", minhas\)/);
   assert.match(pageSrc, /navTodas\?\.classList\.toggle\("active", !minhas\)/);
-  assert.match(pageSrc, /isMinhasEscopo\(\) \|\| currentUser\.role !== "admin"/);
-  assert.match(pageSrc, /geo\?\.classList\.add\("hidden"\)/);
   assert.match(pageSrc, /applyPageChrome\(\);/);
   assert.match(pageSrc, /contentPanelElement\?\.classList\.remove\("hidden"\)/);
   const chromeIdx = pageSrc.indexOf("applyPageChrome();");
@@ -590,7 +589,10 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.equal(chromeIdx > -1 && chromeIdx < showIdx, true, "chrome do menu antes de exibir o painel");
   assert.doesNotMatch(pageSrc, /filter-escopo/);
   assert.doesNotMatch(pageSrc, /function applyQueryEscopo/);
-  ok("escopo vem da URL; menu exclusivo; geo oculta em Minhas demandas");
+  assert.doesNotMatch(pageSrc, /function loadGeoConfig/);
+  assert.doesNotMatch(pageSrc, /#geo-form/);
+  assert.doesNotMatch(pageSrc, /demandas_atualizar_geo_config/);
+  ok("escopo vem da URL; menu exclusivo; geo fora de Demandas");
 }
 
 {
@@ -598,7 +600,7 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(css, /\.demandas-card-title/);
   assert.match(css, /\.demandas-badge\.is-status-em_andamento/);
   assert.match(css, /\.demandas-badge\.is-status-aguardando_validacao/);
-  assert.match(css, /\.demandas-geo-admin summary/);
+  assert.doesNotMatch(css, /\.demandas-geo-admin/);
   assert.match(css, /grid-template-columns: 1fr;/);
   const sidebars = [
     "ui/checkin-operacional-mvp.html",
@@ -609,14 +611,55 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
     "ui/recepcao-mvp.html",
     "ui/usuarios-login-mvp.html",
     "ui/index.html",
+    "ui/geolocalizacao-hotel-mvp.html",
   ];
   for (const rel of sidebars) {
     const src = read(rel);
     assert.match(src, /data-nav="minhas-demandas"/);
     assert.match(src, /data-nav="demandas"/);
     assert.match(src, /demandas-mvp\.html\?escopo=minhas/);
+    assert.doesNotMatch(src, />Geolocalização</);
   }
   ok("CSS compacto e sidebars com data-nav distintos");
+}
+
+{
+  assert.equal(existsSync(join(root, "ui/geolocalizacao-hotel-mvp.html")), true);
+  assert.equal(existsSync(join(root, "ui/geolocalizacao-hotel-mvp.js")), true);
+  const geoHtml = read("ui/geolocalizacao-hotel-mvp.html");
+  const geoJs = read("ui/geolocalizacao-hotel-mvp.js");
+  assert.match(geoHtml, /Geolocalização do hotel/);
+  assert.match(geoHtml, /Usado para validar presença em ações com localização obrigatória/);
+  assert.match(geoHtml, /name="latitude"/);
+  assert.match(geoHtml, /name="longitude"/);
+  assert.match(geoHtml, /name="raio"/);
+  assert.match(geoHtml, />Salvar coordenadas</);
+  assert.match(geoHtml, /href="\.\/usuarios-login-mvp\.html"/);
+  assert.doesNotMatch(geoHtml, />Geolocalização</);
+  assert.match(geoJs, /hotel_geo_config/);
+  assert.match(geoJs, /demandas_atualizar_geo_config/);
+  assert.match(geoJs, /user\.role !== "admin"/);
+  assert.doesNotMatch(geoJs, /innerHTML/);
+  assert.match(loginHtml, /Geolocalização do hotel/);
+  assert.match(indexHtml, /Geolocalização do hotel/);
+  assert.match(loginHtml, /Coordenadas e raio para validação de presença/);
+  assert.match(loginHtml, /href="\.\/geolocalizacao-hotel-mvp\.html"/);
+  assert.match(loginHtml, /data-nav="geo"/);
+  assert.match(loginJs, /data-nav="geo"/);
+  assert.match(loginJs, /toggle\("hidden", !isAdmin\)/);
+  const opSidebars = [
+    "ui/checkin-operacional-mvp.html",
+    "ui/cafe-da-manha-mvp.html",
+    "ui/demandas-mvp.html",
+    "ui/gestao-saude-hotel.html",
+    "ui/financeiro-conciliacao.html",
+  ];
+  for (const rel of opSidebars) {
+    const src = read(rel);
+    assert.doesNotMatch(src, /geolocalizacao-hotel-mvp\.html/);
+    assert.doesNotMatch(src, /Configuração de localização/);
+  }
+  ok("geo saiu de Demandas e ficou na área admin");
 }
 
 console.log(`\nOK test-demandas-manutencao-ui (${cases} casos)\n`);
