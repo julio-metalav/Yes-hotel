@@ -11,6 +11,7 @@ import {
   HITS_DEFAULT_TIMEOUT_MS,
   type HitsConfig,
 } from "../../../src/lib/integrations/hits/config.ts";
+import { isHitsGuestWriteEnabled } from "./guest-write.ts";
 
 export const GATEWAY_BIND_HOST = "127.0.0.1";
 export const GATEWAY_DEFAULT_PORT = 3001;
@@ -25,10 +26,18 @@ export type GatewayConfig = {
   hits: HitsConfig;
   hitsReady: boolean;
   hitsReadyReason: string | null;
+  /** Escrita PAX só com HITS pronto + tenant sandbox `develop` + flag exact `true`. */
+  guestWriteEnabled: boolean;
 };
 
 function read(env: NodeJS.ProcessEnv, name: string): string {
   return String(env[name] ?? "").trim();
+}
+
+function readRaw(env: NodeJS.ProcessEnv, name: string): string {
+  const value = env[name];
+  if (value == null) return "";
+  return String(value);
 }
 
 function parsePort(raw: string): number {
@@ -129,6 +138,11 @@ export function loadGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gateway
     hits,
     hitsReady: readiness.ok,
     hitsReadyReason: readiness.reason,
+    guestWriteEnabled: isHitsGuestWriteEnabled({
+      hitsReady: readiness.ok,
+      tenantName: hits.tenantName,
+      guestWriteFlag: readRaw(env, "HITS_GUEST_WRITE_ENABLED"),
+    }),
   };
 }
 

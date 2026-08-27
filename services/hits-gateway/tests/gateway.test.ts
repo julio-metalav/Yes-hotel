@@ -313,7 +313,7 @@ test("POST/PUT/PATCH/DELETE em reservas → 405 e não chama HITS", async () => 
   });
 });
 
-test("POST/PUT/PATCH/DELETE em hóspedes → 405 e não chama HITS", async () => {
+test("POST/PATCH/DELETE em /v1/guests → 405; PUT padrão → 403 sem chamar HITS", async () => {
   let called = 0;
   const mock: HitsReadClient = {
     listReservations: async () => [],
@@ -322,13 +322,29 @@ test("POST/PUT/PATCH/DELETE em hóspedes → 405 e não chama HITS", async () =>
       called += 1;
       return [];
     },
+    postReservationGuests: async () => {
+      called += 1;
+      return {};
+    },
+    putGuest: async () => {
+      called += 1;
+      return {};
+    },
   };
   await withApp(mock, async (app) => {
-    for (const method of ["POST", "PUT", "PATCH", "DELETE"] as const) {
+    for (const method of ["POST", "PATCH", "DELETE"] as const) {
       const res = await app.inject({ method, url: "/v1/guests", headers: AUTH });
       assert.equal(res.statusCode, 405, method);
       assert.equal(res.json().code, "method_not_allowed");
     }
+    const put = await app.inject({
+      method: "PUT",
+      url: "/v1/guests",
+      headers: AUTH,
+      payload: { idEntity: 1, idReservation: 2, name: "Sintético" },
+    });
+    assert.equal(put.statusCode, 403);
+    assert.equal(put.json().code, "guest_write_disabled");
     assert.equal(called, 0);
   });
 });
@@ -448,6 +464,7 @@ test("loadGatewayConfig não defaulta URL de produção e não liga check-in", (
   assert.equal(cfg.hits.apiBaseUrl, "");
   assert.equal(cfg.hits.checkinEnabled, false);
   assert.equal(cfg.hits.integrationEnabled, false);
+  assert.equal(cfg.guestWriteEnabled, false);
   assert.equal(cfg.port, 3001);
 });
 
@@ -464,6 +481,7 @@ test("loadGatewayConfig ready só com contrato confirmado", () => {
   assert.equal(cfg.hitsReady, true);
   assert.equal(cfg.hits.integrationEnabled, true);
   assert.equal(cfg.hits.checkinEnabled, false);
+  assert.equal(cfg.guestWriteEnabled, false);
   assert.equal(cfg.hits.apiBaseUrl, "https://hits.example.invalid");
 });
 

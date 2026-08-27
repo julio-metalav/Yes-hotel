@@ -107,6 +107,11 @@ export const fixtureGuestsList: HitsGuestListResponse = [
   },
 ];
 
+export const fixtureGuestsWriteAccepted = {
+  ok: true,
+  synthetic: true,
+};
+
 export const fixtureReservationNotFound = {
   httpStatus: 404,
   body: { title: "Not Found", detail: "Reservation not found (synthetic)." },
@@ -210,6 +215,35 @@ export function createHitsFixtureFetch(scenario: string = "happy"): typeof fetch
 
     if (url.includes("/Datashare/RevenueManagement/Guests") && method === "GET") {
       return jsonResponse(200, fixtureGuestsList);
+    }
+
+    if (url.includes("/Datashare/WebCheckinOut/Guests/") && method === "POST") {
+      if (scenario === "server_error") {
+        return jsonResponse(503, fixtureServerError.body);
+      }
+      if (scenario === "validation_failed") {
+        return jsonResponse(400, { title: "Bad Request", detail: "Synthetic validation failure." });
+      }
+      if (scenario === "conflict") {
+        return jsonResponse(409, { title: "Conflict", detail: "Synthetic guest conflict." });
+      }
+      return jsonResponse(200, fixtureGuestsWriteAccepted);
+    }
+
+    if (
+      method === "PUT" &&
+      /\/Datashare\/WebCheckinOut\/Guests\/?(?:\?|$)/.test(url)
+    ) {
+      if (scenario === "server_error") {
+        return jsonResponse(503, fixtureServerError.body);
+      }
+      if (scenario === "validation_failed") {
+        return jsonResponse(400, { title: "Bad Request", detail: "Synthetic validation failure." });
+      }
+      if (scenario === "conflict") {
+        return jsonResponse(409, { title: "Conflict", detail: "Synthetic guest conflict." });
+      }
+      return jsonResponse(200, fixtureGuestsWriteAccepted);
     }
 
     if (url.includes("/CheckIn") && method === "POST") {

@@ -120,10 +120,135 @@ export function mapHitsFailure(
   };
 }
 
+/**
+ * Mapper de escrita PAX. 400/409 específicos desta operação;
+ * demais status reutilizam mapHitsFailure (GETs permanecem inalterados).
+ */
+export function mapHitsGuestWriteFailure(
+  error: unknown,
+  requestId: string,
+): { status: number; body: GatewayErrorBody } {
+  if (error instanceof HitsApiError) {
+    if (error.status === 400) {
+      return {
+        status: 422,
+        body: gatewayErrorBody(
+          requestId,
+          "hits_validation_failed",
+          "HITS recusou a validação do pedido.",
+          false,
+        ),
+      };
+    }
+    if (error.status === 409) {
+      return {
+        status: 409,
+        body: gatewayErrorBody(requestId, "hits_conflict", "Conflito no HITS.", false),
+      };
+    }
+  }
+  return mapHitsFailure(error, requestId);
+}
+
 export function containsSensitiveLeak(payload: unknown, secrets: string[]): boolean {
   const text = JSON.stringify(payload);
   for (const secret of secrets) {
     if (secret && secret.length >= 4 && text.includes(secret)) return true;
   }
   return false;
+}
+
+type ClientInputMap = {
+  status: number;
+  code: string;
+  message: string;
+};
+
+const CLIENT_INPUT_BY_CODE: Record<string, ClientInputMap> = {
+  FST_ERR_CTP_INVALID_JSON_BODY: {
+    status: 400,
+    code: "bad_request",
+    message: "Pedido inválido.",
+  },
+  FST_ERR_CTP_EMPTY_JSON_BODY: {
+    status: 400,
+    code: "bad_request",
+    message: "Pedido inválido.",
+  },
+  FST_ERR_CTP_INVALID_CONTENT_LENGTH: {
+    status: 400,
+    code: "bad_request",
+    message: "Pedido inválido.",
+  },
+  FST_ERR_CTP_INVALID_MEDIA_TYPE: {
+    status: 415,
+    code: "unsupported_media_type",
+    message: "Content-Type não suportado.",
+  },
+  FST_ERR_CTP_BODY_TOO_LARGE: {
+    status: 413,
+    code: "payload_too_large",
+    message: "Pedido excede o tamanho permitido.",
+  },
+};
+
+function errorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
+function errorStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const status = (error as { statusCode?: unknown }).statusCode;
+  return typeof status === "number" ? status : undefined;
+}
+
+/**
+ * Erros de entrada (JSON/body/content-type/tamanho) → HTTP sanitizado.
+ * Não usa message/stack do Fastify. Retorna null se não for erro de parser.
+ */
+export function mapClientInputFailure(
+  error: unknown,
+  requestId: string,
+): { status: number; body: GatewayErrorBody } | null {
+  const code = errorCode(error);
+  const mapped = code ? CLIENT_INPUT_BY_CODE[code] : undefined;
+  if (mapped) {
+    return {
+      status: mapped.status,
+      body: gatewayErrorBody(requestId, mapped.code, mapped.message, false),
+    };
+  }
+
+  const status = errorStatus(error);
+  if (status === 415) {
+    return {
+      status: 415,
+      body: gatewayErrorBody(
+        requestId,
+        "unsupported_media_type",
+        "Content-Type não suportado.",
+        false,
+      ),
+    };
+  }
+  if (status === 413) {
+    return {
+      status: 413,
+      body: gatewayErrorBody(
+        requestId,
+        "payload_too_large",
+        "Pedido excede o tamanho permitido.",
+        false,
+      ),
+    };
+  }
+  if (status === 400) {
+    return {
+      status: 400,
+      body: gatewayErrorBody(requestId, "bad_request", "Pedido inválido.", false),
+    };
+  }
+  return null;
 }
