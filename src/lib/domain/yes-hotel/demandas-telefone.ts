@@ -48,27 +48,35 @@ export function telefoneWhatsappIsAssignable(value: unknown): boolean {
   }
 }
 
+export const DEMANDAS_DIGISAC_STATUS = [
+  "disponivel",
+  "pendente_sem_telefone",
+] as const;
+export type DemandasDigisacNotificacaoStatus =
+  (typeof DEMANDAS_DIGISAC_STATUS)[number];
+
+/** Status de notificação DigiSac. Nunca devolve o número. */
+export function demandasDigisacNotificacaoStatus(
+  telefoneWhatsapp: unknown,
+): DemandasDigisacNotificacaoStatus {
+  return telefoneWhatsappIsAssignable(telefoneWhatsapp)
+    ? "disponivel"
+    : "pendente_sem_telefone";
+}
+
 export function isDemandasStatusAberto(status: string): boolean {
   return status !== "concluida" && status !== "cancelada";
 }
 
-export function assertPodeRemoverTelefoneWhatsapp(input: {
+/**
+ * WhatsApp é opcional no cadastro. Remover o número não bloqueia demanda
+ * aberta: o envio DigiSac fica `pendente_sem_telefone`.
+ */
+export function assertPodeRemoverTelefoneWhatsapp(_input: {
   userId: string;
   telefoneAtual: string | null | undefined;
   telefoneNovo: string | null;
   atribuicoes: Array<{ supervisor_id: string; executor_id: string; status: string }>;
 }): void {
-  const tinhaTelefone = Boolean(String(input.telefoneAtual ?? "").trim());
-  const ficaraSemTelefone = input.telefoneNovo == null;
-  if (!tinhaTelefone || !ficaraSemTelefone) {
-    return;
-  }
-  const aberta = input.atribuicoes.some(
-    (row) =>
-      isDemandasStatusAberto(row.status) &&
-      (row.supervisor_id === input.userId || row.executor_id === input.userId),
-  );
-  if (aberta) {
-    throw new Error("demandas_telefone_atribuido_aberto");
-  }
+  return;
 }

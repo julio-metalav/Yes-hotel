@@ -86,28 +86,6 @@ function normalizeTelefoneWhatsapp(value: unknown): string | null {
   return `+${digits}`;
 }
 
-async function userHasOpenDemandaAssignment(userId: string): Promise<boolean> {
-  const { count, error } = await adminClient
-    .from("demandas")
-    .select("id", { count: "exact", head: true })
-    .or(`supervisor_id.eq.${userId},executor_id.eq.${userId}`)
-    .not("status", "in", "(concluida,cancelada)");
-
-  if (error) {
-    const message = String(error.message || "").toLowerCase();
-    if (
-      message.includes("does not exist") ||
-      message.includes("schema cache") ||
-      message.includes("could not find the table")
-    ) {
-      return false;
-    }
-    throw error;
-  }
-
-  return Boolean(count && count > 0);
-}
-
 const adminClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
   auth: {
     autoRefreshToken: false,
@@ -359,21 +337,6 @@ async function updateUser(request: Request, payload: Record<string, unknown>) {
         error: "Usuario interno sem vinculo auth_user_id.",
       },
       400,
-    );
-  }
-
-  const telefoneAtual = currentProfile.telefone_whatsapp ?? null;
-  if (
-    telefoneAtual &&
-    telefoneWhatsapp == null &&
-    (await userHasOpenDemandaAssignment(userId))
-  ) {
-    return jsonResponse(
-      {
-        error:
-          "Nao e possivel remover o WhatsApp enquanto o usuario for supervisor ou executor de demanda aberta.",
-      },
-      409,
     );
   }
 

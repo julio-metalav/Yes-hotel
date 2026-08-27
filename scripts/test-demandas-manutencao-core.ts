@@ -21,6 +21,7 @@ import {
   DemandasEngine,
   evaluateDemandasGeoCheck,
   transitionIsAllowed,
+  demandasDigisacNotificacaoStatus,
   type DemandasActor,
 } from "../src/lib/domain/yes-hotel/index.ts";
 
@@ -151,9 +152,12 @@ console.log("\n=== Demandas manutenção predial — núcleo ===\n");
 
 {
   assert.equal(normalizeTelefoneWhatsapp("67 99999-9999"), PHONE);
+  assert.equal(normalizeTelefoneWhatsapp("+5567999887766"), "+5567999887766");
   assert.equal(normalizeTelefoneWhatsapp(null), null);
   assert.throws(() => normalizeTelefoneWhatsapp("123"));
-  ok("telefone/WhatsApp normalizado");
+  assert.equal(demandasDigisacNotificacaoStatus(PHONE), "disponivel");
+  assert.equal(demandasDigisacNotificacaoStatus(null), "pendente_sem_telefone");
+  ok("telefone/WhatsApp normalizado E.164 e status DigiSac sem expor número");
 }
 
 {
@@ -210,12 +214,58 @@ console.log("\n=== Demandas manutenção predial — núcleo ===\n");
   const engine = setup();
   assert.throws(() => criar(engine, "inativo"));
   assert.throws(() =>
-    criar(engine, "recepcao", { supervisor_id: "semfone", executor_id: "exe" }),
+    criar(engine, "recepcao", { supervisor_id: "inativo", executor_id: "exe" }),
   );
   assert.throws(() =>
     criar(engine, "recepcao", { supervisor_id: "exe", executor_id: "exe" }),
   );
-  ok("bloqueio inativo, telefone obrigatório e supervisor ≠ executor");
+  ok("bloqueio inativo e supervisor ≠ executor");
+}
+
+{
+  const engine = setup();
+  const ids = engine.listarAtribuiveis().map((user) => user.id);
+  assert.ok(ids.includes("semfone"));
+  assert.ok(ids.includes("sup"));
+  assert.ok(ids.includes("exe"));
+  assert.equal(ids.includes("inativo"), false);
+  assert.equal(
+    engine.listarAtribuiveis().every((user) => !("telefone_whatsapp" in user)),
+    true,
+  );
+
+  const semTelefone = criar(engine, "recepcao", {
+    supervisor_id: "semfone",
+    executor_id: "exe",
+  });
+  assert.equal(semTelefone.supervisor_id, "semfone");
+  const histSem = engine.historico.find((row) => row.acao === "criar");
+  assert.equal(
+    (histSem?.estado_novo as { supervisor_digisac?: string }).supervisor_digisac,
+    "pendente_sem_telefone",
+  );
+  assert.equal(
+    (histSem?.estado_novo as { executor_digisac?: string }).executor_digisac,
+    "disponivel",
+  );
+  assert.equal(
+    JSON.stringify(histSem?.estado_novo).includes("+55"),
+    false,
+  );
+
+  const engineComFone = setup();
+  const comTelefone = criar(engineComFone, "recepcao");
+  assert.equal(comTelefone.supervisor_id, "sup");
+  const histCom = engineComFone.historico.find((row) => row.acao === "criar");
+  assert.equal(
+    (histCom?.estado_novo as { supervisor_digisac?: string }).supervisor_digisac,
+    "disponivel",
+  );
+  assert.equal(
+    (histCom?.estado_novo as { executor_digisac?: string }).executor_digisac,
+    "disponivel",
+  );
+  ok("atribuível com e sem telefone; payload sem WhatsApp; DigiSac pendente sem número");
 }
 
 {
@@ -498,27 +548,19 @@ console.log("\n=== Demandas manutenção predial — núcleo ===\n");
 }
 
 {
-  assert.throws(() =>
-    assertPodeRemoverTelefoneWhatsapp({
-      userId: "exe",
-      telefoneAtual: PHONE,
-      telefoneNovo: null,
-      atribuicoes: [{ supervisor_id: "sup", executor_id: "exe", status: "em_andamento" }],
-    }),
-  );
+  assertPodeRemoverTelefoneWhatsapp({
+    userId: "exe",
+    telefoneAtual: PHONE,
+    telefoneNovo: null,
+    atribuicoes: [{ supervisor_id: "sup", executor_id: "exe", status: "em_andamento" }],
+  });
   assertPodeRemoverTelefoneWhatsapp({
     userId: "exe",
     telefoneAtual: PHONE,
     telefoneNovo: "+5567888888888",
     atribuicoes: [{ supervisor_id: "sup", executor_id: "exe", status: "em_andamento" }],
   });
-  assertPodeRemoverTelefoneWhatsapp({
-    userId: "exe",
-    telefoneAtual: PHONE,
-    telefoneNovo: null,
-    atribuicoes: [{ supervisor_id: "sup", executor_id: "exe", status: "concluida" }],
-  });
-  ok("telefone não pode ser removido com demanda aberta; troca válida e demanda encerrada ok");
+  ok("WhatsApp pode ser removido mesmo com demanda aberta");
 }
 
 {
