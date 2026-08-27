@@ -97,6 +97,37 @@ test("artefato dist: health público, auth e 503 sem HITS", async () => {
     const authorize = await fetch(`http://127.0.0.1:${port}/Authorize`, { method: "POST" });
     assert.equal(authorize.status, 404);
 
+    const postNoAuth = await fetch(`http://127.0.0.1:${port}/v1/reservations/900001/guests`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ guests: [{ name: "Sintetico" }] }),
+    });
+    assert.equal(postNoAuth.status, 401);
+
+    const postAuth = await fetch(`http://127.0.0.1:${port}/v1/reservations/900001/guests`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ guests: [{ name: "Sintetico" }] }),
+    });
+    assert.equal(postAuth.status, 403);
+    const postAuthBody = await postAuth.text();
+    assert.equal(postAuthBody.includes(TOKEN), false);
+    assert.match(postAuthBody, /guest_write_disabled/);
+
+    const putAuth = await fetch(`http://127.0.0.1:${port}/v1/guests`, {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ idEntity: 1, idReservation: 900001, name: "Sintetico" }),
+    });
+    assert.equal(putAuth.status, 403);
+    assert.match(await putAuth.text(), /guest_write_disabled/);
+
     assert.equal(stderr.includes(TOKEN), false);
   } finally {
     child.kill("SIGTERM");

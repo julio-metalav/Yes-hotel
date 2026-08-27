@@ -4,7 +4,7 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { isValidGatewayBearer } from "./auth.ts";
 import { TRUSTED_PROXY_ADDRESSES } from "./config.ts";
-import { containsSensitiveLeak, gatewayErrorBody } from "./http-errors.ts";
+import { containsSensitiveLeak, gatewayErrorBody, mapClientInputFailure } from "./http-errors.ts";
 import type { HitsReadClient } from "./hits-client.ts";
 import { registerGuestRoutes } from "./routes/guests.ts";
 import { registerHealthRoute } from "./routes/health.ts";
@@ -23,9 +23,12 @@ export type BuildAppOptions = {
    * Default: 127.0.0.1 e ::1. Não usar `true` (confiar em qualquer X-Forwarded-For).
    */
   trustProxy?: boolean | string | string[] | number;
+  /** Escrita PAX sandbox. Default false. */
+  guestWriteEnabled?: boolean;
 };
 
 const BODY_LIMIT_BYTES = 32 * 1024;
+export const GATEWAY_BODY_LIMIT_BYTES = BODY_LIMIT_BYTES;
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const secretsToRedact = (options.secretsToRedact ?? [])
@@ -48,6 +51,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
                 "req.headers.authorization",
                 "req.headers.cookie",
                 "req.headers.Authorization",
+                "req.body",
                 "err.stack",
               ],
               remove: true,
@@ -114,7 +118,6 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const path = request.url.split("?")[0] ?? "";
     if (path === "/health") return;
     if (!path.startsWith("/v1/")) return;
-    if (request.method !== "GET" && request.method !== "HEAD") return;
 
     if (!isValidGatewayBearer(request.headers.authorization, options.gatewayToken)) {
       return reply
@@ -125,7 +128,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   registerHealthRoute(app);
   registerReservationRoutes(app, options.hitsClient);
-  registerGuestRoutes(app, options.hitsClient);
+  registerGuestRoutes(app, options.hitsClient, {
+    guestWriteEnabled: options.guestWriteEnabled === true,
+  });
 
   app.setNotFoundHandler((request, reply) => {
     reply
@@ -138,10 +143,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       typeof (error as { statusCode?: unknown }).statusCode === "number"
         ? (error as { statusCode: number }).statusCode
         : 500;
+    const errorCode =
+      typeof (error as { code?: unknown }).code === "string"
+        ? (error as { code: string }).code
+        : "internal_error";
     request.log.error({
       msg: "unhandled_error",
       request_id: request.id,
-      code: (error as { code?: string }).code ?? "internal_error",
+      code: errorCode,
       http_status: statusCode,
     });
     if (reply.sent) return;
@@ -151,6 +160,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         .send(
           gatewayErrorBody(request.id, "rate_limited", "Muitos pedidos. Tente novamente em instantes.", true),
         );
+    }
+    const input = mapClientInputFailure(error, request.id);
+    if (input) {
+      return reply.code(input.status).send(input.body);
     }
     reply
       .code(500)

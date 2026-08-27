@@ -161,6 +161,85 @@ export type HitsGuestListResponse =
       [key: string]: unknown;
     };
 
+/** Enums Swagger V1 — escrita WebCheckinOut/Guests. */
+export type HitsGuestDocumentType = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type HitsGuestContactType = 1 | 2 | 3 | 4;
+export type HitsGuestGender = 0 | 1;
+export type HitsGuestTitle = 1 | 2 | 3 | 4;
+export type HitsGuestLang = 1 | 2 | 3;
+export type HitsGuestPurposeTrip = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type HitsGuestArrivingBy = 0 | 1 | 2 | 3 | 4 | 5 | 7 | 8;
+export type HitsGuestAccessibilityType = 1 | 2 | 3 | 4 | 5;
+
+/** Item de POST /Datashare/WebCheckinOut/Guests/{reservationId}. Sem idEntity. */
+export interface HitsWebCheckinGuestCreateItem {
+  name: string;
+  doc?: string;
+  docType?: HitsGuestDocumentType;
+  contact?: string;
+  contactType?: HitsGuestContactType;
+}
+
+export interface HitsWebCheckinGuestsPostBody {
+  guests: HitsWebCheckinGuestCreateItem[];
+}
+
+export interface HitsGuestNote {
+  noteTypeId: number;
+  note: string | null;
+}
+
+export interface HitsGuestAddress {
+  address?: string | null;
+  zipCode?: string | null;
+  details?: string | null;
+  neighborhood?: string | null;
+  number?: string | null;
+  country?: string | null;
+  state?: string | null;
+  city?: string | null;
+}
+
+/** DTO externo — GuestsPutDto (PUT /Datashare/WebCheckinOut/Guests). */
+export interface HitsGuestsPutDto {
+  idEntity: number;
+  idReservation: number;
+  name?: string;
+  gender?: HitsGuestGender;
+  birthdate?: string;
+  contactType1?: HitsGuestContactType;
+  contact1?: string;
+  contactType2?: HitsGuestContactType;
+  contact2?: string;
+  title?: HitsGuestTitle;
+  accessibility?: boolean;
+  lang?: HitsGuestLang;
+  companyName?: string;
+  companyDocType?: HitsGuestDocumentType;
+  companyDoc?: string;
+  docType?: HitsGuestDocumentType;
+  doc?: string;
+  docStateRegistration?: string;
+  notes?: HitsGuestNote[] | null;
+  addresses?: HitsGuestAddress[] | null;
+  foreign?: boolean;
+  guestForeign?: boolean;
+  purposeTrip?: HitsGuestPurposeTrip;
+  arrivingBy?: HitsGuestArrivingBy;
+  jobTitle?: string;
+  accessibilityType?: HitsGuestAccessibilityType;
+  nationalityCountryId?: number;
+  carLicensePlate?: string;
+}
+
+/** Path oficial PUT (sem reservationId). */
+export const HITS_WEBCHECKIN_GUESTS_PUT_PATH = "/Datashare/WebCheckinOut/Guests";
+
+/** Path oficial POST; reservationId só no path. */
+export function hitsWebCheckinGuestsPostPath(reservationId: string): string {
+  return `${HITS_WEBCHECKIN_GUESTS_PUT_PATH}/${encodeURIComponent(reservationId)}`;
+}
+
 /** DTO externo — ReservationDetailDto (detalhe). */
 export interface HitsReservationDetails {
   idReservation?: number | string;
