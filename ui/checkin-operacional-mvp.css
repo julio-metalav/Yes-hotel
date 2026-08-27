@@ -28,8 +28,8 @@
   --op-radius-lg: 14px;
   --op-shadow: 0 1px 2px rgba(16, 57, 67, 0.04);
   --op-shadow-detail: 0 14px 36px rgba(16, 57, 67, 0.14);
-  --op-row-h: 66px;
-  --op-sidebar-w: 256px;
+  --op-row-h: 46px;
+  --op-sidebar-w: 176px;
 }
 
 *,
@@ -147,15 +147,15 @@ html {
 
 .checkin-view .yes-sidebar-brand {
   display: flex;
-  height: 112px;
+  height: 68px;
   align-items: center;
   justify-content: center;
-  padding: 0 16px;
+  padding: 0 8px;
 }
 
 .checkin-view .yes-sidebar-brand img {
   display: block;
-  width: 176px;
+  width: 118px;
   height: auto;
 }
 
@@ -167,33 +167,39 @@ html {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 4px;
-  padding: 16px 12px;
+  gap: 1px;
+  padding: 6px 6px 8px;
 }
 
 .checkin-view .yes-sidebar-label {
   display: block;
-  padding: 0 12px 12px;
+  padding: 0 8px 6px;
   color: rgba(255, 255, 255, 0.55);
-  font-size: 10px;
+  font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
 .checkin-view .yes-sidebar a {
   display: flex;
-  min-height: 44px;
+  min-height: 32px;
   align-items: center;
-  gap: 12px;
-  padding: 0 12px;
+  gap: 6px;
+  padding: 0 8px;
   border: none;
-  border-radius: 10px;
+  border-radius: 7px;
   color: rgba(255, 255, 255, 0.75);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 500;
   text-decoration: none;
   transition: background 0.15s ease, color 0.15s ease;
+}
+
+.checkin-view .yes-sidebar a > svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
 .checkin-view .yes-sidebar a:hover {
@@ -212,18 +218,18 @@ html {
 
 .checkin-view .yes-sidebar-foot {
   margin-top: auto;
-  padding: 20px;
+  padding: 8px 10px 10px;
   border-top: 1px solid var(--op-sidebar-border);
   color: rgba(255, 255, 255, 0.55);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 10px;
+  line-height: 1.35;
 }
 
 .checkin-view .yes-sidebar-foot strong {
   display: block;
-  margin-top: 4px;
+  margin-top: 2px;
   color: #fff;
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -241,15 +247,15 @@ html {
   overflow: hidden;
 }
 
-/* ----- Header 64px ----- */
+/* ----- Header compacto (~70–75% da altura original) ----- */
 .checkin-view .op-header {
   display: flex;
-  height: 64px;
+  height: 44px;
   flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 0 24px;
+  gap: 8px;
+  padding: 0 10px;
   margin: 0;
   background: var(--op-surface);
   border: none;
@@ -272,9 +278,9 @@ html {
 
 .checkin-view .op-header__eyebrow {
   display: block;
-  margin: 0 0 2px;
+  margin: 0;
   color: var(--op-gold);
-  font-size: 10px;
+  font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -285,7 +291,7 @@ html {
   overflow: hidden;
   color: var(--op-text) !important;
   font-family: inherit !important;
-  font-size: 20px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.15;
@@ -295,7 +301,7 @@ html {
 
 .checkin-view .op-header-logo {
   display: none;
-  width: 112px;
+  width: 84px;
   height: auto;
 }
 
@@ -314,7 +320,7 @@ html {
 
 .checkin-view .op-header__user strong {
   color: var(--op-text);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -348,23 +354,25 @@ html {
   background: var(--op-muted);
 }
 
-.checkin-view #op-logout-btn {
+.checkin-view #op-logout-btn,
+.checkin-view .op-header #logout-button {
   display: inline-flex;
   min-width: 0;
-  min-height: 28px;
-  height: 28px;
+  min-height: 24px;
+  height: 24px;
   align-items: center;
-  gap: 6px;
-  padding: 0 10px;
+  gap: 4px;
+  padding: 0 8px;
   color: var(--op-text);
   background: #fff;
   border: 1px solid var(--op-border);
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: 7px;
+  font-size: 11px;
   font-weight: 600;
 }
 
-.checkin-view #op-logout-btn:hover {
+.checkin-view #op-logout-btn:hover,
+.checkin-view .op-header #logout-button:hover {
   background: var(--op-muted);
   border-color: var(--op-border);
   color: var(--op-text);
@@ -381,8 +389,8 @@ html {
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px 16px;
+  gap: 6px;
+  padding: 6px 8px 8px;
   overflow: hidden;
 }
 
@@ -413,13 +421,13 @@ html {
 .checkin-view .yes-kpis article,
 .checkin-view .yes-kpi-card {
   display: flex;
-  min-width: 160px;
+  min-width: 112px;
   min-height: 0;
   flex: 1 1 0;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 8px 14px;
+  gap: 6px;
+  padding: 4px 8px;
   margin: 0;
   background: transparent;
   border: none;
@@ -448,9 +456,9 @@ html {
   min-width: 0;
   max-width: none;
   color: var(--op-text-muted);
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 500;
-  line-height: 1.25;
+  line-height: 1.2;
   overflow: visible;
   white-space: normal;
 }
@@ -461,7 +469,7 @@ html {
   margin: 0;
   color: var(--op-text);
   font-family: inherit;
-  font-size: 20px;
+  font-size: 14px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
@@ -472,7 +480,7 @@ html {
 
 .checkin-view .yes-kpis .yes-kpi-card--action,
 .checkin-view #op-kpi-occupied-btn {
-  min-width: 200px;
+  min-width: 168px;
   flex: 1.15 1 0;
 }
 
@@ -505,7 +513,7 @@ html {
   gap: 6px;
   min-width: 0;
   max-width: 100%;
-  padding: 8px;
+  padding: 4px;
   margin: 0;
   background: var(--op-surface);
   border: 1px solid var(--op-border);
@@ -516,7 +524,7 @@ html {
 .checkin-view .op-controls {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   max-width: 100%;
   padding: 0;
@@ -531,7 +539,7 @@ html {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 0;
   margin: 0;
   border: none;
@@ -541,20 +549,20 @@ html {
   display: flex;
   gap: 0;
   width: auto;
-  padding: 4px;
+  padding: 3px;
   margin: 0;
   background: var(--op-muted);
-  border-radius: 10px;
+  border-radius: 8px;
 }
 
 .checkin-view .op-view-tab {
   min-height: 0;
-  padding: 8px 16px;
+  padding: 4px 10px;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: var(--op-text-muted);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -569,11 +577,11 @@ html {
 .checkin-view .op-search-field {
   display: flex;
   min-width: 208px;
-  height: 40px;
+  height: 28px;
   flex: 1 1 208px;
   align-items: center;
-  gap: 8px;
-  padding: 0 12px;
+  gap: 6px;
+  padding: 0 8px;
   background: var(--op-bg);
   border: 1px solid var(--op-border);
   border-radius: 10px;
@@ -597,13 +605,13 @@ html {
 }
 
 .checkin-view .op-field {
-  height: 40px;
-  padding: 0 12px;
+  height: 28px;
+  padding: 0 8px;
   border: 1px solid var(--op-border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--op-bg);
   color: var(--op-text);
-  font-size: 13px;
+  font-size: 12px;
   font-family: inherit;
 }
 
@@ -736,13 +744,13 @@ html {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 32px;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 8px;
+  gap: 5px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
   border: 1px solid transparent;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
@@ -752,8 +760,8 @@ html {
 
 .checkin-view .op-toolbar .op-btn,
 .checkin-view .op-toolbar__import {
-  height: 40px;
-  min-height: 40px;
+  height: 28px;
+  min-height: 28px;
   flex: 0 0 auto;
 }
 
@@ -811,15 +819,15 @@ html {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   min-height: 0;
   height: auto;
-  padding: 6px 12px;
+  padding: 4px 8px;
   border-radius: 999px;
   border: 1px solid var(--op-border);
   background: transparent;
   color: var(--op-text-muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
@@ -833,7 +841,7 @@ html {
 }
 
 .checkin-view .op-tab__count {
-  font-size: 11px;
+  font-size: 10px;
   opacity: 0.75;
 }
 
@@ -1013,18 +1021,18 @@ html {
 
 .checkin-view .op-panel__head {
   display: flex;
-  height: 40px;
+  height: 28px;
   flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
-  padding: 0 14px;
+  padding: 0 10px;
   background: transparent;
   border-bottom: 1px solid var(--op-border);
 }
 
 .checkin-view .op-panel__title {
   color: var(--op-text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0;
 }
@@ -1078,7 +1086,7 @@ html {
   position: sticky;
   top: 0;
   z-index: 2;
-  height: 40px;
+  height: 28px;
   padding: 0 8px;
   background: rgba(237, 242, 241, 0.95);
   border-bottom: 1px solid var(--op-border);
@@ -1145,7 +1153,7 @@ html {
 
 .checkin-view .op-apt-num {
   color: var(--op-blue);
-  font-size: 18px;
+  font-size: 13px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -1155,7 +1163,7 @@ html {
   display: block;
   overflow: hidden;
   color: var(--op-text);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1682,11 +1690,11 @@ html {
 /* ----- Responsive ----- */
 @media (max-width: 1200px) {
   .checkin-view .op-header {
-    padding: 0 16px;
+    padding: 0 10px;
   }
 
   .checkin-view .op-header__title {
-    font-size: 18px;
+    font-size: 13px;
   }
 }
 
@@ -1700,7 +1708,7 @@ html {
     gap: 4px;
     min-width: 118px;
     flex: 1 1 0;
-    padding: 8px 12px;
+    padding: 6px 10px;
   }
 
   .checkin-view .yes-kpis .yes-kpi-card--action,
@@ -1718,13 +1726,13 @@ html {
 
   .checkin-view .yes-kpis strong,
   .checkin-view .yes-kpi-card strong {
-    font-size: 18px;
+    font-size: 13px;
   }
 }
 
 @media (min-width: 769px) and (max-width: 1279px) {
   .checkin-view .op-content {
-    padding: 12px 14px 14px;
+    padding: 6px 8px 8px;
   }
 
   .checkin-view .op-toolbar {
@@ -1734,7 +1742,7 @@ html {
   .checkin-view .op-search-field {
     flex: 1 1 100%;
     min-width: 0;
-    height: 40px;
+    height: 28px;
   }
 
   .checkin-view .op-toolbar__status,
@@ -1742,7 +1750,7 @@ html {
     flex: 1 1 160px;
     width: auto;
     min-width: 0;
-    height: 40px;
+    height: 28px;
   }
 
   .checkin-view .op-toolbar__import,
@@ -1751,7 +1759,7 @@ html {
     align-self: stretch;
     width: auto;
     min-width: 104px;
-    height: 40px;
+    height: 28px;
   }
 
   .checkin-view .op-col-apt { width: 6%; }
@@ -1813,6 +1821,11 @@ html {
   .checkin-view .yes-sidebar-close {
     display: inline-flex;
     color: #fff;
+  }
+
+  .checkin-view .yes-sidebar a {
+    min-height: 40px;
+    font-size: 14px;
   }
 
   .checkin-view .op-sidebar-backdrop {
@@ -1979,6 +1992,13 @@ html {
     min-width: 0;
     width: 100%;
     flex: 1 1 100%;
+    height: 40px;
+  }
+
+  .checkin-view .op-field {
+    height: 40px;
+    min-height: 40px;
+    font-size: 16px;
   }
 
   .checkin-view .op-toolbar__status,

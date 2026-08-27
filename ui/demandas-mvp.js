@@ -358,10 +358,16 @@ async function openDetail(id) {
   await Promise.all([loadHistorico(data.id), loadFotos(data.id)]);
 }
 
-function addAction(host, label, handler) {
+function addAction(host, label, handler, variant) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "op-btn op-btn--primary";
+  if (variant === "danger") {
+    button.className = "op-btn op-btn--secondary demandas-action-danger";
+  } else if (variant === "secondary") {
+    button.className = "op-btn op-btn--secondary";
+  } else {
+    button.className = "op-btn op-btn--primary";
+  }
   button.textContent = label;
   button.addEventListener("click", () => {
     handler().catch((error) => showNotice(error.message, "error"));
@@ -375,7 +381,7 @@ function renderActions(row) {
   if (canEdit(row) && row.status !== "concluida" && row.status !== "cancelada") {
     addAction(host, "Editar", async () => {
       openEditPanel(row);
-    });
+    }, "secondary");
   }
   if (canExecute(row) && (row.status === "nao_iniciada" || row.status === "em_correcao" || row.status === "agendada")) {
     addAction(host, "Iniciar", () => act("demandas_iniciar", true));
@@ -389,7 +395,7 @@ function renderActions(row) {
         p_motivo: motivo,
       });
       await afterMutation();
-    });
+    }, "secondary");
     addAction(host, "Enviar para validação", () => act("demandas_enviar_validacao", true));
   }
   if (canExecute(row) && row.status === "pausada") {
@@ -418,7 +424,7 @@ function renderActions(row) {
         p_justificativa: justificativa.trim(),
       });
       await afterMutation();
-    });
+    }, "danger");
   }
   if (canEdit(row) && row.status !== "concluida" && row.status !== "cancelada") {
     addAction(host, "Cancelar", async () => {
@@ -432,7 +438,7 @@ function renderActions(row) {
         p_justificativa: justificativa.trim(),
       });
       await afterMutation();
-    });
+    }, "danger");
   }
   if (canEdit(row) && row.status === "concluida") {
     addAction(host, "Reabrir", async () => {
