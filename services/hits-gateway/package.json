@@ -12,7 +12,7 @@
     "start:prod": "node dist/server.js",
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/gateway.test.ts tests/startup.test.ts",
+    "test": "tsx --test tests/gateway.test.ts tests/startup.test.ts tests/guest-write.test.ts",
     "smoke:dist": "tsx --test tests/dist-smoke.test.ts"
   },
   "dependencies": {

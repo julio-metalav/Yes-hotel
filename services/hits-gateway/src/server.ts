@@ -24,6 +24,7 @@ async function main(): Promise<void> {
       config.gatewayToken,
       config.hits.sharedAccessSecret,
     ],
+    guestWriteEnabled: config.guestWriteEnabled,
     nodeEnv: config.nodeEnv,
     enableRateLimit: true,
   });

@@ -21,6 +21,8 @@ import type {
   HitsCheckInResult,
   HitsGuestListResponse,
   HitsGuestSearchParams,
+  HitsGuestsPutDto,
+  HitsWebCheckinGuestsPostBody,
   HitsIntegrationStatus,
   HitsProperty,
   HitsReservationDetails,
@@ -30,6 +32,10 @@ import type {
   ListReservationsParams,
   HitsAuthResponse,
   HitsReservationDetail,
+} from "./types.ts";
+import {
+  hitsWebCheckinGuestsPostPath,
+  HITS_WEBCHECKIN_GUESTS_PUT_PATH,
 } from "./types.ts";
 
 export interface HitsClientOptions {
@@ -366,6 +372,62 @@ export class HitsClient {
     });
 
     return res.body as HitsGuestListResponse;
+  }
+
+  /**
+   * Inclusão/vínculo de PAX. Sem retry (maxRetries: 0) para não duplicar mutação.
+   * reservationId somente no path; o caller não deve incluir idEntity no body.
+   */
+  async postWebCheckinGuests(
+    reservationId: string,
+    body: HitsWebCheckinGuestsPostBody,
+  ): Promise<unknown> {
+    this.assertIntegrationEnabled("postWebCheckinGuests");
+    this.assertAuthContract();
+    this.assertSecretAndProperty();
+
+    const id = String(reservationId ?? "").trim();
+    if (!id) {
+      throw new HitsError({
+        code: "missing_reservation_id",
+        message: "reservationId obrigatório.",
+        httpStatus: null,
+        retryable: false,
+      });
+    }
+
+    const session = await this.ensureSession();
+    const res = await this.transport.request({
+      method: "POST",
+      url: `${this.config.apiBaseUrl}${hitsWebCheckinGuestsPostPath(id)}`,
+      headers: this.authenticatedHeaders(session.token),
+      body,
+      timeoutMs: this.config.requestTimeoutMs,
+      maxRetries: 0,
+    });
+
+    return res.body;
+  }
+
+  /**
+   * Atualização cadastral de PAX. Sem retry (maxRetries: 0).
+   */
+  async putWebCheckinGuests(body: HitsGuestsPutDto): Promise<unknown> {
+    this.assertIntegrationEnabled("putWebCheckinGuests");
+    this.assertAuthContract();
+    this.assertSecretAndProperty();
+    const session = await this.ensureSession();
+
+    const res = await this.transport.request({
+      method: "PUT",
+      url: `${this.config.apiBaseUrl}${HITS_WEBCHECKIN_GUESTS_PUT_PATH}`,
+      headers: this.authenticatedHeaders(session.token),
+      body,
+      timeoutMs: this.config.requestTimeoutMs,
+      maxRetries: 0,
+    });
+
+    return res.body;
   }
 
   /**

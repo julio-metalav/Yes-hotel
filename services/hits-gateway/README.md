@@ -1,8 +1,10 @@
-# Gateway HITS (V1 somente leitura)
+# Gateway HITS (leitura + escrita PAX sandbox)
 
 Gateway Node.js para o Yes Hotel chamar a API HITS PMS a partir de IP público fixo (whitelist APP Sistemas).
 
 Não faz deploy sozinho. Não altera Supabase, Edge, UI, migrations nem Certbot.
+
+A escrita de PAX nesta versão é **somente homologação Sandbox**. Produção permanece bloqueada. Check-in, no-show, TTLock e UI **não** fazem parte deste escopo.
 
 ## Papel
 
@@ -13,7 +15,8 @@ Yes / Supabase Edge
 Nginx (443) → 127.0.0.1:3001
         v
 Gateway HITS
-        |  HitsClient (POST /Authorize interno + GET Datashare)
+        |  HitsClient (POST /Authorize interno + GET Datashare
+        |  + POST/PUT Guests sandbox, se a trava estiver ligada)
         v
 HITS PMS
 ```
@@ -37,9 +40,27 @@ Mesmo código. Secrets e URLs separados. Nenhuma credencial de PROD no HOMO.
 | GET | `/v1/reservations` | Bearer | `GET /Datashare/WebCheckinOut/Reservations` |
 | GET | `/v1/reservations/:id` | Bearer | `GET /Datashare/WebCheckinOut/Reservation/{id}` |
 | GET | `/v1/guests` | Bearer | `GET /Datashare/RevenueManagement/Guests` |
+| POST | `/v1/reservations/:id/guests` | Bearer | `POST /Datashare/WebCheckinOut/Guests/{reservationId}` |
+| PUT | `/v1/guests` | Bearer | `PUT /Datashare/WebCheckinOut/Guests` |
 
-POST/PUT/PATCH/DELETE em `/v1/reservations` e `/v1/guests` → **405**, sem HITS.
-`/Authorize`, `/Datashare`, CheckIn **não existem** neste serviço.
+Todas as rotas `/v1/` exigem `Authorization: Bearer GATEWAY_TOKEN`.
+
+POST/PUT/PATCH/DELETE em `/v1/reservations` e `/v1/reservations/:id` → **405**, sem HITS.
+POST/PATCH/DELETE em `/v1/guests` → **405**.
+`/Authorize`, `/Datashare`, CheckIn e no-show **não existem** neste serviço.
+
+Escrita PAX (POST/PUT acima) parte **desligada**. Sem as três condições abaixo responde **403** `guest_write_disabled`, sem chamar o HITS:
+
+1. configuração HITS completa (mesmo critério de `hitsReady`);
+2. `HITS_TENANT_NAME` igual a `dev` (só diferença de maiúsculas/minúsculas é ignorada);
+3. `HITS_GUEST_WRITE_ENABLED` exatamente `true`.
+
+Se o tenant não for `dev`, a escrita permanece bloqueada **mesmo com a flag ativa**. Produção não deve usar tenant `dev`; nesta versão a escrita em produção fica bloqueada.
+
+POST e PUT para o HITS usam `maxRetries: 0` (sem retry automático).
+Em sucesso, o gateway **não** reencaminha o JSON do HITS; responde só `{ "ok": true, "request_id": "..." }`.
+
+Roteiro de homologação sandbox: [HOMOLOGACAO-PAX.md](./HOMOLOGACAO-PAX.md).
 
 `GET /health` responde só:
 
@@ -168,6 +189,8 @@ Logs: `journalctl -u hits-gateway -f`
 
 Confirmadas no código Yes: `HITS_API_BASE_URL`, `HITS_SHARED_ACCESS_SECRET`, `HITS_PROPERTY_ID`, `HITS_TENANT_NAME`, `HITS_PROPERTY_CODE`, `HITS_CLIENT_ID`, `HITS_PARTNER_USER_ID`, `HITS_API_VERSION`, `HITS_LANGUAGE_CODE`, `HITS_AUTHORIZE_SCOPES`, `HITS_REQUEST_TIMEOUT_MS`.
 
-Deste serviço: `NODE_ENV`, `PORT` (3001), `GATEWAY_TOKEN`.
+Deste serviço: `NODE_ENV`, `PORT` (3001), `GATEWAY_TOKEN`, `HITS_GUEST_WRITE_ENABLED`.
+
+`HITS_GUEST_WRITE_ENABLED` só vale `true` (minúsculo, exato). Qualquer outro valor mantém a escrita desligada.
 
 Pendentes APP Sistemas: secret, propertyId, tenant, property code, client id, URL sandbox, confirmação da whitelist.
