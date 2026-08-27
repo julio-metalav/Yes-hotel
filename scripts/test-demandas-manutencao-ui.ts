@@ -689,7 +689,7 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(html, /name="sem_local_especifico"/);
   assert.match(css, /\.demandas-view/);
   assert.doesNotMatch(css, /--op-sidebar-w/);
-  assert.match(read("ui/checkin-operacional-mvp.css"), /--op-sidebar-w: 196px/);
+  assert.match(read("ui/checkin-operacional-mvp.css"), /--op-sidebar-w: 176px/);
   assert.match(css, /\.demandas-card-head/);
   assert.match(css, /repeat\(4, minmax\(0, 1fr\)\)/);
   assert.match(renderSrc, /Dados principais/);
