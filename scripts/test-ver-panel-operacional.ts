@@ -77,8 +77,8 @@ assert.match(panelSrc, /detail-collapsible--timeline/);
 assert.match(panelSrc, /Histórico da reserva/);
 assert.match(panelSrc, /Credencial ainda não gerada/);
 assert.doesNotMatch(panelSrc, /Adicionar acompanhante/);
-// Sidebar width intact (não alterada nesta PR)
-assert.match(cssSrc, /--op-sidebar-w:\s*256px/);
+// Sidebar operacional compacto (densidade ~80% em zoom 100%)
+assert.match(cssSrc, /--op-sidebar-w:\s*196px/);
 ok("asserts estruturais (readonly, situação, sidebar)");
 
 // Booking Engine ≠ Booking OTA
@@ -198,11 +198,11 @@ assert.match(cssSrc, /\.op-actions-primary/);
 assert.match(cssSrc, /\.op-actions-secondary/);
 assert.match(cssSrc, /\.op-btn-table\.op-btn-ppd/);
 assert.match(cssSrc, /min-width:\s*max-content/);
-assert.match(cssSrc, /--op-sidebar-w:\s*256px/);
+assert.match(cssSrc, /--op-sidebar-w:\s*196px/);
 assert.equal((cssSrc.match(/--op-sidebar-w:/g) || []).length, 1);
 // canShowPresencialDiferidoBtn permanece o gate (sem alteração de regra)
 assert.match(panelSrc, /api\.canShowPresencialDiferidoButton\(/);
-ok("AÇÕES: Ver+⋯ always-on; PPD secondary; sidebar 256px; gate PPD intacto");
+ok("AÇÕES: Ver+⋯ always-on; PPD secondary; sidebar 196px; gate PPD intacto");
 
 // HTML carrega financial
 assert.match(htmlSrc, /yes-reservation-financial\.js/);

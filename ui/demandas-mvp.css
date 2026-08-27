@@ -1,77 +1,9 @@
-/* Demandas: densidade operacional. Chrome compacto só nesta tela. */
-
-.demandas-view {
-  --op-sidebar-w: 196px;
-}
-
-@media (min-width: 1101px) {
-  .demandas-view .yes-sidebar-brand {
-    height: 72px;
-    padding: 0 10px;
-  }
-
-  .demandas-view .yes-sidebar-brand img {
-    width: 128px;
-  }
-
-  .demandas-view .yes-sidebar nav {
-    gap: 2px;
-    padding: 8px 8px 10px;
-  }
-
-  .demandas-view .yes-sidebar-label {
-    padding: 0 10px 8px;
-  }
-
-  .demandas-view .yes-sidebar a {
-    min-height: 36px;
-    gap: 8px;
-    padding: 0 10px;
-    border-radius: 8px;
-    font-size: 13px;
-  }
-
-  .demandas-view .yes-sidebar-foot {
-    padding: 10px 12px 12px;
-    font-size: 11px;
-  }
-
-  .demandas-view .yes-sidebar-foot strong {
-    font-size: 12px;
-  }
-
-  .demandas-view .op-header {
-    height: 48px;
-    gap: 10px;
-    padding: 0 12px;
-  }
-
-  .demandas-view .op-header__title {
-    font-size: 16px;
-  }
-
-  .demandas-view .op-header__eyebrow {
-    margin-bottom: 0;
-    font-size: 9px;
-  }
-
-  .demandas-view .op-header__user strong {
-    font-size: 13px;
-  }
-}
-
-.demandas-view .op-header #logout-button {
-  min-height: 28px;
-  height: 28px;
-  padding: 0 10px;
-  font-size: 12px;
-}
+/* Demandas: layout e cards. Chrome operacional vem do CSS compartilhado. */
 
 .demandas-view .op-content.demandas-content {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  padding: 8px 12px 10px;
   overflow-x: hidden;
   overflow-y: auto;
 }
