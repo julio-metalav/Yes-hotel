@@ -21,6 +21,7 @@ import {
   HITS_DOCUMENT_TYPES,
   HITS_GENDERS,
   isHitsGuestWriteEnabled,
+  isHitsSandboxTenant,
   parseGuestsPostBody,
   parseGuestsPutBody,
 } from "../src/guest-write.ts";
@@ -38,7 +39,7 @@ function syntheticHitsConfig(overrides: Partial<HitsConfig> = {}): HitsConfig {
     checkinEnabled: false,
     requestTimeoutMs: 1000,
     apiVersion: "1",
-    tenantName: "dev",
+    tenantName: "develop",
     propertyCode: "2",
     partnerUserId: "0",
     clientId: "synthetic-client",
@@ -129,71 +130,79 @@ test("escrita bloqueada por padrão (POST e PUT → 403, sem HITS)", async () =>
   });
 });
 
-test("flag ativa com tenant diferente de dev continua bloqueada", () => {
+test("somente o tenant develop habilita a escrita; dev não é alias", () => {
   const ready = {
     GATEWAY_TOKEN: TOKEN,
     HITS_API_BASE_URL: "https://hits.example.invalid",
     HITS_SHARED_ACCESS_SECRET: SECRET,
     HITS_PROPERTY_ID: "00000000-0000-4000-8000-000000000002",
-    HITS_TENANT_NAME: "prod",
+    HITS_TENANT_NAME: "develop",
     HITS_PROPERTY_CODE: "2",
     HITS_CLIENT_ID: "synthetic-client",
     HITS_GUEST_WRITE_ENABLED: "true",
   };
-  const cfg = loadGatewayConfig(ready);
-  assert.equal(cfg.hitsReady, true);
-  assert.equal(cfg.guestWriteEnabled, false);
 
-  const sandbox = loadGatewayConfig({
-    ...ready,
-    HITS_TENANT_NAME: "dev",
-  });
+  // develop + hitsReady + flag exatamente "true" habilita a rota.
+  const sandbox = loadGatewayConfig(ready);
+  assert.equal(sandbox.hitsReady, true);
   assert.equal(sandbox.guestWriteEnabled, true);
+
+  // `dev` não é alias de `develop`: o tenant real do Sandbox HITS é `develop`.
+  assert.equal(isHitsSandboxTenant("dev"), false);
   assert.equal(
-    loadGatewayConfig({
-      ...ready,
-      HITS_TENANT_NAME: "dev",
-      HITS_GUEST_WRITE_ENABLED: " true",
-    }).guestWriteEnabled,
+    loadGatewayConfig({ ...ready, HITS_TENANT_NAME: "dev" }).guestWriteEnabled,
     false,
   );
   assert.equal(
-    loadGatewayConfig({
-      ...ready,
-      HITS_TENANT_NAME: "dev",
-      HITS_GUEST_WRITE_ENABLED: "true ",
-    }).guestWriteEnabled,
+    isHitsGuestWriteEnabled({ hitsReady: true, tenantName: "dev", guestWriteFlag: "true" }),
     false,
   );
-  assert.equal(
-    loadGatewayConfig({
-      ...ready,
-      HITS_TENANT_NAME: "dev",
-      HITS_GUEST_WRITE_ENABLED: "TRUE",
-    }).guestWriteEnabled,
-    false,
-  );
+
+  // Qualquer outro tenant não habilita, inclusive prefixos e sufixos de `develop`.
+  for (const tenant of ["prod", "production", "HOMO", "developer", "develop2", "devel", "de"]) {
+    assert.equal(
+      isHitsSandboxTenant(tenant),
+      false,
+      `tenant ${JSON.stringify(tenant)} não pode ser sandbox`,
+    );
+    assert.equal(
+      loadGatewayConfig({ ...ready, HITS_TENANT_NAME: tenant }).guestWriteEnabled,
+      false,
+      `tenant ${JSON.stringify(tenant)} não pode habilitar a escrita`,
+    );
+  }
+
+  // `develop` é case-insensitive após trim.
+  for (const tenant of ["develop", "DEVELOP", "Develop", "  develop  ", "\tdevelop\n"]) {
+    assert.equal(
+      isHitsSandboxTenant(tenant),
+      true,
+      `tenant ${JSON.stringify(tenant)} deveria ser sandbox`,
+    );
+    assert.equal(
+      isHitsGuestWriteEnabled({ hitsReady: true, tenantName: tenant, guestWriteFlag: "true" }),
+      true,
+    );
+  }
+
+  // Flag desligada continua bloqueando, mesmo com tenant develop.
+  for (const flag of ["", " true", "true ", "TRUE", "True", "1", "yes", "false"]) {
+    assert.equal(
+      loadGatewayConfig({ ...ready, HITS_GUEST_WRITE_ENABLED: flag }).guestWriteEnabled,
+      false,
+      `flag ${JSON.stringify(flag)} não pode habilitar a escrita`,
+    );
+  }
+  const semFlag: NodeJS.ProcessEnv = { ...ready };
+  delete semFlag.HITS_GUEST_WRITE_ENABLED;
+  assert.equal(loadGatewayConfig(semFlag).guestWriteEnabled, false);
+
+  // hitsReady falso bloqueia mesmo com develop + flag exata.
   assert.equal(
     isHitsGuestWriteEnabled({
-      hitsReady: true,
-      tenantName: "HOMO",
+      hitsReady: false,
+      tenantName: "develop",
       guestWriteFlag: "true",
-    }),
-    false,
-  );
-  assert.equal(
-    isHitsGuestWriteEnabled({
-      hitsReady: true,
-      tenantName: "DEV",
-      guestWriteFlag: "true",
-    }),
-    true,
-  );
-  assert.equal(
-    isHitsGuestWriteEnabled({
-      hitsReady: true,
-      tenantName: "dev",
-      guestWriteFlag: "TRUE",
     }),
     false,
   );
@@ -877,7 +886,7 @@ test("HITS_GUEST_WRITE_ENABLED exige valor bruto exatamente true", () => {
     HITS_API_BASE_URL: "https://hits.example.invalid",
     HITS_SHARED_ACCESS_SECRET: SECRET,
     HITS_PROPERTY_ID: "00000000-0000-4000-8000-000000000002",
-    HITS_TENANT_NAME: "dev",
+    HITS_TENANT_NAME: "develop",
     HITS_PROPERTY_CODE: "2",
     HITS_CLIENT_ID: "synthetic-client",
   };

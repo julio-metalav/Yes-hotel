@@ -467,7 +467,7 @@ export function parseGuestsPutBody(raw: unknown): GuestWriteParseResult<HitsGues
 }
 
 export function isHitsSandboxTenant(tenantName: string): boolean {
-  return tenantName.trim().toLowerCase() === "dev";
+  return tenantName.trim().toLowerCase() === "develop";
 }
 
 export function isHitsGuestWriteEnabled(input: {
