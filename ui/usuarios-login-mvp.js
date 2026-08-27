@@ -61,6 +61,9 @@ function applyDashboardCards(user) {
   document.querySelectorAll('[data-nav="financeiro"]').forEach((node) => {
     node.classList.toggle("hidden", !canFinancial);
   });
+  document.querySelectorAll('[data-nav="wifi"]').forEach((node) => {
+    node.classList.toggle("hidden", !canManage);
+  });
   document.querySelectorAll('[data-nav="usuarios"]').forEach((node) => {
     node.classList.toggle("hidden", !isAdmin);
   });

@@ -33,7 +33,7 @@
     if (!user) {
       accessEl.classList.remove("hidden");
       accessEl.innerHTML =
-        '<p>Faça login na <a href="./checkin-operacional-mvp.html">Operação</a> para editar Wi-Fi.</p>';
+        '<p>Faça login na <a href="./usuarios-login-mvp.html">tela inicial</a> para editar Wi-Fi.</p>';
       return null;
     }
     accessEl.classList.add("hidden");

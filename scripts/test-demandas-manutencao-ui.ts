@@ -145,7 +145,7 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(loginHtml, /\+5567999887766/);
   assert.doesNotMatch(loginHtml, /name="telefoneWhatsapp"[^>]*required/);
   assert.match(usersEdge, /telefone_whatsapp/);
-  assert.match(loginHtml, /usuarios-login-mvp\.js\?v=8/);
+  assert.match(loginHtml, /usuarios-login-mvp\.js\?v=9/);
   ok("dashboard comum, telefone e regressão do redirect de login");
 }
 
