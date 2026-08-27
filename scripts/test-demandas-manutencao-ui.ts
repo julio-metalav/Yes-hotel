@@ -700,4 +700,28 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   ok("densidade operacional preserva estrutura de Demandas e Minhas");
 }
 
+{
+  const opNav = [
+    "ui/checkin-operacional-mvp.html",
+    "ui/cafe-da-manha-mvp.html",
+    "ui/demandas-mvp.html",
+    "ui/gestao-saude-hotel.html",
+    "ui/financeiro-conciliacao.html",
+    "ui/recepcao-mvp.html",
+    "ui/apartamentos-wifi-mvp.html",
+    "ui/geolocalizacao-hotel-mvp.html",
+  ];
+  for (const rel of opNav) {
+    const src = read(rel);
+    assert.match(src, /data-nav="minhas-demandas"[^>]*>[\s\S]{0,180}<svg viewBox="0 0 24 24"/);
+    assert.match(src, /data-nav="demandas"[^>]*>[\s\S]{0,180}<svg viewBox="0 0 24 24"/);
+    assert.match(src, /M16 21v-2a4 4 0 0 0-4-4H6/);
+    assert.match(src, /M16 4h2a2 2 0 0 1 2 2v14/);
+    assert.doesNotMatch(src, /geolocalizacao-hotel-mvp\.html/);
+  }
+  assert.match(html, /M3 11l9-8 9 8/);
+  assert.match(read("ui/checkin-operacional-mvp.css"), /\.yes-sidebar a > svg/);
+  ok("sidebar operacional usa SVG outline em todos os itens principais");
+}
+
 console.log(`\nOK test-demandas-manutencao-ui (${cases} casos)\n`);

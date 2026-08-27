@@ -196,6 +196,12 @@ html {
   transition: background 0.15s ease, color 0.15s ease;
 }
 
+.checkin-view .yes-sidebar a > svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
 .checkin-view .yes-sidebar a:hover {
   background: rgba(44, 96, 105, 0.45);
   color: #fff;
