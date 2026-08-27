@@ -99,31 +99,6 @@
   padding: 1.1rem;
 }
 
-.demandas-geo-admin {
-  background: #f7fafa;
-  border: 1px solid #e4ecec;
-  border-radius: 10px;
-  padding: 0.35rem 0.75rem;
-}
-
-.demandas-geo-admin summary {
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 0.88rem;
-  padding: 0.45rem 0;
-  color: #4b5c61;
-}
-
-.demandas-geo-admin .helper-text {
-  margin: 0 0 0.75rem;
-  color: #687a7f;
-  font-size: 0.82rem;
-}
-
-.demandas-geo-form {
-  margin-bottom: 0.75rem;
-}
-
 .demandas-list-section {
   min-width: 0;
 }

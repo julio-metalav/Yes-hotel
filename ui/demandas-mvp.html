@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=53" />
-    <link rel="stylesheet" href="./demandas-mvp.css?v=3" />
+    <link rel="stylesheet" href="./demandas-mvp.css?v=4" />
   </head>
   <body class="op-body checkin-view demandas-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -161,22 +161,6 @@
             <button type="button" class="op-btn op-btn--primary" id="btn-nova">Nova demanda</button>
           </section>
 
-          <section id="geo-admin" class="demandas-geo-admin hidden">
-            <details id="geo-details">
-              <summary>Configuração de localização</summary>
-              <p class="helper-text">
-                Somente admin. O raio inicial é 200 metros. Sem configuração, ações com
-                localização obrigatória ficam bloqueadas.
-              </p>
-              <form id="geo-form" class="demandas-form-grid demandas-geo-form">
-                <label>Latitude <input name="latitude" type="number" step="any" required /></label>
-                <label>Longitude <input name="longitude" type="number" step="any" required /></label>
-                <label>Raio em metros <input name="raio" type="number" min="1" value="200" required /></label>
-                <button type="submit" class="op-btn op-btn--primary">Salvar coordenadas</button>
-              </form>
-            </details>
-          </section>
-
           <section id="create-panel" class="demandas-panel hidden">
             <h2 id="create-panel-title">Criar demanda</h2>
             <form id="create-form" class="demandas-form-grid">
@@ -278,6 +262,6 @@
     <script defer src="./yes-supabase-auth.js?v=4"></script>
     <script defer src="./yes-demandas-photo.js?v=1"></script>
     <script defer src="./demandas-render.js?v=3"></script>
-    <script defer src="./demandas-mvp.js?v=4"></script>
+    <script defer src="./demandas-mvp.js?v=5"></script>
   </body>
 </html>

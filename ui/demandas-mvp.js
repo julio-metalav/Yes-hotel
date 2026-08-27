@@ -571,23 +571,6 @@ function bindPhotoInput(input) {
   });
 }
 
-async function loadGeoConfig() {
-  const geo = document.querySelector("#geo-admin");
-  if (isMinhasEscopo() || currentUser.role !== "admin") {
-    geo?.classList.add("hidden");
-    return;
-  }
-  geo?.classList.remove("hidden");
-  const { data } = await client().from("hotel_geo_config").select("*").maybeSingle();
-  const form = document.querySelector("#geo-form");
-  if (!(form instanceof HTMLFormElement) || !data) {
-    return;
-  }
-  form.elements.latitude.value = data.latitude;
-  form.elements.longitude.value = data.longitude;
-  form.elements.raio.value = data.raio_metros;
-}
-
 function isMinhasEscopo() {
   return new URLSearchParams(window.location.search).get("escopo") === "minhas";
 }
@@ -613,9 +596,6 @@ function applyPageChrome() {
   } else {
     navTodas?.setAttribute("aria-current", "page");
     navMinhas?.removeAttribute("aria-current");
-  }
-  if (minhas) {
-    document.querySelector("#geo-admin")?.classList.add("hidden");
   }
 }
 
@@ -653,7 +633,7 @@ async function init() {
     currentUser.role,
   );
 
-  await Promise.all([loadAtribuiveis(), loadGeoConfig(), refreshList()]);
+  await Promise.all([loadAtribuiveis(), refreshList()]);
 }
 
 document.querySelector("#logout-button")?.addEventListener("click", async () => {
@@ -716,21 +696,6 @@ document.querySelector("#create-form")?.addEventListener("submit", async (event)
     }
   } catch (error) {
     showNotice(error instanceof Error ? error.message : "Falha ao salvar.", "error");
-  }
-});
-
-document.querySelector("#geo-form")?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = event.target;
-  try {
-    await rpc("demandas_atualizar_geo_config", {
-      p_latitude: Number(form.elements.latitude.value),
-      p_longitude: Number(form.elements.longitude.value),
-      p_raio_metros: Number(form.elements.raio.value),
-    });
-    showNotice("Geolocalização atualizada.");
-  } catch (error) {
-    showNotice(error instanceof Error ? error.message : "Falha ao salvar geo.", "error");
   }
 });
 
