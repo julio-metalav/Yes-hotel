@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=53" />
-    <link rel="stylesheet" href="./demandas-mvp.css?v=4" />
+    <link rel="stylesheet" href="./demandas-mvp.css?v=5" />
   </head>
   <body class="op-body checkin-view demandas-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -167,7 +167,7 @@
               <label class="span-2">Título <input name="titulo" required maxlength="180" /></label>
               <label class="span-2">
                 Descrição (inclua o local afetado)
-                <textarea name="descricao" required rows="4"></textarea>
+                <textarea name="descricao" required rows="3"></textarea>
               </label>
               <label>
                 Tipo
@@ -221,37 +221,44 @@
           <section id="detail-panel" class="demandas-panel hidden">
             <h2 id="detail-title">Detalhe</h2>
             <div id="detail-body"></div>
-            <div id="detail-actions" class="demandas-actions"></div>
-            <h3>Fotos</h3>
-            <div class="demandas-photo-row">
-              <label class="demandas-camera-btn">
-                <input
-                  id="photo-input-camera"
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                />
-                <span aria-hidden="true">📷</span>
-                Tirar foto
-              </label>
-              <label class="demandas-camera-btn demandas-camera-btn--gallery">
-                <input
-                  id="photo-input-gallery"
-                  type="file"
-                  accept="image/*"
-                />
-                Escolher da galeria
-              </label>
-              <select id="photo-etapa">
-                <option value="antes">Antes</option>
-                <option value="durante" selected>Durante</option>
-                <option value="finalizacao">Finalização</option>
-                <option value="correcao">Correção</option>
-              </select>
-            </div>
-            <div id="photo-list" class="demandas-photo-list"></div>
-            <h3>Histórico</h3>
-            <ol id="historico-list" class="demandas-historico"></ol>
+            <section class="demandas-detail-block" aria-label="Ações">
+              <h3>Ações</h3>
+              <div id="detail-actions" class="demandas-actions"></div>
+            </section>
+            <section class="demandas-detail-block" aria-label="Fotos">
+              <h3>Fotos</h3>
+              <div class="demandas-photo-row">
+                <label class="demandas-camera-btn">
+                  <input
+                    id="photo-input-camera"
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                  />
+                  <span aria-hidden="true">📷</span>
+                  Tirar foto
+                </label>
+                <label class="demandas-camera-btn demandas-camera-btn--gallery">
+                  <input
+                    id="photo-input-gallery"
+                    type="file"
+                    accept="image/*"
+                  />
+                  Escolher da galeria
+                </label>
+                <select id="photo-etapa" aria-label="Etapa da foto">
+                  <option value="antes">Antes</option>
+                  <option value="durante" selected>Durante</option>
+                  <option value="finalizacao">Finalização</option>
+                  <option value="correcao">Correção</option>
+                </select>
+              </div>
+              <div id="photo-list" class="demandas-photo-list"></div>
+            </section>
+            <section class="demandas-detail-block" aria-label="Histórico">
+              <h3>Histórico</h3>
+              <ol id="historico-list" class="demandas-historico"></ol>
+            </section>
           </section>
         </main>
       </div>
@@ -261,7 +268,7 @@
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js?v=4"></script>
     <script defer src="./yes-demandas-photo.js?v=1"></script>
-    <script defer src="./demandas-render.js?v=3"></script>
-    <script defer src="./demandas-mvp.js?v=5"></script>
+    <script defer src="./demandas-render.js?v=4"></script>
+    <script defer src="./demandas-mvp.js?v=6"></script>
   </body>
 </html>

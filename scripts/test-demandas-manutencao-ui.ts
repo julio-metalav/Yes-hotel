@@ -391,6 +391,8 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
     "Breno",
     "Prazo",
     "29/08/2026",
+    "Tipo",
+    "Corretiva",
   ]) {
     assert.equal(cardTexts.includes(expected), true, `card sem ${expected}`);
   }
@@ -660,6 +662,41 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
     assert.doesNotMatch(src, /Configuração de localização/);
   }
   ok("geo saiu de Demandas e ficou na área admin");
+}
+
+{
+  const css = read("ui/demandas-mvp.css");
+  assert.match(html, /class="demandas-kpis"/);
+  assert.match(html, /id="kpi-total"/);
+  assert.match(html, /id="kpi-andamento"/);
+  assert.match(html, /id="kpi-validacao"/);
+  assert.match(html, /id="kpi-vencidas"/);
+  assert.match(html, /class="demandas-filters"/);
+  assert.match(html, /id="filter-tipo"/);
+  assert.match(html, /id="filter-prioridade"/);
+  assert.match(html, /id="filter-status"/);
+  assert.match(html, /id="filter-atraso"/);
+  assert.match(html, /id="btn-nova"/);
+  assert.match(html, /id="demandas-list"/);
+  assert.match(html, /id="create-form"/);
+  assert.match(html, /id="nav-minhas"/);
+  assert.match(html, /id="nav-todas"/);
+  assert.match(html, /aria-label="Ações"/);
+  assert.match(html, /id="detail-actions"/);
+  assert.match(html, />Fotos</);
+  assert.match(html, />Histórico</);
+  assert.match(html, /id="historico-list"/);
+  assert.match(html, /name="sem_local_especifico"/);
+  assert.match(css, /\.demandas-view/);
+  assert.match(css, /--op-sidebar-w: 196px/);
+  assert.match(css, /\.demandas-card-head/);
+  assert.match(css, /repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(renderSrc, /Dados principais/);
+  assert.match(renderSrc, /demandas-card-head/);
+  assert.match(pageSrc, /demandas-action-danger/);
+  assert.match(pageSrc, /addAction\(host, "Iniciar"/);
+  assert.match(pageSrc, /addAction\(host, "Cancelar"/);
+  ok("densidade operacional preserva estrutura de Demandas e Minhas");
 }
 
 console.log(`\nOK test-demandas-manutencao-ui (${cases} casos)\n`);

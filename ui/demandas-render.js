@@ -73,6 +73,16 @@
     return String(value || "");
   }
 
+  function tipoLabel(value) {
+    if (value === "corretiva") {
+      return "Corretiva";
+    }
+    if (value === "programada") {
+      return "Programada";
+    }
+    return String(value || "");
+  }
+
   function appendLabeled(dom, host, label, value) {
     const row = el(dom, "div", { className: "demandas-card-row" });
     row.append(el(dom, "span", { className: "demandas-card-label", text: label }));
@@ -80,34 +90,49 @@
     host.append(row);
   }
 
+  function appendStatusRow(dom, host, row, options) {
+    const status = String((row && row.status) || "");
+    const statusRow = el(dom, "div", { className: "demandas-card-row demandas-card-row--wide" });
+    statusRow.append(el(dom, "span", { className: "demandas-card-label", text: "Status" }));
+    appendBadge(
+      dom,
+      statusRow,
+      (options && options.statusLabel) || status,
+      status ? "is-status-" + status : "",
+    );
+    if (options && options.overdue) {
+      appendBadge(dom, statusRow, "Vencida", "is-vencida");
+    }
+    host.append(statusRow);
+  }
+
+  function appendDetailBlock(dom, wrap, title, fill) {
+    const section = el(dom, "section", { className: "demandas-detail-block" });
+    section.append(el(dom, "h3", { className: "demandas-detail-block-title", text: title }));
+    const meta = el(dom, "div", { className: "demandas-detail-meta" });
+    fill(meta);
+    section.append(meta);
+    wrap.append(section);
+  }
+
   function buildCard(row, options, dom) {
     const doc = resolveDom(dom);
     const overdue = Boolean(options && options.overdue);
-    const status = String((row && row.status) || "");
     const card = el(doc, "button", {
       className: overdue ? "demandas-card is-vencida" : "demandas-card",
     });
     card.type = "button";
     card.append(el(doc, "strong", { className: "demandas-card-title", text: row && row.titulo ? row.titulo : "" }));
+    const head = el(doc, "div", { className: "demandas-card-head" });
+    appendStatusRow(doc, head, row, options);
+    card.append(head);
     const body = el(doc, "div", { className: "demandas-card-body" });
-    const statusRow = el(doc, "div", { className: "demandas-card-row" });
-    statusRow.append(el(doc, "span", { className: "demandas-card-label", text: "Status" }));
-    appendBadge(
-      doc,
-      statusRow,
-      (options && options.statusLabel) || status,
-      status ? "is-status-" + status : "",
-    );
-    if (overdue) {
-      appendBadge(doc, statusRow, "Vencida", "is-vencida");
-    }
-    body.append(statusRow);
-    appendLabeled(doc, body, "Prioridade", prioridadeLabel(row && row.prioridade));
     appendLabeled(doc, body, "Executor", String((row && row.executor_nome) || ""));
+    appendLabeled(doc, body, "Prioridade", prioridadeLabel(row && row.prioridade));
     appendLabeled(doc, body, "Prazo", formatDateBr(row && row.data_prevista_conclusao));
     const tipo = String((row && row.tipo) || "");
     if (tipo) {
-      appendLabeled(doc, body, "Tipo", tipo === "corretiva" ? "Corretiva" : tipo === "programada" ? "Programada" : tipo);
+      appendLabeled(doc, body, "Tipo", tipoLabel(tipo));
     }
     card.append(body);
     return card;
@@ -117,45 +142,42 @@
     const doc = resolveDom(dom);
     const wrap = el(doc, "div", { className: "demandas-detail" });
     wrap.append(el(doc, "p", { className: "demandas-detail-desc", text: row && row.descricao ? row.descricao : "" }));
-    const meta = el(doc, "div", { className: "demandas-detail-meta" });
-    const status = String((row && row.status) || "");
-    const statusRow = el(doc, "div", { className: "demandas-card-row" });
-    statusRow.append(el(doc, "span", { className: "demandas-card-label", text: "Status" }));
-    appendBadge(
-      doc,
-      statusRow,
-      (options && options.statusLabel) || status,
-      status ? "is-status-" + status : "",
-    );
-    if (options && options.overdue) {
-      appendBadge(doc, statusRow, "Vencida", "is-vencida");
-    }
-    meta.append(statusRow);
-    appendLabeled(doc, meta, "Tipo", String((row && row.tipo) || ""));
-    appendLabeled(doc, meta, "Prioridade", prioridadeLabel(row && row.prioridade));
-    appendLabeled(doc, meta, "Criador", String((row && row.criador_nome) || ""));
-    appendLabeled(doc, meta, "Supervisor", String((row && row.supervisor_nome) || ""));
-    appendLabeled(doc, meta, "Executor", String((row && row.executor_nome) || ""));
-    appendLabeled(doc, meta, "Início programado", formatDateBr(row && row.data_programada_inicio));
-    appendLabeled(doc, meta, "Conclusão prevista", formatDateBr(row && row.data_prevista_conclusao));
-    appendLabeled(doc, meta, "Foto", row && row.exigir_foto ? "Obrigatória" : "Facultativa");
-    appendLabeled(
-      doc,
-      meta,
-      "Local",
-      row && row.sem_local_especifico ? "Sem local específico" : "Exige geolocalização",
-    );
-    wrap.append(meta);
+    appendDetailBlock(doc, wrap, "Dados principais", function (meta) {
+      appendStatusRow(doc, meta, row, options);
+      appendLabeled(doc, meta, "Tipo", tipoLabel(row && row.tipo));
+      appendLabeled(doc, meta, "Prioridade", prioridadeLabel(row && row.prioridade));
+    });
+    appendDetailBlock(doc, wrap, "Pessoas", function (meta) {
+      appendLabeled(doc, meta, "Criador", String((row && row.criador_nome) || ""));
+      appendLabeled(doc, meta, "Supervisor", String((row && row.supervisor_nome) || ""));
+      appendLabeled(doc, meta, "Executor", String((row && row.executor_nome) || ""));
+    });
+    appendDetailBlock(doc, wrap, "Datas", function (meta) {
+      appendLabeled(doc, meta, "Início programado", formatDateBr(row && row.data_programada_inicio));
+      appendLabeled(doc, meta, "Conclusão prevista", formatDateBr(row && row.data_prevista_conclusao));
+    });
+    appendDetailBlock(doc, wrap, "Regras", function (meta) {
+      appendLabeled(doc, meta, "Foto", row && row.exigir_foto ? "Obrigatória" : "Facultativa");
+      appendLabeled(
+        doc,
+        meta,
+        "Local",
+        row && row.sem_local_especifico ? "Sem local específico" : "Exige geolocalização",
+      );
+    });
     return wrap;
   }
 
   function buildHistoricoItem(item, dom) {
     const doc = resolveDom(dom);
-    const li = el(doc, "li");
+    const li = el(doc, "li", { className: "demandas-historico-item" });
     const when = item && item.whenLabel ? item.whenLabel : "";
     const acao = item && item.acao ? item.acao : "";
-    const justificativa = item && item.justificativa ? ` — ${item.justificativa}` : "";
-    li.textContent = `${when} · ${acao}${justificativa}`;
+    li.append(el(doc, "span", { className: "demandas-historico-when", text: when }));
+    li.append(el(doc, "span", { className: "demandas-historico-acao", text: acao }));
+    if (item && item.justificativa) {
+      li.append(el(doc, "span", { className: "demandas-historico-just", text: item.justificativa }));
+    }
     return li;
   }
 
