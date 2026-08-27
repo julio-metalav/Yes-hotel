@@ -114,4 +114,33 @@ assert.match(wifiJs, /canAccessManagement/);
 assert.match(wifiJs, /data-nav="gestao"/);
 ok("Wi-Fi esconde Gestão via canAccessManagement");
 
+{
+  assert.equal(existsSync(join(root, "ui/apartamentos-wifi-mvp.html")), true);
+  assert.equal(existsSync(join(root, "ui/apartamentos-wifi-mvp.js")), true);
+  assert.doesNotMatch(checkinHtml, /Wi-Fi aptos/);
+  assert.doesNotMatch(checkinHtml, /apartamentos-wifi-mvp\.html/);
+  assert.doesNotMatch(cafeHtml, /Wi-Fi aptos/);
+  assert.doesNotMatch(recepcaoHtml, /Wi-Fi aptos/);
+  assert.doesNotMatch(html, /Wi-Fi aptos/);
+  assert.doesNotMatch(wifiHtml, /Wi-Fi aptos/);
+  assert.match(wifiHtml, /usuarios-login-mvp\.html/);
+  const loginHtml = read("ui/usuarios-login-mvp.html");
+  const indexHtml = read("ui/index.html");
+  const loginJs = read("ui/usuarios-login-mvp.js");
+  for (const src of [loginHtml, indexHtml]) {
+    assert.match(src, /Wi-Fi dos apartamentos/);
+    assert.match(src, /Cadastro e consulta das redes dos apartamentos/);
+    assert.match(src, /href="\.\/apartamentos-wifi-mvp\.html"/);
+    assert.match(src, /data-nav="wifi"/);
+  }
+  assert.match(loginJs, /data-nav="wifi"/);
+  assert.match(loginJs, /classList\.toggle\("hidden", !canManage\)/);
+  const demandasHtml = read("ui/demandas-mvp.html");
+  const finHtml = read("ui/financeiro-conciliacao.html");
+  for (const src of [demandasHtml, finHtml]) {
+    assert.doesNotMatch(src, /Wi-Fi aptos/);
+  }
+  ok("Wi-Fi saiu do sidebar operacional e ficou no card admin");
+}
+
 console.log(`\n=== ${cases} checks Gestão Saúde do Hotel UI OK ===`);
