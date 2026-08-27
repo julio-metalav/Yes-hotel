@@ -51,47 +51,98 @@
     });
   }
 
+  function formatDateBr(value) {
+    const raw = String(value == null ? "" : value);
+    const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) {
+      return raw;
+    }
+    return match[3] + "/" + match[2] + "/" + match[1];
+  }
+
+  function prioridadeLabel(value) {
+    if (value === "alta") {
+      return "Alta";
+    }
+    if (value === "baixa") {
+      return "Baixa";
+    }
+    if (value === "media") {
+      return "Média";
+    }
+    return String(value || "");
+  }
+
+  function appendLabeled(dom, host, label, value) {
+    const row = el(dom, "div", { className: "demandas-card-row" });
+    row.append(el(dom, "span", { className: "demandas-card-label", text: label }));
+    row.append(el(dom, "span", { className: "demandas-card-value", text: value }));
+    host.append(row);
+  }
+
   function buildCard(row, options, dom) {
     const doc = resolveDom(dom);
     const overdue = Boolean(options && options.overdue);
+    const status = String((row && row.status) || "");
     const card = el(doc, "button", {
       className: overdue ? "demandas-card is-vencida" : "demandas-card",
     });
     card.type = "button";
-    card.append(el(doc, "strong", { text: row && row.titulo ? row.titulo : "" }));
-    const meta = el(doc, "div", { className: "demandas-card-meta" });
-    appendBadge(doc, meta, (options && options.statusLabel) || String((row && row.status) || ""));
+    card.append(el(doc, "strong", { className: "demandas-card-title", text: row && row.titulo ? row.titulo : "" }));
+    const body = el(doc, "div", { className: "demandas-card-body" });
+    const statusRow = el(doc, "div", { className: "demandas-card-row" });
+    statusRow.append(el(doc, "span", { className: "demandas-card-label", text: "Status" }));
+    appendBadge(
+      doc,
+      statusRow,
+      (options && options.statusLabel) || status,
+      status ? "is-status-" + status : "",
+    );
     if (overdue) {
-      appendBadge(doc, meta, "Vencida", "is-vencida");
+      appendBadge(doc, statusRow, "Vencida", "is-vencida");
     }
-    appendMetaText(doc, meta, String((row && row.tipo) || ""));
-    appendMetaText(doc, meta, String((row && row.prioridade) || ""));
-    appendMetaText(doc, meta, `Início ${String((row && row.data_programada_inicio) || "")}`);
-    appendMetaText(doc, meta, `Conclusão ${String((row && row.data_prevista_conclusao) || "")}`);
-    appendMetaText(doc, meta, `Executor: ${String((row && row.executor_nome) || "")}`);
-    card.append(meta);
+    body.append(statusRow);
+    appendLabeled(doc, body, "Prioridade", prioridadeLabel(row && row.prioridade));
+    appendLabeled(doc, body, "Executor", String((row && row.executor_nome) || ""));
+    appendLabeled(doc, body, "Prazo", formatDateBr(row && row.data_prevista_conclusao));
+    const tipo = String((row && row.tipo) || "");
+    if (tipo) {
+      appendLabeled(doc, body, "Tipo", tipo === "corretiva" ? "Corretiva" : tipo === "programada" ? "Programada" : tipo);
+    }
+    card.append(body);
     return card;
   }
 
   function buildDetail(row, options, dom) {
     const doc = resolveDom(dom);
-    const wrap = el(doc, "div");
-    wrap.append(el(doc, "p", { text: row && row.descricao ? row.descricao : "" }));
-    const meta = el(doc, "p", { className: "demandas-card-meta" });
-    appendBadge(doc, meta, (options && options.statusLabel) || String((row && row.status) || ""));
+    const wrap = el(doc, "div", { className: "demandas-detail" });
+    wrap.append(el(doc, "p", { className: "demandas-detail-desc", text: row && row.descricao ? row.descricao : "" }));
+    const meta = el(doc, "div", { className: "demandas-detail-meta" });
+    const status = String((row && row.status) || "");
+    const statusRow = el(doc, "div", { className: "demandas-card-row" });
+    statusRow.append(el(doc, "span", { className: "demandas-card-label", text: "Status" }));
+    appendBadge(
+      doc,
+      statusRow,
+      (options && options.statusLabel) || status,
+      status ? "is-status-" + status : "",
+    );
     if (options && options.overdue) {
-      appendBadge(doc, meta, "Vencida", "is-vencida");
+      appendBadge(doc, statusRow, "Vencida", "is-vencida");
     }
-    appendMetaText(doc, meta, `${String((row && row.tipo) || "")} · ${String((row && row.prioridade) || "")}`);
-    appendMetaText(doc, meta, `Criador: ${String((row && row.criador_nome) || "")}`);
-    appendMetaText(doc, meta, `Supervisor: ${String((row && row.supervisor_nome) || "")}`);
-    appendMetaText(doc, meta, `Executor: ${String((row && row.executor_nome) || "")}`);
-    appendMetaText(doc, meta, `Início programado: ${String((row && row.data_programada_inicio) || "")}`);
-    appendMetaText(doc, meta, `Conclusão prevista: ${String((row && row.data_prevista_conclusao) || "")}`);
-    appendMetaText(doc, meta, row && row.exigir_foto ? "Foto obrigatória" : "Foto facultativa");
-    appendMetaText(
+    meta.append(statusRow);
+    appendLabeled(doc, meta, "Tipo", String((row && row.tipo) || ""));
+    appendLabeled(doc, meta, "Prioridade", prioridadeLabel(row && row.prioridade));
+    appendLabeled(doc, meta, "Criador", String((row && row.criador_nome) || ""));
+    appendLabeled(doc, meta, "Supervisor", String((row && row.supervisor_nome) || ""));
+    appendLabeled(doc, meta, "Executor", String((row && row.executor_nome) || ""));
+    appendLabeled(doc, meta, "Início programado", formatDateBr(row && row.data_programada_inicio));
+    appendLabeled(doc, meta, "Conclusão prevista", formatDateBr(row && row.data_prevista_conclusao));
+    appendLabeled(doc, meta, "Foto", row && row.exigir_foto ? "Obrigatória" : "Facultativa");
+    appendLabeled(
       doc,
       meta,
+      "Local",
       row && row.sem_local_especifico ? "Sem local específico" : "Exige geolocalização",
     );
     wrap.append(meta);
