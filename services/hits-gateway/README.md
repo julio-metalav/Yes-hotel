@@ -52,10 +52,12 @@ POST/PATCH/DELETE em `/v1/guests` → **405**.
 Escrita PAX (POST/PUT acima) parte **desligada**. Sem as três condições abaixo responde **403** `guest_write_disabled`, sem chamar o HITS:
 
 1. configuração HITS completa (mesmo critério de `hitsReady`);
-2. `HITS_TENANT_NAME` igual a `dev` (só diferença de maiúsculas/minúsculas é ignorada);
+2. `HITS_TENANT_NAME` igual a `develop` (só diferença de maiúsculas/minúsculas é ignorada);
 3. `HITS_GUEST_WRITE_ENABLED` exatamente `true`.
 
-Se o tenant não for `dev`, a escrita permanece bloqueada **mesmo com a flag ativa**. Produção não deve usar tenant `dev`; nesta versão a escrita em produção fica bloqueada.
+Se o tenant não for `develop`, a escrita permanece bloqueada **mesmo com a flag ativa**. Produção não deve usar tenant `develop`; nesta versão a escrita em produção fica bloqueada.
+
+O tenant do Sandbox HITS é `develop`. `dev` **não** é aceito: além de não liberar a escrita, `HITS_TENANT_NAME=dev` faz a própria HITS rejeitar as leituras (comprovado em HOMO: `GET /v1/reservations/{id}` retorna 502 `hits_server_error` com `dev` e 200 com `develop`).
 
 POST e PUT para o HITS usam `maxRetries: 0` (sem retry automático).
 Em sucesso, o gateway **não** reencaminha o JSON do HITS; responde só `{ "ok": true, "request_id": "..." }`.
