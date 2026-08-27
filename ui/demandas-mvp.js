@@ -196,13 +196,13 @@ async function refreshList() {
 }
 
 function filteredRows() {
-  const escopo = document.querySelector("#filter-escopo")?.value;
   const tipo = document.querySelector("#filter-tipo")?.value;
   const prioridade = document.querySelector("#filter-prioridade")?.value;
   const status = document.querySelector("#filter-status")?.value;
   const atraso = document.querySelector("#filter-atraso")?.value;
+  const minhas = isMinhasEscopo();
   return rows.filter((row) => {
-    if (escopo === "minhas" && !isMinhas(row)) {
+    if (minhas && !isMinhas(row)) {
       return false;
     }
     if (tipo && row.tipo !== tipo) {
@@ -572,10 +572,12 @@ function bindPhotoInput(input) {
 }
 
 async function loadGeoConfig() {
-  if (currentUser.role !== "admin") {
+  const geo = document.querySelector("#geo-admin");
+  if (isMinhasEscopo() || currentUser.role !== "admin") {
+    geo?.classList.add("hidden");
     return;
   }
-  document.querySelector("#geo-admin")?.classList.remove("hidden");
+  geo?.classList.remove("hidden");
   const { data } = await client().from("hotel_geo_config").select("*").maybeSingle();
   const form = document.querySelector("#geo-form");
   if (!(form instanceof HTMLFormElement) || !data) {
@@ -586,19 +588,34 @@ async function loadGeoConfig() {
   form.elements.raio.value = data.raio_metros;
 }
 
-function applyQueryEscopo() {
-  const escopo = new URLSearchParams(window.location.search).get("escopo");
-  const select = document.querySelector("#filter-escopo");
+function isMinhasEscopo() {
+  return new URLSearchParams(window.location.search).get("escopo") === "minhas";
+}
+
+function applyPageChrome() {
+  const minhas = isMinhasEscopo();
+  document.title = minhas ? "Yes Hotel — Minhas demandas" : "Yes Hotel — Demandas";
   const title = document.querySelector("#demandas-page-title");
-  if (escopo === "minhas" && select instanceof HTMLSelectElement) {
-    select.value = "minhas";
-    if (title) {
-      title.textContent = "Minhas demandas";
-    }
-    document.querySelector("#nav-minhas")?.classList.add("active");
-    document.querySelector("#nav-todas")?.classList.remove("active");
-    document.querySelector("#nav-todas")?.removeAttribute("aria-current");
-    document.querySelector("#nav-minhas")?.setAttribute("aria-current", "page");
+  const listHeading = document.querySelector("#demandas-list-heading");
+  if (title) {
+    title.textContent = minhas ? "Minhas demandas" : "Demandas";
+  }
+  if (listHeading) {
+    listHeading.textContent = minhas ? "Minhas demandas" : "Todas as demandas";
+  }
+  const navMinhas = document.querySelector("#nav-minhas");
+  const navTodas = document.querySelector("#nav-todas");
+  navMinhas?.classList.toggle("active", minhas);
+  navTodas?.classList.toggle("active", !minhas);
+  if (minhas) {
+    navMinhas?.setAttribute("aria-current", "page");
+    navTodas?.removeAttribute("aria-current");
+  } else {
+    navTodas?.setAttribute("aria-current", "page");
+    navMinhas?.removeAttribute("aria-current");
+  }
+  if (minhas) {
+    document.querySelector("#geo-admin")?.classList.add("hidden");
   }
 }
 
@@ -618,13 +635,7 @@ async function init() {
     return;
   }
 
-  accessStateElement?.classList.add("hidden");
-  contentPanelElement?.classList.remove("hidden");
-  document.querySelector("#demandas-session-user-name").textContent = currentUser.name;
-  document.querySelector("#demandas-session-user-role").textContent = auth.getRoleLabel(
-    currentUser.role,
-  );
-
+  applyPageChrome();
   document.querySelectorAll('[data-nav="operacao"]').forEach((node) => {
     node.classList.toggle("hidden", currentUser.role === "cafe");
   });
@@ -635,7 +646,13 @@ async function init() {
     node.classList.toggle("hidden", currentUser.role !== "admin");
   });
 
-  applyQueryEscopo();
+  accessStateElement?.classList.add("hidden");
+  contentPanelElement?.classList.remove("hidden");
+  document.querySelector("#demandas-session-user-name").textContent = currentUser.name;
+  document.querySelector("#demandas-session-user-role").textContent = auth.getRoleLabel(
+    currentUser.role,
+  );
+
   await Promise.all([loadAtribuiveis(), loadGeoConfig(), refreshList()]);
 }
 
@@ -644,7 +661,7 @@ document.querySelector("#logout-button")?.addEventListener("click", async () => 
   window.location.href = "./usuarios-login-mvp.html";
 });
 
-["filter-escopo", "filter-tipo", "filter-prioridade", "filter-status", "filter-atraso"].forEach(
+["filter-tipo", "filter-prioridade", "filter-status", "filter-atraso"].forEach(
   (id) => {
     document.querySelector(`#${id}`)?.addEventListener("change", renderList);
   },

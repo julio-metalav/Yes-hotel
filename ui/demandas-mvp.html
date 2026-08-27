@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=53" />
-    <link rel="stylesheet" href="./demandas-mvp.css?v=1" />
+    <link rel="stylesheet" href="./demandas-mvp.css?v=3" />
   </head>
   <body class="op-body checkin-view demandas-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -47,10 +47,10 @@
           <a href="./financeiro-conciliacao.html" data-nav="financeiro">
             <span>Conciliação</span>
           </a>
-          <a class="active" href="./demandas-mvp.html?escopo=minhas" data-nav="demandas" id="nav-minhas">
+          <a href="./demandas-mvp.html?escopo=minhas" data-nav="minhas-demandas" id="nav-minhas">
             <span>Minhas demandas</span>
           </a>
-          <a href="./demandas-mvp.html" data-nav="demandas" id="nav-todas">
+          <a class="active" href="./demandas-mvp.html" data-nav="demandas" id="nav-todas" aria-current="page">
             <span>Demandas</span>
           </a>
         </nav>
@@ -112,19 +112,12 @@
           <section class="demandas-kpis" aria-label="Resumo">
             <article><span>Total</span><strong id="kpi-total">0</strong></article>
             <article><span>Em andamento</span><strong id="kpi-andamento">0</strong></article>
-            <article><span>Aguardando</span><strong id="kpi-validacao">0</strong></article>
+            <article><span>Aguardando validação</span><strong id="kpi-validacao">0</strong></article>
             <article><span>Vencidas</span><strong id="kpi-vencidas">0</strong></article>
           </section>
 
           <section class="demandas-toolbar">
             <div class="demandas-filters">
-              <label>
-                Escopo
-                <select id="filter-escopo">
-                  <option value="todas">Demandas</option>
-                  <option value="minhas">Minhas demandas</option>
-                </select>
-              </label>
               <label>
                 Tipo
                 <select id="filter-tipo">
@@ -169,17 +162,19 @@
           </section>
 
           <section id="geo-admin" class="demandas-geo-admin hidden">
-            <h2>Geolocalização do hotel</h2>
-            <p class="helper-text">
-              Somente admin. O raio inicial é 200 metros. Sem configuração, ações com
-              localização obrigatória ficam bloqueadas.
-            </p>
-            <form id="geo-form" class="demandas-form-grid">
-              <label>Latitude <input name="latitude" type="number" step="any" required /></label>
-              <label>Longitude <input name="longitude" type="number" step="any" required /></label>
-              <label>Raio (metros) <input name="raio" type="number" min="1" value="200" required /></label>
-              <button type="submit" class="op-btn op-btn--primary">Salvar coordenadas</button>
-            </form>
+            <details id="geo-details">
+              <summary>Configuração de localização</summary>
+              <p class="helper-text">
+                Somente admin. O raio inicial é 200 metros. Sem configuração, ações com
+                localização obrigatória ficam bloqueadas.
+              </p>
+              <form id="geo-form" class="demandas-form-grid demandas-geo-form">
+                <label>Latitude <input name="latitude" type="number" step="any" required /></label>
+                <label>Longitude <input name="longitude" type="number" step="any" required /></label>
+                <label>Raio em metros <input name="raio" type="number" min="1" value="200" required /></label>
+                <button type="submit" class="op-btn op-btn--primary">Salvar coordenadas</button>
+              </form>
+            </details>
           </section>
 
           <section id="create-panel" class="demandas-panel hidden">
@@ -234,8 +229,8 @@
             </form>
           </section>
 
-          <section>
-            <h2 class="demandas-list-title">Listagem</h2>
+          <section class="demandas-list-section" aria-labelledby="demandas-list-heading">
+            <h2 class="demandas-list-title" id="demandas-list-heading">Todas as demandas</h2>
             <div id="demandas-list" class="demandas-list"></div>
           </section>
 
@@ -282,7 +277,7 @@
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js?v=4"></script>
     <script defer src="./yes-demandas-photo.js?v=1"></script>
-    <script defer src="./demandas-render.js?v=1"></script>
-    <script defer src="./demandas-mvp.js?v=2"></script>
+    <script defer src="./demandas-render.js?v=3"></script>
+    <script defer src="./demandas-mvp.js?v=4"></script>
   </body>
 </html>

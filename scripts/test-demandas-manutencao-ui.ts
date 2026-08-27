@@ -360,6 +360,41 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
     assert.equal(detail.children[0].textContent, payload);
   }
   ok("payloads XSS permanecem texto e não viram elementos/atributos");
+
+  const cardOk = api.buildCard(
+    {
+      titulo: "Trocar lâmpada do corredor",
+      tipo: "corretiva",
+      prioridade: "alta",
+      data_programada_inicio: "2026-08-24",
+      data_prevista_conclusao: "2026-08-29",
+      executor_nome: "Breno",
+      status: "em_andamento",
+    },
+    { overdue: true, statusLabel: "Em andamento" },
+    fakeDom,
+  ) as FakeNode;
+  function collectText(node: FakeNode): string[] {
+    const texts = node.textContent ? [node.textContent] : [];
+    return texts.concat(node.children.flatMap(collectText));
+  }
+  const cardTexts = collectText(cardOk);
+  assert.equal(cardOk.children[0].textContent, "Trocar lâmpada do corredor");
+  assert.equal(cardOk.className.includes("is-vencida"), true);
+  for (const expected of [
+    "Status",
+    "Em andamento",
+    "Vencida",
+    "Prioridade",
+    "Alta",
+    "Executor",
+    "Breno",
+    "Prazo",
+    "29/08/2026",
+  ]) {
+    assert.equal(cardTexts.includes(expected), true, `card sem ${expected}`);
+  }
+  ok("card compacto renderiza título, status, prioridade, executor, prazo e vencida");
 }
 
 {
@@ -510,6 +545,78 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(photoSrc, /image\/png/);
   assert.match(photoSrc, /image\/webp/);
   ok("Preview falha fechado e Production permanece no ref de produção");
+}
+
+{
+  assert.match(html, /id="demandas-page-title"/);
+  assert.match(html, /id="nav-minhas"/);
+  assert.match(html, /id="nav-todas"/);
+  assert.match(html, /data-nav="minhas-demandas"/);
+  assert.match(html, /demandas-mvp\.html\?escopo=minhas/);
+  assert.match(html, /id="btn-nova"/);
+  assert.match(html, />Nova demanda</);
+  assert.match(html, /id="kpi-validacao"/);
+  assert.match(html, /Aguardando validação/);
+  assert.match(html, /<details id="geo-details">/);
+  assert.match(html, /Configuração de localização/);
+  assert.doesNotMatch(html, /<details id="geo-details"[^>]*\sopen/);
+  assert.doesNotMatch(html, /id="filter-escopo"/);
+  assert.doesNotMatch(html, /id="nav-minhas"[^>]*class="active"/);
+
+  const navMinhas = html.match(/<a[^>]*id="nav-minhas"[^>]*>/);
+  const navTodas = html.match(/<a[^>]*id="nav-todas"[^>]*>/);
+  assert.ok(navMinhas && navTodas, "links de navegação de Demandas");
+  assert.match(navMinhas[0], /data-nav="minhas-demandas"/);
+  assert.match(navTodas[0], /data-nav="demandas"/);
+  assert.doesNotMatch(navMinhas[0], /\bactive\b/);
+  assert.match(navTodas[0], /\bactive\b/);
+  assert.doesNotMatch(navMinhas[0], /data-nav="demandas"/);
+  ok("HTML separa Demandas e Minhas demandas com menu e geo recolhida");
+}
+
+{
+  assert.match(pageSrc, /function isMinhasEscopo/);
+  assert.match(pageSrc, /get\("escopo"\) === "minhas"/);
+  assert.match(pageSrc, /function applyPageChrome/);
+  assert.match(pageSrc, /title\.textContent = minhas \? "Minhas demandas" : "Demandas"/);
+  assert.match(pageSrc, /navMinhas\?\.classList\.toggle\("active", minhas\)/);
+  assert.match(pageSrc, /navTodas\?\.classList\.toggle\("active", !minhas\)/);
+  assert.match(pageSrc, /isMinhasEscopo\(\) \|\| currentUser\.role !== "admin"/);
+  assert.match(pageSrc, /geo\?\.classList\.add\("hidden"\)/);
+  assert.match(pageSrc, /applyPageChrome\(\);/);
+  assert.match(pageSrc, /contentPanelElement\?\.classList\.remove\("hidden"\)/);
+  const chromeIdx = pageSrc.indexOf("applyPageChrome();");
+  const showIdx = pageSrc.indexOf('contentPanelElement?.classList.remove("hidden")');
+  assert.equal(chromeIdx > -1 && chromeIdx < showIdx, true, "chrome do menu antes de exibir o painel");
+  assert.doesNotMatch(pageSrc, /filter-escopo/);
+  assert.doesNotMatch(pageSrc, /function applyQueryEscopo/);
+  ok("escopo vem da URL; menu exclusivo; geo oculta em Minhas demandas");
+}
+
+{
+  const css = read("ui/demandas-mvp.css");
+  assert.match(css, /\.demandas-card-title/);
+  assert.match(css, /\.demandas-badge\.is-status-em_andamento/);
+  assert.match(css, /\.demandas-badge\.is-status-aguardando_validacao/);
+  assert.match(css, /\.demandas-geo-admin summary/);
+  assert.match(css, /grid-template-columns: 1fr;/);
+  const sidebars = [
+    "ui/checkin-operacional-mvp.html",
+    "ui/cafe-da-manha-mvp.html",
+    "ui/gestao-saude-hotel.html",
+    "ui/financeiro-conciliacao.html",
+    "ui/apartamentos-wifi-mvp.html",
+    "ui/recepcao-mvp.html",
+    "ui/usuarios-login-mvp.html",
+    "ui/index.html",
+  ];
+  for (const rel of sidebars) {
+    const src = read(rel);
+    assert.match(src, /data-nav="minhas-demandas"/);
+    assert.match(src, /data-nav="demandas"/);
+    assert.match(src, /demandas-mvp\.html\?escopo=minhas/);
+  }
+  ok("CSS compacto e sidebars com data-nav distintos");
 }
 
 console.log(`\nOK test-demandas-manutencao-ui (${cases} casos)\n`);
