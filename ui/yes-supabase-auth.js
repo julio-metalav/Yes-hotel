@@ -87,6 +87,10 @@
     return user?.role === "admin";
   }
 
+  function canAccessDemandas(user) {
+    return Boolean(user?.active) && ["admin", "recepcao", "cafe"].includes(user?.role);
+  }
+
   function mapProfile(profileRow) {
     if (!profileRow) {
       return null;
@@ -475,6 +479,7 @@
       password,
       role,
       active,
+      telefoneWhatsapp: input.telefoneWhatsapp,
     });
 
     return data.user;
@@ -498,6 +503,7 @@
       password,
       role,
       active,
+      telefoneWhatsapp: input.telefoneWhatsapp,
     });
 
     return data.user;
@@ -516,6 +522,7 @@
     canAccessBreakfast,
     canAccessManagement,
     canAccessFinancialRecon,
+    canAccessDemandas,
     hasUsers,
     bootstrapFirstAdmin,
     login,

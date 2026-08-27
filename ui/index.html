@@ -113,7 +113,7 @@
             Acesse as rotinas disponíveis para a operação do hotel.
           </p>
           <div class="operacional-nav-grid">
-            <a class="operacional-nav-card" href="./checkin-operacional-mvp.html">
+            <a class="operacional-nav-card" href="./checkin-operacional-mvp.html" data-nav="checkin">
               <span class="operacional-nav-card-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
                   <path d="M7 3v3M17 3v3M4 9h16" />
@@ -127,7 +127,7 @@
               </span>
               <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
             </a>
-            <a class="operacional-nav-card" href="./cafe-da-manha-mvp.html">
+            <a class="operacional-nav-card" href="./cafe-da-manha-mvp.html" data-nav="cafe">
               <span class="operacional-nav-card-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
                   <path d="M5 8h11v7a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V8Z" />
@@ -140,7 +140,57 @@
               </span>
               <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
             </a>
-            <a class="operacional-nav-card operacional-nav-card--anchor" href="#gestao-usuarios-section">
+            <a class="operacional-nav-card" href="./demandas-mvp.html?escopo=minhas" data-nav="minhas-demandas">
+              <span class="operacional-nav-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                  <rect x="4" y="4" width="16" height="16" rx="2" />
+                  <path d="M8 10h8M8 14h5" />
+                </svg>
+              </span>
+              <span class="operacional-nav-card-content">
+                <span class="operacional-nav-card-label">Minhas demandas</span>
+                <span class="operacional-nav-card-desc">Onde você é criador, supervisor ou executor</span>
+              </span>
+              <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="operacional-nav-card" href="./demandas-mvp.html" data-nav="demandas">
+              <span class="operacional-nav-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                  <path d="M9 3h6l2 3H7l2-3Z" />
+                  <rect x="5" y="6" width="14" height="14" rx="2" />
+                </svg>
+              </span>
+              <span class="operacional-nav-card-content">
+                <span class="operacional-nav-card-label">Demandas</span>
+                <span class="operacional-nav-card-desc">Manutenção predial — consulta e criação</span>
+              </span>
+              <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="operacional-nav-card" href="./gestao-saude-hotel.html" data-nav="gestao">
+              <span class="operacional-nav-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                  <path d="M3 3v18h18M7 16v-5M12 16V8M17 16v-9" />
+                </svg>
+              </span>
+              <span class="operacional-nav-card-content">
+                <span class="operacional-nav-card-label">Gestão</span>
+                <span class="operacional-nav-card-desc">Saúde do Hotel e indicadores</span>
+              </span>
+              <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="operacional-nav-card" href="./financeiro-conciliacao.html" data-nav="financeiro">
+              <span class="operacional-nav-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                  <path d="M12 3v18M4 8h6l-2.5 5H4Zm10 0h6l-2.5 5H14Z" />
+                </svg>
+              </span>
+              <span class="operacional-nav-card-content">
+                <span class="operacional-nav-card-label">Conciliação</span>
+                <span class="operacional-nav-card-desc">Financeiro Omie ↔ Sicredi</span>
+              </span>
+              <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="operacional-nav-card operacional-nav-card--anchor" href="#gestao-usuarios-section" data-nav="usuarios">
               <span class="operacional-nav-card-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
                   <path d="M16 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" />
@@ -157,7 +207,7 @@
           </div>
         </nav>
 
-        <section class="users-section dashboard-section" id="gestao-usuarios-section">
+        <section class="users-section dashboard-section dashboard-admin-only" id="gestao-usuarios-section">
           <div class="section-header">
             <div>
               <h2>Usuários cadastrados</h2>
@@ -171,7 +221,7 @@
           <div class="users-list" id="users-list"></div>
         </section>
 
-        <section class="users-section dashboard-section">
+        <section class="users-section dashboard-section dashboard-admin-only">
           <div class="section-header">
             <div>
               <h2 id="user-form-title">Novo usuário</h2>
@@ -200,6 +250,16 @@
               />
             </label>
             <label>
+              Telefone / WhatsApp
+              <input
+                type="tel"
+                name="telefoneWhatsapp"
+                inputmode="tel"
+                placeholder="(67) 99999-0000"
+                autocomplete="tel"
+              />
+            </label>
+            <label>
               Perfil
               <select name="role" required>
                 <option value="admin">Admin</option>
@@ -224,7 +284,7 @@
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js?v=3"></script>
-    <script defer src="./yes-supabase-auth.js?v=3"></script>
-    <script defer src="./usuarios-login-mvp.js?v=6"></script>
+    <script defer src="./yes-supabase-auth.js?v=4"></script>
+    <script defer src="./usuarios-login-mvp.js?v=8"></script>
   </body>
 </html>

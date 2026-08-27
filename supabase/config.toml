@@ -83,3 +83,7 @@ verify_jwt = false
 # Decisão humana de conciliação. Escrita isolada. Auth própria (JWT admin).
 [functions.financial-recon-decide]
 verify_jwt = false
+
+# Upload privado de fotos de Demandas. Auth própria (JWT de usuário interno).
+[functions.demandas-foto-upload]
+verify_jwt = false
