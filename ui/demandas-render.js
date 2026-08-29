@@ -83,6 +83,18 @@
     return String(value || "");
   }
 
+  function descriptionSnippet(value, maxLen) {
+    const limit = typeof maxLen === "number" && maxLen > 0 ? maxLen : 110;
+    const raw = String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+    if (!raw) {
+      return "";
+    }
+    if (raw.length <= limit) {
+      return raw;
+    }
+    return raw.slice(0, limit).trim() + "…";
+  }
+
   function appendLabeled(dom, host, label, value) {
     const row = el(dom, "div", { className: "demandas-card-row" });
     row.append(el(dom, "span", { className: "demandas-card-label", text: label }));
@@ -118,21 +130,58 @@
   function buildCard(row, options, dom) {
     const doc = resolveDom(dom);
     const overdue = Boolean(options && options.overdue);
-    const card = el(doc, "button", {
-      className: overdue ? "demandas-card is-vencida" : "demandas-card",
-    });
-    card.type = "button";
-    card.append(el(doc, "strong", { className: "demandas-card-title", text: row && row.titulo ? row.titulo : "" }));
+    const status = String((row && row.status) || "");
+    const prioridade = String((row && row.prioridade) || "");
+    const classes = ["demandas-card"];
+    if (overdue) {
+      classes.push("is-vencida");
+    }
+    if (prioridade === "alta") {
+      classes.push("is-alta");
+    }
+    if (status === "aguardando_validacao") {
+      classes.push("is-validacao");
+    }
+    const card = el(doc, "article", { className: classes.join(" ") });
+    if (typeof card.setAttribute === "function") {
+      card.setAttribute("tabindex", "0");
+    }
+    card.append(
+      el(doc, "strong", {
+        className: "demandas-card-title",
+        text: row && row.titulo ? row.titulo : "",
+      }),
+    );
     const head = el(doc, "div", { className: "demandas-card-head" });
-    appendStatusRow(doc, head, row, options);
+    if (prioridade) {
+      appendBadge(doc, head, prioridadeLabel(prioridade), "is-prioridade-" + prioridade);
+    }
+    appendBadge(
+      doc,
+      head,
+      (options && options.statusLabel) || status,
+      status ? "is-status-" + status : "",
+    );
+    if (overdue) {
+      appendBadge(doc, head, "Vencida", "is-vencida");
+    }
+    if (row && row.exigir_foto) {
+      appendBadge(doc, head, "Foto obrigatória", "is-foto");
+    }
     card.append(head);
     const body = el(doc, "div", { className: "demandas-card-body" });
-    appendLabeled(doc, body, "Executor", String((row && row.executor_nome) || ""));
-    appendLabeled(doc, body, "Prioridade", prioridadeLabel(row && row.prioridade));
+    if (!options || options.showExecutor !== false) {
+      appendLabeled(doc, body, "Responsável", String((row && row.executor_nome) || ""));
+    }
     appendLabeled(doc, body, "Prazo", formatDateBr(row && row.data_prevista_conclusao));
-    const tipo = String((row && row.tipo) || "");
-    if (tipo) {
-      appendLabeled(doc, body, "Tipo", tipoLabel(tipo));
+    const snippet = descriptionSnippet(row && row.descricao);
+    if (snippet) {
+      body.append(el(doc, "p", { className: "demandas-card-snippet", text: snippet }));
+    }
+    if (row && row.sem_local_especifico) {
+      body.append(
+        el(doc, "p", { className: "demandas-card-local-note", text: "Sem local específico" }),
+      );
     }
     card.append(body);
     return card;
@@ -214,6 +263,7 @@
 
   globalScope.YesHotelDemandasRender = {
     fillAssigneeSelect: fillAssigneeSelect,
+    descriptionSnippet: descriptionSnippet,
     buildCard: buildCard,
     buildDetail: buildDetail,
     buildHistoricoItem: buildHistoricoItem,

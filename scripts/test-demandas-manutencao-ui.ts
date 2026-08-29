@@ -325,10 +325,13 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
         titulo: payload,
         tipo: payload,
         prioridade: payload,
+        descricao: payload,
         data_programada_inicio: "2026-08-24",
         data_prevista_conclusao: "2026-08-26",
         executor_nome: payload,
         status: "nao_iniciada",
+        exigir_foto: true,
+        sem_local_especifico: true,
       },
       { overdue: false, statusLabel: payload },
       fakeDom,
@@ -366,10 +369,13 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
       titulo: "Trocar lâmpada do corredor",
       tipo: "corretiva",
       prioridade: "alta",
+      descricao: "Corredor do 2º andar, próximo ao apartamento 24.",
       data_programada_inicio: "2026-08-24",
       data_prevista_conclusao: "2026-08-29",
       executor_nome: "Breno",
       status: "em_andamento",
+      exigir_foto: true,
+      sem_local_especifico: false,
     },
     { overdue: true, statusLabel: "Em andamento" },
     fakeDom,
@@ -381,22 +387,40 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   const cardTexts = collectText(cardOk);
   assert.equal(cardOk.children[0].textContent, "Trocar lâmpada do corredor");
   assert.equal(cardOk.className.includes("is-vencida"), true);
+  assert.equal(cardOk.className.includes("is-alta"), true);
   for (const expected of [
-    "Status",
     "Em andamento",
     "Vencida",
-    "Prioridade",
     "Alta",
-    "Executor",
+    "Responsável",
     "Breno",
     "Prazo",
     "29/08/2026",
-    "Tipo",
-    "Corretiva",
+    "Foto obrigatória",
+    "Corredor do 2º andar, próximo ao apartamento 24.",
   ]) {
     assert.equal(cardTexts.includes(expected), true, `card sem ${expected}`);
   }
-  ok("card compacto renderiza título, status, prioridade, executor, prazo e vencida");
+  assert.equal(cardTexts.includes("Tipo"), false);
+  assert.equal(cardTexts.includes("Corretiva"), false);
+  const cardLocal = api.buildCard(
+    {
+      titulo: "Revisão geral",
+      prioridade: "media",
+      descricao: "Itens diversos da área comum.",
+      data_prevista_conclusao: "2026-08-30",
+      executor_nome: "Breno",
+      status: "aguardando_validacao",
+      exigir_foto: false,
+      sem_local_especifico: true,
+    },
+    { overdue: false, statusLabel: "Aguardando validação" },
+    fakeDom,
+  ) as FakeNode;
+  assert.equal(cardLocal.className.includes("is-validacao"), true);
+  assert.equal(collectText(cardLocal).includes("Sem local específico"), true);
+  assert.equal(collectText(cardLocal).includes("Foto obrigatória"), false);
+  ok("card compacto renderiza título, status, prioridade, responsável, prazo e vencida");
 }
 
 {
@@ -556,7 +580,7 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(html, /data-nav="minhas-demandas"/);
   assert.match(html, /demandas-mvp\.html\?escopo=minhas/);
   assert.match(html, /id="btn-nova"/);
-  assert.match(html, />Nova demanda</);
+  assert.match(html, /\+\s*Nova demanda/);
   assert.match(html, /id="kpi-validacao"/);
   assert.match(html, /Aguardando validação/);
   assert.doesNotMatch(html, /id="geo-admin"/);
@@ -677,6 +701,13 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(html, /id="filter-status"/);
   assert.match(html, /id="filter-atraso"/);
   assert.match(html, /id="btn-nova"/);
+  assert.match(html, /id="filter-busca"/);
+  assert.match(html, /id="filter-executor"/);
+  assert.match(html, /id="kpis-gestao"/);
+  assert.match(html, /id="kpis-minhas"/);
+  assert.match(html, /id="kpi-pendentes"/);
+  assert.match(html, /id="demandas-empty"/);
+  assert.match(html, /Nenhuma demanda encontrada/);
   assert.match(html, /id="demandas-list"/);
   assert.match(html, /id="create-form"/);
   assert.match(html, /id="nav-minhas"/);
@@ -697,6 +728,22 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(pageSrc, /demandas-action-danger/);
   assert.match(pageSrc, /addAction\(host, "Iniciar"/);
   assert.match(pageSrc, /addAction\(host, "Cancelar"/);
+  assert.match(pageSrc, /addAction\(host, "Enviar para validação"/);
+  assert.match(pageSrc, /function visualRank/);
+  assert.match(pageSrc, /function isPendenteMinhas/);
+  assert.match(pageSrc, /nao_iniciada/);
+  assert.match(pageSrc, /pausada/);
+  assert.match(pageSrc, /em_correcao/);
+  assert.match(pageSrc, /function isConcluidaHoje/);
+  assert.match(pageSrc, /America\/Campo_Grande/);
+  assert.match(pageSrc, /filter-busca/);
+  assert.match(pageSrc, /executor_id/);
+  assert.match(pageSrc, /stopPropagation/);
+  assert.match(pageSrc, /showExecutor: !isMinhasEscopo\(\)/);
+  assert.match(renderSrc, /Foto obrigatória/);
+  assert.match(renderSrc, /Sem local específico/);
+  assert.match(renderSrc, /Responsável/);
+  assert.doesNotMatch(pageSrc, /innerHTML/);
   ok("densidade operacional preserva estrutura de Demandas e Minhas");
 }
 

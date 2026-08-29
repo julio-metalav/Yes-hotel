@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=56" />
-    <link rel="stylesheet" href="./demandas-mvp.css?v=7" />
+    <link rel="stylesheet" href="./demandas-mvp.css?v=8" />
   </head>
   <body class="op-body checkin-view demandas-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -117,6 +117,9 @@
             </div>
           </div>
           <div class="op-header__right">
+            <button type="button" class="op-btn op-btn--primary" id="btn-nova">
+              + Nova demanda
+            </button>
             <p id="session-user" class="op-header__user" aria-live="polite">
               <strong id="demandas-session-user-name"></strong>
               <span id="demandas-session-user-role" class="op-header__role"></span>
@@ -130,16 +133,52 @@
         <main class="op-content demandas-content">
           <p id="demandas-notice" class="demandas-notice hidden" role="status"></p>
 
-          <section class="demandas-kpis" aria-label="Resumo">
-            <article><span>Total</span><strong id="kpi-total">0</strong></article>
-            <article><span>Em andamento</span><strong id="kpi-andamento">0</strong></article>
-            <article><span>Aguardando validação</span><strong id="kpi-validacao">0</strong></article>
-            <article><span>Vencidas</span><strong id="kpi-vencidas">0</strong></article>
+          <section class="demandas-kpis" id="kpis-gestao" aria-label="Resumo">
+            <button type="button" class="demandas-kpi is-active" data-kpi="total">
+              <span>Total</span>
+              <strong id="kpi-total">0</strong>
+            </button>
+            <button type="button" class="demandas-kpi" data-kpi="andamento">
+              <span>Em andamento</span>
+              <strong id="kpi-andamento">0</strong>
+            </button>
+            <button type="button" class="demandas-kpi" data-kpi="validacao">
+              <span>Aguardando validação</span>
+              <strong id="kpi-validacao">0</strong>
+            </button>
+            <button type="button" class="demandas-kpi" data-kpi="vencidas">
+              <span>Vencidas</span>
+              <strong id="kpi-vencidas">0</strong>
+            </button>
+          </section>
+
+          <section class="demandas-kpis demandas-kpis--minhas hidden" id="kpis-minhas" aria-label="Resumo">
+            <button type="button" class="demandas-kpi" data-kpi="pendentes">
+              <span>Pendentes</span>
+              <strong id="kpi-pendentes">0</strong>
+            </button>
+            <button type="button" class="demandas-kpi" data-kpi="andamento">
+              <span>Em andamento</span>
+              <strong id="kpi-minhas-andamento">0</strong>
+            </button>
+            <button type="button" class="demandas-kpi" data-kpi="concluidas-hoje">
+              <span>Concluídas hoje</span>
+              <strong id="kpi-concluidas-hoje">0</strong>
+            </button>
           </section>
 
           <section class="demandas-toolbar">
             <div class="demandas-filters">
-              <label>
+              <label class="demandas-filter-busca" data-filter="busca">
+                Busca
+                <input
+                  id="filter-busca"
+                  type="search"
+                  placeholder="Título, descrição ou nome"
+                  autocomplete="off"
+                />
+              </label>
+              <label data-filter="tipo">
                 Tipo
                 <select id="filter-tipo">
                   <option value="">Todos</option>
@@ -147,7 +186,7 @@
                   <option value="programada">Programada</option>
                 </select>
               </label>
-              <label>
+              <label data-filter="prioridade">
                 Prioridade
                 <select id="filter-prioridade">
                   <option value="">Todas</option>
@@ -156,7 +195,7 @@
                   <option value="alta">Alta</option>
                 </select>
               </label>
-              <label>
+              <label data-filter="status">
                 Status
                 <select id="filter-status">
                   <option value="">Todos</option>
@@ -170,7 +209,13 @@
                   <option value="cancelada">Cancelada</option>
                 </select>
               </label>
-              <label>
+              <label data-filter="executor">
+                Responsável
+                <select id="filter-executor">
+                  <option value="">Todos</option>
+                </select>
+              </label>
+              <label data-filter="atraso">
                 Atraso
                 <select id="filter-atraso">
                   <option value="">Todas</option>
@@ -179,7 +224,6 @@
                 </select>
               </label>
             </div>
-            <button type="button" class="op-btn op-btn--primary" id="btn-nova">Nova demanda</button>
           </section>
 
           <section id="create-panel" class="demandas-panel hidden">
@@ -236,6 +280,13 @@
 
           <section class="demandas-list-section" aria-labelledby="demandas-list-heading">
             <h2 class="demandas-list-title" id="demandas-list-heading">Todas as demandas</h2>
+            <div id="demandas-empty" class="demandas-empty hidden">
+              <p id="demandas-empty-title">Nenhuma demanda encontrada</p>
+              <p id="demandas-empty-hint" class="demandas-empty-hint hidden"></p>
+              <button type="button" class="op-btn op-btn--primary hidden" id="demandas-empty-create">
+                Criar demanda
+              </button>
+            </div>
             <div id="demandas-list" class="demandas-list"></div>
           </section>
 
@@ -289,7 +340,7 @@
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js?v=4"></script>
     <script defer src="./yes-demandas-photo.js?v=1"></script>
-    <script defer src="./demandas-render.js?v=4"></script>
-    <script defer src="./demandas-mvp.js?v=6"></script>
+    <script defer src="./demandas-render.js?v=5"></script>
+    <script defer src="./demandas-mvp.js?v=7"></script>
   </body>
 </html>
