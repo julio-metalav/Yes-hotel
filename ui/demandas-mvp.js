@@ -605,13 +605,18 @@ async function openDetail(id) {
   selected = data;
   document.querySelector("#detail-panel")?.classList.remove("hidden");
   document.querySelector("#detail-title").textContent = data.titulo;
+  const detailOptions = {
+    overdue: isOverdue(data),
+    statusLabel: STATUS_LABEL[data.status] || data.status,
+  };
+  const lead = document.querySelector("#detail-lead");
   const body = document.querySelector("#detail-body");
-  body.replaceChildren(
-    render.buildDetail(data, {
-      overdue: isOverdue(data),
-      statusLabel: STATUS_LABEL[data.status] || data.status,
-    }),
-  );
+  if (lead instanceof HTMLElement && typeof render.buildDetailLead === "function") {
+    lead.replaceChildren(render.buildDetailLead(data, detailOptions));
+    body.replaceChildren(render.buildDetailSummary(data, detailOptions));
+  } else {
+    body.replaceChildren(render.buildDetail(data, detailOptions));
+  }
   renderActions(data);
   await Promise.all([loadHistorico(data.id), loadFotos(data.id)]);
   document.querySelector("#detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -654,7 +659,7 @@ function renderActions(row) {
         p_motivo: motivo,
       });
       await afterMutation();
-    }, "secondary");
+    });
     addAction(host, "Enviar para validação", () => act("demandas_enviar_validacao", true));
   }
   if (canExecute(row) && row.status === "pausada") {

@@ -360,7 +360,11 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
     assert.equal(signals.tags.length, 0, `payload criou tag: ${payload}`);
     assert.equal(signals.attrs.length, 0, `payload criou handler: ${payload}`);
     assert.equal(card.children[0].textContent, payload);
-    assert.equal(detail.children[0].textContent, payload);
+    function collectDetailText(node: FakeNode): string[] {
+      const texts = node.textContent ? [node.textContent] : [];
+      return texts.concat(node.children.flatMap(collectDetailText));
+    }
+    assert.equal(collectDetailText(detail).includes(payload), true, "payload sumiu do detalhe");
   }
   ok("payloads XSS permanecem texto e não viram elementos/atributos");
 
@@ -723,7 +727,11 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(read("ui/checkin-operacional-mvp.css"), /--op-sidebar-w: 176px/);
   assert.match(css, /\.demandas-card-head/);
   assert.match(css, /repeat\(4, minmax\(0, 1fr\)\)/);
-  assert.match(renderSrc, /Dados principais/);
+  assert.match(renderSrc, /demandas-detail-lead/);
+  assert.match(renderSrc, /Pessoas/);
+  assert.match(html, /id="detail-lead"/);
+  assert.match(html, /Ver histórico/);
+  assert.match(html, /Ocultar histórico/);
   assert.match(renderSrc, /demandas-card-head/);
   assert.match(pageSrc, /demandas-action-danger/);
   assert.match(pageSrc, /addAction\(host, "Iniciar"/);

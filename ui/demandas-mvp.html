@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=56" />
-    <link rel="stylesheet" href="./demandas-mvp.css?v=9" />
+    <link rel="stylesheet" href="./demandas-mvp.css?v=10" />
   </head>
   <body class="op-body checkin-view demandas-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -290,13 +290,14 @@
             <div id="demandas-list" class="demandas-list"></div>
           </section>
 
-          <section id="detail-panel" class="demandas-panel hidden">
+          <section id="detail-panel" class="demandas-panel demandas-detail-panel hidden">
             <h2 id="detail-title">Detalhe</h2>
-            <div id="detail-body"></div>
-            <section class="demandas-detail-block" aria-label="Ações">
+            <div id="detail-lead"></div>
+            <section class="demandas-detail-block demandas-detail-actions-block" aria-label="Ações">
               <h3>Ações</h3>
               <div id="detail-actions" class="demandas-actions"></div>
             </section>
+            <div id="detail-body"></div>
             <section class="demandas-detail-block" aria-label="Fotos">
               <h3>Fotos</h3>
               <div class="demandas-photo-row">
@@ -327,10 +328,14 @@
               </div>
               <div id="photo-list" class="demandas-photo-list"></div>
             </section>
-            <section class="demandas-detail-block" aria-label="Histórico">
+            <details class="demandas-historico-fold">
+              <summary>
+                <span class="demandas-historico-summary-closed">Ver histórico</span>
+                <span class="demandas-historico-summary-open">Ocultar histórico</span>
+              </summary>
               <h3>Histórico</h3>
               <ol id="historico-list" class="demandas-historico"></ol>
-            </section>
+            </details>
           </section>
         </main>
       </div>
@@ -340,7 +345,7 @@
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js?v=4"></script>
     <script defer src="./yes-demandas-photo.js?v=1"></script>
-    <script defer src="./demandas-render.js?v=5"></script>
-    <script defer src="./demandas-mvp.js?v=8"></script>
+    <script defer src="./demandas-render.js?v=6"></script>
+    <script defer src="./demandas-mvp.js?v=9"></script>
   </body>
 </html>
