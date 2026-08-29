@@ -224,14 +224,21 @@
 
 .demandas-card:hover,
 .demandas-card:focus-visible {
-  border-color: #9bb6ba;
+  border-color: #7a9ea3;
+  background: #f6fafa;
   outline: none;
 }
 
 .demandas-card.is-vencida {
-  border-color: #d97706;
+  border-color: #b45309;
   border-left-width: 4px;
-  background: #fffdf8;
+  background: #fff8eb;
+}
+
+.demandas-card.is-vencida:hover,
+.demandas-card.is-vencida:focus-visible {
+  border-color: #92400e;
+  background: #fff3d6;
 }
 
 .demandas-card.is-alta:not(.is-vencida) {
@@ -319,8 +326,36 @@
   margin-top: 0.25rem;
 }
 
+.demandas-escopo-minhas .demandas-card-body {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.demandas-escopo-minhas .demandas-card-actions {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: end;
+  justify-content: flex-end;
+  margin-top: 0;
+  max-width: 18.5rem;
+}
+
 .demandas-card-actions .op-btn {
   min-height: 32px;
+}
+
+.demandas-card-action-detail {
+  background: transparent;
+  border-color: transparent;
+  color: #4b5c61;
+  font-weight: 600;
+}
+
+.demandas-card-action-detail:hover,
+.demandas-card-action-detail:focus-visible {
+  background: #edf4f5;
+  border-color: #dce4e4;
+  color: #103943;
 }
 
 .demandas-detail {
@@ -410,9 +445,9 @@
 }
 
 .demandas-badge.is-vencida {
-  background: #fde68a;
-  border-color: #d97706;
-  color: #92400e;
+  background: #f59e0b;
+  border-color: #b45309;
+  color: #7c2d12;
   font-weight: 800;
 }
 
@@ -644,12 +679,19 @@
     justify-content: flex-start;
   }
 
-  .demandas-card-body {
+  .demandas-card-body,
+  .demandas-escopo-minhas .demandas-card-body {
+    grid-column: 1;
     grid-row: 3;
   }
 
-  .demandas-card-actions {
+  .demandas-card-actions,
+  .demandas-escopo-minhas .demandas-card-actions {
+    grid-column: 1;
     grid-row: 4;
+    align-self: stretch;
+    justify-content: flex-start;
+    max-width: none;
   }
 
   .demandas-card-actions .op-btn,

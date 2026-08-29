@@ -739,6 +739,8 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(pageSrc, /filter-busca/);
   assert.match(pageSrc, /executor_id/);
   assert.match(pageSrc, /stopPropagation/);
+  assert.match(pageSrc, /demandas-card-action-detail/);
+  assert.match(css, /cursor: pointer/);
   assert.match(pageSrc, /showExecutor: !isMinhasEscopo\(\)/);
   assert.match(renderSrc, /Foto obrigatória/);
   assert.match(renderSrc, /Sem local específico/);

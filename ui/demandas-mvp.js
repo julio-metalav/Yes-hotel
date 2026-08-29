@@ -415,8 +415,11 @@ function renderEmpty(list) {
 function addCardAction(host, label, handler, variant) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className =
-    variant === "secondary" ? "op-btn op-btn--secondary" : "op-btn op-btn--primary";
+  if (variant === "detail") {
+    button.className = "op-btn op-btn--ghost demandas-card-action-detail";
+  } else {
+    button.className = "op-btn op-btn--primary";
+  }
   button.textContent = label;
   button.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -444,21 +447,16 @@ function appendOperatorActions(card, row) {
     });
   }
   if (canExecute(row) && row.status === "em_andamento") {
-    addCardAction(
-      host,
-      "Pausar",
-      async () => {
-        selected = row;
-        const motivo = window.prompt("Motivo da pausa (opcional)") || "";
-        await rpc("demandas_pausar", {
-          p_demanda_id: selected.id,
-          p_row_version: selected.row_version,
-          p_motivo: motivo,
-        });
-        await afterMutation();
-      },
-      "secondary",
-    );
+    addCardAction(host, "Pausar", async () => {
+      selected = row;
+      const motivo = window.prompt("Motivo da pausa (opcional)") || "";
+      await rpc("demandas_pausar", {
+        p_demanda_id: selected.id,
+        p_row_version: selected.row_version,
+        p_motivo: motivo,
+      });
+      await afterMutation();
+    });
     addCardAction(host, "Enviar para validação", async () => {
       selected = row;
       await act("demandas_enviar_validacao", true);
@@ -479,7 +477,7 @@ function appendOperatorActions(card, row) {
     async () => {
       await openDetail(row.id);
     },
-    "secondary",
+    "detail",
   );
   card.append(host);
 }
