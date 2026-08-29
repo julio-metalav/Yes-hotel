@@ -83,6 +83,18 @@
     return String(value || "");
   }
 
+  function descriptionSnippet(value, maxLen) {
+    const limit = typeof maxLen === "number" && maxLen > 0 ? maxLen : 110;
+    const raw = String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+    if (!raw) {
+      return "";
+    }
+    if (raw.length <= limit) {
+      return raw;
+    }
+    return raw.slice(0, limit).trim() + "…";
+  }
+
   function appendLabeled(dom, host, label, value) {
     const row = el(dom, "div", { className: "demandas-card-row" });
     row.append(el(dom, "span", { className: "demandas-card-label", text: label }));
@@ -118,45 +130,115 @@
   function buildCard(row, options, dom) {
     const doc = resolveDom(dom);
     const overdue = Boolean(options && options.overdue);
-    const card = el(doc, "button", {
-      className: overdue ? "demandas-card is-vencida" : "demandas-card",
-    });
-    card.type = "button";
-    card.append(el(doc, "strong", { className: "demandas-card-title", text: row && row.titulo ? row.titulo : "" }));
+    const status = String((row && row.status) || "");
+    const prioridade = String((row && row.prioridade) || "");
+    const classes = ["demandas-card"];
+    if (overdue) {
+      classes.push("is-vencida");
+    }
+    if (prioridade === "alta") {
+      classes.push("is-alta");
+    }
+    if (status === "aguardando_validacao") {
+      classes.push("is-validacao");
+    }
+    const card = el(doc, "article", { className: classes.join(" ") });
+    if (typeof card.setAttribute === "function") {
+      card.setAttribute("tabindex", "0");
+    }
+    card.append(
+      el(doc, "strong", {
+        className: "demandas-card-title",
+        text: row && row.titulo ? row.titulo : "",
+      }),
+    );
     const head = el(doc, "div", { className: "demandas-card-head" });
-    appendStatusRow(doc, head, row, options);
+    if (prioridade) {
+      appendBadge(doc, head, prioridadeLabel(prioridade), "is-prioridade-" + prioridade);
+    }
+    appendBadge(
+      doc,
+      head,
+      (options && options.statusLabel) || status,
+      status ? "is-status-" + status : "",
+    );
+    if (overdue) {
+      appendBadge(doc, head, "Vencida", "is-vencida");
+    }
+    if (row && row.exigir_foto) {
+      appendBadge(doc, head, "Foto obrigatória", "is-foto");
+    }
     card.append(head);
     const body = el(doc, "div", { className: "demandas-card-body" });
-    appendLabeled(doc, body, "Executor", String((row && row.executor_nome) || ""));
-    appendLabeled(doc, body, "Prioridade", prioridadeLabel(row && row.prioridade));
+    if (!options || options.showExecutor !== false) {
+      appendLabeled(doc, body, "Responsável", String((row && row.executor_nome) || ""));
+    }
     appendLabeled(doc, body, "Prazo", formatDateBr(row && row.data_prevista_conclusao));
-    const tipo = String((row && row.tipo) || "");
-    if (tipo) {
-      appendLabeled(doc, body, "Tipo", tipoLabel(tipo));
+    const snippet = descriptionSnippet(row && row.descricao);
+    if (snippet) {
+      body.append(el(doc, "p", { className: "demandas-card-snippet", text: snippet }));
+    }
+    if (row && row.sem_local_especifico) {
+      body.append(
+        el(doc, "p", { className: "demandas-card-local-note", text: "Sem local específico" }),
+      );
     }
     card.append(body);
     return card;
   }
 
-  function buildDetail(row, options, dom) {
+  function appendDetailBadges(dom, host, row, options) {
+    const status = String((row && row.status) || "");
+    const prioridade = String((row && row.prioridade) || "");
+    if (status) {
+      appendBadge(
+        dom,
+        host,
+        (options && options.statusLabel) || status,
+        "is-status-" + status,
+      );
+    }
+    if (prioridade) {
+      appendBadge(dom, host, prioridadeLabel(prioridade), "is-prioridade-" + prioridade);
+    }
+    if (options && options.overdue) {
+      appendBadge(dom, host, "Vencida", "is-vencida");
+    }
+  }
+
+  function buildDetailLead(row, options, dom) {
     const doc = resolveDom(dom);
-    const wrap = el(doc, "div", { className: "demandas-detail" });
-    wrap.append(el(doc, "p", { className: "demandas-detail-desc", text: row && row.descricao ? row.descricao : "" }));
-    appendDetailBlock(doc, wrap, "Dados principais", function (meta) {
-      appendStatusRow(doc, meta, row, options);
-      appendLabeled(doc, meta, "Tipo", tipoLabel(row && row.tipo));
-      appendLabeled(doc, meta, "Prioridade", prioridadeLabel(row && row.prioridade));
-    });
-    appendDetailBlock(doc, wrap, "Pessoas", function (meta) {
+    const lead = el(doc, "div", { className: "demandas-detail-lead" });
+    const badges = el(doc, "div", { className: "demandas-detail-badges" });
+    appendDetailBadges(doc, badges, row, options);
+    lead.append(badges);
+    const facts = el(doc, "div", { className: "demandas-detail-facts" });
+    appendLabeled(doc, facts, "Prazo", formatDateBr(row && row.data_prevista_conclusao));
+    appendLabeled(doc, facts, "Executor", String((row && row.executor_nome) || ""));
+    appendLabeled(doc, facts, "Supervisor", String((row && row.supervisor_nome) || ""));
+    lead.append(facts);
+    const full = String((row && row.descricao) || "").replace(/\s+/g, " ").trim();
+    const snippet = descriptionSnippet(full, 160);
+    if (snippet) {
+      lead.append(el(doc, "p", { className: "demandas-detail-desc", text: snippet }));
+    }
+    return lead;
+  }
+
+  function buildDetailSummary(row, options, dom) {
+    const doc = resolveDom(dom);
+    const summary = el(doc, "div", { className: "demandas-detail-summary" });
+    appendDetailBlock(doc, summary, "Pessoas", function (meta) {
       appendLabeled(doc, meta, "Criador", String((row && row.criador_nome) || ""));
-      appendLabeled(doc, meta, "Supervisor", String((row && row.supervisor_nome) || ""));
       appendLabeled(doc, meta, "Executor", String((row && row.executor_nome) || ""));
+      appendLabeled(doc, meta, "Supervisor", String((row && row.supervisor_nome) || ""));
     });
-    appendDetailBlock(doc, wrap, "Datas", function (meta) {
+    appendDetailBlock(doc, summary, "Datas", function (meta) {
       appendLabeled(doc, meta, "Início programado", formatDateBr(row && row.data_programada_inicio));
       appendLabeled(doc, meta, "Conclusão prevista", formatDateBr(row && row.data_prevista_conclusao));
     });
-    appendDetailBlock(doc, wrap, "Regras", function (meta) {
+    appendDetailBlock(doc, summary, "Regras", function (meta) {
+      appendLabeled(doc, meta, "Tipo", tipoLabel(row && row.tipo));
       appendLabeled(doc, meta, "Foto", row && row.exigir_foto ? "Obrigatória" : "Facultativa");
       appendLabeled(
         doc,
@@ -165,6 +247,23 @@
         row && row.sem_local_especifico ? "Sem local específico" : "Exige geolocalização",
       );
     });
+    const full = String((row && row.descricao) || "");
+    const normalized = full.replace(/\s+/g, " ").trim();
+    const snippet = descriptionSnippet(normalized, 160);
+    if (normalized && snippet !== normalized) {
+      const desc = el(doc, "section", { className: "demandas-detail-block demandas-detail-desc-block" });
+      desc.append(el(doc, "h3", { className: "demandas-detail-block-title", text: "Descrição" }));
+      desc.append(el(doc, "p", { className: "demandas-detail-desc-full", text: full }));
+      summary.append(desc);
+    }
+    return summary;
+  }
+
+  function buildDetail(row, options, dom) {
+    const doc = resolveDom(dom);
+    const wrap = el(doc, "div", { className: "demandas-detail" });
+    wrap.append(buildDetailLead(row, options, doc));
+    wrap.append(buildDetailSummary(row, options, doc));
     return wrap;
   }
 
@@ -214,7 +313,10 @@
 
   globalScope.YesHotelDemandasRender = {
     fillAssigneeSelect: fillAssigneeSelect,
+    descriptionSnippet: descriptionSnippet,
     buildCard: buildCard,
+    buildDetailLead: buildDetailLead,
+    buildDetailSummary: buildDetailSummary,
     buildDetail: buildDetail,
     buildHistoricoItem: buildHistoricoItem,
     collectExecutableSignals: collectExecutableSignals,

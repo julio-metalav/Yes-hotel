@@ -18,6 +18,7 @@ let rows = [];
 let selected = null;
 let atribuiveis = [];
 let formMode = "create";
+let minhasKpi = null;
 
 const noticeElement = document.querySelector("#demandas-notice");
 const accessStateElement = document.querySelector("#access-state");
@@ -111,6 +112,40 @@ function isMinhas(row) {
   );
 }
 
+function isPendenteMinhas(row) {
+  return (
+    row.status === "nao_iniciada" ||
+    row.status === "pausada" ||
+    row.status === "em_correcao"
+  );
+}
+
+function isConcluidaHoje(row) {
+  if (row.status !== "concluida" || !row.concluida_em) {
+    return false;
+  }
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Campo_Grande",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return fmt.format(new Date(row.concluida_em)) === hotelTodayYmd();
+}
+
+function visualRank(row) {
+  if (isOverdue(row)) {
+    return 0;
+  }
+  if (row.status === "aguardando_validacao") {
+    return 1;
+  }
+  if (row.status === "em_andamento") {
+    return 2;
+  }
+  return 3;
+}
+
 function canEdit(row) {
   return row.criador_id === currentUser.id || currentUser.role === "admin";
 }
@@ -163,9 +198,25 @@ function fillAssigneeSelects() {
   syncAssigneeSelects();
 }
 
+function fillExecutorFilter() {
+  const select = document.querySelector("#filter-executor");
+  if (!(select instanceof HTMLSelectElement)) {
+    return;
+  }
+  const current = select.value;
+  render.fillAssigneeSelect(select, atribuiveis);
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "Todos";
+  select.insertBefore(all, select.firstChild);
+  const stillValid = Array.from(select.options).some((opt) => opt.value === current);
+  select.value = stillValid ? current : "";
+}
+
 async function loadAtribuiveis() {
   atribuiveis = (await rpc("demandas_listar_usuarios_atribuiveis")) || [];
   fillAssigneeSelects();
+  fillExecutorFilter();
 }
 
 function syncAssigneeSelects() {
@@ -195,16 +246,46 @@ async function refreshList() {
   renderList();
 }
 
+function normalizeSearch(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function matchesSearch(row, query) {
+  if (!query) {
+    return true;
+  }
+  const haystack = [
+    row.titulo,
+    row.descricao,
+    row.executor_nome,
+    row.supervisor_nome,
+    row.criador_nome,
+  ]
+    .map((part) => normalizeSearch(part))
+    .join(" ");
+  return haystack.includes(query);
+}
+
+function scopeRows() {
+  if (!isMinhasEscopo()) {
+    return rows.slice();
+  }
+  return rows.filter(isMinhas);
+}
+
 function filteredRows() {
   const tipo = document.querySelector("#filter-tipo")?.value;
   const prioridade = document.querySelector("#filter-prioridade")?.value;
   const status = document.querySelector("#filter-status")?.value;
   const atraso = document.querySelector("#filter-atraso")?.value;
+  const executor = document.querySelector("#filter-executor")?.value;
+  const busca = normalizeSearch(document.querySelector("#filter-busca")?.value);
   const minhas = isMinhasEscopo();
-  return rows.filter((row) => {
-    if (minhas && !isMinhas(row)) {
-      return false;
-    }
+  const list = scopeRows().filter((row) => {
     if (tipo && row.tipo !== tipo) {
       return false;
     }
@@ -214,53 +295,229 @@ function filteredRows() {
     if (status && row.status !== status) {
       return false;
     }
+    if (executor && row.executor_id !== executor) {
+      return false;
+    }
     if (atraso === "vencida" && !isOverdue(row)) {
       return false;
     }
     if (atraso === "no_prazo" && isOverdue(row)) {
       return false;
     }
+    if (!matchesSearch(row, busca)) {
+      return false;
+    }
+    if (minhas && minhasKpi === "pendentes" && !isPendenteMinhas(row)) {
+      return false;
+    }
+    if (minhas && minhasKpi === "andamento" && row.status !== "em_andamento") {
+      return false;
+    }
+    if (minhas && minhasKpi === "concluidas-hoje" && !isConcluidaHoje(row)) {
+      return false;
+    }
     return true;
+  });
+  if (minhas) {
+    return list;
+  }
+  return list.slice().sort((left, right) => {
+    const rankDelta = visualRank(left) - visualRank(right);
+    if (rankDelta !== 0) {
+      return rankDelta;
+    }
+    return String(right.created_at || "").localeCompare(String(left.created_at || ""));
   });
 }
 
-function renderKpis(list) {
-  document.querySelector("#kpi-total").textContent = String(list.length);
+function renderKpis() {
+  const scope = scopeRows();
+  if (isMinhasEscopo()) {
+    const pendentes = document.querySelector("#kpi-pendentes");
+    const andamento = document.querySelector("#kpi-minhas-andamento");
+    const hoje = document.querySelector("#kpi-concluidas-hoje");
+    if (pendentes) {
+      pendentes.textContent = String(scope.filter(isPendenteMinhas).length);
+    }
+    if (andamento) {
+      andamento.textContent = String(
+        scope.filter((row) => row.status === "em_andamento").length,
+      );
+    }
+    if (hoje) {
+      hoje.textContent = String(scope.filter(isConcluidaHoje).length);
+    }
+    document.querySelectorAll("#kpis-minhas .demandas-kpi").forEach((button) => {
+      button.classList.toggle("is-active", button.getAttribute("data-kpi") === minhasKpi);
+    });
+    return;
+  }
+  document.querySelector("#kpi-total").textContent = String(scope.length);
   document.querySelector("#kpi-andamento").textContent = String(
-    list.filter((row) => row.status === "em_andamento").length,
+    scope.filter((row) => row.status === "em_andamento").length,
   );
   document.querySelector("#kpi-validacao").textContent = String(
-    list.filter((row) => row.status === "aguardando_validacao").length,
+    scope.filter((row) => row.status === "aguardando_validacao").length,
   );
   document.querySelector("#kpi-vencidas").textContent = String(
-    list.filter((row) => isOverdue(row)).length,
+    scope.filter((row) => isOverdue(row)).length,
   );
+  syncGestaoKpiHighlight();
+}
+
+function hasGestaoFilters() {
+  return Boolean(
+    document.querySelector("#filter-tipo")?.value ||
+      document.querySelector("#filter-prioridade")?.value ||
+      document.querySelector("#filter-status")?.value ||
+      document.querySelector("#filter-atraso")?.value ||
+      document.querySelector("#filter-executor")?.value ||
+      String(document.querySelector("#filter-busca")?.value || "").trim(),
+  );
+}
+
+function renderEmpty(list) {
+  const empty = document.querySelector("#demandas-empty");
+  const title = document.querySelector("#demandas-empty-title");
+  const hint = document.querySelector("#demandas-empty-hint");
+  const createBtn = document.querySelector("#demandas-empty-create");
+  if (!(empty instanceof HTMLElement)) {
+    return;
+  }
+  if (list.length) {
+    empty.classList.add("hidden");
+    return;
+  }
+  empty.classList.remove("hidden");
+  if (title) {
+    title.textContent = "Nenhuma demanda encontrada";
+  }
+  if (isMinhasEscopo()) {
+    createBtn?.classList.add("hidden");
+    if (hint instanceof HTMLElement) {
+      if (scopeRows().length === 0) {
+        hint.textContent = "Nada pendente para você no momento.";
+        hint.classList.remove("hidden");
+      } else {
+        hint.textContent = "";
+        hint.classList.add("hidden");
+      }
+    }
+    return;
+  }
+  if (hint instanceof HTMLElement) {
+    hint.textContent = "";
+    hint.classList.add("hidden");
+  }
+  createBtn?.classList.toggle("hidden", hasGestaoFilters());
+}
+
+function addCardAction(host, label, handler, variant) {
+  const button = document.createElement("button");
+  button.type = "button";
+  if (variant === "detail") {
+    button.className = "op-btn op-btn--ghost demandas-card-action-detail";
+  } else {
+    button.className = "op-btn op-btn--primary";
+  }
+  button.textContent = label;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    handler().catch((error) => showNotice(error.message, "error"));
+  });
+  host.append(button);
+}
+
+function appendOperatorActions(card, row) {
+  if (!isMinhasEscopo()) {
+    return;
+  }
+  const host = document.createElement("div");
+  host.className = "demandas-card-actions";
+  host.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+  if (
+    canExecute(row) &&
+    (row.status === "nao_iniciada" || row.status === "em_correcao" || row.status === "agendada")
+  ) {
+    addCardAction(host, "Iniciar", async () => {
+      selected = row;
+      await act("demandas_iniciar", true);
+    });
+  }
+  if (canExecute(row) && row.status === "em_andamento") {
+    addCardAction(host, "Pausar", async () => {
+      selected = row;
+      const motivo = window.prompt("Motivo da pausa (opcional)") || "";
+      await rpc("demandas_pausar", {
+        p_demanda_id: selected.id,
+        p_row_version: selected.row_version,
+        p_motivo: motivo,
+      });
+      await afterMutation();
+    });
+    addCardAction(host, "Enviar para validação", async () => {
+      selected = row;
+      await act("demandas_enviar_validacao", true);
+    });
+  }
+  if (canExecute(row) && row.status === "pausada") {
+    addCardAction(host, "Retomar", async () => {
+      selected = row;
+      await rpc("demandas_retomar", {
+        p_demanda_id: selected.id,
+        p_row_version: selected.row_version,
+      }).then(afterMutation);
+    });
+  }
+  addCardAction(
+    host,
+    "Ver detalhes",
+    async () => {
+      await openDetail(row.id);
+    },
+    "detail",
+  );
+  card.append(host);
 }
 
 function renderList() {
   const list = filteredRows();
-  renderKpis(list);
+  renderKpis();
+  renderEmpty(list);
   const host = document.querySelector("#demandas-list");
   if (!(host instanceof HTMLElement)) {
     return;
   }
   host.replaceChildren();
-  if (!list.length) {
-    const empty = document.createElement("p");
-    empty.textContent = "Nenhuma demanda neste filtro.";
-    host.append(empty);
-    return;
-  }
   list.forEach((row) => {
     const card = render.buildCard(row, {
       overdue: isOverdue(row),
       statusLabel: STATUS_LABEL[row.status] || row.status,
+      showExecutor: !isMinhasEscopo(),
     });
-    card.addEventListener("click", () => {
+    card.addEventListener("click", (event) => {
+      if (event.target instanceof Element && event.target.closest(".demandas-card-actions")) {
+        return;
+      }
       openDetail(row.id).catch((error) => {
         showNotice(error.message, "error");
       });
     });
+    card.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      if (event.target instanceof Element && event.target.closest(".demandas-card-actions")) {
+        return;
+      }
+      event.preventDefault();
+      openDetail(row.id).catch((error) => {
+        showNotice(error.message, "error");
+      });
+    });
+    appendOperatorActions(card, row);
     host.append(card);
   });
 }
@@ -305,6 +562,7 @@ function resetCreateForm() {
 function openCreatePanel() {
   resetCreateForm();
   createPanelElement?.classList.remove("hidden");
+  createPanelElement?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function openEditPanel(row) {
@@ -347,15 +605,21 @@ async function openDetail(id) {
   selected = data;
   document.querySelector("#detail-panel")?.classList.remove("hidden");
   document.querySelector("#detail-title").textContent = data.titulo;
+  const detailOptions = {
+    overdue: isOverdue(data),
+    statusLabel: STATUS_LABEL[data.status] || data.status,
+  };
+  const lead = document.querySelector("#detail-lead");
   const body = document.querySelector("#detail-body");
-  body.replaceChildren(
-    render.buildDetail(data, {
-      overdue: isOverdue(data),
-      statusLabel: STATUS_LABEL[data.status] || data.status,
-    }),
-  );
+  if (lead instanceof HTMLElement && typeof render.buildDetailLead === "function") {
+    lead.replaceChildren(render.buildDetailLead(data, detailOptions));
+    body.replaceChildren(render.buildDetailSummary(data, detailOptions));
+  } else {
+    body.replaceChildren(render.buildDetail(data, detailOptions));
+  }
   renderActions(data);
   await Promise.all([loadHistorico(data.id), loadFotos(data.id)]);
+  document.querySelector("#detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function addAction(host, label, handler, variant) {
@@ -395,7 +659,7 @@ function renderActions(row) {
         p_motivo: motivo,
       });
       await afterMutation();
-    }, "secondary");
+    });
     addAction(host, "Enviar para validação", () => act("demandas_enviar_validacao", true));
   }
   if (canExecute(row) && row.status === "pausada") {
@@ -583,6 +847,8 @@ function isMinhasEscopo() {
 
 function applyPageChrome() {
   const minhas = isMinhasEscopo();
+  document.body.classList.toggle("demandas-escopo-minhas", minhas);
+  document.body.classList.toggle("demandas-escopo-gestao", !minhas);
   document.title = minhas ? "Yes Hotel — Minhas demandas" : "Yes Hotel — Demandas";
   const title = document.querySelector("#demandas-page-title");
   const listHeading = document.querySelector("#demandas-list-heading");
@@ -603,6 +869,71 @@ function applyPageChrome() {
     navTodas?.setAttribute("aria-current", "page");
     navMinhas?.removeAttribute("aria-current");
   }
+  document.querySelector("#kpis-gestao")?.classList.toggle("hidden", minhas);
+  document.querySelector("#kpis-minhas")?.classList.toggle("hidden", !minhas);
+  document.querySelector("#btn-nova")?.classList.toggle("hidden", minhas);
+  document.querySelectorAll("[data-filter]").forEach((node) => {
+    const key = node.getAttribute("data-filter");
+    const keep = minhas ? key === "status" || key === "prioridade" : true;
+    node.classList.toggle("hidden", !keep);
+  });
+}
+
+function syncGestaoKpiHighlight() {
+  const status = document.querySelector("#filter-status")?.value;
+  const atraso = document.querySelector("#filter-atraso")?.value;
+  let active = "total";
+  if (atraso === "vencida") {
+    active = "vencidas";
+  } else if (status === "em_andamento" && !atraso) {
+    active = "andamento";
+  } else if (status === "aguardando_validacao" && !atraso) {
+    active = "validacao";
+  }
+  document.querySelectorAll("#kpis-gestao .demandas-kpi").forEach((button) => {
+    button.classList.toggle("is-active", button.getAttribute("data-kpi") === active);
+  });
+}
+
+function applyGestaoKpi(key) {
+  const statusEl = document.querySelector("#filter-status");
+  const atrasoEl = document.querySelector("#filter-atraso");
+  if (key === "total") {
+    if (statusEl instanceof HTMLSelectElement) {
+      statusEl.value = "";
+    }
+    if (atrasoEl instanceof HTMLSelectElement) {
+      atrasoEl.value = "";
+    }
+  } else if (key === "andamento") {
+    if (statusEl instanceof HTMLSelectElement) {
+      statusEl.value = "em_andamento";
+    }
+    if (atrasoEl instanceof HTMLSelectElement) {
+      atrasoEl.value = "";
+    }
+  } else if (key === "validacao") {
+    if (statusEl instanceof HTMLSelectElement) {
+      statusEl.value = "aguardando_validacao";
+    }
+    if (atrasoEl instanceof HTMLSelectElement) {
+      atrasoEl.value = "";
+    }
+  } else if (key === "vencidas") {
+    if (atrasoEl instanceof HTMLSelectElement) {
+      atrasoEl.value = "vencida";
+    }
+  }
+  renderList();
+}
+
+function applyMinhasKpi(key) {
+  minhasKpi = minhasKpi === key ? null : key;
+  const statusEl = document.querySelector("#filter-status");
+  if (minhasKpi && statusEl instanceof HTMLSelectElement) {
+    statusEl.value = "";
+  }
+  renderList();
 }
 
 async function init() {
@@ -647,16 +978,42 @@ document.querySelector("#logout-button")?.addEventListener("click", async () => 
   window.location.href = "./usuarios-login-mvp.html";
 });
 
-["filter-tipo", "filter-prioridade", "filter-status", "filter-atraso"].forEach(
+["filter-tipo", "filter-prioridade", "filter-status", "filter-atraso", "filter-executor"].forEach(
   (id) => {
-    document.querySelector(`#${id}`)?.addEventListener("change", renderList);
+    document.querySelector(`#${id}`)?.addEventListener("change", () => {
+      if (id === "filter-status" && isMinhasEscopo()) {
+        minhasKpi = null;
+      }
+      renderList();
+    });
   },
 );
+
+document.querySelector("#filter-busca")?.addEventListener("input", renderList);
+
+document.querySelector("#kpis-gestao")?.addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest("[data-kpi]") : null;
+  if (!button) {
+    return;
+  }
+  applyGestaoKpi(button.getAttribute("data-kpi"));
+});
+
+document.querySelector("#kpis-minhas")?.addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest("[data-kpi]") : null;
+  if (!button) {
+    return;
+  }
+  applyMinhasKpi(button.getAttribute("data-kpi"));
+});
 
 document.querySelector('[name="supervisor_id"]')?.addEventListener("change", syncAssigneeSelects);
 document.querySelector('[name="executor_id"]')?.addEventListener("change", syncAssigneeSelects);
 
 document.querySelector("#btn-nova")?.addEventListener("click", () => {
+  openCreatePanel();
+});
+document.querySelector("#demandas-empty-create")?.addEventListener("click", () => {
   openCreatePanel();
 });
 document.querySelector("#btn-cancelar-criar")?.addEventListener("click", () => {
