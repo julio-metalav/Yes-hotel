@@ -84,8 +84,12 @@ Headers Datashare (preencher após confirmação HITS):
 1. Montar body `AccessSecret`: `secret`, `propertyId`, `scopes` (ex.: `["WebCheckIn"]`)
 2. `POST /Authorize` com header `X-API-VERSION`
 3. Receber `AccessToken`: `token`, `party`
-4. Guardar token **somente em memória**
+4. Guardar token **somente em memória**, com `obtainedAtMs`
 5. Chamadas Datashare: `Authorization: Bearer <token>` + headers de contexto
+6. Reutilizar a sessão só enquanto `now - obtainedAtMs < 3h45` (validade oficial: 4 horas; margem preventiva de 15 minutos)
+7. No limite ou após 3h45, descartar a sessão e fazer novo `POST /Authorize`
+8. HTTP 401 invalida a sessão em memória e **não** repete a operação que falhou; a próxima requisição independente autoriza de novo
+9. Chamadas concorrentes sem sessão compartilham a mesma autorização em andamento
 
 Token/secret nunca são logados, persistidos ou retornados em erros.
 
@@ -135,6 +139,8 @@ Além disso, o cliente bloqueia mutação enquanto `checkInBodyContractStatus ==
 - Erros sanitizados (`HitsError` / `sanitizeUnknown`)
 - Transporte com timeout, AbortController, retry só em 429/5xx/timeout
 - Sem retry em 400/401/403/409
+- POST/PUT de hóspedes: `maxRetries: 0` (sem retry automático, inclusive após 401)
+- Token Bearer: validade oficial 4 horas; renovação preventiva aos 3h45; 401 invalida a sessão
 
 ## O que ainda falta (depende da HITS)
 

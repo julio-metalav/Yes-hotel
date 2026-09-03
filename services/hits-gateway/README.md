@@ -59,7 +59,20 @@ Se o tenant não for `develop`, a escrita permanece bloqueada **mesmo com a flag
 
 O tenant do Sandbox HITS é `develop`. `dev` **não** é aceito: além de não liberar a escrita, `HITS_TENANT_NAME=dev` faz a própria HITS rejeitar as leituras (comprovado em HOMO: `GET /v1/reservations/{id}` retorna 502 `hits_server_error` com `dev` e 200 com `develop`).
 
-POST e PUT para o HITS usam `maxRetries: 0` (sem retry automático).
+## Ciclo de vida do token HITS
+
+A HITS informa que o Bearer vale **quatro horas**. O cliente do gateway:
+
+- grava `obtainedAtMs` na sessão em memória;
+- **consulta** essa idade antes de cada chamada autenticada;
+- reutiliza o token só dentro de uma janela segura de **3h45** (margem de 15 minutos);
+- no limite ou após 3h45, descarta a sessão e faz novo `POST /Authorize`;
+- ao receber HTTP 401 da HITS, invalida imediatamente a sessão e **não** repete a operação que falhou;
+- a próxima requisição independente obtém um token novo;
+- chamadas concorrentes sem sessão compartilham a mesma autorização em andamento;
+- falha de autorização limpa a promessa/sessão para uma tentativa futura independente.
+
+POST e PUT para o HITS usam `maxRetries: 0` (sem retry automático), inclusive após 401.
 Em sucesso, o gateway **não** reencaminha o JSON do HITS; responde só `{ "ok": true, "request_id": "..." }`.
 
 Roteiro de homologação sandbox: [HOMOLOGACAO-PAX.md](./HOMOLOGACAO-PAX.md).

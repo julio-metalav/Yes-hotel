@@ -8,7 +8,7 @@ import {
   hitsConfigStatus,
   type HitsConfig,
 } from "./config.ts";
-import { HitsError, assertNoSensitiveLeak } from "./errors.ts";
+import { HitsApiError, HitsError, assertNoSensitiveLeak } from "./errors.ts";
 import {
   createHitsTransport,
   type HitsFetch,
@@ -38,12 +38,35 @@ import {
   HITS_WEBCHECKIN_GUESTS_PUT_PATH,
 } from "./types.ts";
 
+/** Validade oficial informada pela HITS para o Bearer. */
+export const HITS_TOKEN_OFFICIAL_TTL_MS = 4 * 60 * 60 * 1000;
+/** Margem preventiva antes do vencimento oficial. */
+export const HITS_SESSION_RENEW_MARGIN_MS = 15 * 60 * 1000;
+/** Janela segura de reuso: 3h45 desde `obtainedAtMs`. */
+export const HITS_SESSION_SAFE_TTL_MS =
+  HITS_TOKEN_OFFICIAL_TTL_MS - HITS_SESSION_RENEW_MARGIN_MS;
+
+export function isHitsSessionWithinSafeWindow(
+  obtainedAtMs: number,
+  nowMs: number,
+): boolean {
+  if (!Number.isFinite(obtainedAtMs) || !Number.isFinite(nowMs)) return false;
+  if (nowMs < obtainedAtMs) return false;
+  return nowMs - obtainedAtMs < HITS_SESSION_SAFE_TTL_MS;
+}
+
+function isHitsHttpUnauthorized(error: unknown): boolean {
+  return error instanceof HitsApiError && error.status === 401;
+}
+
 export interface HitsClientOptions {
   config?: HitsConfig;
   transport?: HitsTransport;
   fetchImpl?: HitsFetch;
   /** Se true, permite logs de debug SEM secret/token. */
   debug?: boolean;
+  /** Relógio injetável para testes determinísticos do ciclo de vida. */
+  now?: () => number;
 }
 
 function buildAuthorizeBody(config: HitsConfig): HitsAccessSecret {
@@ -81,8 +104,11 @@ export class HitsClient {
   private readonly config: HitsConfig;
   private readonly transport: HitsTransport;
   private readonly debug: boolean;
+  private readonly now: () => number;
   /** Token somente em memória. */
   private session: HitsSessionToken | null = null;
+  /** Autorização em andamento — chamadas concorrentes compartilham a mesma Promise. */
+  private authorizeInFlight: Promise<HitsSessionToken> | null = null;
 
   constructor(options: HitsClientOptions = {}) {
     this.config = options.config ?? getHitsConfig();
@@ -90,6 +116,17 @@ export class HitsClient {
       options.transport ??
       createHitsTransport(options.fetchImpl ?? fetch);
     this.debug = options.debug === true;
+    this.now = options.now ?? (() => Date.now());
+  }
+
+  private invalidateSession(usedSession?: HitsSessionToken): void {
+    if (usedSession && this.session !== usedSession) return;
+    this.session = null;
+  }
+
+  private isCurrentSessionReusable(): boolean {
+    if (!this.session?.token) return false;
+    return isHitsSessionWithinSafeWindow(this.session.obtainedAtMs, this.now());
   }
 
   getStatus(): HitsIntegrationStatus {
@@ -223,31 +260,68 @@ export class HitsClient {
     });
 
     const token = parseAccessToken(res.body);
-    this.session = {
-      token: token.token,
-      party: token.party,
-      obtainedAtMs: Date.now(),
-    };
     assertNoSensitiveLeak(
       { ok: true, party: token.party },
       [this.config.sharedAccessSecret, token.token],
     );
+    this.session = {
+      token: token.token,
+      party: token.party,
+      obtainedAtMs: this.now(),
+    };
     this.debugSafe("authorize.success", { party: token.party });
     return token;
   }
 
   private async ensureSession(): Promise<HitsSessionToken> {
-    if (this.session?.token) return this.session;
-    await this.authorize();
-    if (!this.session) {
-      throw new HitsError({
-        code: "unauthorized",
-        message: "Sessão HITS indisponível após authorize.",
-        httpStatus: null,
-        retryable: false,
-      });
+    if (this.isCurrentSessionReusable()) {
+      return this.session as HitsSessionToken;
     }
-    return this.session;
+    this.invalidateSession();
+
+    if (this.authorizeInFlight) {
+      return this.authorizeInFlight;
+    }
+
+    const pending = this.authorize()
+      .then(() => {
+        if (!this.session?.token) {
+          throw new HitsError({
+            code: "unauthorized",
+            message: "Sessão HITS indisponível após authorize.",
+            httpStatus: null,
+            retryable: false,
+          });
+        }
+        return this.session;
+      })
+      .finally(() => {
+        if (this.authorizeInFlight === pending) {
+          this.authorizeInFlight = null;
+        }
+      });
+
+    this.authorizeInFlight = pending;
+    return pending;
+  }
+
+  /**
+   * Executa uma chamada autenticada. HTTP 401 invalida a sessão usada
+   * por esta requisição (por identidade do objeto) e não repete a
+   * operação que falhou.
+   */
+  private async requestWithSession<T>(
+    execute: (session: HitsSessionToken) => Promise<T>,
+  ): Promise<T> {
+    const session = await this.ensureSession();
+    try {
+      return await execute(session);
+    } catch (error) {
+      if (isHitsHttpUnauthorized(error)) {
+        this.invalidateSession(session);
+      }
+      throw error;
+    }
   }
 
   async healthCheck(): Promise<{ ok: boolean; httpStatus: number; body: unknown }> {
@@ -269,18 +343,19 @@ export class HitsClient {
     this.assertIntegrationEnabled("listProperties");
     this.assertAuthContract();
     this.assertSecretAndProperty();
-    const session = await this.ensureSession();
 
     const qs = new URLSearchParams();
     if (params?.since) qs.set("Since", params.since);
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
 
-    const res = await this.transport.request({
-      method: "GET",
-      url: `${this.config.apiBaseUrl}/Datashare/Properties${suffix}`,
-      headers: this.authenticatedHeaders(session.token),
-      timeoutMs: this.config.requestTimeoutMs,
-    });
+    const res = await this.requestWithSession((session) =>
+      this.transport.request({
+        method: "GET",
+        url: `${this.config.apiBaseUrl}/Datashare/Properties${suffix}`,
+        headers: this.authenticatedHeaders(session.token),
+        timeoutMs: this.config.requestTimeoutMs,
+      }),
+    );
 
     if (Array.isArray(res.body)) return res.body as HitsProperty[];
     if (res.body && typeof res.body === "object") {
@@ -297,7 +372,6 @@ export class HitsClient {
     this.assertIntegrationEnabled("listWebCheckinReservations");
     this.assertAuthContract();
     this.assertSecretAndProperty();
-    const session = await this.ensureSession();
 
     const qs = new URLSearchParams();
     if (params.type !== undefined) qs.set("Type", String(params.type));
@@ -310,12 +384,14 @@ export class HitsClient {
     if (params.page !== undefined) qs.set("Page", String(params.page));
     if (params.size !== undefined) qs.set("Size", String(params.size));
 
-    const res = await this.transport.request({
-      method: "GET",
-      url: `${this.config.apiBaseUrl}/Datashare/WebCheckinOut/Reservations?${qs.toString()}`,
-      headers: this.authenticatedHeaders(session.token),
-      timeoutMs: this.config.requestTimeoutMs,
-    });
+    const res = await this.requestWithSession((session) =>
+      this.transport.request({
+        method: "GET",
+        url: `${this.config.apiBaseUrl}/Datashare/WebCheckinOut/Reservations?${qs.toString()}`,
+        headers: this.authenticatedHeaders(session.token),
+        timeoutMs: this.config.requestTimeoutMs,
+      }),
+    );
 
     return res.body as HitsReservationListResponse;
   }
@@ -335,13 +411,14 @@ export class HitsClient {
       });
     }
 
-    const session = await this.ensureSession();
-    const res = await this.transport.request({
-      method: "GET",
-      url: `${this.config.apiBaseUrl}/Datashare/WebCheckinOut/Reservation/${encodeURIComponent(id)}`,
-      headers: this.authenticatedHeaders(session.token),
-      timeoutMs: this.config.requestTimeoutMs,
-    });
+    const res = await this.requestWithSession((session) =>
+      this.transport.request({
+        method: "GET",
+        url: `${this.config.apiBaseUrl}/Datashare/WebCheckinOut/Reservation/${encodeURIComponent(id)}`,
+        headers: this.authenticatedHeaders(session.token),
+        timeoutMs: this.config.requestTimeoutMs,
+      }),
+    );
 
     return res.body as HitsReservationDetails;
   }
@@ -352,7 +429,6 @@ export class HitsClient {
     this.assertIntegrationEnabled("listRevenueManagementGuests");
     this.assertAuthContract();
     this.assertSecretAndProperty();
-    const session = await this.ensureSession();
 
     const qs = new URLSearchParams();
     if (params.entityId) qs.set("EntityId", params.entityId);
@@ -364,12 +440,14 @@ export class HitsClient {
     if (params.size !== undefined) qs.set("Size", String(params.size));
     const suffix = qs.size > 0 ? `?${qs.toString()}` : "";
 
-    const res = await this.transport.request({
-      method: "GET",
-      url: `${this.config.apiBaseUrl}/Datashare/RevenueManagement/Guests${suffix}`,
-      headers: this.authenticatedHeaders(session.token),
-      timeoutMs: this.config.requestTimeoutMs,
-    });
+    const res = await this.requestWithSession((session) =>
+      this.transport.request({
+        method: "GET",
+        url: `${this.config.apiBaseUrl}/Datashare/RevenueManagement/Guests${suffix}`,
+        headers: this.authenticatedHeaders(session.token),
+        timeoutMs: this.config.requestTimeoutMs,
+      }),
+    );
 
     return res.body as HitsGuestListResponse;
   }
@@ -396,15 +474,16 @@ export class HitsClient {
       });
     }
 
-    const session = await this.ensureSession();
-    const res = await this.transport.request({
-      method: "POST",
-      url: `${this.config.apiBaseUrl}${hitsWebCheckinGuestsPostPath(id)}`,
-      headers: this.authenticatedHeaders(session.token),
-      body,
-      timeoutMs: this.config.requestTimeoutMs,
-      maxRetries: 0,
-    });
+    const res = await this.requestWithSession((session) =>
+      this.transport.request({
+        method: "POST",
+        url: `${this.config.apiBaseUrl}${hitsWebCheckinGuestsPostPath(id)}`,
+        headers: this.authenticatedHeaders(session.token),
+        body,
+        timeoutMs: this.config.requestTimeoutMs,
+        maxRetries: 0,
+      }),
+    );
 
     return res.body;
   }
@@ -416,16 +495,17 @@ export class HitsClient {
     this.assertIntegrationEnabled("putWebCheckinGuests");
     this.assertAuthContract();
     this.assertSecretAndProperty();
-    const session = await this.ensureSession();
 
-    const res = await this.transport.request({
-      method: "PUT",
-      url: `${this.config.apiBaseUrl}${HITS_WEBCHECKIN_GUESTS_PUT_PATH}`,
-      headers: this.authenticatedHeaders(session.token),
-      body,
-      timeoutMs: this.config.requestTimeoutMs,
-      maxRetries: 0,
-    });
+    const res = await this.requestWithSession((session) =>
+      this.transport.request({
+        method: "PUT",
+        url: `${this.config.apiBaseUrl}${HITS_WEBCHECKIN_GUESTS_PUT_PATH}`,
+        headers: this.authenticatedHeaders(session.token),
+        body,
+        timeoutMs: this.config.requestTimeoutMs,
+        maxRetries: 0,
+      }),
+    );
 
     return res.body;
   }
@@ -470,16 +550,17 @@ export class HitsClient {
     }
 
     this.assertSecretAndProperty();
-    const session = await this.ensureSession();
 
     // Swagger atual: POST sem requestBody; resposta CheckInDto.
-    const res = await this.transport.request({
-      method: "POST",
-      url: `${this.config.apiBaseUrl}/Datashare/Folios/${encodeURIComponent(id)}/CheckIn`,
-      headers: this.authenticatedHeaders(session.token),
-      timeoutMs: this.config.requestTimeoutMs,
-      maxRetries: 0,
-    });
+    const res = await this.requestWithSession((session) =>
+      this.transport.request({
+        method: "POST",
+        url: `${this.config.apiBaseUrl}/Datashare/Folios/${encodeURIComponent(id)}/CheckIn`,
+        headers: this.authenticatedHeaders(session.token),
+        timeoutMs: this.config.requestTimeoutMs,
+        maxRetries: 0,
+      }),
+    );
 
     return (res.body ?? {}) as HitsCheckInResult;
   }

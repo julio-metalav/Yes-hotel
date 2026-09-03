@@ -23,7 +23,10 @@ export interface HitsAccessToken {
   party: string;
 }
 
-/** Token em memória (nunca persistir / logar / expor em erro). */
+/**
+ * Token em memória (nunca persistir / logar / expor em erro).
+ * `obtainedAtMs` é consultado na renovação preventiva (janela segura < 4h).
+ */
 export interface HitsSessionToken {
   token: string;
   party: string;

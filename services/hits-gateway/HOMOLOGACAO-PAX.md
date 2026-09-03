@@ -52,7 +52,7 @@ Destino HITS: `POST /Datashare/WebCheckinOut/Guests/{reservationId}`.
 
 - `reservationId` só no path. Não enviar `idEntity`.
 - `name` obrigatório. `doc`+`docType` juntos; `contact`+`contactType` juntos.
-- Sem retry automático.
+- Sem retry automático (nem após HTTP 401 da HITS; 401 invalida a sessão em memória).
 
 Esperado: `200` com `{"ok":true,"request_id":"..."}`. O body do HITS não é reencaminhado. `403 guest_write_disabled` = trava ainda desligada. `401` = token ausente/errado.
 
@@ -81,6 +81,7 @@ curl -sS -D - \
 Destino HITS: `PUT /Datashare/WebCheckinOut/Guests`.
 
 Obrigatório: `idEntity` e `idReservation` inteiros positivos, e ao menos um campo de atualização.
+Sem retry automático (nem após HTTP 401 da HITS; 401 invalida a sessão em memória).
 
 Esperado: `200` com `{"ok":true,"request_id":"..."}`. Sem PAX, documento, contato ou JSON upstream. `422 hits_validation_failed` = HITS 400. `409 hits_conflict` = conflito HITS.
 
