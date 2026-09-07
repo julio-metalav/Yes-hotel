@@ -17,3 +17,7 @@ homologacao/
 # Sandbox / artefatos temporários locais (não versionar)
 tmp/
 
+
+# Artefatos Python gerados (scripts/extract-management-pdfs.py)
+__pycache__/
+*.pyc
