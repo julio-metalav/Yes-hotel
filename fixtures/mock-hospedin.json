@@ -1,0 +1,41 @@
+{
+  "reservations": [
+    {
+      "id": "HOSP-RES-1001",
+      "codigo": "RES-1001",
+      "status": "cancelled",
+      "cancelled": true,
+      "check_in": "2026-04-11",
+      "check_out": "2026-04-14",
+      "created_at": "2026-04-10T12:00:00Z",
+      "updated_at": "2026-04-10T13:00:00Z",
+      "room_id": "APT-12",
+      "room_name": "Apartamento 12",
+      "unit_code": "APT-12",
+      "payment_status": "refunded",
+      "payment_amount": 1350.00,
+      "currency": "BRL",
+      "main_guest": {
+        "id": "HOSP-GUEST-5001",
+        "name": "Ana Paula Souza"
+      },
+      "guests": [
+        {
+          "id": "HOSP-GUEST-5001",
+          "is_main": true,
+          "name": "Ana Paula Souza"
+        },
+        {
+          "id": "HOSP-GUEST-5002",
+          "is_main": false,
+          "name": "Bruno Carvalho Souza"
+        },
+        {
+          "id": "HOSP-GUEST-5003",
+          "is_main": false,
+          "name": "Carla Menezes Souza"
+        }
+      ]
+    }
+  ]
+}
