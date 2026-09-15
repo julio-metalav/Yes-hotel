@@ -27,6 +27,10 @@ function config(patch: Partial<HitsGatewayReadConfig> = {}): HitsGatewayReadConf
     token: TOKEN,
     requestTimeoutMs: 5_000,
     enabled: true,
+    environment: "sandbox",
+    productionEnabled: false,
+    reservationType: 0,
+    reservationStatus: 1,
     ...patch,
   };
 }
@@ -239,6 +243,119 @@ async function main() {
       /HITS_GATEWAY_READ_ENABLED/,
     );
     ok("flag desligada não chega a tocar a rede");
+  }
+
+  console.log("\n== Ambiente e trava de produção ==");
+  {
+    // Ausência das novas envs tem de preservar exatamente o comportamento atual.
+    const cfg = getHitsGatewayReadConfig({
+      HITS_GATEWAY_URL: "https://hits-homo.example",
+      HITS_GATEWAY_TOKEN: TOKEN,
+      HITS_GATEWAY_READ_ENABLED: "true",
+    });
+    assert.equal(cfg.environment, "sandbox");
+    assert.equal(cfg.productionEnabled, false);
+    assert.equal(cfg.reservationType, 0);
+    assert.equal(cfg.reservationStatus, 1);
+    assert.equal(assertHitsGatewayReadReady(cfg).ok, true);
+    ok("sem as novas envs: sandbox, Type=0, Status=1 — comportamento atual");
+  }
+  {
+    const cfg = getHitsGatewayReadConfig({
+      HITS_GATEWAY_URL: "https://hits-prod.example",
+      HITS_GATEWAY_TOKEN: TOKEN,
+      HITS_GATEWAY_READ_ENABLED: "true",
+      HITS_ENVIRONMENT: "production",
+    });
+    const gate = assertHitsGatewayReadReady(cfg);
+    assert.equal(gate.ok, false);
+    assert.equal(gate.ok === false && gate.reason, "hits_production_not_enabled");
+    ok("production sem HITS_PRODUCTION_ENABLED=true é bloqueado");
+  }
+  {
+    const cfg = getHitsGatewayReadConfig({
+      HITS_GATEWAY_URL: "https://hits-prod.example",
+      HITS_GATEWAY_TOKEN: TOKEN,
+      HITS_GATEWAY_READ_ENABLED: "true",
+      HITS_ENVIRONMENT: "production",
+      HITS_PRODUCTION_ENABLED: "true",
+    });
+    assert.equal(cfg.environment, "production");
+    assert.equal(assertHitsGatewayReadReady(cfg).ok, true);
+    ok("production explicitamente habilitado é aceito");
+  }
+  {
+    // Só o literal exato liga; qualquer outra coisa permanece seguro.
+    for (const raw of ["", "prod", "PRODUCTION ", "1", "yes"]) {
+      const cfg = getHitsGatewayReadConfig({
+        HITS_GATEWAY_URL: "https://hits-homo.example",
+        HITS_GATEWAY_TOKEN: TOKEN,
+        HITS_GATEWAY_READ_ENABLED: "true",
+        HITS_ENVIRONMENT: raw,
+      });
+      const esperado = raw.trim().toLowerCase() === "production" ? "production" : "sandbox";
+      assert.equal(cfg.environment, esperado, `HITS_ENVIRONMENT="${raw}"`);
+    }
+    for (const raw of ["", "false", "TRUE", "1", "sim"]) {
+      const cfg = getHitsGatewayReadConfig({
+        HITS_PRODUCTION_ENABLED: raw,
+      });
+      assert.equal(cfg.productionEnabled, false, `HITS_PRODUCTION_ENABLED="${raw}"`);
+    }
+    ok("trava de produção só cede ao valor exato");
+  }
+  {
+    const sandbox = assertHitsGatewayReadReady(
+      config({ baseUrl: "http://167.172.2.24:3001" }),
+    );
+    assert.equal(sandbox.ok === false && sandbox.reason, "gateway_forbidden_host");
+
+    const prod = assertHitsGatewayReadReady(
+      config({
+        baseUrl: "http://167.172.2.24:3001",
+        environment: "production",
+        productionEnabled: true,
+      }),
+    );
+    assert.equal(prod.ok, true, "produção liberada não é barrada pelo host");
+    ok("host de produção: recusado em sandbox, liberado em produção habilitada");
+  }
+  {
+    const cfg = getHitsGatewayReadConfig({
+      HITS_RESERVATION_TYPE: "2",
+      HITS_RESERVATION_STATUS: "3",
+    });
+    assert.equal(cfg.reservationType, 2);
+    assert.equal(cfg.reservationStatus, 3);
+
+    // Valor fora do contrato cai no default em vez de ir para a HITS.
+    const invalido = getHitsGatewayReadConfig({
+      HITS_RESERVATION_TYPE: "9",
+      HITS_RESERVATION_STATUS: "0",
+    });
+    assert.equal(invalido.reservationType, 0);
+    assert.equal(invalido.reservationStatus, 1);
+    ok("Type/Status customizados valem; fora do contrato cai no default");
+  }
+  {
+    const calls: Call[] = [];
+    await fetchHitsSandboxReservations({
+      config: config({ reservationType: 2, reservationStatus: 3 }),
+      fetchImpl: fakeFetch({ "/v1/reservations": { body: { data: [] } } }, calls),
+      nowIso: "2026-09-15T00:00:00.000Z",
+    });
+    assert.match(calls[0]!.url, /(^|[?&])Type=2([&]|$)/);
+    assert.match(calls[0]!.url, /(^|[?&])Status=3([&]|$)/);
+    ok("a query usa os filtros da config");
+  }
+  {
+    const status = hitsGatewayReadStatus(config());
+    assert.equal(status.environment, "sandbox");
+    assert.equal(status.production_enabled, false);
+    assert.equal(status.reservation_type, 0);
+    assert.equal(status.reservation_status, 1);
+    assert.equal(JSON.stringify(status).includes(TOKEN), false);
+    ok("status expõe ambiente e filtros, nunca o token");
   }
 
   console.log("\n== Paginação ==");

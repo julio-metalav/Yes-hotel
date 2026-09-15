@@ -48,6 +48,10 @@ function denoEnv(): Record<string, string | undefined> {
     "HITS_GATEWAY_TOKEN",
     "HITS_GATEWAY_READ_ENABLED",
     "HITS_GATEWAY_TIMEOUT_MS",
+    "HITS_ENVIRONMENT",
+    "HITS_PRODUCTION_ENABLED",
+    "HITS_RESERVATION_TYPE",
+    "HITS_RESERVATION_STATUS",
   ];
   const env: Record<string, string | undefined> = {};
   for (const k of keys) env[k] = Deno.env.get(k) ?? undefined;
@@ -72,7 +76,9 @@ Deno.serve(async (req: Request) => {
         message: gate.message,
         gateway: hitsGatewayReadStatus(config),
       },
-      gate.reason === "gateway_read_disabled" ? 403 : 503,
+      gate.reason === "gateway_read_disabled" || gate.reason === "hits_production_not_enabled"
+        ? 403
+        : 503,
     );
   }
 

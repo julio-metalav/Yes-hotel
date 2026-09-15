@@ -36,6 +36,9 @@ export const HITS_GATEWAY_MAX_PAGE_SIZE = 100;
  * Type=0 é o que a tela de chegadas quer: reservas por data de entrada.
  */
 export const HITS_LIST_TYPE_CHECKIN_DATE = 0;
+/** Valores aceitos pelo contrato HITS (docs/YES_HOTEL_CONTRATO_TECNICO_HITS_V1.md §6.1). */
+export const HITS_LIST_TYPES = [0, 1, 2] as const;
+export const HITS_LIST_STATUSES = [1, 2, 3, 4] as const;
 /**
  * `Status` é obrigatório: omitido, o HITS faz bind para 0 (fora do enum) e
  * responde 400 `The field Status is invalid.`
@@ -55,8 +58,16 @@ export const HITS_LIST_MAX_PAGES = 10;
  */
 export const HITS_LIST_MAX_RESERVATIONS = 50;
 
-/** Host de produção — proibido nesta etapa. */
+/**
+ * Hosts de produção conhecidos. Continuam recusados enquanto o ambiente for
+ * sandbox — falar com produção a partir do sandbox é erro grave, não conveniência.
+ * Em `HITS_ENVIRONMENT=production` com a trava liberada, deixam de ser bloqueados.
+ */
 export const HITS_GATEWAY_FORBIDDEN_HOSTS = ["167.172.2.24"] as const;
+
+export type HitsEnvironment = "sandbox" | "production";
+
+export const HITS_ENVIRONMENT_DEFAULT: HitsEnvironment = "sandbox";
 
 /** Leitura tolera um retry de 429/5xx; nenhuma mutação existe aqui. */
 const READ_MAX_RETRIES = 1;
@@ -68,6 +79,14 @@ export interface HitsGatewayReadConfig {
   token: string;
   requestTimeoutMs: number;
   enabled: boolean;
+  /** Ambiente HITS alvo. Default sandbox — produção exige opt-in explícito. */
+  environment: HitsEnvironment;
+  /** Trava de produção: só `true` exato libera `environment=production`. */
+  productionEnabled: boolean;
+  /** Filtro Type da listagem. Default 0 (data de check-in). */
+  reservationType: (typeof HITS_LIST_TYPES)[number];
+  /** Filtro Status da listagem. Default 1 (Confirmed). */
+  reservationStatus: (typeof HITS_LIST_STATUSES)[number];
 }
 
 export type HitsGatewayEnv = Record<string, string | undefined>;
@@ -85,12 +104,39 @@ function parseTimeoutMs(raw: string): number {
   return Math.floor(n);
 }
 
+/** Só o literal "production" muda o ambiente; qualquer outra coisa é sandbox. */
+function parseEnvironment(raw: string): HitsEnvironment {
+  return raw.trim().toLowerCase() === "production" ? "production" : HITS_ENVIRONMENT_DEFAULT;
+}
+
+function parseEnumOr<T extends number>(
+  raw: string,
+  allowed: readonly T[],
+  fallback: T,
+): T {
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return (allowed as readonly number[]).includes(n) ? (n as T) : fallback;
+}
+
 export function getHitsGatewayReadConfig(env: HitsGatewayEnv): HitsGatewayReadConfig {
   return {
     baseUrl: read(env, "HITS_GATEWAY_URL").replace(/\/+$/, ""),
     token: read(env, "HITS_GATEWAY_TOKEN"),
     requestTimeoutMs: parseTimeoutMs(read(env, "HITS_GATEWAY_TIMEOUT_MS")),
     enabled: read(env, "HITS_GATEWAY_READ_ENABLED") === "true",
+    environment: parseEnvironment(read(env, "HITS_ENVIRONMENT")),
+    productionEnabled: read(env, "HITS_PRODUCTION_ENABLED") === "true",
+    reservationType: parseEnumOr(
+      read(env, "HITS_RESERVATION_TYPE"),
+      HITS_LIST_TYPES,
+      HITS_LIST_TYPE_CHECKIN_DATE,
+    ),
+    reservationStatus: parseEnumOr(
+      read(env, "HITS_RESERVATION_STATUS"),
+      HITS_LIST_STATUSES,
+      HITS_LIST_STATUS_CONFIRMED,
+    ),
   };
 }
 
@@ -103,7 +149,8 @@ export type HitsGatewayReadReadiness =
         | "gateway_missing_url"
         | "gateway_missing_token"
         | "gateway_invalid_url"
-        | "gateway_forbidden_host";
+        | "gateway_forbidden_host"
+        | "hits_production_not_enabled";
       message: string;
     };
 
@@ -116,6 +163,15 @@ export function assertHitsGatewayReadReady(
       ok: false,
       reason: "gateway_read_disabled",
       message: "HITS_GATEWAY_READ_ENABLED != true",
+    };
+  }
+  // Trava de produção: apontar o ambiente para production não basta, é preciso
+  // liberar explicitamente. Sem isso, nenhuma chamada sai.
+  if (config.environment === "production" && !config.productionEnabled) {
+    return {
+      ok: false,
+      reason: "hits_production_not_enabled",
+      message: "HITS_ENVIRONMENT=production exige HITS_PRODUCTION_ENABLED=true",
     };
   }
   if (!config.baseUrl) {
@@ -146,11 +202,15 @@ export function assertHitsGatewayReadReady(
       message: "HITS_GATEWAY_URL deve usar http(s)",
     };
   }
-  if ((HITS_GATEWAY_FORBIDDEN_HOSTS as readonly string[]).includes(parsed.hostname)) {
+  // Em sandbox, host de produção continua recusado. Em produção liberada, não.
+  if (
+    config.environment !== "production" &&
+    (HITS_GATEWAY_FORBIDDEN_HOSTS as readonly string[]).includes(parsed.hostname)
+  ) {
     return {
       ok: false,
       reason: "gateway_forbidden_host",
-      message: "Host de produção proibido nesta etapa",
+      message: "Host de produção recusado em ambiente sandbox",
     };
   }
 
@@ -163,12 +223,20 @@ export function hitsGatewayReadStatus(config: HitsGatewayReadConfig): {
   has_url: boolean;
   has_token: boolean;
   request_timeout_ms: number;
+  environment: HitsEnvironment;
+  production_enabled: boolean;
+  reservation_type: number;
+  reservation_status: number;
 } {
   return {
     enabled: config.enabled,
     has_url: Boolean(config.baseUrl),
     has_token: Boolean(config.token),
     request_timeout_ms: config.requestTimeoutMs,
+    environment: config.environment,
+    production_enabled: config.productionEnabled,
+    reservation_type: config.reservationType,
+    reservation_status: config.reservationStatus,
   };
 }
 
@@ -329,8 +397,10 @@ export async function fetchHitsSandboxReservations(
     for (let offset = 0; offset < HITS_LIST_MAX_PAGES; offset += 1) {
       const currentPage = page + offset;
       const qs = new URLSearchParams();
-      qs.set("Type", String(HITS_LIST_TYPE_CHECKIN_DATE));
-      qs.set("Status", String(input.status ?? HITS_LIST_STATUS_CONFIRMED));
+      // Filtros vêm da config (env), com os defaults atuais preservados.
+      // O override por chamada continua tendo precedência.
+      qs.set("Type", String(config.reservationType));
+      qs.set("Status", String(input.status ?? config.reservationStatus));
       qs.set("InitialDate", initialDate);
       qs.set("FinalDate", finalDate);
       qs.set("Page", String(currentPage));
