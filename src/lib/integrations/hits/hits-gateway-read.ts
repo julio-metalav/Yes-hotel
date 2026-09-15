@@ -27,6 +27,20 @@ export const HITS_GATEWAY_DEFAULT_TIMEOUT_MS = 12_000;
 export const HITS_GATEWAY_DEFAULT_PAGE_SIZE = 20;
 export const HITS_GATEWAY_MAX_PAGE_SIZE = 100;
 
+/**
+ * A listagem HITS não aceita busca sem critério: `Type` é o que dá sentido ao
+ * intervalo de datas (0 = data de check-in, 1 = inclusão, 2 = atualização —
+ * docs/YES_HOTEL_CONTRATO_TECNICO_HITS_V1.md §6.1). Sem Type e sem janela, o
+ * HITS responde 400 e o gateway devolve hits_bad_request.
+ *
+ * Type=0 é o que a tela de chegadas quer: reservas por data de entrada.
+ */
+export const HITS_LIST_TYPE_CHECKIN_DATE = 0;
+/** Janela default quando o chamador não informa datas. */
+export const HITS_LIST_DEFAULT_WINDOW_DAYS = 30;
+/** Paginação do HITS é 1-based (docs/YES_HOTEL_PLANO_TESTE_AUTENTICADO_HITS_V1.md §5.3). */
+export const HITS_LIST_FIRST_PAGE = 1;
+
 /** Host de produção — proibido nesta etapa. */
 export const HITS_GATEWAY_FORBIDDEN_HOSTS = ["167.172.2.24"] as const;
 
@@ -192,6 +206,8 @@ export type FetchHitsSandboxReservationsInput = {
   size?: number;
   /** Ids explícitos: pula a listagem e busca só esses detalhes. */
   reservationIds?: string[];
+  /** Relógio injetável — só afeta a janela default de datas. */
+  nowIso?: string;
 };
 
 export type FetchHitsSandboxReservationsResult = {
@@ -203,8 +219,25 @@ export type FetchHitsSandboxReservationsResult = {
 };
 
 function clampPage(page: number | undefined): number {
-  if (page == null || !Number.isFinite(page) || page < 0) return 0;
+  if (page == null || !Number.isFinite(page) || page < HITS_LIST_FIRST_PAGE) {
+    return HITS_LIST_FIRST_PAGE;
+  }
   return Math.floor(page);
+}
+
+function addDaysYmd(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y!, m! - 1, d! + days));
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Janela default: a partir de hoje, `HITS_LIST_DEFAULT_WINDOW_DAYS` à frente.
+ * Só é usada quando o chamador não informou nenhuma das duas datas.
+ */
+export function defaultListWindow(nowIso?: string): { from: string; to: string } {
+  const today = (nowIso ? new Date(nowIso) : new Date()).toISOString().slice(0, 10);
+  return { from: today, to: addDaysYmd(today, HITS_LIST_DEFAULT_WINDOW_DAYS) };
 }
 
 function clampSize(size: number | undefined): number {
@@ -251,9 +284,12 @@ export async function fetchHitsSandboxReservations(
       ...new Set(input.reservationIds.map((id) => String(id).trim()).filter(Boolean)),
     ].slice(0, size);
   } else {
+    // Type + janela são obrigatórios na prática: sem eles o HITS devolve 400.
+    const window = defaultListWindow(input.nowIso);
     const qs = new URLSearchParams();
-    if (input.dateFrom) qs.set("InitialDate", input.dateFrom);
-    if (input.dateTo) qs.set("FinalDate", input.dateTo);
+    qs.set("Type", String(HITS_LIST_TYPE_CHECKIN_DATE));
+    qs.set("InitialDate", input.dateFrom || window.from);
+    qs.set("FinalDate", input.dateTo || window.to);
     qs.set("Page", String(page));
     qs.set("Size", String(size));
 

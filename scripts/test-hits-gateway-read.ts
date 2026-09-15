@@ -135,6 +135,46 @@ async function main() {
     assert.match(calls[0]!.url, /InitialDate=2026-09-15/);
     assert.match(calls[0]!.url, /FinalDate=2026-09-30/);
     ok("janela de datas repassada ao gateway");
+
+    assert.match(calls[0]!.url, /(^|[?&])Type=0([&]|$)/);
+    ok("Type=0 sempre enviado — sem ele o HITS responde 400");
+
+    assert.match(calls[0]!.url, /(^|[?&])Page=1([&]|$)/);
+    ok("paginação começa em 1, não em 0");
+  }
+  {
+    // Regressão do bad request em HOMO: sem datas, a query ia sem Type e com
+    // Page=0 — combinação que o HITS recusa.
+    const calls: Call[] = [];
+    await fetchHitsSandboxReservations({
+      config: config(),
+      fetchImpl: fakeFetch(
+        {
+          "/v1/reservations": { body: { data: [] } },
+        },
+        calls,
+      ),
+      nowIso: "2026-09-15T00:00:00.000Z",
+    });
+
+    const url = calls[0]!.url;
+    assert.match(url, /(^|[?&])Type=0([&]|$)/);
+    assert.match(url, /InitialDate=2026-09-15/);
+    assert.match(url, /FinalDate=2026-10-15/);
+    assert.match(url, /(^|[?&])Page=1([&]|$)/);
+    assert.doesNotMatch(url, /Page=0/);
+    ok("sem datas: janela default de 30 dias + Type=0 + Page=1");
+  }
+  {
+    const calls: Call[] = [];
+    await fetchHitsSandboxReservations({
+      config: config(),
+      fetchImpl: fakeFetch({ "/v1/reservations": { body: { data: [] } } }, calls),
+      page: 0,
+      nowIso: "2026-09-15T00:00:00.000Z",
+    });
+    assert.match(calls[0]!.url, /(^|[?&])Page=1([&]|$)/);
+    ok("Page=0 pedido pelo chamador é corrigido para 1");
   }
   {
     const calls: Call[] = [];
