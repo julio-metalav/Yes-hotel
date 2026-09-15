@@ -63,42 +63,105 @@
     if (emptyEl) emptyEl.classList.toggle("hidden", rows.length > 0);
   }
 
-  async function load() {
+  /**
+   * Ciclo de leitura compartilhado.
+   *
+   * Painel técnico e grade operacional consomem a MESMA resposta: duas leituras
+   * concorrentes somavam ~66 requisições ao gateway (1 listagem + 1 detalhe por
+   * reserva, duas vezes) e estouravam o limite de 60/min, derrubando uma delas.
+   */
+  var inflight = null;
+  var cycleResult = null;
+  var cycleListeners = [];
+
+  function notifyCycle(payload) {
+    cycleListeners.forEach(function (fn) {
+      try {
+        fn(payload);
+      } catch (err) {
+        /* um assinante com defeito não pode derrubar os outros */
+      }
+    });
+  }
+
+  /** Assina o fim de cada ciclo. Se já houve um, recebe o resultado na hora. */
+  function onCycle(fn) {
+    if (typeof fn !== "function") return;
+    cycleListeners.push(fn);
+    if (cycleResult) fn(cycleResult);
+  }
+
+  async function requestCycle() {
     var auth = global.YesHotelAuthApp;
     var url = functionsUrl();
     if (!auth || !auth.getEdgeFunctionFetchHeaders || !url) {
-      setStatus("Supabase não configurado nesta build.", true);
-      return;
+      return { ok: false, rows: [], error: "supabase_nao_configurado" };
     }
-
-    if (btn) btn.disabled = true;
-    setStatus("Consultando HITS Sandbox…", false);
     try {
       var headers = await auth.getEdgeFunctionFetchHeaders();
       var res = await global.fetch(url, { method: "GET", headers: headers });
       var data = await res.json().catch(function () {
         return null;
       });
-
       if (!res.ok || !data || data.ok !== true) {
-        var code = (data && (data.error || data.message)) || "HTTP " + res.status;
-        renderRows([]);
-        setStatus("Não foi possível ler o HITS Sandbox (" + code + ").", true);
-        return;
+        return {
+          ok: false,
+          rows: [],
+          error: (data && (data.error || data.message)) || "HTTP " + res.status,
+        };
       }
-
-      renderRows(data.rows || []);
-      var note = "Leitura direta do HITS Sandbox pelo gateway. Nada foi gravado.";
-      if (data.failed && data.failed.length) {
-        note += " " + data.failed.length + " reserva(s) sem detalhe.";
-      }
-      setStatus(note, false);
+      return {
+        ok: true,
+        rows: (data.rows || []).map(toReservaOperacional).filter(function (r) {
+          return r.externalReservationId;
+        }),
+        failed: data.failed || [],
+      };
     } catch (err) {
-      renderRows([]);
-      setStatus("Falha de rede ao consultar o gateway.", true);
-    } finally {
-      if (btn) btn.disabled = false;
+      return { ok: false, rows: [], error: "falha_de_rede" };
     }
+  }
+
+  /**
+   * Uma leitura por ciclo. Chamadas concorrentes compartilham a mesma promise;
+   * `force` inicia um ciclo novo (botão Atualizar / Consultar).
+   */
+  function loadCycle(options) {
+    var force = options && options.force === true;
+    if (inflight) return inflight;
+    if (!force && cycleResult) return Promise.resolve(cycleResult);
+
+    if (btn) btn.disabled = true;
+    setStatus("Consultando HITS Sandbox…", false);
+
+    inflight = requestCycle().then(function (result) {
+      cycleResult = result;
+      inflight = null;
+      if (btn) btn.disabled = false;
+      renderCycle(result);
+      notifyCycle(result);
+      return result;
+    });
+    return inflight;
+  }
+
+  function renderCycle(result) {
+    if (!result.ok) {
+      renderRows([]);
+      setStatus("Não foi possível ler o HITS Sandbox (" + result.error + ").", true);
+      return;
+    }
+    renderRows(result.rows);
+    var note = "Leitura direta do HITS Sandbox pelo gateway. Nada foi gravado.";
+    if (result.failed && result.failed.length) {
+      note += " " + result.failed.length + " reserva(s) sem detalhe.";
+    }
+    setStatus(note, false);
+  }
+
+  /** O painel exibe o que já veio da grade; não dispara leitura própria. */
+  function load() {
+    return loadCycle({ force: true });
   }
 
   if (btn) btn.addEventListener("click", load);
@@ -142,30 +205,19 @@
   }
 
   /**
-   * Busca as reservas do Sandbox e devolve já no formato da listagem.
+   * Reservas do Sandbox no formato da listagem, pelo ciclo compartilhado.
    * Nunca lança: a tela operacional não pode quebrar por causa do HITS.
    */
-  async function fetchReservasOperacionais() {
-    var auth = global.YesHotelAuthApp;
-    var url = functionsUrl();
-    if (!auth || !auth.getEdgeFunctionFetchHeaders || !url) return [];
-    try {
-      var headers = await auth.getEdgeFunctionFetchHeaders();
-      var res = await global.fetch(url, { method: "GET", headers: headers });
-      var data = await res.json().catch(function () {
-        return null;
-      });
-      if (!res.ok || !data || data.ok !== true || !Array.isArray(data.rows)) return [];
-      return data.rows.map(toReservaOperacional).filter(function (r) {
-        return r.externalReservationId;
-      });
-    } catch (err) {
-      return [];
-    }
+  function fetchReservasOperacionais(options) {
+    return loadCycle(options).then(function (result) {
+      return result.rows;
+    });
   }
 
   global.YesHotelHitsSandboxPreview = {
     load: load,
+    loadCycle: loadCycle,
+    onCycle: onCycle,
     fetchReservasOperacionais: fetchReservasOperacionais,
     toReservaOperacional: toReservaOperacional,
     isReadOnlyId: isReadOnlyId,

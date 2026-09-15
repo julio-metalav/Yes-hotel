@@ -19,7 +19,10 @@ const ROOT = resolve(process.cwd());
 type PreviewApi = {
   toReservaOperacional: (row: Record<string, unknown>) => Record<string, unknown>;
   isReadOnlyId: (id: string) => boolean;
-  fetchReservasOperacionais: () => Promise<Array<Record<string, unknown>>>;
+  fetchReservasOperacionais: (options?: {
+    force?: boolean;
+  }) => Promise<Array<Record<string, unknown>>>;
+  onCycle: (fn: (result: { ok: boolean; rows: unknown[] }) => void) => void;
   READ_ONLY_ID_PREFIX: string;
 };
 
@@ -125,6 +128,28 @@ async function main() {
     ok("GET único na Edge, linhas já no formato da listagem");
   }
   {
+    // Painel + grade + KPIs consomem o mesmo ciclo: uma leitura, não duas.
+    let calls = 0;
+    const api = loadPreview(async () => {
+      calls += 1;
+      return jsonResponse({ ok: true, rows: [ROW] });
+    });
+    const [a, b] = await Promise.all([
+      api.fetchReservasOperacionais(),
+      api.fetchReservasOperacionais(),
+    ]);
+    assert.equal(calls, 1, "chamadas concorrentes compartilham a promise");
+    assert.equal(a.length, 1);
+    assert.equal(b.length, 1);
+
+    await api.fetchReservasOperacionais();
+    assert.equal(calls, 1, "sem force, reusa o resultado do ciclo");
+
+    await api.fetchReservasOperacionais({ force: true });
+    assert.equal(calls, 2, "force inicia um ciclo novo");
+    ok("uma única leitura HITS por ciclo, compartilhada");
+  }
+  {
     const api = loadPreview(async () => jsonResponse({ ok: false, error: "x" }, 502));
     assert.equal((await api.fetchReservasOperacionais()).length, 0);
     ok("Edge com erro → lista vazia, a tela operacional não quebra");
@@ -172,23 +197,20 @@ async function main() {
     assert.match(src, /jaNoBanco/);
     ok("merge em memória com dedupe por external_reservation_id");
 
-    // Regressão: a grade abria vazia porque o init carregava pelo provider,
-    // sem passar pelo merge — só refreshFromSource mesclava.
-    assert.doesNotMatch(
-      src,
-      /reservas = await loadReservasOperacionaisFromProvider\(\)/,
-      "init não pode carregar sem mesclar a leitura HITS",
+    // Regressão: o init travava no await da leitura HITS e nunca chegava a
+    // registrar os listeners — grade vazia e botão Atualizar inerte.
+    const initLoad = src.indexOf("reservas = (await loadReservasOperacionaisFromProvider()) || []");
+    assert.ok(initLoad > -1, "init deve carregar o banco sem esperar o HITS");
+    const depoisDoInit = src.slice(initLoad, initLoad + 400);
+    assert.match(
+      depoisDoInit,
+      /aplicarLeituraHitsQuandoPronta\(\)/,
+      "init precisa disparar a leitura HITS sem bloquear",
     );
-    const atribuicoes = src.match(/reservas = await load\w+\(/g) || [];
-    assert.ok(atribuicoes.length >= 2, "esperado init + refresh");
-    for (const a of atribuicoes) {
-      assert.match(
-        a,
-        /loadReservasOperacionaisComLeituraHits/,
-        `carga sem merge encontrada: ${a}`,
-      );
-    }
-    ok("init e refresh usam o mesmo ponto de carga com merge");
+    ok("boot carrega o banco e aplica HITS sem bloquear o init");
+
+    assert.match(src, /async function refreshFromSource[\s\S]{0,200}force: true/);
+    ok("Atualizar força um ciclo novo de leitura HITS");
 
     // Nenhuma escrita a partir das reservas HITS.
     assert.doesNotMatch(src, /somenteLeituraHits[\s\S]{0,200}\.insert\(/);

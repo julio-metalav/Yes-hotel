@@ -3380,11 +3380,11 @@ function refresh() {
  * Nada é gravado. Reserva já espelhada no banco (mesmo external_reservation_id)
  * não é duplicada — o registro real tem precedência.
  */
-async function loadReservasSomenteLeituraHits(jaCarregadas) {
+async function loadReservasSomenteLeituraHits(jaCarregadas, options) {
   if (PAINEL_DATA_SOURCE !== PAINEL_DATA_SOURCE_BACKEND) return [];
   const api = typeof window !== "undefined" ? window.YesHotelHitsSandboxPreview : null;
   if (!api || typeof api.fetchReservasOperacionais !== "function") return [];
-  const externas = await api.fetchReservasOperacionais();
+  const externas = await api.fetchReservasOperacionais(options);
   if (!Array.isArray(externas) || externas.length === 0) return [];
   const jaNoBanco = new Set(
     (jaCarregadas || [])
@@ -3399,15 +3399,42 @@ async function loadReservasSomenteLeituraHits(jaCarregadas) {
  * Usado tanto no init quanto no refresh — se só um deles mesclasse, a grade
  * abriria vazia e só populasse depois de uma ação do operador.
  */
-async function loadReservasOperacionaisComLeituraHits() {
+async function loadReservasOperacionaisComLeituraHits(options) {
   const base = (await loadReservasOperacionaisFromProvider()) || [];
-  const hits = await loadReservasSomenteLeituraHits(base);
+  const hits = await loadReservasSomenteLeituraHits(base, options);
   return hits.length > 0 ? base.concat(hits) : base;
+}
+
+/**
+ * Aplica a leitura HITS sem bloquear quem chamou.
+ *
+ * O boot não pode esperar por ela: com cache frio são dezenas de GETs de
+ * detalhe, e enquanto o await não resolvia o init parava antes de registrar os
+ * listeners — a grade ficava vazia e o botão Atualizar, inerte.
+ */
+function aplicarLeituraHitsQuandoPronta(options) {
+  loadReservasSomenteLeituraHits(reservas, options)
+    .then((hits) => {
+      if (!Array.isArray(hits) || hits.length === 0) return;
+      const jaNaLista = new Set(
+        (reservas || [])
+          .map((r) => String((r && r.externalReservationId) || "").trim())
+          .filter(Boolean),
+      );
+      const novas = hits.filter((r) => !jaNaLista.has(String(r.externalReservationId)));
+      if (novas.length === 0) return;
+      reservas = (reservas || []).concat(novas);
+      invalidateArrivalsCache();
+      refresh();
+    })
+    .catch(() => {
+      /* leitura HITS é complementar: falha não derruba a tela */
+    });
 }
 
 async function refreshFromSource() {
   invalidateArrivalsCache();
-  reservas = await loadReservasOperacionaisComLeituraHits();
+  reservas = await loadReservasOperacionaisComLeituraHits({ force: true });
   refresh();
 }
 
@@ -7164,7 +7191,10 @@ async function initCheckinOperacional() {
     opImportLink.classList.add("hidden");
   }
 
-  reservas = await loadReservasOperacionaisComLeituraHits();
+  // Banco primeiro: a tela sobe e os listeners são registrados de imediato.
+  // A leitura HITS entra logo em seguida, no mesmo ciclo compartilhado.
+  reservas = (await loadReservasOperacionaisFromProvider()) || [];
+  aplicarLeituraHitsQuandoPronta();
   invalidateArrivalsCache();
   await ensureArrivalsDataset();
 
