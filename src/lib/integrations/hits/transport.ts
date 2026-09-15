@@ -80,6 +80,50 @@ function shouldRetryError(error: unknown): boolean {
   return false;
 }
 
+/**
+ * Falhas de rede transitórias. Lista fechada de propósito: erro desconhecido
+ * não é repetido, porque não se sabe se a requisição chegou ao destino.
+ */
+const RETRYABLE_NETWORK_CODES = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "EPIPE",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+]);
+
+const MAX_CAUSE_DEPTH = 5;
+
+/**
+ * `fetch` embrulha a falha real: sobe `TypeError: fetch failed` com o código
+ * em `cause.code`. Percorre a cadeia de causas até achar um código conhecido.
+ * Retorna o código transitório encontrado, ou null.
+ */
+export function retryableNetworkErrorCode(error: unknown): string | null {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  for (let depth = 0; current != null && depth < MAX_CAUSE_DEPTH; depth += 1) {
+    if (seen.has(current)) break;
+    seen.add(current);
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string" && RETRYABLE_NETWORK_CODES.has(code)) return code;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return null;
+}
+
+/** Erro de rede sanitizado: sem stack, sem host cru além do pathHint. */
+function networkError(networkCode: string, url: string): HitsError {
+  return new HitsError({
+    code: "network",
+    message: `Falha de rede ao consultar o HITS (${networkCode}).`,
+    httpStatus: null,
+    retryable: true,
+    details: { pathHint: safeUrlHint(url), networkCode },
+  });
+}
+
 export function createHitsTransport(fetchImpl: HitsFetch = fetch): HitsTransport {
   return {
     async request(req: HitsTransportRequest): Promise<HitsTransportResponse> {
@@ -166,6 +210,19 @@ export function createHitsTransport(fetchImpl: HitsFetch = fetch): HitsTransport
               continue;
             }
             throw timeoutErr;
+          }
+
+          // Rede transitória: mesmo limite e backoff dos demais retries.
+          // Com maxRetries 0 (POST/PUT) não repete — a escrita pode ter ido.
+          const networkCode = retryableNetworkErrorCode(error);
+          if (networkCode) {
+            const netErr = networkError(networkCode, req.url);
+            if (attempt <= maxRetries) {
+              lastError = netErr;
+              await sleep(Math.min(250 * 2 ** (attempt - 1), 2_000));
+              continue;
+            }
+            throw netErr;
           }
 
           if (shouldRetryError(error) && attempt <= maxRetries) {

@@ -71,6 +71,7 @@
     "test:hits-reservation-sync-chegadas": "tsx scripts/test-hits-reservation-sync-chegadas.ts",
     "test:hits-real-reservation-source": "tsx scripts/test-hits-real-reservation-source.ts",
     "test:hits-gateway-read": "tsx scripts/test-hits-gateway-read.ts",
+    "test:hits-transport-network-retry": "tsx scripts/test-hits-transport-network-retry.ts",
     "test:hits-sandbox-operacional-ui": "tsx scripts/test-hits-sandbox-operacional-ui.ts",
     "test:hits-edge:deno-imports": "tsx scripts/test-hits-edge-deno-imports.ts",
     "test:reservation-financial-classification": "tsx scripts/test-reservation-financial-classification.ts",
