@@ -9,6 +9,7 @@ import type { HitsReadClient } from "./hits-client.ts";
 import { registerGuestRoutes } from "./routes/guests.ts";
 import { registerHealthRoute } from "./routes/health.ts";
 import { registerReservationRoutes } from "./routes/reservations.ts";
+import type { ReservationListCache } from "./reservation-cache.ts";
 
 export type BuildAppOptions = {
   gatewayToken: string;
@@ -25,6 +26,8 @@ export type BuildAppOptions = {
   trustProxy?: boolean | string | string[] | number;
   /** Escrita PAX sandbox. Default false. */
   guestWriteEnabled?: boolean;
+  /** Cache da listagem. Injetável para teste; default = instância própria. */
+  listCache?: ReservationListCache;
 };
 
 const BODY_LIMIT_BYTES = 32 * 1024;
@@ -127,7 +130,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   registerHealthRoute(app);
-  registerReservationRoutes(app, options.hitsClient);
+  registerReservationRoutes(app, options.hitsClient, { listCache: options.listCache });
   registerGuestRoutes(app, options.hitsClient, {
     guestWriteEnabled: options.guestWriteEnabled === true,
   });
