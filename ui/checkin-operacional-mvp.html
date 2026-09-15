@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=56" />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=58" />
   </head>
   <body class="op-body checkin-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -298,39 +298,55 @@
             class="op-hits-sandbox"
             aria-label="Reservas no HITS Sandbox (somente leitura)"
           >
-            <div class="op-panel">
-              <div class="op-panel__head">
-                <span class="op-panel__title">HITS Sandbox — somente leitura</span>
-                <span id="op-hits-sandbox-count" class="op-panel__count"></span>
+            <div class="op-hits-bar">
+              <div class="op-hits-bar__id">
+                <span class="op-hits-bar__title">HITS Sandbox</span>
+                <span id="op-hits-sandbox-badge" class="op-hits-bar__badge hidden">Conectado</span>
+              </div>
+              <div class="op-hits-bar__meta">
+                <span id="op-hits-sandbox-count" class="op-hits-bar__count"></span>
+                <span id="op-hits-sandbox-updated" class="op-hits-bar__updated"></span>
+              </div>
+              <p class="op-hits-bar__hint">Leitura direta via API HITS — somente leitura</p>
+              <div class="op-hits-bar__actions">
                 <button
                   type="button"
                   class="op-btn op-btn--secondary"
                   id="op-hits-sandbox-refresh"
                 >
-                  Consultar HITS Sandbox
+                  Atualizar HITS
+                </button>
+                <button
+                  type="button"
+                  class="op-hits-bar__toggle"
+                  id="op-hits-sandbox-toggle"
+                  aria-expanded="false"
+                  aria-controls="op-hits-sandbox-details"
+                >
+                  Ver diagnóstico
                 </button>
               </div>
-              <div class="op-panel__body">
-                <p id="op-hits-sandbox-status" class="op-hits-sandbox__status hidden" role="status"></p>
-                <div class="op-table-wrap">
-                  <table class="op-table" aria-label="Reservas no HITS Sandbox">
-                    <thead>
-                      <tr>
-                        <th>idReservation</th>
-                        <th>Apto</th>
-                        <th>Hóspede</th>
-                        <th>Entrada</th>
-                        <th>Saída</th>
-                        <th>Status</th>
-                        <th>Hóspedes</th>
-                      </tr>
-                    </thead>
-                    <tbody id="op-hits-sandbox-body"></tbody>
-                  </table>
-                </div>
-                <div id="op-hits-sandbox-empty" class="op-empty">
-                  <p class="op-empty__title">Nenhuma reserva carregada</p>
-                </div>
+            </div>
+            <div id="op-hits-sandbox-details" class="op-hits-details hidden">
+              <p id="op-hits-sandbox-status" class="op-hits-sandbox__status hidden" role="status"></p>
+              <div class="op-table-wrap">
+                <table class="op-table" aria-label="Reservas no HITS Sandbox">
+                  <thead>
+                    <tr>
+                      <th>idReservation</th>
+                      <th>Apto</th>
+                      <th>Hóspede</th>
+                      <th>Entrada</th>
+                      <th>Saída</th>
+                      <th>Status</th>
+                      <th>Hóspedes</th>
+                    </tr>
+                  </thead>
+                  <tbody id="op-hits-sandbox-body"></tbody>
+                </table>
+              </div>
+              <div id="op-hits-sandbox-empty" class="op-empty">
+                <p class="op-empty__title">Nenhuma reserva carregada</p>
               </div>
             </div>
           </section>
@@ -514,7 +530,7 @@
     <script defer src="./yes-pagarme-payment-ui.js?v=6"></script>
     <script defer src="./yes-pagamento-presencial-diferido-ui.js?v=1"></script>
     <script defer src="./yes-reservation-financial.js?v=3"></script>
-    <script defer src="./yes-hits-sandbox-preview.js?v=2"></script>
+    <script defer src="./yes-hits-sandbox-preview.js?v=3"></script>
     <script defer src="./checkin-operacional-mvp.js?v=55"></script>
   </body>
 </html>

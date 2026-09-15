@@ -226,6 +226,50 @@ async function main() {
     ok("ordem dos scripts garante a API disponível no init");
   }
 
+  console.log("\n== Painel compacto ==");
+  {
+    const html = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.html"), "utf8");
+
+    // Barra compacta com tudo que o estado recolhido precisa mostrar.
+    for (const id of [
+      "op-hits-sandbox-badge",
+      "op-hits-sandbox-count",
+      "op-hits-sandbox-updated",
+      "op-hits-sandbox-refresh",
+      "op-hits-sandbox-toggle",
+      "op-hits-sandbox-details",
+    ]) {
+      assert.ok(html.includes(`id="${id}"`), `faltou ${id}`);
+    }
+    assert.match(html, /Leitura direta via API HITS — somente leitura/);
+    assert.match(html, />\s*Atualizar HITS\s*</);
+    ok("barra compacta traz badge, contagem, hora, hint e ações");
+
+    const details = html.slice(html.indexOf('id="op-hits-sandbox-details"'));
+    assert.match(
+      details.slice(0, 120),
+      /class="op-hits-details hidden"/,
+      "diagnóstico deve nascer recolhido",
+    );
+    const toggle = html.slice(html.indexOf('id="op-hits-sandbox-toggle"'));
+    assert.match(toggle.slice(0, 200), /aria-expanded="false"/);
+    assert.match(toggle.slice(0, 200), /aria-controls="op-hits-sandbox-details"/);
+    ok("tabela técnica recolhida por padrão, com aria correto");
+
+    // A tabela técnica continua existindo, só que dentro do bloco recolhido.
+    for (const col of ["idReservation", "Apto", "Hóspede", "Entrada", "Saída", "Status"]) {
+      assert.ok(details.includes(col), `coluna ${col} sumiu do diagnóstico`);
+    }
+    ok("colunas técnicas preservadas dentro do diagnóstico");
+
+    const js = readFileSync(resolve(ROOT, "ui/yes-hits-sandbox-preview.js"), "utf8");
+    assert.match(js, /function setDetailsOpen/);
+    assert.match(js, /setDetailsOpen\(!isDetailsOpen\(\)\)/, "toggle abre e fecha");
+    assert.match(js, /setDetailsOpen\(false\)/, "estado inicial recolhido");
+    assert.match(js, /function renderResumo/);
+    ok("toggle alterna e o resumo alimenta a barra");
+  }
+
   console.log(`\nOK test-hits-sandbox-operacional-ui (${cases} casos)`);
 }
 

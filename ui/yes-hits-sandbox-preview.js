@@ -20,6 +20,47 @@
   var count = doc.querySelector("#op-hits-sandbox-count");
   var statusEl = doc.querySelector("#op-hits-sandbox-status");
   var emptyEl = doc.querySelector("#op-hits-sandbox-empty");
+  var badgeEl = doc.querySelector("#op-hits-sandbox-badge");
+  var updatedEl = doc.querySelector("#op-hits-sandbox-updated");
+  var toggleEl = doc.querySelector("#op-hits-sandbox-toggle");
+  var detailsEl = doc.querySelector("#op-hits-sandbox-details");
+
+  /** Diagnóstico nasce recolhido: a barra compacta é o estado normal. */
+  function setDetailsOpen(open) {
+    if (!detailsEl || !toggleEl) return;
+    detailsEl.classList.toggle("hidden", !open);
+    toggleEl.setAttribute("aria-expanded", open ? "true" : "false");
+    toggleEl.textContent = open ? "Ocultar diagnóstico" : "Ver diagnóstico";
+  }
+
+  function isDetailsOpen() {
+    return !!detailsEl && !detailsEl.classList.contains("hidden");
+  }
+
+  function hhmm(date) {
+    var d = date || new Date();
+    return (
+      String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0")
+    );
+  }
+
+  /** Resumo da barra compacta: conectado, quantidade e hora da leitura. */
+  function renderResumo(result) {
+    var conectado = !!(result && result.ok);
+    if (badgeEl) {
+      badgeEl.classList.toggle("hidden", !conectado);
+    }
+    if (count) {
+      var n = conectado ? result.rows.length : 0;
+      count.textContent = conectado
+        ? n + (n === 1 ? " reserva lida" : " reservas lidas")
+        : "leitura indisponível";
+      count.classList.toggle("op-hits-bar__count--error", !conectado);
+    }
+    if (updatedEl) {
+      updatedEl.textContent = conectado ? "atualizado " + hhmm() : "";
+    }
+  }
 
   function setStatus(text, isError) {
     if (!statusEl) return;
@@ -59,7 +100,7 @@
       });
       body.appendChild(tr);
     });
-    if (count) count.textContent = rows.length ? String(rows.length) : "";
+    // A contagem vive na barra compacta (renderResumo), não aqui.
     if (emptyEl) emptyEl.classList.toggle("hidden", rows.length > 0);
   }
 
@@ -146,6 +187,7 @@
   }
 
   function renderCycle(result) {
+    renderResumo(result);
     if (!result.ok) {
       renderRows([]);
       setStatus("Não foi possível ler o HITS Sandbox (" + result.error + ").", true);
@@ -165,6 +207,12 @@
   }
 
   if (btn) btn.addEventListener("click", load);
+  if (toggleEl) {
+    toggleEl.addEventListener("click", function () {
+      setDetailsOpen(!isDetailsOpen());
+    });
+  }
+  setDetailsOpen(false);
 
   /** Prefixo do id sintético — nunca existe no banco, por construção. */
   var READ_ONLY_ID_PREFIX = "hits-preview:";
