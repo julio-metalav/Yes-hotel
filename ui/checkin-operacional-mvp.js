@@ -3381,6 +3381,7 @@ function refresh() {
  * não é duplicada — o registro real tem precedência.
  */
 async function loadReservasSomenteLeituraHits(jaCarregadas) {
+  if (PAINEL_DATA_SOURCE !== PAINEL_DATA_SOURCE_BACKEND) return [];
   const api = typeof window !== "undefined" ? window.YesHotelHitsSandboxPreview : null;
   if (!api || typeof api.fetchReservasOperacionais !== "function") return [];
   const externas = await api.fetchReservasOperacionais();
@@ -3393,15 +3394,20 @@ async function loadReservasSomenteLeituraHits(jaCarregadas) {
   return externas.filter((r) => !jaNoBanco.has(String(r.externalReservationId)));
 }
 
+/**
+ * Ponto único de carga da grade: provider do banco + leitura HITS mesclada.
+ * Usado tanto no init quanto no refresh — se só um deles mesclasse, a grade
+ * abriria vazia e só populasse depois de uma ação do operador.
+ */
+async function loadReservasOperacionaisComLeituraHits() {
+  const base = (await loadReservasOperacionaisFromProvider()) || [];
+  const hits = await loadReservasSomenteLeituraHits(base);
+  return hits.length > 0 ? base.concat(hits) : base;
+}
+
 async function refreshFromSource() {
   invalidateArrivalsCache();
-  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY) {
-    reservas = await loadReservasFromLocalRepository();
-  } else if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
-    reservas = await loadReservasFromBackend();
-    const hits = await loadReservasSomenteLeituraHits(reservas);
-    if (hits.length > 0) reservas = reservas.concat(hits);
-  }
+  reservas = await loadReservasOperacionaisComLeituraHits();
   refresh();
 }
 
@@ -7158,7 +7164,7 @@ async function initCheckinOperacional() {
     opImportLink.classList.add("hidden");
   }
 
-  reservas = await loadReservasOperacionaisFromProvider();
+  reservas = await loadReservasOperacionaisComLeituraHits();
   invalidateArrivalsCache();
   await ensureArrivalsDataset();
 

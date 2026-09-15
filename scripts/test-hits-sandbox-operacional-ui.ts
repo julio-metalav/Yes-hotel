@@ -172,6 +172,24 @@ async function main() {
     assert.match(src, /jaNoBanco/);
     ok("merge em memória com dedupe por external_reservation_id");
 
+    // Regressão: a grade abria vazia porque o init carregava pelo provider,
+    // sem passar pelo merge — só refreshFromSource mesclava.
+    assert.doesNotMatch(
+      src,
+      /reservas = await loadReservasOperacionaisFromProvider\(\)/,
+      "init não pode carregar sem mesclar a leitura HITS",
+    );
+    const atribuicoes = src.match(/reservas = await load\w+\(/g) || [];
+    assert.ok(atribuicoes.length >= 2, "esperado init + refresh");
+    for (const a of atribuicoes) {
+      assert.match(
+        a,
+        /loadReservasOperacionaisComLeituraHits/,
+        `carga sem merge encontrada: ${a}`,
+      );
+    }
+    ok("init e refresh usam o mesmo ponto de carga com merge");
+
     // Nenhuma escrita a partir das reservas HITS.
     assert.doesNotMatch(src, /somenteLeituraHits[\s\S]{0,200}\.insert\(/);
     assert.doesNotMatch(src, /somenteLeituraHits[\s\S]{0,200}\.update\(/);
