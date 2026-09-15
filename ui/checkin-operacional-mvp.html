@@ -293,6 +293,48 @@
             </div>
           </section>
 
+          <section
+            id="op-hits-sandbox-panel"
+            class="op-hits-sandbox"
+            aria-label="Reservas no HITS Sandbox (somente leitura)"
+          >
+            <div class="op-panel">
+              <div class="op-panel__head">
+                <span class="op-panel__title">HITS Sandbox — somente leitura</span>
+                <span id="op-hits-sandbox-count" class="op-panel__count"></span>
+                <button
+                  type="button"
+                  class="op-btn op-btn--secondary"
+                  id="op-hits-sandbox-refresh"
+                >
+                  Consultar HITS Sandbox
+                </button>
+              </div>
+              <div class="op-panel__body">
+                <p id="op-hits-sandbox-status" class="op-hits-sandbox__status hidden" role="status"></p>
+                <div class="op-table-wrap">
+                  <table class="op-table" aria-label="Reservas no HITS Sandbox">
+                    <thead>
+                      <tr>
+                        <th>idReservation</th>
+                        <th>Apto</th>
+                        <th>Hóspede</th>
+                        <th>Entrada</th>
+                        <th>Saída</th>
+                        <th>Status</th>
+                        <th>Hóspedes</th>
+                      </tr>
+                    </thead>
+                    <tbody id="op-hits-sandbox-body"></tbody>
+                  </table>
+                </div>
+                <div id="op-hits-sandbox-empty" class="op-empty">
+                  <p class="op-empty__title">Nenhuma reserva carregada</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <div id="op-occupied-drawer" class="op-occupied-drawer hidden" aria-hidden="true">
             <div class="op-occupied-drawer__backdrop" id="op-occupied-backdrop"></div>
             <aside class="op-occupied-drawer__panel" role="dialog" aria-labelledby="op-occupied-title">
@@ -473,5 +515,6 @@
     <script defer src="./yes-pagamento-presencial-diferido-ui.js?v=1"></script>
     <script defer src="./yes-reservation-financial.js?v=3"></script>
     <script defer src="./checkin-operacional-mvp.js?v=53"></script>
+    <script defer src="./yes-hits-sandbox-preview.js?v=1"></script>
   </body>
 </html>
