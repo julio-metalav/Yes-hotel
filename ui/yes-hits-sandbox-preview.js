@@ -103,5 +103,72 @@
 
   if (btn) btn.addEventListener("click", load);
 
-  global.YesHotelHitsSandboxPreview = { load: load };
+  /** Prefixo do id sintético — nunca existe no banco, por construção. */
+  var READ_ONLY_ID_PREFIX = "hits-preview:";
+
+  function isReadOnlyId(id) {
+    return String(id || "").indexOf(READ_ONLY_ID_PREFIX) === 0;
+  }
+
+  /**
+   * Linha da Edge → objeto no formato que a listagem operacional consome.
+   * Somente leitura: sem id de banco, sem hóspedes, sem eventos, sem FNRH.
+   * O id sintético carrega o idReservation para a busca continuar achando.
+   */
+  function toReservaOperacional(row) {
+    var ext = String((row && row.external_reservation_id) || "").trim();
+    return {
+      id: READ_ONLY_ID_PREFIX + ext,
+      somenteLeituraHits: true,
+      apartamento: String((row && row.apartamento) || "").trim(),
+      hospedePrincipal: String((row && row.hospede_principal) || "").trim(),
+      externalReservationId: ext || null,
+      origemExterna: "hits_preview",
+      checkInPrevisto: String((row && row.check_in) || "").slice(0, 10),
+      checkOutPrevisto: String((row && row.check_out) || "").slice(0, 10),
+      totalHospedesHits: Math.max(1, Number(row && row.total_hospedes) || 1),
+      statusReserva: row && row.status_reserva === "cancelada" ? "cancelada" : "ativa",
+      // Campos operacionais neutros: nada aqui dispara ação.
+      pagamento: "desconhecido",
+      acessoLiberado: false,
+      entrouNoApto: false,
+      hospedes: [],
+      historico: [],
+      cobrancasPagarme: [],
+      pagamentosPagarme: [],
+      fnrhStatusAgregado: null,
+      pagamentoPresencialDiferidoAutorizado: false,
+    };
+  }
+
+  /**
+   * Busca as reservas do Sandbox e devolve já no formato da listagem.
+   * Nunca lança: a tela operacional não pode quebrar por causa do HITS.
+   */
+  async function fetchReservasOperacionais() {
+    var auth = global.YesHotelAuthApp;
+    var url = functionsUrl();
+    if (!auth || !auth.getEdgeFunctionFetchHeaders || !url) return [];
+    try {
+      var headers = await auth.getEdgeFunctionFetchHeaders();
+      var res = await global.fetch(url, { method: "GET", headers: headers });
+      var data = await res.json().catch(function () {
+        return null;
+      });
+      if (!res.ok || !data || data.ok !== true || !Array.isArray(data.rows)) return [];
+      return data.rows.map(toReservaOperacional).filter(function (r) {
+        return r.externalReservationId;
+      });
+    } catch (err) {
+      return [];
+    }
+  }
+
+  global.YesHotelHitsSandboxPreview = {
+    load: load,
+    fetchReservasOperacionais: fetchReservasOperacionais,
+    toReservaOperacional: toReservaOperacional,
+    isReadOnlyId: isReadOnlyId,
+    READ_ONLY_ID_PREFIX: READ_ONLY_ID_PREFIX,
+  };
 })(typeof window !== "undefined" ? window : globalThis);

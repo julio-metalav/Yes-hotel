@@ -254,6 +254,8 @@ function getPrioridadeLabel(prioridade) {
  * Usa os mesmos predicados do painel (pagamento, FNRH, acesso, senha backend, entrada).
  */
 function getFilaOperacionalRank(reserva) {
+  // Fora da fila operacional: não há pagamento, FNRH nem acesso a avaliar.
+  if (isReservaSomenteLeituraHits(reserva)) return 4;
   if (!isPagamentoOk(reserva)) return 0;
   if (hasFnrhPendente(reserva) || !isFnrhCompleta(reserva)) return 1;
   if (!acessoLiberadoEfetivo(reserva)) return 2;
@@ -897,7 +899,16 @@ function getPresencialDiferidoUiApi() {
     : null;
 }
 
+/**
+ * Reserva vinda do HITS Sandbox: existe só em memória, não tem registro no
+ * banco. Nenhuma ação operacional pode ser oferecida sobre ela.
+ */
+function isReservaSomenteLeituraHits(reserva) {
+  return !!(reserva && reserva.somenteLeituraHits === true);
+}
+
 function canShowPresencialDiferidoBtn(reserva) {
+  if (isReservaSomenteLeituraHits(reserva)) return false;
   const api = getPresencialDiferidoUiApi();
   if (!api || typeof api.canShowPresencialDiferidoButton !== "function") return false;
   const d = api.canShowPresencialDiferidoButton({
@@ -2121,6 +2132,10 @@ function getFaltamContato(reserva) {
 }
 
 function derivarStatusOperacional(reserva) {
+  // Badge neutro e não clicável: não há cobrança Pagar.me a abrir.
+  if (isReservaSomenteLeituraHits(reserva)) {
+    return { label: "HITS · leitura", type: "neutral" };
+  }
   const payUi = resolvePaymentUiForReserva(reserva);
   if (payUi && payUi.kind === "pago_pagarme_hits_pendente") {
     return {
@@ -2309,6 +2324,8 @@ function temPendenciaOperacionalRelevanteParaListaPadrao(reserva) {
 
 /** Ocultar da lista padrão: já passou o corte após check-in e não há pendência operacional relevante. */
 function reservaOcultaDaListaPadraoOperacional(reserva) {
+  // Leitura HITS permanece visível: é justamente o que se quer conferir.
+  if (isReservaSomenteLeituraHits(reserva)) return false;
   if (temPendenciaOperacionalRelevanteParaListaPadrao(reserva)) return false;
   const cutoff = getCutoffOcultarListaPadraoAposCheckin(reserva.checkInPrevisto);
   if (!cutoff) return false;
@@ -2527,6 +2544,10 @@ async function acaoConfirmarCheckin(id) {
 
 /** Texto curto + destaque/CTA para coluna Próxima ação — alinhado a derivarRecomendacaoOperacional. */
 function listaProximaAcaoOperacional(reserva) {
+  // Sem CTA: nada a executar sobre uma reserva que não existe no banco.
+  if (isReservaSomenteLeituraHits(reserva)) {
+    return { texto: "Somente leitura", destaque: false, cta: null };
+  }
   const ctx = buildRecomendacaoOperacionalCtx(reserva);
   const rec = derivarRecomendacaoOperacional(reserva, ctx);
   const raw = rec && rec.listaLabel != null ? String(rec.listaLabel).trim() : "";
@@ -2537,6 +2558,11 @@ function listaProximaAcaoOperacional(reserva) {
 
 /** Resumo curto para coluna Fluxo (lista): PAGO/NÃO PAGO em destaque + FNRH + no máximo um terceiro sinal. Retorna HTML seguro. */
 function linhaFluxoResumo(reserva) {
+  // Só o que o HITS entregou: pax e nada de FNRH/pagamento/acesso.
+  if (isReservaSomenteLeituraHits(reserva)) {
+    const pax = Math.max(1, Number(reserva.totalHospedesHits) || 1);
+    return `<span class="op-flux__item">${pax} ${pax === 1 ? "hóspede" : "hóspedes"}</span>`;
+  }
   const total = getHospedesTotal(reserva);
   const confirmadas = getFnrhConfirmadas(reserva);
   const finUi = resolveFinancialUi(reserva);
@@ -3349,12 +3375,32 @@ function refresh() {
   }
 }
 
+/**
+ * Reservas do HITS Sandbox, somente leitura, mescladas em memória.
+ * Nada é gravado. Reserva já espelhada no banco (mesmo external_reservation_id)
+ * não é duplicada — o registro real tem precedência.
+ */
+async function loadReservasSomenteLeituraHits(jaCarregadas) {
+  const api = typeof window !== "undefined" ? window.YesHotelHitsSandboxPreview : null;
+  if (!api || typeof api.fetchReservasOperacionais !== "function") return [];
+  const externas = await api.fetchReservasOperacionais();
+  if (!Array.isArray(externas) || externas.length === 0) return [];
+  const jaNoBanco = new Set(
+    (jaCarregadas || [])
+      .map((r) => String((r && r.externalReservationId) || "").trim())
+      .filter(Boolean),
+  );
+  return externas.filter((r) => !jaNoBanco.has(String(r.externalReservationId)));
+}
+
 async function refreshFromSource() {
   invalidateArrivalsCache();
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY) {
     reservas = await loadReservasFromLocalRepository();
   } else if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
     reservas = await loadReservasFromBackend();
+    const hits = await loadReservasSomenteLeituraHits(reservas);
+    if (hits.length > 0) reservas = reservas.concat(hits);
   }
   refresh();
 }
@@ -3570,6 +3616,9 @@ async function acaoLifecycleRetry(reservaId) {
 function openDetail(reservaId) {
   const reserva = getReservaById(reservaId);
   if (!reserva) return;
+  // O detalhe operacional depende de hóspedes, eventos, FNRH e TTLock do banco.
+  // Reserva HITS não tem nada disso: não abre.
+  if (isReservaSomenteLeituraHits(reserva)) return;
   detailReservaId = reservaId;
   syncDetailPanelChrome(reserva);
   renderDetail(reserva);
@@ -4595,6 +4644,8 @@ function derivarExcecaoToleranciaAcesso(reserva) {
 
 function derivarExcecaoOperacionalReserva(reserva) {
   if (!reserva || isCheckinConcluido(reserva)) return null;
+  // Sem estado operacional no banco, não há exceção a derivar.
+  if (isReservaSomenteLeituraHits(reserva)) return null;
 
   const tolEx = derivarExcecaoToleranciaAcesso(reserva);
   if (tolEx) return tolEx;
