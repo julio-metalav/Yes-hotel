@@ -6,7 +6,9 @@ import {
   HitsApiError,
   HitsError,
   sanitizeMessage,
+  sanitizeUnknown,
 } from "../../../src/lib/integrations/hits/errors.ts";
+import { isHitsSandboxTenant } from "./guest-write.ts";
 
 export type GatewayErrorBody = {
   ok: false;
@@ -148,6 +150,43 @@ export function mapHitsGuestWriteFailure(
     }
   }
   return mapHitsFailure(error, requestId);
+}
+
+/**
+ * Diagnóstico temporário do 400 do HITS.
+ * Exige a flag E tenant sandbox — produção nunca loga corpo upstream.
+ */
+const UPSTREAM_DEBUG_BODY_MAX = 1000;
+
+export function isHitsUpstreamDebugEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    String(env.HITS_GATEWAY_DEBUG_UPSTREAM ?? "").trim() === "true" &&
+    isHitsSandboxTenant(String(env.HITS_TENANT_NAME ?? ""))
+  );
+}
+
+/**
+ * Corpo já chega sanitizado de HitsApiError; sanitiza de novo (idempotente)
+ * e trunca. Não inclui headers, Authorization, secret nem token.
+ */
+export function describeHitsUpstreamFailure(
+  error: unknown,
+  ctx: { requestId: string; method: string; path: string },
+): Record<string, unknown> | null {
+  if (!(error instanceof HitsApiError)) return null;
+  return {
+    msg: "hits_upstream_error_debug",
+    request_id: ctx.requestId,
+    upstream_method: ctx.method,
+    upstream_path: ctx.path,
+    upstream_http_status: error.status,
+    upstream_body: JSON.stringify(sanitizeUnknown(error.responseBody) ?? null).slice(
+      0,
+      UPSTREAM_DEBUG_BODY_MAX,
+    ),
+  };
 }
 
 export function containsSensitiveLeak(payload: unknown, secrets: string[]): boolean {
