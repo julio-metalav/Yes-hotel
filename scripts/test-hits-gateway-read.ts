@@ -241,6 +241,199 @@ async function main() {
     ok("flag desligada não chega a tocar a rede");
   }
 
+  console.log("\n== Paginação ==");
+  {
+    // Regressão real: com Size=20 e só a página 1, a 17806 ficava de fora.
+    const pageOf = (n: number, from: number) =>
+      Array.from({ length: n }, (_, i) => ({ idReservation: from + i }));
+    const detailFor = (id: string) => ({
+      ...DETAIL_17613,
+      idReservation: Number(id),
+      guests: [{ idEntity: 1, name: `Hospede ${id}`, main: true }],
+    });
+
+    const calls: Call[] = [];
+    const fetchImpl = async (url: string, init: { method: string; headers: Record<string, string> }) => {
+      calls.push({ url, method: init.method, headers: init.headers });
+      const detail = url.match(/\/v1\/reservations\/(\d+)$/);
+      if (detail) {
+        return new Response(JSON.stringify(detailFor(detail[1]!)), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const page = Number(new URL(url).searchParams.get("Page"));
+      // 20 na página 1, 5 na página 2 (última). 17806 só existe na 2.
+      // Faixa da página 1 não contém 17806 de propósito: ela só existe na 2.
+      const body =
+        page === 1
+          ? { data: pageOf(20, 17700) }
+          : page === 2
+            ? { data: [...pageOf(4, 17810), { idReservation: 17806 }] }
+            : { data: [] };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await fetchHitsSandboxReservations({
+      config: config(),
+      fetchImpl,
+      nowIso: "2026-09-15T00:00:00.000Z",
+    });
+
+    assert.equal(result.pages_fetched, 2, "precisa buscar a página 2");
+    assert.equal(result.stopped_reason, "last_page");
+    assert.equal(result.rows.length, 25);
+    ok("mais de 20 reservas: busca a página 2 e encerra na página incompleta");
+
+    assert.ok(
+      result.rows.some((r) => r.external_reservation_id === "17806"),
+      "17806 não pode ser perdida por estar além da página 1",
+    );
+    ok("17806 aparece mesmo estando na segunda página");
+
+    const listCalls = calls.filter((c) => !/\/v1\/reservations\/\d+$/.test(c.url));
+    assert.equal(listCalls.length, 2, "uma chamada por página, sem paralelismo");
+    assert.equal(calls.every((c) => c.method === "GET"), true);
+    ok("listagem sequencial, só GET");
+  }
+  {
+    const calls: Call[] = [];
+    const result = await fetchHitsSandboxReservations({
+      config: config(),
+      fetchImpl: fakeFetch(
+        {
+          "/v1/reservations": { body: { data: [{ idReservation: 17613 }] } },
+          "/v1/reservations/17613": { body: DETAIL_17613 },
+        },
+        calls,
+      ),
+      nowIso: "2026-09-15T00:00:00.000Z",
+    });
+    assert.equal(result.pages_fetched, 1);
+    assert.equal(result.stopped_reason, "last_page");
+    ok("menos que Size encerra na primeira página");
+  }
+  {
+    // Página 1 cheia, página 2 vazia.
+    const calls: Call[] = [];
+    const fetchImpl = async (url: string, init: { method: string; headers: Record<string, string> }) => {
+      calls.push({ url, method: init.method, headers: init.headers });
+      if (/\/v1\/reservations\/\d+$/.test(url)) {
+        return new Response(JSON.stringify(DETAIL_17613), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const page = Number(new URL(url).searchParams.get("Page"));
+      const body =
+        page === 1
+          ? { data: Array.from({ length: 20 }, (_, i) => ({ idReservation: 17700 + i })) }
+          : { data: [] };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    const result = await fetchHitsSandboxReservations({
+      config: config(),
+      fetchImpl,
+      nowIso: "2026-09-15T00:00:00.000Z",
+    });
+    assert.equal(result.pages_fetched, 2);
+    assert.equal(result.stopped_reason, "empty_page");
+    ok("página vazia encerra a varredura");
+  }
+  {
+    // Mesmo id repetido entre páginas não pode duplicar linha nem gastar detalhe duas vezes.
+    const detailCalls: string[] = [];
+    const fetchImpl = async (url: string) => {
+      const detail = url.match(/\/v1\/reservations\/(\d+)$/);
+      if (detail) {
+        detailCalls.push(detail[1]!);
+        return new Response(JSON.stringify({ ...DETAIL_17613, idReservation: Number(detail[1]) }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const page = Number(new URL(url).searchParams.get("Page"));
+      const repetido = Array.from({ length: 20 }, () => ({ idReservation: 17613 }));
+      return new Response(JSON.stringify({ data: page <= 2 ? repetido : [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    const result = await fetchHitsSandboxReservations({
+      config: config(),
+      fetchImpl,
+      nowIso: "2026-09-15T00:00:00.000Z",
+    });
+    assert.equal(result.rows.length, 1, "dedupe entre e dentro das páginas");
+    assert.equal(detailCalls.length, 1, "detalhe não é buscado duas vezes");
+    ok("dedupe por idReservation entre páginas");
+  }
+  {
+    // Fonte infinita: o limite defensivo precisa parar a varredura.
+    let listCount = 0;
+    const fetchImpl = async (url: string) => {
+      if (/\/v1\/reservations\/\d+$/.test(url)) {
+        const id = Number(url.match(/(\d+)$/)![1]);
+        return new Response(JSON.stringify({ ...DETAIL_17613, idReservation: id }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      listCount += 1;
+      const base = 20000 + listCount * 100;
+      return new Response(
+        JSON.stringify({ data: Array.from({ length: 20 }, (_, i) => ({ idReservation: base + i })) }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+    const result = await fetchHitsSandboxReservations({
+      config: config(),
+      fetchImpl,
+      nowIso: "2026-09-15T00:00:00.000Z",
+    });
+    assert.equal(result.stopped_reason, "max_reservations");
+    assert.equal(result.rows.length, 50, "teto de reservas respeitado");
+    assert.ok(listCount <= 10, "nunca passa do teto de páginas");
+    ok("limite defensivo corta fonte infinita (50 reservas / 10 páginas)");
+  }
+  {
+    // 429 na primeira tentativa da listagem: o transporte já repete uma vez.
+    let attempts = 0;
+    const fetchImpl = async (url: string) => {
+      if (/\/v1\/reservations\/\d+$/.test(url)) {
+        return new Response(JSON.stringify(DETAIL_17613), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      attempts += 1;
+      if (attempts === 1) {
+        return new Response(JSON.stringify({ code: "rate_limited" }), {
+          status: 429,
+          headers: { "Content-Type": "application/json", "Retry-After": "0" },
+        });
+      }
+      return new Response(JSON.stringify({ data: [{ idReservation: 17613 }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    const result = await fetchHitsSandboxReservations({
+      config: config(),
+      fetchImpl,
+      nowIso: "2026-09-15T00:00:00.000Z",
+    });
+    assert.equal(result.rows.length, 1);
+    assert.equal(attempts, 2, "429 foi repetido uma vez pelo transporte");
+    ok("429 na listagem respeita o retry existente com Retry-After");
+  }
+
   console.log("\n== Mapeamento somente leitura ==");
   {
     const cancelada = normalizeHitsDetailToSynced(

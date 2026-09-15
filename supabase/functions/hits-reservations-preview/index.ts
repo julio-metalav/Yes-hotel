@@ -98,6 +98,8 @@ Deno.serve(async (req: Request) => {
       source: "hits_gateway",
       page: result.page,
       size: result.size,
+      pages_fetched: result.pages_fetched,
+      stopped_reason: result.stopped_reason,
       count: result.rows.length,
       rows: result.rows,
       failed: result.failed,

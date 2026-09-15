@@ -47,6 +47,13 @@ export const HITS_LIST_STATUS_CONFIRMED = 1;
 export const HITS_LIST_DEFAULT_WINDOW_DAYS = 30;
 /** Paginação do HITS é 1-based (docs/YES_HOTEL_PLANO_TESTE_AUTENTICADO_HITS_V1.md §5.3). */
 export const HITS_LIST_FIRST_PAGE = 1;
+/** Limites defensivos: a listagem nunca vira laço infinito nem varredura do universo. */
+export const HITS_LIST_MAX_PAGES = 10;
+/**
+ * Teto de reservas por leitura. Cada reserva custa um GET de detalhe, e o
+ * gateway limita a 60 req/min — este teto é o que mantém o fan-out abaixo disso.
+ */
+export const HITS_LIST_MAX_RESERVATIONS = 50;
 
 /** Host de produção — proibido nesta etapa. */
 export const HITS_GATEWAY_FORBIDDEN_HOSTS = ["167.172.2.24"] as const;
@@ -221,8 +228,18 @@ export type FetchHitsSandboxReservationsInput = {
 
 export type FetchHitsSandboxReservationsResult = {
   rows: HitsSandboxReservationRow[];
+  /** Primeira página consultada. */
   page: number;
   size: number;
+  /** Quantas páginas de listagem foram efetivamente buscadas. */
+  pages_fetched: number;
+  /** Por que a paginação parou — diagnóstico, sem PII. */
+  stopped_reason:
+    | "last_page"
+    | "empty_page"
+    | "max_pages"
+    | "max_reservations"
+    | "explicit_ids";
   /** Detalhes que falharam individualmente — sem PII, só id e código. */
   failed: Array<{ external_reservation_id: string; code: string }>;
 };
@@ -287,37 +304,78 @@ export async function fetchHitsSandboxReservations(
   const size = clampSize(input.size);
   const headers = gatewayHeaders(config);
 
-  let ids: string[];
+  const ids: string[] = [];
+  const seenIds = new Set<string>();
+  let pagesFetched = 0;
+  let stoppedReason: FetchHitsSandboxReservationsResult["stopped_reason"] = "last_page";
+
   if (input.reservationIds && input.reservationIds.length > 0) {
-    ids = [
-      ...new Set(input.reservationIds.map((id) => String(id).trim()).filter(Boolean)),
-    ].slice(0, size);
+    stoppedReason = "explicit_ids";
+    for (const raw of input.reservationIds) {
+      const id = String(raw).trim();
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
+      ids.push(id);
+      if (ids.length >= size) break;
+    }
   } else {
     // Type + janela são obrigatórios na prática: sem eles o HITS devolve 400.
     const window = defaultListWindow(input.nowIso);
-    const qs = new URLSearchParams();
-    qs.set("Type", String(HITS_LIST_TYPE_CHECKIN_DATE));
-    qs.set("Status", String(input.status ?? HITS_LIST_STATUS_CONFIRMED));
-    qs.set("InitialDate", input.dateFrom || window.from);
-    qs.set("FinalDate", input.dateTo || window.to);
-    qs.set("Page", String(page));
-    qs.set("Size", String(size));
+    const initialDate = input.dateFrom || window.from;
+    const finalDate = input.dateTo || window.to;
 
-    const listRes = await transport.request({
-      method: "GET",
-      url: `${config.baseUrl}/v1/reservations?${qs.toString()}`,
-      headers,
-      timeoutMs: config.requestTimeoutMs,
-      maxRetries: READ_MAX_RETRIES,
-    });
+    // Sequencial de propósito: o gateway limita a 60 req/min e cada reserva
+    // ainda custa um GET de detalhe. Paralelizar aqui produz 429.
+    for (let offset = 0; offset < HITS_LIST_MAX_PAGES; offset += 1) {
+      const currentPage = page + offset;
+      const qs = new URLSearchParams();
+      qs.set("Type", String(HITS_LIST_TYPE_CHECKIN_DATE));
+      qs.set("Status", String(input.status ?? HITS_LIST_STATUS_CONFIRMED));
+      qs.set("InitialDate", initialDate);
+      qs.set("FinalDate", finalDate);
+      qs.set("Page", String(currentPage));
+      qs.set("Size", String(size));
 
-    ids = [
-      ...new Set(
-        extractGatewayListItems(listRes.body)
-          .map((s) => String(s?.idReservation ?? "").trim())
-          .filter(Boolean),
-      ),
-    ].slice(0, size);
+      const listRes = await transport.request({
+        method: "GET",
+        url: `${config.baseUrl}/v1/reservations?${qs.toString()}`,
+        headers,
+        timeoutMs: config.requestTimeoutMs,
+        maxRetries: READ_MAX_RETRIES,
+      });
+      pagesFetched += 1;
+
+      const items = extractGatewayListItems(listRes.body);
+      let hitCap = false;
+      for (const summary of items) {
+        const id = String(summary?.idReservation ?? "").trim();
+        // Dedupe entre páginas: o HITS pode repetir item se algo mudar durante a varredura.
+        if (!id || seenIds.has(id)) continue;
+        seenIds.add(id);
+        ids.push(id);
+        if (ids.length >= HITS_LIST_MAX_RESERVATIONS) {
+          hitCap = true;
+          break;
+        }
+      }
+
+      if (hitCap) {
+        stoppedReason = "max_reservations";
+        break;
+      }
+      if (items.length === 0) {
+        stoppedReason = "empty_page";
+        break;
+      }
+      // Página incompleta = última página.
+      if (items.length < size) {
+        stoppedReason = "last_page";
+        break;
+      }
+      if (offset === HITS_LIST_MAX_PAGES - 1) {
+        stoppedReason = "max_pages";
+      }
+    }
   }
 
   const rows: HitsSandboxReservationRow[] = [];
@@ -351,5 +409,5 @@ export async function fetchHitsSandboxReservations(
     return a.external_reservation_id < b.external_reservation_id ? -1 : 1;
   });
 
-  return { rows, page, size, failed };
+  return { rows, page, size, pages_fetched: pagesFetched, stopped_reason: stoppedReason, failed };
 }
