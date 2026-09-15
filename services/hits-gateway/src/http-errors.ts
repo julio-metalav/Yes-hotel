@@ -167,25 +167,79 @@ export function isHitsUpstreamDebugEnabled(
   );
 }
 
+/** Nunca entram no log: stack e qualquer portador de credencial/header. */
+const DEBUG_SKIP_KEYS = /^(stack|message|headers|header|config|request|response|req|res|socket|agent)$/i;
+const DEBUG_SECRET_KEYS = /secret|token|password|authorization|apikey|api_key|cookie/i;
+
+function truncJson(value: unknown): string {
+  return JSON.stringify(sanitizeUnknown(value) ?? null).slice(0, UPSTREAM_DEBUG_BODY_MAX);
+}
+
+/** Só aceita um nome de classe simples; qualquer outra coisa vira "unknown". */
+function safeConstructorName(error: unknown): string {
+  const name = (error as { constructor?: { name?: unknown } } | null)?.constructor?.name;
+  return typeof name === "string" && /^[A-Za-z0-9_]{1,64}$/.test(name) ? name : "unknown";
+}
+
+/** Propriedades próprias, sem stack, sem headers, sem credencial. */
+function ownPropsSanitized(error: unknown): Record<string, unknown> {
+  if (!error || typeof error !== "object") return {};
+  const out: Record<string, unknown> = {};
+  for (const key of Object.getOwnPropertyNames(error)) {
+    if (DEBUG_SKIP_KEYS.test(key) || DEBUG_SECRET_KEYS.test(key)) continue;
+    out[key] = sanitizeUnknown((error as Record<string, unknown>)[key]);
+  }
+  return out;
+}
+
 /**
- * Corpo já chega sanitizado de HitsApiError; sanitiza de novo (idempotente)
- * e trunca. Não inclui headers, Authorization, secret nem token.
+ * Diagnóstico da falha ao consultar o HITS, cobrindo os três caminhos:
+ * HitsApiError (HTTP do HITS), HitsError (timeout/config/transporte) e
+ * erro desconhecido — que hoje vira internal_error sem deixar rastro.
+ *
+ * Corpo, details e props já passam por sanitizeUnknown e são truncados.
+ * Nunca inclui stack, headers, Authorization, token nem secret.
  */
-export function describeHitsUpstreamFailure(
+export function describeHitsFailureForDebug(
   error: unknown,
   ctx: { requestId: string; method: string; path: string },
-): Record<string, unknown> | null {
-  if (!(error instanceof HitsApiError)) return null;
-  return {
-    msg: "hits_upstream_error_debug",
+): Record<string, unknown> {
+  const base = {
+    msg: "hits_failure_debug",
     request_id: ctx.requestId,
     upstream_method: ctx.method,
     upstream_path: ctx.path,
-    upstream_http_status: error.status,
-    upstream_body: JSON.stringify(sanitizeUnknown(error.responseBody) ?? null).slice(
-      0,
-      UPSTREAM_DEBUG_BODY_MAX,
-    ),
+  };
+
+  if (error instanceof HitsApiError) {
+    return {
+      ...base,
+      error_type: "HitsApiError",
+      code: error.code,
+      message: sanitizeMessage(error.message),
+      http_status: error.status,
+      retryable: error.retryable,
+      upstream_body: truncJson(error.responseBody),
+    };
+  }
+
+  if (error instanceof HitsError) {
+    return {
+      ...base,
+      error_type: "HitsError",
+      code: error.code,
+      message: sanitizeMessage(error.message),
+      http_status: error.httpStatus,
+      retryable: error.retryable,
+      details: truncJson(error.details ?? null),
+    };
+  }
+
+  return {
+    ...base,
+    error_type: safeConstructorName(error),
+    message: error instanceof Error ? sanitizeMessage(error.message) : null,
+    own_props: truncJson(ownPropsSanitized(error)),
   };
 }
 

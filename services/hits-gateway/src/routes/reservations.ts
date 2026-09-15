@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { HitsReadClient } from "../hits-client.ts";
 import {
-  describeHitsUpstreamFailure,
+  describeHitsFailureForDebug,
   gatewayErrorBody,
   isHitsUpstreamDebugEnabled,
   mapHitsFailure,
@@ -70,12 +70,13 @@ export function registerReservationRoutes(
     } catch (error) {
       const mapped = mapHitsFailure(error, request.id);
       if (isHitsUpstreamDebugEnabled()) {
-        const debug = describeHitsUpstreamFailure(error, {
-          requestId: request.id,
-          method: "GET",
-          path: "/Datashare/WebCheckinOut/Reservations",
-        });
-        if (debug) request.log.error(debug);
+        request.log.error(
+          describeHitsFailureForDebug(error, {
+            requestId: request.id,
+            method: "GET",
+            path: "/Datashare/WebCheckinOut/Reservations",
+          }),
+        );
       }
       request.log.error({
         msg: "hits_list_failed",
