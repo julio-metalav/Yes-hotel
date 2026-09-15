@@ -36,6 +36,13 @@ export const HITS_GATEWAY_MAX_PAGE_SIZE = 100;
  * Type=0 é o que a tela de chegadas quer: reservas por data de entrada.
  */
 export const HITS_LIST_TYPE_CHECKIN_DATE = 0;
+/**
+ * `Status` é obrigatório: omitido, o HITS faz bind para 0 (fora do enum) e
+ * responde 400 `The field Status is invalid.`
+ * 1=Confirmed, 2=Canceled, 3=Processed, 4=Blocked
+ * (docs/YES_HOTEL_CONTRATO_TECNICO_HITS_V1.md §6.1).
+ */
+export const HITS_LIST_STATUS_CONFIRMED = 1;
 /** Janela default quando o chamador não informa datas. */
 export const HITS_LIST_DEFAULT_WINDOW_DAYS = 30;
 /** Paginação do HITS é 1-based (docs/YES_HOTEL_PLANO_TESTE_AUTENTICADO_HITS_V1.md §5.3). */
@@ -206,6 +213,8 @@ export type FetchHitsSandboxReservationsInput = {
   size?: number;
   /** Ids explícitos: pula a listagem e busca só esses detalhes. */
   reservationIds?: string[];
+  /** Status HITS (1=Confirmed, 2=Canceled, 3=Processed, 4=Blocked). Default 1. */
+  status?: 1 | 2 | 3 | 4;
   /** Relógio injetável — só afeta a janela default de datas. */
   nowIso?: string;
 };
@@ -288,6 +297,7 @@ export async function fetchHitsSandboxReservations(
     const window = defaultListWindow(input.nowIso);
     const qs = new URLSearchParams();
     qs.set("Type", String(HITS_LIST_TYPE_CHECKIN_DATE));
+    qs.set("Status", String(input.status ?? HITS_LIST_STATUS_CONFIRMED));
     qs.set("InitialDate", input.dateFrom || window.from);
     qs.set("FinalDate", input.dateTo || window.to);
     qs.set("Page", String(page));

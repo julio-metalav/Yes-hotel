@@ -141,6 +141,22 @@ async function main() {
 
     assert.match(calls[0]!.url, /(^|[?&])Page=1([&]|$)/);
     ok("paginação começa em 1, não em 0");
+
+    assert.match(calls[0]!.url, /(^|[?&])Status=1([&]|$)/);
+    ok("Status=1 sempre enviado — omitido, o HITS devolve 400");
+  }
+  {
+    // Regressão do 400 real em HOMO:
+    // {"errors":{"Status":["The field Status is invalid."]}}
+    const calls: Call[] = [];
+    await fetchHitsSandboxReservations({
+      config: config(),
+      fetchImpl: fakeFetch({ "/v1/reservations": { body: { data: [] } } }, calls),
+      status: 2,
+      nowIso: "2026-09-15T00:00:00.000Z",
+    });
+    assert.match(calls[0]!.url, /(^|[?&])Status=2([&]|$)/);
+    ok("Status do chamador é respeitado (2 = Canceled)");
   }
   {
     // Regressão do bad request em HOMO: sem datas, a query ia sem Type e com
@@ -163,7 +179,9 @@ async function main() {
     assert.match(url, /FinalDate=2026-10-15/);
     assert.match(url, /(^|[?&])Page=1([&]|$)/);
     assert.doesNotMatch(url, /Page=0/);
-    ok("sem datas: janela default de 30 dias + Type=0 + Page=1");
+    assert.match(url, /(^|[?&])Status=1([&]|$)/);
+    assert.doesNotMatch(url, /Status=0/);
+    ok("sem datas: janela default de 30 dias + Type=0 + Status=1 + Page=1");
   }
   {
     const calls: Call[] = [];
