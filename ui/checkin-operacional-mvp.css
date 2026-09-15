@@ -996,14 +996,16 @@ html {
 }
 
 /* ----- Main / table as dominant area ----- */
-/* Cresce com o conteúdo em vez de recortá-lo: quem recebe o excesso é
-   .op-content, que tem a única barra vertical da tela. */
+/* A cadeia de alturas precisa ficar definida até .op-panel, que é
+   `flex: 1 1 0` + `overflow: hidden`: com altura indefinida acima dele, o
+   painel colapsa para zero e a tabela some mesmo presente no DOM.
+   O piso de 360px é o que faz o excesso chegar à barra de .op-content. */
 .checkin-view .op-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  min-height: 0;
-  flex: 0 0 auto;
-  overflow: visible;
+  min-height: 360px;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 /* Blocos acima da lista não são comprimidos quando a altura aperta. */
@@ -1103,7 +1105,7 @@ html {
   display: flex;
   min-width: 0;
   min-height: 0;
-  height: auto;
+  height: 100%;
   flex-direction: column;
 }
 
@@ -1156,13 +1158,11 @@ html {
   flex-direction: column;
 }
 
-/* Sem rolagem vertical própria: a tabela cresce e o excesso vai para a barra
-   principal em .op-content. Evita a segunda barra dentro do painel. */
 .checkin-view .op-table-wrap {
-  flex: 0 0 auto;
+  flex: 1;
   min-height: 0;
-  overflow-x: auto;
-  overflow-y: visible;
+  overflow: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
 }
 
