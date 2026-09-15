@@ -51,7 +51,8 @@
       badgeEl.classList.toggle("hidden", !conectado);
     }
     if (count) {
-      var n = conectado ? result.rows.length : 0;
+      // Conta o que o HITS devolveu, não o que sobrou após a transformação.
+      var n = conectado ? (result.raw || []).length : 0;
       count.textContent = conectado
         ? n + (n === 1 ? " reserva lida" : " reservas lidas")
         : "leitura indisponível";
@@ -136,7 +137,7 @@
     var auth = global.YesHotelAuthApp;
     var url = functionsUrl();
     if (!auth || !auth.getEdgeFunctionFetchHeaders || !url) {
-      return { ok: false, rows: [], error: "supabase_nao_configurado" };
+      return { ok: false, raw: [], rows: [], error: "supabase_nao_configurado" };
     }
     try {
       var headers = await auth.getEdgeFunctionFetchHeaders();
@@ -147,19 +148,25 @@
       if (!res.ok || !data || data.ok !== true) {
         return {
           ok: false,
+          raw: [],
           rows: [],
           error: (data && (data.error || data.message)) || "HTTP " + res.status,
         };
       }
+      // Duas representações da MESMA leitura:
+      //   raw  → shape da Edge (external_reservation_id, check_in, ...) p/ o painel
+      //   rows → shape da listagem operacional (externalReservationId, ...) p/ a grade
+      var raw = data.rows || [];
       return {
         ok: true,
-        rows: (data.rows || []).map(toReservaOperacional).filter(function (r) {
+        raw: raw,
+        rows: raw.map(toReservaOperacional).filter(function (r) {
           return r.externalReservationId;
         }),
         failed: data.failed || [],
       };
     } catch (err) {
-      return { ok: false, rows: [], error: "falha_de_rede" };
+      return { ok: false, raw: [], rows: [], error: "falha_de_rede" };
     }
   }
 
@@ -193,7 +200,8 @@
       setStatus("Não foi possível ler o HITS Sandbox (" + result.error + ").", true);
       return;
     }
-    renderRows(result.rows);
+    // Painel técnico lê o shape bruto da Edge, não o transformado.
+    renderRows(result.raw || []);
     var note = "Leitura direta do HITS Sandbox pelo gateway. Nada foi gravado.";
     if (result.failed && result.failed.length) {
       note += " " + result.failed.length + " reserva(s) sem detalhe.";

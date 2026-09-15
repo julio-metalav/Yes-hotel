@@ -23,6 +23,11 @@ type PreviewApi = {
     force?: boolean;
   }) => Promise<Array<Record<string, unknown>>>;
   onCycle: (fn: (result: { ok: boolean; rows: unknown[] }) => void) => void;
+  loadCycle: (options?: { force?: boolean }) => Promise<{
+    ok: boolean;
+    raw: unknown[];
+    rows: unknown[];
+  }>;
   READ_ONLY_ID_PREFIX: string;
 };
 
@@ -148,6 +153,49 @@ async function main() {
     await api.fetchReservasOperacionais({ force: true });
     assert.equal(calls, 2, "force inicia um ciclo novo");
     ok("uma única leitura HITS por ciclo, compartilhada");
+  }
+  {
+    // Regressão: o ciclo passou a entregar só o shape transformado e o painel
+    // técnico, que lê o shape da Edge, esvaziou idReservation/nome/datas.
+    let calls = 0;
+    const api = loadPreview(async () => {
+      calls += 1;
+      return jsonResponse({ ok: true, rows: [ROW] });
+    });
+    const cycle = await api.loadCycle();
+    assert.equal(calls, 1, "uma leitura só");
+
+    // raw = shape da Edge, para o painel técnico
+    const raw = cycle.raw as Array<Record<string, unknown>>;
+    assert.equal(raw.length, 1);
+    assert.equal(raw[0]!.external_reservation_id, "17613");
+    assert.equal(raw[0]!.hospede_principal, "Hospede Sintetico");
+    assert.equal(raw[0]!.check_in, "2026-09-20");
+    assert.equal(raw[0]!.check_out, "2026-09-23");
+    assert.equal(raw[0]!.status_reserva, "ativa");
+    assert.equal(raw[0]!.total_hospedes, 2);
+
+    // rows = shape da listagem operacional, para a grade
+    const rows = cycle.rows as Array<Record<string, unknown>>;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.externalReservationId, "17613");
+    assert.equal(rows[0]!.checkInPrevisto, "2026-09-20");
+    assert.equal(rows[0]!.somenteLeituraHits, true);
+
+    // Os dois shapes são distintos: trocar um pelo outro quebra a tela.
+    assert.equal(raw[0]!.externalReservationId, undefined);
+    assert.equal(rows[0]!.external_reservation_id, undefined);
+    ok("um ciclo entrega raw (painel) e rows (grade), sem segunda chamada");
+  }
+  {
+    const js = readFileSync(resolve(ROOT, "ui/yes-hits-sandbox-preview.js"), "utf8");
+    assert.match(js, /renderRows\(result\.raw/, "painel precisa renderizar o raw");
+    assert.doesNotMatch(
+      js,
+      /renderRows\(result\.rows\)/,
+      "renderRows não pode receber o shape transformado",
+    );
+    ok("renderCycle alimenta o painel com o shape correto");
   }
   {
     const api = loadPreview(async () => jsonResponse({ ok: false, error: "x" }, 502));
