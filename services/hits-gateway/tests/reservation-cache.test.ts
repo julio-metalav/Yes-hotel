@@ -4,9 +4,24 @@ import { HitsApiError } from "../../../src/lib/integrations/hits/errors.ts";
 import { buildApp } from "../src/app.ts";
 import type { HitsReadClient } from "../src/hits-client.ts";
 import {
+  RESERVATION_CACHE_STALE_MS,
+  RESERVATION_CACHE_TTL_MS,
   ReservationListCache,
   reservationCacheKey,
 } from "../src/reservation-cache.ts";
+
+/**
+ * Tempos próprios para os testes de comportamento: a lógica é verificada com
+ * valores fixos, e não quebra quando os defaults forem recalibrados.
+ * Os defaults têm teste separado, no fim do arquivo.
+ */
+const T_TTL = 30_000;
+const T_STALE = 120_000;
+
+/** Cache com os tempos do teste, independente dos defaults de produção. */
+function testCache(now: () => number, patch: { maxEntries?: number } = {}) {
+  return new ReservationListCache({ now, ttlMs: T_TTL, staleMs: T_STALE, ...patch });
+}
 
 const TOKEN = "test-gateway-token-not-a-real-value";
 const AUTH = { authorization: `Bearer ${TOKEN}` };
@@ -63,7 +78,7 @@ async function withApp(
 
 test("primeira chamada vai ao upstream; segunda dentro de 30s usa cache", async () => {
   const clock = fakeClock();
-  const cache = new ReservationListCache({ now: clock.now });
+  const cache = testCache(clock.now);
   const up = upstream(async (n) => ({ data: [{ idReservation: 17806, call: n }] }));
 
   await withApp(up.client, cache, async (app) => {
@@ -83,7 +98,7 @@ test("primeira chamada vai ao upstream; segunda dentro de 30s usa cache", async 
 
 test("após o TTL a listagem consulta o HITS de novo", async () => {
   const clock = fakeClock();
-  const cache = new ReservationListCache({ now: clock.now });
+  const cache = testCache(clock.now);
   const up = upstream(async (n) => ({ data: [{ call: n }] }));
 
   await withApp(up.client, cache, async (app) => {
@@ -98,7 +113,7 @@ test("após o TTL a listagem consulta o HITS de novo", async () => {
 
 test("429 do HITS com stale recente devolve stale, sem zerar a tela", async () => {
   const clock = fakeClock();
-  const cache = new ReservationListCache({ now: clock.now });
+  const cache = testCache(clock.now);
   const up = upstream(async (n) => {
     if (n === 1) return { data: [{ idReservation: 17806 }] };
     throw new HitsApiError("HITS HTTP 429", 429, {
@@ -121,7 +136,7 @@ test("429 do HITS com stale recente devolve stale, sem zerar a tela", async () =
 
 test("429 sem stale mantém o erro mapeado", async () => {
   const clock = fakeClock();
-  const cache = new ReservationListCache({ now: clock.now });
+  const cache = testCache(clock.now);
   const up = upstream(async () => {
     throw new HitsApiError("HITS HTTP 429", 429, { message: "Too many calls" });
   });
@@ -136,7 +151,7 @@ test("429 sem stale mantém o erro mapeado", async () => {
 
 test("stale expirado (>120s) não é servido", async () => {
   const clock = fakeClock();
-  const cache = new ReservationListCache({ now: clock.now });
+  const cache = testCache(clock.now);
   const up = upstream(async (n) => {
     if (n === 1) return { data: [{ idReservation: 17806 }] };
     throw new HitsApiError("HITS HTTP 429", 429, { message: "Too many calls" });
@@ -152,7 +167,7 @@ test("stale expirado (>120s) não é servido", async () => {
 
 test("erro 5xx não é cacheado e não serve stale", async () => {
   const clock = fakeClock();
-  const cache = new ReservationListCache({ now: clock.now });
+  const cache = testCache(clock.now);
   const up = upstream(async (n) => {
     if (n === 1) return { data: [{ idReservation: 17806 }] };
     throw new HitsApiError("HITS HTTP 500", 500, { message: "boom" });
@@ -169,7 +184,7 @@ test("erro 5xx não é cacheado e não serve stale", async () => {
 
 test("parâmetros diferentes geram chaves diferentes", async () => {
   const clock = fakeClock();
-  const cache = new ReservationListCache({ now: clock.now });
+  const cache = testCache(clock.now);
   const up = upstream(async (n) => ({ data: [{ call: n }] }));
 
   await withApp(up.client, cache, async (app) => {
@@ -201,7 +216,7 @@ test("parâmetros diferentes geram chaves diferentes", async () => {
 
 test("ordem dos parâmetros na querystring não muda a chave", async () => {
   const clock = fakeClock();
-  const cache = new ReservationListCache({ now: clock.now });
+  const cache = testCache(clock.now);
   const up = upstream(async () => ({ data: [] }));
 
   await withApp(up.client, cache, async (app) => {
@@ -216,7 +231,7 @@ test("ordem dos parâmetros na querystring não muda a chave", async () => {
 
 test("detalhe e escrita nunca usam cache", async () => {
   const clock = fakeClock();
-  const cache = new ReservationListCache({ now: clock.now });
+  const cache = testCache(clock.now);
   let detailCalls = 0;
   const client: HitsReadClient = {
     listReservations: async () => ({ data: [] }),
@@ -241,13 +256,41 @@ test("detalhe e escrita nunca usam cache", async () => {
 
 test("cache respeita o teto de entradas", () => {
   const clock = fakeClock();
-  const cache = new ReservationListCache({ now: clock.now, maxEntries: 3 });
+  const cache = testCache(clock.now, { maxEntries: 3 });
   for (let i = 0; i < 10; i += 1) {
     cache.set(reservationCacheKey({ page: i }), { data: [i] });
   }
   assert.equal(cache.size, 3);
   assert.equal(cache.lookup(reservationCacheKey({ page: 0 })).state, "miss");
   assert.equal(cache.lookup(reservationCacheKey({ page: 9 })).state, "fresh");
+});
+
+test("defaults de produção: TTL 120s e stale 600s", () => {
+  // Calibrado pelos logs do HOMO: a HITS recusava a mesma página aos 31s do
+  // último 200 com "Too many calls for same reservation page 1".
+  assert.equal(RESERVATION_CACHE_TTL_MS, 120_000);
+  assert.equal(RESERVATION_CACHE_STALE_MS, 600_000);
+
+  let now = 1_000_000;
+  const cache = new ReservationListCache({ now: () => now });
+  const key = reservationCacheKey({ type: 0, status: 1, page: 1, size: 20 });
+  cache.set(key, { data: [] });
+
+  // Onde o 429 acontecia antes: 31s agora ainda é fresh, sem tocar a HITS.
+  now += 31_000;
+  assert.equal(cache.lookup(key).state, "fresh", "31s não pode mais ir à HITS");
+
+  now += 88_000; // 119s
+  assert.equal(cache.lookup(key).state, "fresh");
+
+  now += 2_000; // 121s
+  assert.equal(cache.lookup(key).state, "stale", "após 120s tenta a HITS");
+
+  now += 478_000; // 599s
+  assert.equal(cache.lookup(key).state, "stale", "stale cobre até 600s");
+
+  now += 2_000; // 601s
+  assert.equal(cache.lookup(key).state, "miss");
 });
 
 test("relógio para trás invalida a entrada em vez de servir algo incerto", () => {
