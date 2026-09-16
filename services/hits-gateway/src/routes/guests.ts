@@ -1,6 +1,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { HitsReadClient } from "../hits-client.ts";
-import { gatewayErrorBody, mapHitsFailure, mapHitsGuestWriteFailure } from "../http-errors.ts";
+import {
+  describeHitsFailureForDebug,
+  gatewayErrorBody,
+  isHitsUpstreamDebugEnabled,
+  mapHitsFailure,
+  mapHitsGuestWriteFailure,
+} from "../http-errors.ts";
 import { parseGuestsPostBody, parseGuestsPutBody } from "../guest-write.ts";
 import { parseGuestListQuery, parseReservationId } from "../query.ts";
 
@@ -115,6 +121,19 @@ export function registerGuestRoutes(
       return reply.code(200).send({ ok: true, request_id: request.id });
     } catch (error) {
       const mapped = mapHitsGuestWriteFailure(error, request.id);
+      // O 422 devolvido aqui é a tradução de um 400 do HITS, e a mensagem de
+      // validação vinha sendo descartada. Mesmo diagnóstico já usado na rota de
+      // reservas: só com a flag ligada E tenant sandbox; corpo sanitizado e
+      // truncado, sem stack, headers, token ou secret.
+      if (isHitsUpstreamDebugEnabled()) {
+        request.log.error(
+          describeHitsFailureForDebug(error, {
+            requestId: request.id,
+            method: "PUT",
+            path: "/Datashare/WebCheckinOut/Guests",
+          }),
+        );
+      }
       request.log.error({
         msg: "hits_guest_put_failed",
         request_id: request.id,
