@@ -8,7 +8,9 @@
 import assert from "node:assert/strict";
 import {
   buildHitsGuestPutFromFnrh,
+  FNRH_TO_HITS_ENUMS_CONFIRMED,
   hasUpdatableFields,
+  HITS_DOC_TYPE_CONHECIDOS,
   normalizeEnumKey,
   type FnrhGuestData,
 } from "../src/lib/integrations/hits/fnrh-to-hits-guest";
@@ -70,6 +72,88 @@ function main() {
     ok("endereço vira addresses[0] com as 8 chaves do contrato");
   }
 
+  console.log("\n== Documento principal (exigido pelo HITS) ==");
+  {
+    // O HITS recusa o PUT sem documento principal:
+    // 400 "Deve haver ao menos um documento principal informado".
+    const r = buildHitsGuestPutFromFnrh({
+      idEntity: 1,
+      idReservation: 2,
+      fnrh: FICHA_COMPLETA,
+    });
+    assert.equal(r.dto.doc, "12345678909");
+    assert.equal(r.dto.docType, 2);
+    ok("CPF vai por padrão como doc + docType=2");
+
+    // Só CPF e passaporte: são os que o HITS aceita como documento principal.
+    const enviados: Array<[string, number]> = [
+      ["cpf", 2],
+      ["passport", 1],
+    ];
+    for (const [tipo, esperado] of enviados) {
+      const out = buildHitsGuestPutFromFnrh({
+        idEntity: 1,
+        idReservation: 2,
+        fnrh: { ...FICHA_COMPLETA, documento_tipo: tipo },
+      });
+      assert.equal(out.dto.docType, esperado, `${tipo} → ${esperado}`);
+      assert.equal(out.dto.doc, "12345678909", `${tipo} envia o número junto`);
+    }
+    ok("cpf→2 e passport→1 são os únicos enviados por padrão");
+
+    // RG e certidão têm enum conhecido, mas não está confirmado que servem como
+    // documento principal neste PUT. CNH e other não têm enum algum.
+    for (const tipo of ["rg", "birth_certificate", "cnh", "other"]) {
+      const out = buildHitsGuestPutFromFnrh({
+        idEntity: 1,
+        idReservation: 2,
+        fnrh: { ...FICHA_COMPLETA, documento_tipo: tipo },
+      });
+      assert.equal(out.dto.docType, undefined, `${tipo} não entra por padrão`);
+      assert.equal(out.dto.doc, undefined, `${tipo} não envia número sem tipo`);
+      const motivos = new Map(out.omitted.map((o) => [o.field, o.reason]));
+      assert.equal(motivos.get("doc"), "enum_nao_confirmado");
+    }
+    ok("rg, birth_certificate, cnh e other ficam fora deste fluxo");
+
+    // O enum conhecido continua registrado, mesmo sem ser enviado.
+    assert.equal(HITS_DOC_TYPE_CONHECIDOS.rg, 3);
+    assert.equal(HITS_DOC_TYPE_CONHECIDOS.birth_certificate, 7);
+    assert.equal(FNRH_TO_HITS_ENUMS_CONFIRMED.docType?.rg, undefined);
+    assert.equal(FNRH_TO_HITS_ENUMS_CONFIRMED.docType?.birth_certificate, undefined);
+    ok("RG e certidão seguem documentados como enum, fora do mapa de envio");
+  }
+  {
+    // A FNRH valida por dígitos mas grava o texto digitado.
+    const mascarado = buildHitsGuestPutFromFnrh({
+      idEntity: 1,
+      idReservation: 2,
+      fnrh: { ...FICHA_COMPLETA, documento_numero: "123.456.789-09" },
+    });
+    assert.equal(mascarado.dto.doc, "12345678909");
+    ok("máscara de CPF é removida antes de enviar");
+
+    const passaporte = buildHitsGuestPutFromFnrh({
+      idEntity: 1,
+      idReservation: 2,
+      fnrh: { ...FICHA_COMPLETA, documento_tipo: "passport", documento_numero: "AB123456" },
+    });
+    assert.equal(passaporte.dto.doc, "AB123456");
+    ok("passaporte alfanumérico é preservado como está");
+  }
+  {
+    const semDoc = buildHitsGuestPutFromFnrh({
+      idEntity: 1,
+      idReservation: 2,
+      fnrh: { ...FICHA_COMPLETA, documento_numero: "", documento_tipo: "" },
+    });
+    assert.equal(semDoc.dto.doc, undefined);
+    assert.equal(semDoc.dto.docType, undefined);
+    const motivos = new Map(semDoc.omitted.map((o) => [o.field, o.reason]));
+    assert.equal(motivos.get("doc"), "vazio");
+    ok("ficha sem documento não inventa par — quem recusa é o HITS");
+  }
+
   console.log("\n== Omissão por enum não confirmado ==");
   {
     const r = buildHitsGuestPutFromFnrh({
@@ -77,13 +161,12 @@ function main() {
       idReservation: 2,
       fnrh: FICHA_COMPLETA,
     });
-    for (const campo of ["doc", "docType", "contact1", "contactType1", "contact2", "contactType2", "gender", "purposeTrip", "arrivingBy"]) {
+    for (const campo of ["contact1", "contactType1", "contact2", "contactType2", "gender", "purposeTrip", "arrivingBy"]) {
       assert.equal((r.dto as Record<string, unknown>)[campo], undefined, `${campo} não pode ir sem de/para`);
     }
-    ok("documento, contatos, sexo, motivo e transporte ficam de fora por padrão");
+    ok("contatos, sexo, motivo e transporte seguem fora — só documento foi confirmado");
 
     const motivos = new Map(r.omitted.map((o) => [o.field, o.reason]));
-    assert.equal(motivos.get("doc"), "enum_nao_confirmado");
     assert.equal(motivos.get("contact1"), "enum_nao_confirmado");
     assert.equal(motivos.get("nationalityCountryId"), "sem_campo_no_contrato");
     ok("cada omissão registra o motivo, sem expor valor");

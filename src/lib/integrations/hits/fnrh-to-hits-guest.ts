@@ -69,8 +69,43 @@ export type FnrhToHitsEnumMap = {
   arrivingBy?: Record<string, HitsGuestArrivingBy>;
 };
 
-/** Default: nenhum enum confirmado. Trocar só com o Swagger em mãos. */
+/** Nenhum enum resolvido. Base para testes e para o que ainda não se sabe. */
 export const FNRH_TO_HITS_ENUMS_UNCONFIRMED: FnrhToHitsEnumMap = {};
+
+/**
+ * Enum de documento conhecido, documentado em `types.ts:150` a partir do
+ * Swagger: 1=Passaporte, 2=CPF, 3=RG, 7=Certidão de nascimento. A allowlist da
+ * busca (`query.ts`) usa a mesma faixa.
+ *
+ * Referência — não é o que se envia. Ver `FNRH_TO_HITS_ENUMS_CONFIRMED`.
+ */
+export const HITS_DOC_TYPE_CONHECIDOS = {
+  passport: 1,
+  cpf: 2,
+  rg: 3,
+  birth_certificate: 7,
+} as const satisfies Record<string, HitsGuestDocumentType>;
+
+/**
+ * De/para efetivo do fluxo FNRH → `PUT /Datashare/WebCheckinOut/Guests`.
+ *
+ * O HITS recusa o PUT sem documento principal
+ * (`400 "Deve haver ao menos um documento principal informado"`), e exige CPF ou
+ * passaporte para a confirmação. Só esses dois entram por padrão.
+ *
+ * RG e certidão de nascimento têm enum conhecido (acima), mas não está
+ * confirmado que satisfazem a exigência de documento principal neste PUT —
+ * enviá-los poderia gravar um documento que o HITS não aceita como principal.
+ * `cnh` e `other` não têm enum: 4, 5 e 6 existem na faixa de escrita sem
+ * significado documentado. Os demais enums (contato, sexo, motivo da viagem,
+ * meio de transporte) seguem sem legenda e continuam omitidos.
+ */
+export const FNRH_TO_HITS_ENUMS_CONFIRMED: FnrhToHitsEnumMap = {
+  docType: {
+    cpf: HITS_DOC_TYPE_CONHECIDOS.cpf,
+    passport: HITS_DOC_TYPE_CONHECIDOS.passport,
+  },
+};
 
 /** Motivo pelo qual um campo não entrou — diagnóstico sem valor, só rótulo. */
 export type FnrhToHitsOmission = {
@@ -88,6 +123,19 @@ export type FnrhToHitsResult = {
 function clean(value: unknown): string {
   if (value == null) return "";
   return String(value).trim();
+}
+
+/**
+ * Documento sem máscara. A FNRH valida por dígitos mas grava o texto digitado
+ * ("123.456.789-09"); o HITS quer o número. Passaporte é alfanumérico, então a
+ * limpeza só remove pontuação quando o valor é claramente numérico mascarado.
+ */
+export function stripDocumentMask(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const digits = raw.replace(/\D/g, "");
+  // Só vira dígitos puros quando não há letra: preserva passaporte "AB123456".
+  return /[A-Za-z]/.test(raw) ? raw : digits;
 }
 
 /** Chave de lookup estável: minúscula, sem acento, sem espaço duplo. */
@@ -132,7 +180,7 @@ export type BuildHitsGuestPutInput = {
   idEntity: number;
   idReservation: number;
   fnrh: FnrhGuestData;
-  /** Default: nenhum enum. Injetável para teste e para o dia da confirmação. */
+  /** Default: só os enums confirmados. Injetável para teste. */
   enums?: FnrhToHitsEnumMap;
 };
 
@@ -144,7 +192,7 @@ export function buildHitsGuestPutFromFnrh(
   input: BuildHitsGuestPutInput,
 ): FnrhToHitsResult {
   const fnrh = input.fnrh ?? {};
-  const enums = input.enums ?? FNRH_TO_HITS_ENUMS_UNCONFIRMED;
+  const enums = input.enums ?? FNRH_TO_HITS_ENUMS_CONFIRMED;
 
   const dto: HitsGuestsPutDto = {
     idEntity: input.idEntity,
@@ -181,7 +229,7 @@ export function buildHitsGuestPutFromFnrh(
   // --- Documento: número e tipo andam juntos (contrato do POST). Sem o de/para
   //     de docType confirmado, enviar o número isolado gravaria um documento sem
   //     tipo — os dois ficam de fora.
-  const doc = clean(fnrh.documento_numero);
+  const doc = stripDocumentMask(fnrh.documento_numero);
   const docTypeKey = normalizeEnumKey(fnrh.documento_tipo);
   const docType = enums.docType?.[docTypeKey];
   if (doc && docType != null) {
