@@ -43,8 +43,22 @@ export const HITS_LIST_TYPE_CHECKIN_DATE = 0;
  * (docs/YES_HOTEL_CONTRATO_TECNICO_HITS_V1.md §6.1).
  */
 export const HITS_LIST_STATUS_CONFIRMED = 1;
+/**
+ * `Processed` — a reserva depois do check-in no HITS. Ler só Status=1 fazia a
+ * reserva sumir da tela no instante da entrada: é esse o bug que a segunda
+ * leitura corrige. Tratado como "hospedada" pelo comportamento observado no
+ * Sandbox; a semântica oficial ainda será confirmada com a HITS.
+ */
+export const HITS_LIST_STATUS_PROCESSED = 3;
 /** Janela default quando o chamador não informa datas. */
 export const HITS_LIST_DEFAULT_WINDOW_DAYS = 30;
+/**
+ * Janela da leitura de hospedados, provisória até a HITS confirmar o filtro de
+ * in house: `Type=0` é data de check-in e quem está hospedado já entrou, então
+ * a busca olha para trás; +1 dia cobre a entrada de hoje.
+ */
+const IN_HOUSE_LOOKBACK_DAYS = 30;
+const IN_HOUSE_FORWARD_DAYS = 1;
 /** Paginação do HITS é 1-based (docs/YES_HOTEL_PLANO_TESTE_AUTENTICADO_HITS_V1.md §5.3). */
 export const HITS_LIST_FIRST_PAGE = 1;
 /** Limites defensivos: a listagem nunca vira laço infinito nem varredura do universo. */
@@ -181,10 +195,13 @@ export type HitsSandboxReservationRow = {
   check_out: string;
   status_reserva: "ativa" | "cancelada";
   total_hospedes: number;
+  /** Status=1 → confirmada; Status=3 → hospedada. Independe de status_reserva. */
+  ciclo_hits: "confirmada" | "hospedada";
 };
 
 export function toHitsSandboxRow(
   reservation: SyncedReservation,
+  ciclo: HitsSandboxReservationRow["ciclo_hits"] = "confirmada",
 ): HitsSandboxReservationRow {
   return {
     external_reservation_id: reservation.externalReservationId,
@@ -194,6 +211,7 @@ export function toHitsSandboxRow(
     check_out: reservation.checkOut || "",
     status_reserva: reservation.reservationStatus,
     total_hospedes: Math.max(1, Number(reservation.totalGuests) || 1),
+    ciclo_hits: ciclo,
   };
 }
 
@@ -306,6 +324,8 @@ export async function fetchHitsSandboxReservations(
 
   const ids: string[] = [];
   const seenIds = new Set<string>();
+  /** Ids vistos na listagem de Status=3 — já entraram no apartamento. */
+  const hospedadas = new Set<string>();
   let pagesFetched = 0;
   let stoppedReason: FetchHitsSandboxReservationsResult["stopped_reason"] = "last_page";
 
@@ -324,56 +344,84 @@ export async function fetchHitsSandboxReservations(
     const initialDate = input.dateFrom || window.from;
     const finalDate = input.dateTo || window.to;
 
-    // Sequencial de propósito: o gateway limita a 60 req/min e cada reserva
-    // ainda custa um GET de detalhe. Paralelizar aqui produz 429.
-    for (let offset = 0; offset < HITS_LIST_MAX_PAGES; offset += 1) {
-      const currentPage = page + offset;
-      const qs = new URLSearchParams();
-      qs.set("Type", String(HITS_LIST_TYPE_CHECKIN_DATE));
-      qs.set("Status", String(input.status ?? HITS_LIST_STATUS_CONFIRMED));
-      qs.set("InitialDate", initialDate);
-      qs.set("FinalDate", finalDate);
-      qs.set("Page", String(currentPage));
-      qs.set("Size", String(size));
+    // Ciclo de vida: confirmadas e, em seguida, quem já entrou. `status`
+    // explícito continua valendo como leitura única.
+    const statuses =
+      input.status != null
+        ? [input.status]
+        : [HITS_LIST_STATUS_CONFIRMED, HITS_LIST_STATUS_PROCESSED];
 
-      const listRes = await transport.request({
-        method: "GET",
-        url: `${config.baseUrl}/v1/reservations?${qs.toString()}`,
-        headers,
-        timeoutMs: config.requestTimeoutMs,
-        maxRetries: READ_MAX_RETRIES,
-      });
-      pagesFetched += 1;
+    // Sequencial de propósito, entre status e entre páginas: o gateway limita a
+    // 60 req/min e cada reserva ainda custa um GET de detalhe. Paralelizar
+    // aqui produz 429.
+    for (const status of statuses) {
+      // Hospedados só podem ter entrado no passado; confirmadas mantêm a janela.
+      const from =
+        status === HITS_LIST_STATUS_PROCESSED
+          ? addDaysYmd(initialDate, -IN_HOUSE_LOOKBACK_DAYS)
+          : initialDate;
+      const to =
+        status === HITS_LIST_STATUS_PROCESSED
+          ? addDaysYmd(initialDate, IN_HOUSE_FORWARD_DAYS)
+          : finalDate;
+      // O teto de reservas é por leitura: a cobertura de cada status é a mesma
+      // de quando existia apenas a leitura de confirmadas.
+      let addedThisRead = 0;
 
-      const items = extractGatewayListItems(listRes.body);
-      let hitCap = false;
-      for (const summary of items) {
-        const id = String(summary?.idReservation ?? "").trim();
-        // Dedupe entre páginas: o HITS pode repetir item se algo mudar durante a varredura.
-        if (!id || seenIds.has(id)) continue;
-        seenIds.add(id);
-        ids.push(id);
-        if (ids.length >= HITS_LIST_MAX_RESERVATIONS) {
-          hitCap = true;
+      for (let offset = 0; offset < HITS_LIST_MAX_PAGES; offset += 1) {
+        const currentPage = page + offset;
+        const qs = new URLSearchParams();
+        qs.set("Type", String(HITS_LIST_TYPE_CHECKIN_DATE));
+        qs.set("Status", String(status));
+        qs.set("InitialDate", from);
+        qs.set("FinalDate", to);
+        qs.set("Page", String(currentPage));
+        qs.set("Size", String(size));
+
+        const listRes = await transport.request({
+          method: "GET",
+          url: `${config.baseUrl}/v1/reservations?${qs.toString()}`,
+          headers,
+          timeoutMs: config.requestTimeoutMs,
+          maxRetries: READ_MAX_RETRIES,
+        });
+        pagesFetched += 1;
+
+        const items = extractGatewayListItems(listRes.body);
+        let hitCap = false;
+        for (const summary of items) {
+          const id = String(summary?.idReservation ?? "").trim();
+          if (!id) continue;
+          // Status=3 prevalece: apareceu como processada, já entrou.
+          if (status === HITS_LIST_STATUS_PROCESSED) hospedadas.add(id);
+          // Dedupe entre páginas e entre as duas leituras: o detalhe da mesma
+          // reserva nunca é buscado duas vezes.
+          if (seenIds.has(id)) continue;
+          seenIds.add(id);
+          ids.push(id);
+          addedThisRead += 1;
+          if (addedThisRead >= HITS_LIST_MAX_RESERVATIONS) {
+            hitCap = true;
+            break;
+          }
+        }
+
+        if (hitCap) {
+          stoppedReason = "max_reservations";
           break;
         }
-      }
-
-      if (hitCap) {
-        stoppedReason = "max_reservations";
-        break;
-      }
-      if (items.length === 0) {
-        stoppedReason = "empty_page";
-        break;
-      }
-      // Página incompleta = última página.
-      if (items.length < size) {
-        stoppedReason = "last_page";
-        break;
-      }
-      if (offset === HITS_LIST_MAX_PAGES - 1) {
-        stoppedReason = "max_pages";
+        if (items.length === 0) {
+          stoppedReason = "empty_page";
+          break;
+        }
+        // Página incompleta = última página.
+        if (items.length < size) {
+          stoppedReason = "last_page";
+          break;
+        }
+        if (offset === HITS_LIST_MAX_PAGES - 1) {
+          stoppedReason = "max_pages";
+        }
       }
     }
   }
@@ -394,7 +442,7 @@ export async function fetchHitsSandboxReservations(
         (detailRes.body ?? {}) as HitsReservationDetails as Record<string, unknown>,
         null,
       );
-      rows.push(toHitsSandboxRow(synced));
+      rows.push(toHitsSandboxRow(synced, hospedadas.has(id) ? "hospedada" : "confirmada"));
     } catch (e) {
       failed.push({
         external_reservation_id: id,

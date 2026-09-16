@@ -278,7 +278,9 @@
       // Campos operacionais neutros: nada aqui dispara ação.
       pagamento: "desconhecido",
       acessoLiberado: false,
-      entrouNoApto: false,
+      // Status=3 no HITS = hóspede já entrou. Sem isto a reserva sumia da grade
+      // no instante do check-in.
+      entrouNoApto: !!(row && row.ciclo_hits === "hospedada"),
       hospedes: [],
       historico: [],
       cobrancasPagarme: [],

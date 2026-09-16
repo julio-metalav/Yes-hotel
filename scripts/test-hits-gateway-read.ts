@@ -280,6 +280,8 @@ async function main() {
     const result = await fetchHitsSandboxReservations({
       config: config(),
       fetchImpl,
+      // Leitura única: estes casos são sobre paginação, não sobre ciclo.
+      status: 1,
       nowIso: "2026-09-15T00:00:00.000Z",
     });
 
@@ -310,6 +312,7 @@ async function main() {
         },
         calls,
       ),
+      status: 1,
       nowIso: "2026-09-15T00:00:00.000Z",
     });
     assert.equal(result.pages_fetched, 1);
@@ -340,6 +343,7 @@ async function main() {
     const result = await fetchHitsSandboxReservations({
       config: config(),
       fetchImpl,
+      status: 1,
       nowIso: "2026-09-15T00:00:00.000Z",
     });
     assert.equal(result.pages_fetched, 2);
@@ -368,6 +372,7 @@ async function main() {
     const result = await fetchHitsSandboxReservations({
       config: config(),
       fetchImpl,
+      status: 1,
       nowIso: "2026-09-15T00:00:00.000Z",
     });
     assert.equal(result.rows.length, 1, "dedupe entre e dentro das páginas");
@@ -395,6 +400,7 @@ async function main() {
     const result = await fetchHitsSandboxReservations({
       config: config(),
       fetchImpl,
+      status: 1,
       nowIso: "2026-09-15T00:00:00.000Z",
     });
     assert.equal(result.stopped_reason, "max_reservations");
@@ -427,11 +433,81 @@ async function main() {
     const result = await fetchHitsSandboxReservations({
       config: config(),
       fetchImpl,
+      status: 1,
       nowIso: "2026-09-15T00:00:00.000Z",
     });
     assert.equal(result.rows.length, 1);
     assert.equal(attempts, 2, "429 foi repetido uma vez pelo transporte");
     ok("429 na listagem respeita o retry existente com Retry-After");
+  }
+
+  console.log("\n== Ciclo de vida (Status 1 + 3) ==");
+  {
+    /** Mock por Status: cada leitura devolve a sua lista na página 1. */
+    const byStatus = (lists: Record<string, number[]>, calls?: Call[]) =>
+      async (url: string, init: { method: string; headers: Record<string, string> }) => {
+        calls?.push({ url, method: init.method, headers: init.headers });
+        const detail = url.match(/\/v1\/reservations\/(\d+)$/);
+        if (detail) {
+          return new Response(
+            JSON.stringify({ ...DETAIL_17613, idReservation: Number(detail[1]) }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        const params = new URL(url).searchParams;
+        const ids = Number(params.get("Page")) === 1 ? (lists[params.get("Status")!] ?? []) : [];
+        return new Response(
+          JSON.stringify({ data: ids.map((id) => ({ idReservation: id })) }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+    const janela = { dateFrom: "2026-09-15", dateTo: "2026-10-15" };
+    {
+      const calls: Call[] = [];
+      const result = await fetchHitsSandboxReservations({
+        config: config(),
+        fetchImpl: byStatus({ "1": [17613], "3": [] }, calls),
+        ...janela,
+      });
+      assert.equal(result.rows.length, 1);
+      assert.equal(result.rows[0]!.ciclo_hits, "confirmada");
+      ok("reserva só em Status=1 aparece como confirmada");
+
+      const lists = calls.filter((c) => !/\/v1\/reservations\/\d+$/.test(c.url));
+      assert.equal(lists.length, 2, "uma leitura por status, sequenciais");
+      assert.match(lists[0]!.url, /Status=1&InitialDate=2026-09-15&FinalDate=2026-10-15/);
+      // dia operacional − 30 = 2026-08-16; dia operacional + 1 = 2026-09-16.
+      assert.match(lists[1]!.url, /Status=3&InitialDate=2026-08-16&FinalDate=2026-09-16/);
+      ok("Status=1 mantém a janela atual; Status=3 usa from−30 até from+1");
+    }
+    {
+      // REGRESSÃO: depois do check-in a reserva sai do Status=1 e não pode sumir.
+      const result = await fetchHitsSandboxReservations({
+        config: config(),
+        fetchImpl: byStatus({ "1": [], "3": [17656] }),
+        ...janela,
+      });
+      assert.equal(result.rows.length, 1, "17656 não pode sumir após o check-in");
+      assert.equal(result.rows[0]!.external_reservation_id, "17656");
+      assert.equal(result.rows[0]!.ciclo_hits, "hospedada");
+      ok("17656 só em Status=3 continua aparecendo, como hospedada");
+    }
+    {
+      // Transição: o HITS devolve a reserva nas duas listas.
+      const calls: Call[] = [];
+      const result = await fetchHitsSandboxReservations({
+        config: config(),
+        fetchImpl: byStatus({ "1": [17656], "3": [17656] }, calls),
+        ...janela,
+      });
+      assert.equal(result.rows.length, 1, "uma única linha");
+      assert.equal(result.rows[0]!.ciclo_hits, "hospedada", "Status=3 prevalece");
+      const detalhes = calls.filter((c) => /\/v1\/reservations\/\d+$/.test(c.url));
+      assert.equal(detalhes.length, 1, "e um único GET de detalhe");
+      assert.equal(calls.every((c) => c.method === "GET"), true);
+      ok("mesma id nos dois status gera uma linha só, sem escrita");
+    }
   }
 
   console.log("\n== Mapeamento somente leitura ==");

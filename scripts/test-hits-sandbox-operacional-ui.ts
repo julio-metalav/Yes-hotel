@@ -173,6 +173,26 @@ async function main() {
     assert.equal(r.fnrhStatusAgregado, null);
     ok("estado operacional neutro — nada a executar");
   }
+  {
+    // Sem isto a reserva sumia da grade no instante do check-in no HITS.
+    const api = loadPreview();
+    assert.equal(
+      api.toReservaOperacional({ ...ROW, ciclo_hits: "hospedada" }).entrouNoApto,
+      true,
+    );
+    assert.equal(
+      api.toReservaOperacional({ ...ROW, ciclo_hits: "confirmada" }).entrouNoApto,
+      false,
+    );
+    // Linha sem o campo não pode virar hospedada por acidente.
+    assert.equal(api.toReservaOperacional(ROW).entrouNoApto, false);
+    // Acesso é credencial do Yes/TTLock: o HITS não concede.
+    assert.equal(
+      api.toReservaOperacional({ ...ROW, ciclo_hits: "hospedada" }).acessoLiberado,
+      false,
+    );
+    ok("ciclo_hits=hospedada vira entrouNoApto, sem liberar acesso");
+  }
 
   console.log("\n== Busca da Edge ==");
   {
