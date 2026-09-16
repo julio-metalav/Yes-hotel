@@ -95,12 +95,26 @@ function main() {
       .map((m) => m[1]);
     assert.deepEqual(
       [...new Set(escritas)].sort(),
-      ["fnrh_hospedes", "operacional_reserva_eventos"],
-      "só a ficha e o log de eventos podem receber escrita",
+      ["fnrh_hospedes", "operacional_hospedes", "operacional_reserva_eventos"],
+      "ficha, hóspede (só idEntity) e log de eventos",
     );
     assert.equal(tabelas.includes("operacional_reservas"), true, "reserva é lida…");
     assert.equal(escritas.includes("operacional_reservas"), false, "…mas nunca escrita");
-    ok("operacional_reservas é só leitura; escrita restrita à ficha e ao evento");
+    ok("operacional_reservas é só leitura; escrita restrita à ficha, ao idEntity e ao evento");
+
+    // O único update em operacional_hospedes grava pms_external_guest_id e só
+    // quando ainda é nulo — nada mais do hóspede é tocado.
+    const updatesHospede = [
+      ...syncBlock.matchAll(/\.from\("operacional_hospedes"\)\s*\.update\(\{([\s\S]*?)\}\)([\s\S]*?);/g),
+    ];
+    assert.equal(updatesHospede.length, 1, "um único update em operacional_hospedes");
+    const [, campos, cadeia] = updatesHospede[0]!;
+    assert.deepEqual(
+      campos.split(",").map((c) => c.trim().split(":")[0]).filter(Boolean).sort(),
+      ["pms_external_guest_id", "updated_at"],
+    );
+    assert.match(cadeia, /\.is\("pms_external_guest_id", null\)/);
+    ok("update do hóspede: só pms_external_guest_id, guardado por is(null)");
 
     for (const proibido of [
       "entrou_no_apto",
@@ -120,6 +134,87 @@ function main() {
       );
     }
     ok("sem status de reserva, check-in, quarto, pagamento, senha ou TTLock");
+  }
+
+  console.log("\n== PAX novo no HITS: ordem e idempotência ==");
+  {
+    const pax = syncBlock.slice(
+      syncBlock.indexOf("async function garantirPaxNoHits"),
+      syncBlock.indexOf("async function syncFnrhToHits"),
+    );
+    assert.ok(pax.length > 0, "garantirPaxNoHits existe e vem antes do sync");
+
+    // 1. Só entra no ramo de criação quando não há idEntity persistido.
+    assert.match(
+      syncBlock,
+      /if \(idEntity == null\) \{\s*\n\s*idEntity = await garantirPaxNoHits\(/,
+      "POST só é alcançável sem idEntity",
+    );
+    const posts = (syncBlock.match(/method: "POST"/g) || []).length;
+    assert.equal(posts, 1, "um único POST em todo o sync");
+    assert.ok(pax.includes('method: "POST"'), "e ele vive dentro de garantirPaxNoHits");
+    ok("com idEntity persistido não há POST: vai direto ao PUT");
+
+    // 2–3. Sem documento principal → pendente, sem POST; busca no detalhe ANTES do POST.
+    assert.match(pax, /if \(!item \|\| !item\.doc\) \{[\s\S]*?syncStatus: "pendente"/);
+    const iBuscaAntes = pax.indexOf("findIdEntityByDoc(antes.detail, doc)");
+    const iPost = pax.indexOf('method: "POST"');
+    const iBuscaDepois = pax.indexOf("findIdEntityByDoc(depois.detail, doc)");
+    const iPersist = pax.indexOf('.is("pms_external_guest_id", null)');
+    assert.ok(iBuscaAntes > -1 && iBuscaAntes < iPost, "GET+busca antes do POST");
+    assert.ok(iBuscaDepois > iPost, "GET+busca de novo depois do POST");
+    assert.ok(iPersist > iBuscaDepois, "persistência só depois de localizar");
+    ok("ordem: busca → POST → busca → persistir (POST pulado se já achou)");
+
+    // Falha de GET ≠ PAX ausente. GET pré-POST quebrado → zero POST.
+    assert.match(pax, /if \(!r\.ok\) return \{ ok: false, status: r\.status \};/);
+    assert.equal(/return r\.ok \? .* : null/.test(pax), false, "lerDetalhe não pode devolver null em falha");
+    const iAntes = pax.indexOf("const antes = await lerDetalhe();");
+    const iAntesFalha = pax.indexOf("if (!antes.ok) {", iAntes);
+    const iAntesReturn = pax.indexOf("return null;", iAntesFalha);
+    assert.ok(iAntes > -1 && iAntesFalha > iAntes, "GET pré-POST checa ok");
+    assert.ok(iAntesReturn > iAntesFalha && iAntesReturn < iPost, "falha do GET pré-POST retorna ANTES do POST");
+    assert.match(
+      pax.slice(iAntesFalha, iAntesReturn),
+      /fichaStatus: "erro_sincronizacao"/,
+      "falha do GET pré-POST registra erro controlado",
+    );
+    assert.match(pax.slice(iAntesFalha, iAntesReturn), /POST não executado/);
+    ok("GET pré-POST falhou → erro controlado, ficha preservada, zero POST");
+
+    // POST só depois de GET ok + busca sem match.
+    const iPostIf = pax.lastIndexOf("if (idEntity == null) {", iPost);
+    assert.ok(iPostIf > iBuscaAntes && iPostIf < iPost, "POST condicionado ao resultado da busca pós-GET-ok");
+    ok("GET pré-POST ok sem PAX → POST permitido");
+
+    // GET pós-POST: falha e ausência têm motivos distintos, ambos sem id inventado.
+    const iDepois = pax.indexOf("const depois = await lerDetalhe();");
+    assert.ok(iDepois > iPost);
+    assert.match(pax.slice(iDepois), /if \(!depois\.ok\) \{[\s\S]*?releitura da reserva falhou[\s\S]*?return null;/);
+    assert.match(pax.slice(iDepois), /não localizado no detalhe da reserva[\s\S]*?return null;/);
+    ok("GET pós-POST: falha de leitura e PAX ausente registram motivos distintos");
+
+    // 4–5. Falhas: POST ruim → erro, nada persistido; PAX não localizado → erro,
+    //      sem idEntity inventado; PUT vem só depois, no sync.
+    assert.match(pax, /if \(!res\.ok\) \{[\s\S]*?syncStatus: "erro"[\s\S]*?return null;/);
+    assert.match(pax, /não localizado no detalhe da reserva[\s\S]*?return null;/);
+    // Só código: a fatia termina no docblock do sync, que cita o PUT em comentário.
+    const paxCode = stripComments(pax);
+    assert.equal(/idEntity\s*=\s*\d/.test(paxCode), false, "nenhum idEntity literal");
+    assert.equal(paxCode.includes("/v1/guests"), false, "nenhum PUT dentro da criação");
+    assert.equal(paxCode.includes('method: "PUT"'), false, "nenhum PUT dentro da criação");
+    assert.ok(syncBlock.indexOf('method: "PUT"') > syncBlock.indexOf("async function syncFnrhToHits"));
+    ok("falha no POST ou na localização: erro controlado, ficha preservada, sem PUT");
+
+    // Escopo: só GET do detalhe da própria reserva — nenhuma busca global.
+    assert.equal(pax.includes("/v1/guests?"), false, "sem busca global por CPF");
+    assert.match(pax, /\/v1\/reservations\/\$\{encodeURIComponent\(String\(input\.idReservation\)\)\}/);
+    ok("localização escopada à reserva — sem busca global de entidade");
+
+    // Retry: o valor que segue para o PUT é o PERSISTIDO, não o obtido.
+    assert.match(pax, /const persistido = toPositiveInt\([\s\S]*?pms_external_guest_id/);
+    assert.match(pax, /return persistido;/);
+    ok("dois submits simultâneos: o primeiro persiste, o segundo adota o persistido");
   }
 
   console.log("\n== Ação no painel: só a porta de entrada ==");

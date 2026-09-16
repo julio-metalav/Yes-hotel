@@ -7,7 +7,9 @@
  */
 import assert from "node:assert/strict";
 import {
+  buildHitsGuestPostFromFnrh,
   buildHitsGuestPutFromFnrh,
+  findIdEntityByDoc,
   FNRH_TO_HITS_ENUMS_CONFIRMED,
   hasUpdatableFields,
   HITS_DOC_TYPE_CONHECIDOS,
@@ -219,6 +221,67 @@ function main() {
     const motivos = new Map(r.omitted.map((o) => [o.field, o.reason]));
     assert.equal(motivos.get("contato_email"), "enum_nao_confirmado");
     ok("sem de/para de contato, nada é enviado nem inventado");
+  }
+
+  console.log("\n== PAX novo: item do POST derivado do mesmo mapeamento ==");
+  {
+    const item = buildHitsGuestPostFromFnrh(FICHA_COMPLETA);
+    assert.deepEqual(item, {
+      name: "Hospede Teste HITS",
+      doc: "12345678909",
+      docType: 2,
+      contact: "67999990000",
+      contactType: 2,
+    });
+    ok("POST leva só name, doc/docType e contact/contactType — nada além do contrato");
+
+    const soEmail = buildHitsGuestPostFromFnrh({ ...FICHA_COMPLETA, telefone: "" });
+    assert.equal(soEmail?.contact, "hospede.teste@example.com");
+    assert.equal(soEmail?.contactType, 1);
+    ok("sem telefone, o contato do POST é o e-mail com tipo 1");
+
+    const semContato = buildHitsGuestPostFromFnrh({ ...FICHA_COMPLETA, telefone: "", email: "" });
+    assert.equal(semContato?.contact, undefined);
+    assert.equal(semContato?.contactType, undefined);
+    ok("sem contato, o par não vai — o POST não exige");
+
+    assert.equal(buildHitsGuestPostFromFnrh({ ...FICHA_COMPLETA, documento_numero: "" }), null);
+    assert.equal(buildHitsGuestPostFromFnrh({ ...FICHA_COMPLETA, documento_tipo: "rg" }), null);
+    assert.equal(buildHitsGuestPostFromFnrh({ ...FICHA_COMPLETA, hospede_nome: "" }), null);
+    ok("sem documento principal ou sem nome não há POST — e não há como localizar o PAX depois");
+  }
+
+  console.log("\n== PAX novo: localizar idEntity no detalhe da reserva ==");
+  {
+    const detail = {
+      idReservation: 17816,
+      guests: [
+        { idEntity: 141600, name: "AAAA", docCpfCnpjPassport: "11111111111" },
+        { idEntity: 141601, name: "BBBB", docCpfCnpjPassport: "123.456.789-09" },
+        { idEntity: 141602, name: "CCCC", docCpfCnpjPassport: null, federalRegistrationNumber: "22222222222" },
+      ],
+    };
+    assert.equal(findIdEntityByDoc(detail, "12345678909"), "141601");
+    assert.equal(findIdEntityByDoc(detail, "123.456.789-09"), "141601");
+    ok("acha pelo documento comparando sem máscara nos dois lados");
+
+    assert.equal(findIdEntityByDoc(detail, "22222222222"), "141602");
+    ok("federalRegistrationNumber também conta como documento");
+
+    assert.equal(findIdEntityByDoc(detail, "99999999999"), null);
+    assert.equal(findIdEntityByDoc({ guests: [] }, "12345678909"), null);
+    assert.equal(findIdEntityByDoc(null, "12345678909"), null);
+    assert.equal(findIdEntityByDoc(detail, ""), null);
+    ok("sem match, sem guests, sem detalhe ou sem doc → null, nunca um id inventado");
+
+    const passaporte = { guests: [{ idEntity: 7, docCpfCnpjPassport: "AB123456" }] };
+    assert.equal(findIdEntityByDoc(passaporte, "AB123456"), "7");
+    assert.equal(findIdEntityByDoc(passaporte, "AB-123456"), null);
+    ok("passaporte alfanumérico compara literal, sem limpar");
+
+    assert.equal(findIdEntityByDoc({ guests: [{ idEntity: 0, docCpfCnpjPassport: "11111111111" }] }, "11111111111"), null);
+    assert.equal(findIdEntityByDoc({ guests: [{ idEntity: "x", docCpfCnpjPassport: "11111111111" }] }, "11111111111"), null);
+    ok("idEntity inválido no detalhe não é aceito");
   }
 
   console.log("\n== Omissão por enum não confirmado ==");

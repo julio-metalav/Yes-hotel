@@ -18,6 +18,7 @@ import type {
   HitsGuestGender,
   HitsGuestPurposeTrip,
   HitsGuestsPutDto,
+  HitsWebCheckinGuestCreateItem,
 } from "./types.ts";
 
 /** Colunas de `fnrh_hospedes` usadas aqui. Todas opcionais: a ficha pode estar parcial. */
@@ -302,4 +303,56 @@ export function buildHitsGuestPutFromFnrh(
 /** O PUT exige ao menos um campo além dos identificadores. */
 export function hasUpdatableFields(result: FnrhToHitsResult): boolean {
   return result.included.length > 0;
+}
+
+/**
+ * Item de `POST /v1/reservations/:id/guests` (inclusão de PAX na reserva).
+ *
+ * O contrato do POST só aceita `name`, `doc`+`docType` e `contact`+`contactType`
+ * (`guest-write.ts`): nascimento, endereço e o resto vão depois, pelo PUT.
+ * Derivado do mesmo mapeamento do PUT para não existir uma segunda tabela de
+ * enums — os ids passados são descartados.
+ *
+ * Devolve `null` sem nome ou sem documento principal: sem documento, além de o
+ * PUT ser recusado, não há como localizar o PAX criado no detalhe da reserva.
+ */
+export function buildHitsGuestPostFromFnrh(
+  fnrh: FnrhGuestData,
+  enums?: FnrhToHitsEnumMap,
+): HitsWebCheckinGuestCreateItem | null {
+  const { dto } = buildHitsGuestPutFromFnrh({ idEntity: 1, idReservation: 1, fnrh, enums });
+  if (!dto.name || !dto.doc || dto.docType == null) return null;
+  const item: HitsWebCheckinGuestCreateItem = {
+    name: dto.name,
+    doc: dto.doc,
+    docType: dto.docType,
+  };
+  if (dto.contact1 && dto.contactType1 != null) {
+    item.contact = dto.contact1;
+    item.contactType = dto.contactType1;
+  }
+  return item;
+}
+
+/**
+ * Localiza, no detalhe de uma reserva do HITS, o idEntity do PAX cujo documento
+ * bate com `doc`. Comparação pelo valor sem máscara dos dois lados — o detalhe
+ * devolve `docCpfCnpjPassport` cru (11 dígitos no Sandbox), mas o mapper
+ * também limpa por garantia. Escopo é a reserva: nunca uma busca global.
+ *
+ * `null` quando não há match — o chamador não inventa idEntity.
+ */
+export function findIdEntityByDoc(detail: unknown, doc: string): string | null {
+  const alvo = stripDocumentMask(doc);
+  if (!alvo) return null;
+  const guests = (detail as { guests?: unknown } | null)?.guests;
+  if (!Array.isArray(guests)) return null;
+  for (const g of guests) {
+    const guest = (g ?? {}) as Record<string, unknown>;
+    const candidatos = [guest.docCpfCnpjPassport, guest.federalRegistrationNumber];
+    if (!candidatos.some((c) => stripDocumentMask(c) === alvo)) continue;
+    const id = String(guest.idEntity ?? "").trim();
+    if (/^\d+$/.test(id) && Number(id) > 0) return id;
+  }
+  return null;
 }

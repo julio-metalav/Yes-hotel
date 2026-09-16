@@ -32,7 +32,9 @@ import {
 } from "../../../src/lib/domain/yes-hotel/fnrh-completion-policy.ts";
 import { evaluateReservationFnrhState } from "../../../src/lib/domain/yes-hotel/reservation-fnrh-state.ts";
 import {
+  buildHitsGuestPostFromFnrh,
   buildHitsGuestPutFromFnrh,
+  findIdEntityByDoc,
   hasUpdatableFields,
 } from "../../../src/lib/integrations/hits/fnrh-to-hits-guest.ts";
 import {
@@ -1247,6 +1249,135 @@ async function registrarSyncFnrh(
 }
 
 /**
+ * Garante o PAX no HITS para uma posição criada pelo Yes (ocupação declarada)
+ * que ainda não tem idEntity. Devolve o idEntity persistido, ou `null` depois
+ * de registrar o motivo — nunca inventa id.
+ *
+ * Ordem, e por que ela é idempotente:
+ *   3. GET do detalhe da reserva e busca do PAX pelo documento — um POST
+ *      anterior cujo persist falhou é reencontrado aqui, sem novo POST;
+ *   5. POST mínimo (name, doc/docType, contact/contactType — é tudo o que o
+ *      contrato do POST aceita; o resto vai no PUT);
+ *   6–7. GET de novo e localização pelo documento (o gateway não reencaminha o
+ *      corpo do HITS, então o idEntity só existe no detalhe);
+ *   8. persiste `pms_external_guest_id` SOMENTE se ainda nulo — quem persistiu
+ *      primeiro vence, e o valor persistido é o que segue para o PUT.
+ * Escopo é a reserva: nunca uma busca global de entidade por CPF.
+ */
+async function garantirPaxNoHits(
+  client: ReturnType<typeof createClient>,
+  fnrhId: string,
+  reservaId: string,
+  now: string,
+  input: {
+    hospedeId: string;
+    idReservation: number;
+    fnrh: Record<string, unknown>;
+    gatewayUrl: string;
+    gatewayToken: string;
+  },
+): Promise<number | null> {
+  const headers = {
+    Authorization: `Bearer ${input.gatewayToken}`,
+    Accept: "application/json",
+  };
+  const item = buildHitsGuestPostFromFnrh(input.fnrh);
+  if (!item || !item.doc) {
+    await registrarSyncFnrh(client, fnrhId, reservaId, now, {
+      syncStatus: "pendente",
+      erro: "Hóspede sem documento principal: PAX não criado no HITS.",
+    });
+    return null;
+  }
+  const doc = item.doc;
+  const reservaPath = `${input.gatewayUrl}/v1/reservations/${encodeURIComponent(String(input.idReservation))}`;
+  // Falha de GET e "PAX não existe" são coisas diferentes: só a segunda
+  // autoriza um POST. Um GET transitório quebrado antes do POST duplicaria PAX.
+  const lerDetalhe = async (): Promise<
+    { ok: true; detail: unknown } | { ok: false; status: number }
+  > => {
+    const r = await fetch(reservaPath, { method: "GET", headers });
+    if (!r.ok) return { ok: false, status: r.status };
+    return { ok: true, detail: await r.json() };
+  };
+
+  // 3–4. Já está na reserva? Então só falta persistir e seguir para o PUT.
+  const antes = await lerDetalhe();
+  if (!antes.ok) {
+    await registrarSyncFnrh(client, fnrhId, reservaId, now, {
+      syncStatus: "erro",
+      erro: `Leitura da reserva no HITS falhou antes de criar o PAX (HTTP ${antes.status}); POST não executado.`,
+      fichaStatus: "erro_sincronizacao",
+    });
+    return null;
+  }
+  let idEntity = findIdEntityByDoc(antes.detail, doc);
+
+  if (idEntity == null) {
+    // 5. Inclusão mínima do PAX na reserva.
+    const res = await fetch(`${reservaPath}/guests`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ guests: [item] }),
+    });
+    if (!res.ok) {
+      const body = (await res.text()).slice(0, 300);
+      await registrarSyncFnrh(client, fnrhId, reservaId, now, {
+        syncStatus: "erro",
+        erro: `POST PAX no HITS: HTTP ${res.status} ${body}`,
+        fichaStatus: "erro_sincronizacao",
+      });
+      return null;
+    }
+    // 6–7. O id só aparece no detalhe. Releitura falha ≠ PAX ausente: nos dois
+    //      casos nada é inventado, mas o motivo registrado é distinto — e no
+    //      retry a busca pré-POST reencontra o PAX sem criar outro.
+    const depois = await lerDetalhe();
+    if (!depois.ok) {
+      await registrarSyncFnrh(client, fnrhId, reservaId, now, {
+        syncStatus: "erro",
+        erro: `PAX criado no HITS, mas a releitura da reserva falhou (HTTP ${depois.status}).`,
+        fichaStatus: "erro_sincronizacao",
+      });
+      return null;
+    }
+    idEntity = findIdEntityByDoc(depois.detail, doc);
+    if (idEntity == null) {
+      await registrarSyncFnrh(client, fnrhId, reservaId, now, {
+        syncStatus: "erro",
+        erro: "PAX criado no HITS, mas não localizado no detalhe da reserva pelo documento.",
+        fichaStatus: "erro_sincronizacao",
+      });
+      return null;
+    }
+  }
+
+  // 8. Persistência guardada: só preenche se ainda for nulo.
+  await client
+    .from("operacional_hospedes")
+    .update({ pms_external_guest_id: idEntity, updated_at: now })
+    .eq("id", input.hospedeId)
+    .is("pms_external_guest_id", null);
+  const { data: h } = await client
+    .from("operacional_hospedes")
+    .select("pms_external_guest_id")
+    .eq("id", input.hospedeId)
+    .single();
+  const persistido = toPositiveInt(
+    (h as Record<string, unknown> | null)?.pms_external_guest_id,
+  );
+  if (persistido == null) {
+    await registrarSyncFnrh(client, fnrhId, reservaId, now, {
+      syncStatus: "erro",
+      erro: "idEntity obtido no HITS, mas não persistido no hóspede.",
+      fichaStatus: "erro_sincronizacao",
+    });
+    return null;
+  }
+  return persistido;
+}
+
+/**
  * Envia os campos suportados da ficha para o cadastro PAX do HITS, pelo gateway
  * (`PUT /v1/guests`) — a única fronteira de escrita que existe. Sem fila, sem
  * webhook novo, sem tabela nova: o estado do envio continua em `fnrh_hospedes`.
@@ -1295,18 +1426,29 @@ async function syncFnrhToHits(
     const idReservation = toPositiveInt(
       (reserva as Record<string, unknown> | null)?.external_reservation_id,
     );
-    const idEntity = toPositiveInt(
-      (hospede as Record<string, unknown> | null)?.pms_external_guest_id,
-    );
-    if (idReservation == null || idEntity == null) {
+    if (idReservation == null) {
       await registrarSyncFnrh(client, fnrhId, reservaId, now, {
         syncStatus: "pendente",
-        erro:
-          idReservation == null
-            ? "Reserva sem external_reservation_id numérico."
-            : "Hóspede sem pms_external_guest_id numérico.",
+        erro: "Reserva sem external_reservation_id numérico.",
       });
       return;
+    }
+
+    // Posição criada pelo Yes (ocupação declarada) ainda sem PAX no HITS: cria
+    // e obtém o idEntity antes de sincronizar. Com idEntity já persistido este
+    // passo é pulado — o retry vai direto ao PUT, sem novo POST.
+    let idEntity = toPositiveInt(
+      (hospede as Record<string, unknown> | null)?.pms_external_guest_id,
+    );
+    if (idEntity == null) {
+      idEntity = await garantirPaxNoHits(client, fnrhId, reservaId, now, {
+        hospedeId: String((fnrh as Record<string, unknown>).hospede_id ?? ""),
+        idReservation,
+        fnrh: fnrh as Record<string, unknown>,
+        gatewayUrl,
+        gatewayToken,
+      });
+      if (idEntity == null) return; // motivo já registrado; ficha preservada
     }
 
     const mapped = buildHitsGuestPutFromFnrh({
