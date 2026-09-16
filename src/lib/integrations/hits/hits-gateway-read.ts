@@ -269,6 +269,12 @@ function clampPage(page: number | undefined): number {
   return Math.floor(page);
 }
 
+/** `YYYY-MM-DD` ou null. Datas do HITS podem vir com hora; só o dia importa. */
+function ymdOrNull(value: unknown): string | null {
+  const s = String(value ?? "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
 function addDaysYmd(ymd: string, days: number): string {
   const [y, m, d] = ymd.split("-").map(Number);
   const dt = new Date(Date.UTC(y!, m! - 1, d! + days));
@@ -355,11 +361,11 @@ export async function fetchHitsSandboxReservations(
     // 60 req/min e cada reserva ainda custa um GET de detalhe. Paralelizar
     // aqui produz 429.
     for (const status of statuses) {
-      // Hospedados só podem ter entrado no passado; confirmadas mantêm a janela.
-      const from =
-        status === HITS_LIST_STATUS_PROCESSED
-          ? addDaysYmd(initialDate, -IN_HOUSE_LOOKBACK_DAYS)
-          : initialDate;
+      // As duas leituras olham para trás: hospedados só podem ter entrado no
+      // passado, e confirmadas com check-in passado e check-out futuro são
+      // estadias em curso sem check-in registrado no HITS (caso 17792). O que
+      // já terminou é cortado pelo check-out do sumário, abaixo, sem detalhe.
+      const from = addDaysYmd(initialDate, -IN_HOUSE_LOOKBACK_DAYS);
       const to =
         status === HITS_LIST_STATUS_PROCESSED
           ? addDaysYmd(initialDate, IN_HOUSE_FORWARD_DAYS)
@@ -392,6 +398,11 @@ export async function fetchHitsSandboxReservations(
         for (const summary of items) {
           const id = String(summary?.idReservation ?? "").trim();
           if (!id) continue;
+          // Estadia já encerrada (check-out estritamente antes do dia
+          // operacional) não custa detalhe. Check-out igual a hoje entra;
+          // ausente ou inválido também entra — não se descarta no escuro.
+          const checkOut = ymdOrNull((summary as { checkOut?: unknown } | null)?.checkOut);
+          if (checkOut && checkOut < initialDate) continue;
           // Status=3 prevalece: apareceu como processada, já entrou.
           if (status === HITS_LIST_STATUS_PROCESSED) hospedadas.add(id);
           // Dedupe entre páginas e entre as duas leituras: o detalhe da mesma

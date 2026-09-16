@@ -132,9 +132,11 @@ async function main() {
     assert.equal(calls.every((c) => c.headers.Authorization === `Bearer ${TOKEN}`), true);
     ok("Authorization Bearer do gateway montado no backend");
 
-    assert.match(calls[0]!.url, /InitialDate=2026-09-15/);
+    // dateFrom é o dia operacional; a leitura recua 30 dias para pegar estadias
+    // em curso, e o FinalDate recebido é mantido.
+    assert.match(calls[0]!.url, /InitialDate=2026-08-16/);
     assert.match(calls[0]!.url, /FinalDate=2026-09-30/);
-    ok("janela de datas repassada ao gateway");
+    ok("janela de datas repassada ao gateway (com lookback de 30 dias)");
 
     assert.match(calls[0]!.url, /(^|[?&])Type=0([&]|$)/);
     ok("Type=0 sempre enviado — sem ele o HITS responde 400");
@@ -175,7 +177,7 @@ async function main() {
 
     const url = calls[0]!.url;
     assert.match(url, /(^|[?&])Type=0([&]|$)/);
-    assert.match(url, /InitialDate=2026-09-15/);
+    assert.match(url, /InitialDate=2026-08-16/);
     assert.match(url, /FinalDate=2026-10-15/);
     assert.match(url, /(^|[?&])Page=1([&]|$)/);
     assert.doesNotMatch(url, /Page=0/);
@@ -476,10 +478,12 @@ async function main() {
 
       const lists = calls.filter((c) => !/\/v1\/reservations\/\d+$/.test(c.url));
       assert.equal(lists.length, 2, "uma leitura por status, sequenciais");
-      assert.match(lists[0]!.url, /Status=1&InitialDate=2026-09-15&FinalDate=2026-10-15/);
+      // Status=1 também recua 30 dias (estadias em curso sem check-in no HITS),
+      // mantendo o FinalDate recebido.
+      assert.match(lists[0]!.url, /Status=1&InitialDate=2026-08-16&FinalDate=2026-10-15/);
       // dia operacional − 30 = 2026-08-16; dia operacional + 1 = 2026-09-16.
       assert.match(lists[1]!.url, /Status=3&InitialDate=2026-08-16&FinalDate=2026-09-16/);
-      ok("Status=1 mantém a janela atual; Status=3 usa from−30 até from+1");
+      ok("Status=1 usa from−30 até to; Status=3 usa from−30 até from+1");
     }
     {
       // REGRESSÃO: depois do check-in a reserva sai do Status=1 e não pode sumir.
@@ -507,6 +511,130 @@ async function main() {
       assert.equal(detalhes.length, 1, "e um único GET de detalhe");
       assert.equal(calls.every((c) => c.method === "GET"), true);
       ok("mesma id nos dois status gera uma linha só, sem escrita");
+    }
+  }
+
+  console.log("\n== Estadias em curso sem check-in no HITS (caso 17792) ==");
+  {
+    /** Mock por Status com checkIn/checkOut no sumário, como o HITS devolve. */
+    type Sum = { idReservation: number; checkIn?: string; checkOut?: string | null };
+    const byStatusSum = (lists: Record<string, Sum[]>, calls: Call[]) =>
+      async (url: string, init: { method: string; headers: Record<string, string> }) => {
+        calls.push({ url, method: init.method, headers: init.headers });
+        const detail = url.match(/\/v1\/reservations\/(\d+)$/);
+        if (detail) {
+          return new Response(
+            JSON.stringify({ ...DETAIL_17613, idReservation: Number(detail[1]) }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        const params = new URL(url).searchParams;
+        const items = Number(params.get("Page")) === 1 ? (lists[params.get("Status")!] ?? []) : [];
+        return new Response(JSON.stringify({ data: items }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      };
+    const detalhesDe = (calls: Call[]) =>
+      calls
+        .map((c) => c.url.match(/\/v1\/reservations\/(\d+)$/)?.[1])
+        .filter((x): x is string => !!x);
+    // Dia operacional 16/09; janela recebida do painel 16/09..16/10.
+    const hoje = { dateFrom: "2026-09-16", dateTo: "2026-10-16" };
+
+    {
+      const calls: Call[] = [];
+      const r = await fetchHitsSandboxReservations({
+        config: config(),
+        fetchImpl: byStatusSum(
+          {
+            "1": [
+              { idReservation: 17792, checkIn: "2026-09-09", checkOut: "2026-09-17" }, // em curso
+              { idReservation: 17752, checkIn: "2026-09-09", checkOut: "2026-09-11" }, // encerrada
+            ],
+            "3": [],
+          },
+          calls,
+        ),
+        ...hoje,
+      });
+      const lists = calls.filter((c) => !/\/v1\/reservations\/\d+$/.test(c.url));
+      assert.match(lists[0]!.url, /Status=1&InitialDate=2026-08-17&FinalDate=2026-10-16/);
+      ok("Status=1 recua 30 dias a partir do dia operacional");
+
+      assert.ok(r.rows.some((x) => x.external_reservation_id === "17792"), "17792 precisa entrar");
+      assert.equal(r.rows[0]!.ciclo_hits, "confirmada", "continua Status=1: confirmada, não hospedada");
+      ok("Status=1 09/09→17/09 com dia operacional 16/09 entra no feed");
+
+      assert.deepEqual(detalhesDe(calls), ["17792"], "17752 encerrada não gera detalhe");
+      assert.equal(r.rows.some((x) => x.external_reservation_id === "17752"), false);
+      ok("Status=1 09/09→11/09 (encerrada) não gera GET de detalhe");
+    }
+    {
+      const calls: Call[] = [];
+      const r = await fetchHitsSandboxReservations({
+        config: config(),
+        fetchImpl: byStatusSum(
+          {
+            "1": [
+              { idReservation: 17801, checkIn: "2026-09-10", checkOut: "2026-09-16" }, // sai hoje
+              { idReservation: 17802, checkIn: "2026-09-10", checkOut: "" },           // vazio
+              { idReservation: 17803, checkIn: "2026-09-10", checkOut: "abc" },        // inválido
+              { idReservation: 17804, checkIn: "2026-09-10" },                         // ausente
+              { idReservation: 17805, checkIn: "2026-09-10", checkOut: "2026-09-15T14:00:00" }, // ontem, com hora
+            ],
+            "3": [],
+          },
+          calls,
+        ),
+        ...hoje,
+      });
+      const ids = r.rows.map((x) => x.external_reservation_id).sort();
+      assert.deepEqual(ids, ["17801", "17802", "17803", "17804"]);
+      assert.deepEqual(detalhesDe(calls).sort(), ["17801", "17802", "17803", "17804"]);
+      ok("check-out = dia operacional entra; vazio/inválido/ausente entram; ontem (mesmo com hora) não");
+    }
+    {
+      // Status=3 continua funcionando e o filtro também poupa detalhe lá.
+      const calls: Call[] = [];
+      const r = await fetchHitsSandboxReservations({
+        config: config(),
+        fetchImpl: byStatusSum(
+          {
+            "1": [],
+            "3": [
+              { idReservation: 17656, checkIn: "2026-09-15", checkOut: "2026-09-18" }, // hospedada
+              { idReservation: 17600, checkIn: "2026-08-20", checkOut: "2026-08-25" }, // já saiu
+            ],
+          },
+          calls,
+        ),
+        ...hoje,
+      });
+      assert.equal(r.rows.length, 1);
+      assert.equal(r.rows[0]!.external_reservation_id, "17656");
+      assert.equal(r.rows[0]!.ciclo_hits, "hospedada");
+      assert.deepEqual(detalhesDe(calls), ["17656"]);
+      ok("Status=3: hospedada entra como hospedada; estadia encerrada não custa detalhe");
+    }
+    {
+      // Dedupe entre as duas leituras segue: mesma id em 1 e 3 → 1 detalhe, hospedada.
+      const calls: Call[] = [];
+      const r = await fetchHitsSandboxReservations({
+        config: config(),
+        fetchImpl: byStatusSum(
+          {
+            "1": [{ idReservation: 17792, checkIn: "2026-09-09", checkOut: "2026-09-17" }],
+            "3": [{ idReservation: 17792, checkIn: "2026-09-09", checkOut: "2026-09-17" }],
+          },
+          calls,
+        ),
+        ...hoje,
+      });
+      assert.equal(r.rows.length, 1);
+      assert.equal(r.rows[0]!.ciclo_hits, "hospedada");
+      assert.deepEqual(detalhesDe(calls), ["17792"]);
+      ok("dedupe por idReservation entre leituras continua: um detalhe, Status=3 prevalece");
     }
   }
 
