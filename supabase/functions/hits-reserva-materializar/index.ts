@@ -20,6 +20,7 @@ import {
   getHitsGatewayReadConfig,
 } from "../../../src/lib/integrations/hits/hits-gateway-read.ts";
 import { normalizeHitsDetailToSynced } from "../../../src/lib/integrations/hits/normalize-hits-detail-to-synced.ts";
+import { calcularPosicoesFaltantes } from "../../../src/lib/integrations/hits/hits-ocupacao.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -218,6 +219,38 @@ Deno.serve(async (req: Request) => {
     hospedes.push({ id_entity: idEntity, criado: !error });
   }
 
+  // 4. Completa a ocupação declarada pelo HITS com posições sem PAX.
+  //    Reserva de 2 adultos com 1 idEntity cadastrado é o caso comum; sem isto
+  //    a segunda pessoa ficaria sem ficha. Mesmo payload do "Adicionar hóspede"
+  //    do painel (ui/checkin-operacional-mvp.js:1415) — e sem
+  //    pms_external_guest_id, porque não se inventa idEntity. A ficha e o
+  //    link_token continuam vindo do trigger operacional_hospedes_criar_fnrh.
+  const { data: ativos } = await admin
+    .from("operacional_hospedes")
+    .select("id")
+    .eq("reserva_id", reserva.id)
+    .or("removed_from_reservation.is.null,removed_from_reservation.eq.false");
+  const hospedesAtivos = (ativos ?? []).length;
+  const faltam = calcularPosicoesFaltantes(synced.totalGuests, hospedesAtivos);
+
+  let posicoesCriadas = 0;
+  for (let i = 0; i < faltam; i += 1) {
+    const { error } = await admin.from("operacional_hospedes").insert({
+      reserva_id: reserva.id,
+      nome: "Novo hóspede",
+      principal: false,
+      status_operacional: "nao_identificado",
+      origem_cadastro: "novo",
+      modo_coleta_fnrh: "preenchimento_completo",
+      tentativas_envio: 0,
+    });
+    if (error) {
+      console.error("[HITS_MATERIALIZAR] insert posição falhou", { code: error.code });
+      break;
+    }
+    posicoesCriadas += 1;
+  }
+
   // Resposta sem PII: ids técnicos e contadores.
   return json({
     ok: true,
@@ -226,5 +259,10 @@ Deno.serve(async (req: Request) => {
     reserva_criada: reservaCriada,
     hospedes,
     hospedes_total: hospedes.length,
+    ocupacao: {
+      declarada_hits: Number(synced.totalGuests) || 1,
+      hospedes_ativos: hospedesAtivos,
+      posicoes_criadas: posicoesCriadas,
+    },
   });
 });

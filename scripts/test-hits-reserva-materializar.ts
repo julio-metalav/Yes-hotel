@@ -9,6 +9,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  calcularPosicoesFaltantes,
+  MAX_HOSPEDES_POR_RESERVA,
+} from "../src/lib/integrations/hits/hits-ocupacao";
 
 let cases = 0;
 function ok(name: string) {
@@ -51,6 +55,59 @@ function main() {
       "só essas duas tabelas recebem escrita",
     );
     ok("escrita restrita a operacional_reservas e operacional_hospedes");
+  }
+
+  console.log("\n== Ocupação declarada pelo HITS (cálculo real) ==");
+  {
+    // A reserva 100: HITS declara 2 adultos, só 1 PAX tem idEntity.
+    assert.equal(calcularPosicoesFaltantes(1, 1), 0, "1 adulto / 1 PAX → nada extra");
+    assert.equal(calcularPosicoesFaltantes(2, 1), 1, "2 adultos / 1 PAX → 1 posição");
+    assert.equal(calcularPosicoesFaltantes(2, 2), 0, "2 adultos / 2 PAX → nada extra");
+    assert.equal(calcularPosicoesFaltantes(3, 1), 2, "3 adultos / 1 PAX → 2 posições");
+    ok("1/1→0, 2/1→1, 2/2→0, 3/1→2");
+
+    // Segunda execução: os ativos já cobrem a ocupação.
+    assert.equal(calcularPosicoesFaltantes(2, 2), 0, "reexecução não cria nada");
+    assert.equal(calcularPosicoesFaltantes(2, 3), 0, "excedente não vira negativo");
+    ok("segunda execução é inerte — idempotência no cálculo");
+
+    assert.equal(calcularPosicoesFaltantes(null, 0), 1);
+    assert.equal(calcularPosicoesFaltantes("x", 0), 1);
+    assert.equal(calcularPosicoesFaltantes(0, 0), 1);
+    assert.equal(calcularPosicoesFaltantes(2.7, 0), 2);
+    assert.equal(calcularPosicoesFaltantes(999, 0), MAX_HOSPEDES_POR_RESERVA);
+    ok("ocupação suja vira 1, fracionária trunca, absurda é cortada pelo teto");
+  }
+
+  console.log("\n== Posição sem PAX: mesmo caminho do painel ==");
+  {
+    const bloco = edgeCode.slice(edgeCode.indexOf("const { data: ativos }"));
+    assert.match(bloco, /nome: "Novo hóspede"/);
+    assert.match(bloco, /principal: false/);
+    assert.match(bloco, /status_operacional: "nao_identificado"/);
+    assert.match(bloco, /origem_cadastro: "novo"/);
+    assert.match(bloco, /modo_coleta_fnrh: "preenchimento_completo"/);
+    assert.match(bloco, /tentativas_envio: 0/);
+    // O painel usa as constantes; a Edge, os literais equivalentes.
+    const mvpAdd = mvp.slice(mvp.indexOf("async function backendAddHospede"));
+    assert.ok(mvpAdd.includes('nome: "Novo hóspede"'));
+    assert.ok(mvpAdd.includes("ORIGEM_CADASTRO.NOVO"));
+    ok("payload idêntico ao backendAddHospede do painel (mvp:1415)");
+
+    assert.equal(
+      /pms_external_guest_id/.test(bloco),
+      false,
+      "posição sem PAX não recebe idEntity",
+    );
+    ok("nenhum idEntity inventado para quem o HITS não cadastrou");
+
+    assert.match(bloco, /removed_from_reservation\.is\.null,removed_from_reservation\.eq\.false/);
+    ok("hóspede removido da reserva não conta como posição ocupada");
+
+    for (const proibido of ["is_minor", "guest_role", "responsible_guest_id"]) {
+      assert.equal(bloco.includes(proibido), false, `${proibido} é da FNRH, não daqui`);
+    }
+    ok("menor e responsável continuam classificados pela FNRH existente");
   }
 
   console.log("\n== 2 e 3. Idempotência ==");
