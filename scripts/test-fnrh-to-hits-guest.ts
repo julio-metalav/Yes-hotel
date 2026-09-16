@@ -154,6 +154,73 @@ function main() {
     ok("ficha sem documento não inventa par — quem recusa é o HITS");
   }
 
+  console.log("\n== Contatos (confirmado por round-trip no Sandbox) ==");
+  {
+    // Ambos presentes: telefone no slot 1, e-mail no slot 2.
+    const r = buildHitsGuestPutFromFnrh({
+      idEntity: 1,
+      idReservation: 2,
+      fnrh: FICHA_COMPLETA,
+    });
+    assert.equal(r.dto.contact1, "67999990000");
+    assert.equal(r.dto.contactType1, 2, "telefone → contactType 2");
+    assert.equal(r.dto.contact2, "hospede.teste@example.com");
+    assert.equal(r.dto.contactType2, 1, "e-mail → contactType 1");
+    ok("telefone vai com contactType=2 e e-mail com contactType=1 por padrão");
+  }
+  {
+    // Só e-mail: ocupa o slot 1 (formato provado); nada de contact2 inventado.
+    const r = buildHitsGuestPutFromFnrh({
+      idEntity: 1,
+      idReservation: 2,
+      fnrh: { ...FICHA_COMPLETA, telefone: "" },
+    });
+    assert.equal(r.dto.contact1, "hospede.teste@example.com");
+    assert.equal(r.dto.contactType1, 1);
+    assert.equal(r.dto.contact2, undefined);
+    assert.equal(r.dto.contactType2, undefined);
+    ok("só e-mail: vai em contact1 com tipo 1, sem segundo contato");
+  }
+  {
+    // Só telefone: idem.
+    const r = buildHitsGuestPutFromFnrh({
+      idEntity: 1,
+      idReservation: 2,
+      fnrh: { ...FICHA_COMPLETA, email: "" },
+    });
+    assert.equal(r.dto.contact1, "67999990000");
+    assert.equal(r.dto.contactType1, 2);
+    assert.equal(r.dto.contact2, undefined);
+    ok("só telefone: vai em contact1 com tipo 2, sem segundo contato");
+  }
+  {
+    const r = buildHitsGuestPutFromFnrh({
+      idEntity: 1,
+      idReservation: 2,
+      fnrh: { ...FICHA_COMPLETA, email: "", telefone: "" },
+    });
+    assert.equal(r.dto.contact1, undefined);
+    assert.equal(r.dto.contact2, undefined);
+    const motivos = new Map(r.omitted.map((o) => [o.field, o.reason]));
+    assert.equal(motivos.get("contato_telefone"), "vazio");
+    assert.equal(motivos.get("contato_email"), "vazio");
+    ok("sem contatos: nenhum slot é enviado");
+  }
+  {
+    // Sem enum confirmado, o contato fica de fora — protege contra regressão
+    // se alguém zerar o mapa.
+    const r = buildHitsGuestPutFromFnrh({
+      idEntity: 1,
+      idReservation: 2,
+      fnrh: FICHA_COMPLETA,
+      enums: { docType: { cpf: 2 } },
+    });
+    assert.equal(r.dto.contact1, undefined);
+    const motivos = new Map(r.omitted.map((o) => [o.field, o.reason]));
+    assert.equal(motivos.get("contato_email"), "enum_nao_confirmado");
+    ok("sem de/para de contato, nada é enviado nem inventado");
+  }
+
   console.log("\n== Omissão por enum não confirmado ==");
   {
     const r = buildHitsGuestPutFromFnrh({
@@ -161,13 +228,13 @@ function main() {
       idReservation: 2,
       fnrh: FICHA_COMPLETA,
     });
-    for (const campo of ["contact1", "contactType1", "contact2", "contactType2", "gender", "purposeTrip", "arrivingBy"]) {
+    for (const campo of ["gender", "purposeTrip", "arrivingBy"]) {
       assert.equal((r.dto as Record<string, unknown>)[campo], undefined, `${campo} não pode ir sem de/para`);
     }
-    ok("contatos, sexo, motivo e transporte seguem fora — só documento foi confirmado");
+    ok("sexo, motivo e transporte seguem fora — só documento e contato confirmados");
 
     const motivos = new Map(r.omitted.map((o) => [o.field, o.reason]));
-    assert.equal(motivos.get("contact1"), "enum_nao_confirmado");
+    assert.equal(motivos.get("gender"), "enum_nao_confirmado");
     assert.equal(motivos.get("nationalityCountryId"), "sem_campo_no_contrato");
     ok("cada omissão registra o motivo, sem expor valor");
 

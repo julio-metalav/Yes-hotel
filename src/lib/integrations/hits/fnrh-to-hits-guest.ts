@@ -97,14 +97,24 @@ export const HITS_DOC_TYPE_CONHECIDOS = {
  * confirmado que satisfazem a exigência de documento principal neste PUT —
  * enviá-los poderia gravar um documento que o HITS não aceita como principal.
  * `cnh` e `other` não têm enum: 4, 5 e 6 existem na faixa de escrita sem
- * significado documentado. Os demais enums (contato, sexo, motivo da viagem,
- * meio de transporte) seguem sem legenda e continuam omitidos.
+ * significado documentado.
+ *
+ * Contato — confirmado por round-trip no Sandbox (16/09/2026, tenant develop):
+ * `PUT contact1 + contactType1=1` com um e-mail apareceu em `contactMail`;
+ * `contactType1=2` com um número apareceu em `contactPhone`. O GET de hóspede
+ * não expõe tipo, então esta era a única via. Atenção: os testes do gateway
+ * usam `contactType: 2` com e-mail — convenção antiga, semanticamente invertida.
+ * 3 e 4 continuam sem significado conhecido.
+ *
+ * Sexo, motivo da viagem e meio de transporte seguem sem legenda e omitidos.
  */
 export const FNRH_TO_HITS_ENUMS_CONFIRMED: FnrhToHitsEnumMap = {
   docType: {
     cpf: HITS_DOC_TYPE_CONHECIDOS.cpf,
     passport: HITS_DOC_TYPE_CONHECIDOS.passport,
   },
+  contactTypeEmail: 1,
+  contactTypePhone: 2,
 };
 
 /** Motivo pelo qual um campo não entrou — diagnóstico sem valor, só rótulo. */
@@ -242,25 +252,27 @@ export function buildHitsGuestPutFromFnrh(
     skip("docType", "enum_nao_confirmado");
   }
 
-  // --- Contatos: o HITS exige o par contactN + contactTypeN ---
-  const phone = clean(fnrh.telefone);
-  if (phone && enums.contactTypePhone != null) {
-    add("contact1", phone);
-    add("contactType1", enums.contactTypePhone);
-  } else if (!phone) {
-    skip("contact1", "vazio");
-  } else {
-    skip("contact1", "enum_nao_confirmado");
-  }
-
-  const email = clean(fnrh.email);
-  if (email && enums.contactTypeEmail != null) {
-    add("contact2", email);
-    add("contactType2", enums.contactTypeEmail);
-  } else if (!email) {
-    skip("contact2", "vazio");
-  } else {
-    skip("contact2", "enum_nao_confirmado");
+  // --- Contatos: o HITS exige o par contactN + contactTypeN. Os slots são
+  //     preenchidos em sequência: com um contato só, ele vai em contact1 — o
+  //     formato provado no Sandbox (contact2 sozinho não foi testado). Com um
+  //     valor apenas, o segundo contato não é inventado.
+  const contatos: Array<[string, HitsGuestContactType | undefined, string]> = [
+    ["telefone", enums.contactTypePhone, clean(fnrh.telefone)],
+    ["email", enums.contactTypeEmail, clean(fnrh.email)],
+  ];
+  let slot = 1;
+  for (const [campo, tipo, valor] of contatos) {
+    if (!valor) {
+      skip(`contato_${campo}`, "vazio");
+      continue;
+    }
+    if (tipo == null) {
+      skip(`contato_${campo}`, "enum_nao_confirmado");
+      continue;
+    }
+    add(`contact${slot}` as keyof HitsGuestsPutDto, valor);
+    add(`contactType${slot}` as keyof HitsGuestsPutDto, tipo);
+    slot += 1;
   }
 
   // --- Enums puros ---
