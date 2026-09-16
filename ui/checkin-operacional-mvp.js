@@ -1510,6 +1510,63 @@ async function backendEnviarLinks(reservaId) {
   return true;
 }
 
+/**
+ * Cria o vínculo operacional mínimo de uma reserva do HITS, para que a FNRH já
+ * existente tenha onde acontecer. Idempotente do lado da Edge: reserva e
+ * hóspedes já vinculados são reusados, e ficha existente não é tocada.
+ */
+async function backendPrepararFnrhHits(externalReservationId) {
+  const supabase = getSupabase();
+  const auth = typeof window !== "undefined" ? window.YesHotelAuthApp : null;
+  if (!supabase || !auth || typeof auth.getEdgeFunctionFetchHeaders !== "function") {
+    return { ok: false, error: "Cliente Supabase indisponível." };
+  }
+  let headers;
+  try {
+    headers = await auth.getEdgeFunctionFetchHeaders();
+  } catch (_e) {
+    return { ok: false, error: "Sessão expirada. Faça login novamente." };
+  }
+  const functionsUrl =
+    (typeof supabase.supabaseUrl === "string" ? supabase.supabaseUrl : "").replace(/\/$/, "") +
+    "/functions/v1";
+  try {
+    const res = await fetch(functionsUrl + "/hits-reserva-materializar", {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ external_reservation_id: String(externalReservationId || "") }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok !== true) {
+      return { ok: false, error: (data && (data.error || data.message)) || "HTTP " + res.status };
+    }
+    return { ok: true, data: data };
+  } catch (_e) {
+    return { ok: false, error: "falha_de_rede" };
+  }
+}
+
+/**
+ * Ação da lista para reserva somente leitura do HITS. Depois do refresh, o
+ * dedupe existente faz a reserva do banco assumir o lugar da linha em memória e
+ * o fluxo segue pelos botões que já existem no detalhe.
+ */
+async function acaoPrepararFnrhHits(reservaId) {
+  const reserva = getReservaById(reservaId);
+  if (!reserva) return;
+  const externalId = String(reserva.externalReservationId || "").trim();
+  if (!externalId) {
+    alert("Reserva sem idReservation do HITS.");
+    return;
+  }
+  const out = await backendPrepararFnrhHits(externalId);
+  if (!out.ok) {
+    alert("Não foi possível preparar a FNRH (" + out.error + ").");
+    return;
+  }
+  await refreshFromSource();
+}
+
 async function backendLiberarAcesso(reservaId) {
   const supabase = getSupabase();
   if (!supabase) {
@@ -2544,9 +2601,14 @@ async function acaoConfirmarCheckin(id) {
 
 /** Texto curto + destaque/CTA para coluna Próxima ação — alinhado a derivarRecomendacaoOperacional. */
 function listaProximaAcaoOperacional(reserva) {
-  // Sem CTA: nada a executar sobre uma reserva que não existe no banco.
+  // Reserva que só existe no HITS: a única ação possível é criar o vínculo
+  // operacional para a FNRH existente poder acontecer. Nada mais é oferecido.
   if (isReservaSomenteLeituraHits(reserva)) {
-    return { texto: "Somente leitura", destaque: false, cta: null };
+    return {
+      texto: "Preparar FNRH",
+      destaque: true,
+      cta: { kind: "preparar_fnrh", label: "Preparar FNRH" },
+    };
   }
   const ctx = buildRecomendacaoOperacionalCtx(reserva);
   const rec = derivarRecomendacaoOperacional(reserva, ctx);
@@ -2849,6 +2911,12 @@ function renderOperacionalLista() {
 /** Abre o painel e reutiliza o mesmo roteador de CTA do detalhe. */
 function openDetailAndRunCta(reservaId, kind) {
   if (!reservaId || !kind) return;
+  // Antes de openDetail: o detalhe não abre para reserva somente leitura, e é
+  // justamente essa que precisa do vínculo.
+  if (kind === "preparar_fnrh") {
+    acaoPrepararFnrhHits(reservaId);
+    return;
+  }
   if (
     kind === "pagarme_classificar" ||
     kind === "pagarme_cobrar" ||
