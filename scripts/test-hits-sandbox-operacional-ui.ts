@@ -62,6 +62,14 @@ function loadPreview(fetchImpl?: unknown): PreviewApi {
  * a exercita com relógio injetado.
  */
 function loadPainelWindow(): (now: Date) => { from: string; to: string } {
+  const sandbox = loadPainelSandbox();
+  const fn = (sandbox as { resolveHitsReadWindow?: unknown }).resolveHitsReadWindow;
+  assert.equal(typeof fn, "function", "resolveHitsReadWindow deve existir");
+  return fn as (now: Date) => { from: string; to: string };
+}
+
+/** Sandbox do painel com as funções top-level acessíveis por nome. */
+function loadPainelSandbox(): Record<string, unknown> {
   const src = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.js"), "utf8");
   const el = () => ({
     classList: { add() {}, remove() {}, toggle() {} },
@@ -107,9 +115,7 @@ function loadPainelWindow(): (now: Date) => { from: string; to: string } {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(src, sandbox);
-  const fn = (sandbox as { resolveHitsReadWindow?: unknown }).resolveHitsReadWindow;
-  assert.equal(typeof fn, "function", "resolveHitsReadWindow deve existir");
-  return fn as (now: Date) => { from: string; to: string };
+  return sandbox;
 }
 
 const ROW = {
@@ -372,6 +378,164 @@ async function main() {
     assert.equal(w.from, "2026-09-15");
     assert.equal(w.to, "2026-10-15");
     ok("date_to = date_from + 30 dias");
+  }
+
+  console.log("\n== Reservas canceladas no HITS: reconciliação pelo detalhe ==");
+  {
+    type Resultado = "cancelada" | "ja_cancelada" | "falha";
+    const sb = loadPainelSandbox() as {
+      selecionarCandidatasCancelamentoHits: (b: unknown[], f: unknown[]) => string[];
+      selecionarCanceladasConfirmadasHits: (b: unknown[], rows: unknown[]) => unknown[];
+      persistirCancelamentoHits: (sup: unknown, id: string, now: string) => Promise<Resultado>;
+      aplicarResultadoCancelamentoHits: (r: { statusReserva: string }, res: Resultado) => boolean;
+      filtrarReservasOperacionaisAtivas: (l: unknown[]) => unknown[];
+    };
+    const mk = (ext: string | null, origem: string, status = "ativa") => ({
+      id: "uuid-" + (ext || "manual"),
+      externalReservationId: ext,
+      origemExterna: origem,
+      statusReserva: status,
+      hospedes: [{ nome: "H" }],
+      historico: [{ tipo: "x" }],
+    });
+    const a104 = mk("17820", "hits");            // cancelada no HITS, sumiu do feed
+    const b105 = mk("17821", "hits");            // ativa, só fora da janela do feed
+    const cMan = mk(null, "manual");             // manual: nunca candidata
+    const dJa  = mk("17822", "hits", "cancelada"); // já cancelada no banco
+    const e107 = mk("17823", "hits");            // presente no feed
+    const base = [a104, b105, cMan, dJa, e107];
+    const feed = [{ externalReservationId: "17823" }];
+
+    // Arrays nascem no realm do vm: espalhar antes de comparar (mesmo caso já
+    // tratado acima para hospedes/cobranças).
+    const ids = [...sb.selecionarCandidatasCancelamentoHits(base, feed)];
+    assert.deepEqual(ids, ["17820", "17821"]);
+    ok("candidatas = banco+hits, ativas, fora do feed; manual e já cancelada ficam de fora");
+
+    // Detalhe confirma: 17820 cancelada; 17821 ativa. Seleção é PURA: nada muda ainda.
+    const confirmadas = [
+      ...sb.selecionarCanceladasConfirmadasHits(base, [
+        { external_reservation_id: "17820", status_reserva: "cancelada" },
+        { external_reservation_id: "17821", status_reserva: "ativa" },
+      ]),
+    ];
+    assert.deepEqual(confirmadas, [a104]);
+    assert.equal(a104.statusReserva, "ativa", "seleção não muta: banco ainda não confirmou");
+    assert.equal(b105.statusReserva, "ativa", "ativa no detalhe continua ativa");
+    assert.equal(e107.statusReserva, "ativa", "presente no feed continua ativa");
+    ok("detalhe confirma cancelada → selecionada, mas ainda ativa em memória");
+
+    // Não devolvida pelo detalhe (falha/timeout) → NÃO infere cancelamento.
+    const f = mk("17824", "hits");
+    assert.deepEqual([...sb.selecionarCanceladasConfirmadasHits([f], [])], []);
+    assert.equal(f.statusReserva, "ativa");
+    ok("sumiu do feed mas o detalhe não confirmou → não é marcada cancelada");
+
+    // Persistência com Supabase falso: só o banco autoriza mudar a memória.
+    const fakeSupabase = (plano: { updateError?: boolean; updateRows?: number; statusAtual?: string; selectError?: boolean }) => {
+      const eventos: unknown[] = [];
+      const chain = (kind: "update" | "select" | "insert", payload?: unknown) => {
+        const q: Record<string, unknown> = {};
+        const self = () => q;
+        q.eq = self; q.maybeSingle = () => {
+          if (plano.selectError) return Promise.resolve({ data: null, error: { message: "x" } });
+          return Promise.resolve({ data: { status_reserva: plano.statusAtual ?? "ativa" }, error: null });
+        };
+        q.select = () => Promise.resolve(
+          plano.updateError
+            ? { data: null, error: { message: "boom" } }
+            : { data: Array.from({ length: plano.updateRows ?? 1 }, () => ({ id: "x" })), error: null },
+        );
+        if (kind === "insert") { eventos.push(payload); return Promise.resolve({ error: null }); }
+        return q;
+      };
+      return {
+        eventos,
+        from: () => ({
+          update: () => chain("update"),
+          select: () => chain("select"),
+          insert: (p: unknown) => chain("insert", p),
+        }),
+      };
+    };
+
+    // 1. UPDATE falha → "falha": continua ativa, sem evento.
+    const rFalha = mk("17830", "hits");
+    const resFalha = await sb.persistirCancelamentoHits(fakeSupabase({ updateError: true }), rFalha.id, "2026-09-16T00:00:00Z");
+    assert.equal(resFalha, "falha");
+    assert.equal(sb.aplicarResultadoCancelamentoHits(rFalha, resFalha), false, "sem evento");
+    assert.equal(rFalha.statusReserva, "ativa", "falha no banco → continua ativa na grade");
+    ok("UPDATE falhou → reserva segue ativa em memória e sem evento");
+
+    // 2. UPDATE ok (1 linha) → "cancelada": some da grade + evento.
+    const rOk = mk("17831", "hits");
+    const resOk = await sb.persistirCancelamentoHits(fakeSupabase({ updateRows: 1 }), rOk.id, "2026-09-16T00:00:00Z");
+    assert.equal(resOk, "cancelada");
+    assert.equal(sb.aplicarResultadoCancelamentoHits(rOk, resOk), true, "evento devido");
+    assert.equal(rOk.statusReserva, "cancelada");
+    assert.deepEqual([...(sb.filtrarReservasOperacionaisAtivas([rOk]) as unknown[])], []);
+    ok("UPDATE confirmou → some da grade e gera evento");
+
+    // 3. UPDATE 0 linhas + banco já cancelada → "ja_cancelada": some, SEM evento duplicado.
+    const rJa = mk("17832", "hits");
+    const resJa = await sb.persistirCancelamentoHits(fakeSupabase({ updateRows: 0, statusAtual: "cancelada" }), rJa.id, "2026-09-16T00:00:00Z");
+    assert.equal(resJa, "ja_cancelada");
+    assert.equal(sb.aplicarResultadoCancelamentoHits(rJa, resJa), false, "outro processo já gravou: sem evento");
+    assert.equal(rJa.statusReserva, "cancelada");
+    ok("segunda execução / outro processo: reconciliada sem evento duplicado");
+
+    // 4. UPDATE 0 linhas e banco ainda ativa (estado inesperado) → "falha": não esconde.
+    const rIncerto = mk("17833", "hits");
+    const resIncerto = await sb.persistirCancelamentoHits(fakeSupabase({ updateRows: 0, statusAtual: "ativa" }), rIncerto.id, "2026-09-16T00:00:00Z");
+    assert.equal(resIncerto, "falha");
+    assert.equal(rIncerto.statusReserva, "ativa");
+    ok("0 linhas sem confirmação de cancelada → não esconde da grade");
+
+    // Para os passos seguintes, a 17820 passa a cancelada como se o banco tivesse confirmado.
+    a104.statusReserva = "cancelada";
+
+    // Histórico e hóspedes do objeto seguem intactos; nada é apagado.
+    assert.equal((a104.hospedes as unknown[]).length, 1);
+    assert.equal((a104.historico as unknown[]).length, 1);
+    ok("cancelar preserva hóspedes e histórico da reserva");
+
+    const ativas = [...(sb.filtrarReservasOperacionaisAtivas(base) as Array<{ id: string }>)];
+    assert.deepEqual(ativas.map((r) => r.id), ["uuid-17821", "uuid-manual", "uuid-17823"]);
+    ok("lista ativa exclui a cancelada agora e a já cancelada; mantém as demais (sem duplicar)");
+
+    // Reexecução: já cancelada não é candidata nem é marcada de novo.
+    assert.deepEqual([...sb.selecionarCandidatasCancelamentoHits(base, feed)], ["17821"]);
+    assert.deepEqual(
+      [...sb.selecionarCanceladasConfirmadasHits(base, [{ external_reservation_id: "17820", status_reserva: "cancelada" }])],
+      [],
+    );
+    ok("idempotente: segunda reconciliação não re-marca nem duplica");
+
+    // `const` top-level não é exposto pelo vm; o teto é o documentado no painel.
+    const muitas = Array.from({ length: 30 }, (_, i) => mk(String(30000 + i), "hits"));
+    assert.equal(sb.selecionarCandidatasCancelamentoHits(muitas, []).length, 20);
+    ok("teto de 20 ids por ciclo protege o rate limit do gateway");
+  }
+  {
+    // Guardas estáticas do trecho que escreve no banco.
+    const src = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.js"), "utf8");
+    const bloco = src.slice(
+      src.indexOf("function selecionarCanceladasConfirmadasHits"),
+      src.indexOf("async function loadReservasSomenteLeituraHits"),
+    );
+    assert.match(bloco, /hits-reservations-preview\?ids=/, "confirma pelo detalhe, via Edge existente");
+    assert.match(bloco, /\.update\(\{ status_reserva: "cancelada", updated_at: nowIso \}\)/);
+    assert.match(bloco, /\.eq\("status_reserva", "ativa"\)/, "só marca quem ainda estava ativa");
+    // Ordem: persistir → aplicar na memória → evento. Nunca o inverso.
+    const iPersist = bloco.indexOf("await persistirCancelamentoHits(supabase, r.id, nowIso)");
+    const iAplica = bloco.indexOf("aplicarResultadoCancelamentoHits(r, resultado)");
+    const iEvento = bloco.indexOf('tipo: "hits_reserva_cancelada"');
+    assert.ok(iPersist > -1 && iAplica > iPersist && iEvento > iAplica, "banco → memória → evento");
+    assert.match(bloco, /if \(!aplicarResultadoCancelamentoHits\(r, resultado\)\) continue;/, "sem confirmação, pula sem evento");
+    assert.equal(/\.delete\(/.test(bloco), false, "nada é apagado");
+    assert.match(bloco, /tipo: "hits_reserva_cancelada"/, "evento já conhecido pela UI");
+    assert.equal(/operacional_hospedes|fnrh_hospedes/.test(bloco), false, "hóspedes e FNRH intocados");
+    ok("escrita restrita a status_reserva + evento; sem delete, sem tocar hóspedes/FNRH");
   }
 
   console.log("\n== Repasse da janela à Edge ==");

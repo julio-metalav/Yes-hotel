@@ -1706,7 +1706,9 @@ function loadReservasOperacionaisFromProvider() {
     return loadReservasFromLocalRepository();
   }
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
-    return loadReservasFromBackend();
+    // Cancelada no banco (reconciliada antes) não volta à grade; a linha e o
+    // histórico continuam no banco.
+    return loadReservasFromBackend().then(filtrarReservasOperacionaisAtivas);
   }
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_HITS_ADAPTER) {
     return loadReservasFromHitsAdapter();
@@ -3463,6 +3465,139 @@ function resolveHitsReadWindow(now) {
   return { from, to: addDaysYmd(from, HITS_READ_WINDOW_DAYS) };
 }
 
+/** Teto de detalhes por ciclo: cada id custa um GET no gateway. */
+const HITS_CANCEL_CHECK_MAX_IDS = 20;
+
+/** A grade operacional só lista reservas ativas; cancelada fica no banco, com histórico. */
+function filtrarReservasOperacionaisAtivas(lista) {
+  return (Array.isArray(lista) ? lista : []).filter((r) => r && r.statusReserva !== "cancelada");
+}
+
+/**
+ * Reservas do banco com origem HITS que NÃO vieram no feed desta leitura.
+ * Ausência no feed não é cancelamento — é só o gatilho para confirmar pelo
+ * detalhe. Nada é marcado aqui.
+ */
+function selecionarCandidatasCancelamentoHits(base, feed) {
+  const noFeed = new Set(
+    (feed || [])
+      .map((r) => String((r && r.externalReservationId) || "").trim())
+      .filter(Boolean),
+  );
+  const ids = [];
+  for (const r of base || []) {
+    if (!r || r.origemExterna !== "hits" || r.statusReserva === "cancelada") continue;
+    const ext = String(r.externalReservationId || "").trim();
+    if (!ext || noFeed.has(ext)) continue;
+    ids.push(ext);
+    if (ids.length >= HITS_CANCEL_CHECK_MAX_IDS) break;
+  }
+  return ids;
+}
+
+/**
+ * Quais reservas do banco o detalhe do HITS CONFIRMOU como canceladas
+ * (`status_reserva === "cancelada"`, que o normalizador deriva do status 2).
+ * Pura: não muta nada. Linha não devolvida, com falha ou ativa fica de fora.
+ */
+function selecionarCanceladasConfirmadasHits(base, rowsDetalhe) {
+  const canceladas = new Set(
+    (rowsDetalhe || [])
+      .filter((r) => r && r.status_reserva === "cancelada")
+      .map((r) => String(r.external_reservation_id || "").trim())
+      .filter(Boolean),
+  );
+  return (base || []).filter((r) => {
+    if (!r || r.statusReserva === "cancelada") return false;
+    const ext = String(r.externalReservationId || "").trim();
+    return !!ext && canceladas.has(ext);
+  });
+}
+
+/**
+ * Persiste o cancelamento de UMA reserva, guardado por `status_reserva = ativa`.
+ * Devolve "cancelada" (esta chamada gravou), "ja_cancelada" (outro processo já
+ * gravou: nada a repetir) ou "falha" (banco não confirmou). Nunca lança.
+ */
+async function persistirCancelamentoHits(supabase, reservaId, nowIso) {
+  try {
+    const { data, error } = await supabase
+      .from("operacional_reservas")
+      .update({ status_reserva: "cancelada", updated_at: nowIso })
+      .eq("id", reservaId)
+      .eq("status_reserva", "ativa")
+      .select("id");
+    if (error) return "falha";
+    if (Array.isArray(data) && data.length > 0) return "cancelada";
+    // Zero linhas: ou já estava cancelada (reconciliada por outro ciclo), ou
+    // algo mudou. Só o banco decide; sem confirmação, não se esconde da grade.
+    const { data: atual, error: erroLeitura } = await supabase
+      .from("operacional_reservas")
+      .select("status_reserva")
+      .eq("id", reservaId)
+      .maybeSingle();
+    if (erroLeitura) return "falha";
+    return atual && atual.status_reserva === "cancelada" ? "ja_cancelada" : "falha";
+  } catch (_e) {
+    return "falha";
+  }
+}
+
+/**
+ * A memória só muda depois que o banco confirmou. Devolve `true` quando o
+ * evento deve ser registrado — apenas quando ESTA chamada gravou.
+ */
+function aplicarResultadoCancelamentoHits(reserva, resultado) {
+  if (resultado === "cancelada" || resultado === "ja_cancelada") {
+    reserva.statusReserva = "cancelada";
+  }
+  return resultado === "cancelada";
+}
+
+/**
+ * Reconcilia com o HITS as reservas do banco que sumiram do feed: consulta o
+ * DETALHE de cada uma (status explícito) e só então marca cancelada — sem
+ * apagar reserva, hóspedes, FNRH ou eventos. Nunca lança: é complementar.
+ */
+async function reconciliarCanceladasHits(base, feed) {
+  const ids = selecionarCandidatasCancelamentoHits(base, feed);
+  if (ids.length === 0) return [];
+  const supabase = getSupabase();
+  const auth = typeof window !== "undefined" ? window.YesHotelAuthApp : null;
+  if (!supabase || !auth || typeof auth.getEdgeFunctionFetchHeaders !== "function") return [];
+  try {
+    const headers = await auth.getEdgeFunctionFetchHeaders();
+    const functionsUrl =
+      (typeof supabase.supabaseUrl === "string" ? supabase.supabaseUrl : "").replace(/\/$/, "") +
+      "/functions/v1";
+    const res = await fetch(
+      functionsUrl + "/hits-reservations-preview?ids=" + encodeURIComponent(ids.join(",")),
+      { method: "GET", headers },
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok !== true || !Array.isArray(data.rows)) return [];
+    const confirmadas = selecionarCanceladasConfirmadasHits(base, data.rows);
+    const nowIso = new Date().toISOString();
+    const marcadas = [];
+    for (const r of confirmadas) {
+      // Banco primeiro; a grade só muda com a gravação confirmada. Falha → a
+      // reserva segue ativa na tela e sem evento; tenta de novo no próximo ciclo.
+      const resultado = await persistirCancelamentoHits(supabase, r.id, nowIso);
+      if (!aplicarResultadoCancelamentoHits(r, resultado)) continue;
+      marcadas.push(r);
+      await supabase.from("operacional_reserva_eventos").insert({
+        reserva_id: r.id,
+        tipo: "hits_reserva_cancelada",
+        titulo: "Reserva cancelada",
+        detalhe: "Reserva cancelada na origem (HITS status 2), confirmada pelo detalhe.",
+      });
+    }
+    return marcadas;
+  } catch (_e) {
+    return [];
+  }
+}
+
 async function loadReservasSomenteLeituraHits(jaCarregadas, options) {
   if (PAINEL_DATA_SOURCE !== PAINEL_DATA_SOURCE_BACKEND) return [];
   const api = typeof window !== "undefined" ? window.YesHotelHitsSandboxPreview : null;
@@ -3474,6 +3609,8 @@ async function loadReservasSomenteLeituraHits(jaCarregadas, options) {
     dateTo: janela.to,
   });
   if (!Array.isArray(externas) || externas.length === 0) return [];
+  // Feed lido com sucesso: quem está no banco e sumiu dele é confirmado no detalhe.
+  await reconciliarCanceladasHits(jaCarregadas, externas);
   const jaNoBanco = new Set(
     (jaCarregadas || [])
       .map((r) => String((r && r.externalReservationId) || "").trim())
@@ -3490,7 +3627,9 @@ async function loadReservasSomenteLeituraHits(jaCarregadas, options) {
 async function loadReservasOperacionaisComLeituraHits(options) {
   const base = (await loadReservasOperacionaisFromProvider()) || [];
   const hits = await loadReservasSomenteLeituraHits(base, options);
-  return hits.length > 0 ? base.concat(hits) : base;
+  // A reconciliação pode ter marcado canceladas em `base`: elas saem da grade.
+  const ativas = filtrarReservasOperacionaisAtivas(base);
+  return hits.length > 0 ? ativas.concat(hits) : ativas;
 }
 
 /**
@@ -3503,15 +3642,19 @@ async function loadReservasOperacionaisComLeituraHits(options) {
 function aplicarLeituraHitsQuandoPronta(options) {
   loadReservasSomenteLeituraHits(reservas, options)
     .then((hits) => {
-      if (!Array.isArray(hits) || hits.length === 0) return;
+      // Canceladas confirmadas na reconciliação saem da grade mesmo sem linha nova.
+      const ativas = filtrarReservasOperacionaisAtivas(reservas);
+      const houveCancelamento = ativas.length !== (reservas || []).length;
       const jaNaLista = new Set(
-        (reservas || [])
+        ativas
           .map((r) => String((r && r.externalReservationId) || "").trim())
           .filter(Boolean),
       );
-      const novas = hits.filter((r) => !jaNaLista.has(String(r.externalReservationId)));
-      if (novas.length === 0) return;
-      reservas = (reservas || []).concat(novas);
+      const novas = (Array.isArray(hits) ? hits : []).filter(
+        (r) => !jaNaLista.has(String(r.externalReservationId)),
+      );
+      if (novas.length === 0 && !houveCancelamento) return;
+      reservas = ativas.concat(novas);
       invalidateArrivalsCache();
       refresh();
     })
