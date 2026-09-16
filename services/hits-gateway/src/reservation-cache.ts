@@ -10,10 +10,17 @@
 
 import type { HitsReservationSearchParams } from "../../../src/lib/integrations/hits/types.ts";
 
-/** Janela em que a entrada é servida direto, sem tocar no HITS. */
-export const RESERVATION_CACHE_TTL_MS = 30_000;
+/**
+ * Janela em que a entrada é servida direto, sem tocar no HITS.
+ *
+ * 120s e não 30s: os logs do HOMO mostram a HITS recusando a mesma página com
+ * `Too many calls for same reservation page 1` já aos 31s do último 200. O TTL
+ * curto fazia o gateway bater dentro da janela em que a HITS ainda recusa.
+ * Custo aceito: uma alteração no HITS pode levar até 2min para refletir.
+ */
+export const RESERVATION_CACHE_TTL_MS = 120_000;
 /** Além do TTL, ainda utilizável como stale — apenas quando o HITS responde 429. */
-export const RESERVATION_CACHE_STALE_MS = 120_000;
+export const RESERVATION_CACHE_STALE_MS = 600_000;
 /** Teto de chaves distintas; evita crescer sem limite com janelas variadas. */
 export const RESERVATION_CACHE_MAX_ENTRIES = 64;
 
