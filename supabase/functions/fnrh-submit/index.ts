@@ -32,6 +32,10 @@ import {
 } from "../../../src/lib/domain/yes-hotel/fnrh-completion-policy.ts";
 import { evaluateReservationFnrhState } from "../../../src/lib/domain/yes-hotel/reservation-fnrh-state.ts";
 import {
+  buildHitsGuestPutFromFnrh,
+  hasUpdatableFields,
+} from "../../../src/lib/integrations/hits/fnrh-to-hits-guest.ts";
+import {
   isFinanceiroLiberadoParaAcesso,
 } from "../../../src/lib/domain/yes-hotel/guest-access-messages.ts";
 
@@ -1169,93 +1173,180 @@ async function maybeDispararLiberacaoPorRequisitos(reservaId: string): Promise<v
   }
 }
 
+/** Campos da ficha que alimentam o DTO PAX. Nenhum outro é lido. */
+const FNRH_SYNC_SELECT = [
+  "hospede_id",
+  "hospede_nome",
+  "data_nascimento",
+  "documento_numero",
+  "documento_tipo",
+  "telefone",
+  "email",
+  "sexo",
+  "cep",
+  "logradouro",
+  "numero",
+  "complemento",
+  "bairro",
+  "cidade",
+  "uf",
+  "pais",
+  "motivo_viagem",
+  "meio_transporte",
+  "placa_veiculo",
+  "nacionalidade",
+].join(", ");
+
+/** Inteiro positivo ou null — idEntity e idReservation do HITS são numéricos. */
+function toPositiveInt(value: unknown): number | null {
+  const n = Number(String(value ?? "").trim());
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * Registra o desfecho do sync sem apagar nada da ficha.
+ *
+ * A FNRH permanece salva em qualquer cenário: aqui só se escreve o estado da
+ * sincronização e um evento operacional. Nenhum status de reserva, quarto,
+ * check-in, pagamento ou credencial é tocado.
+ */
+async function registrarSyncFnrh(
+  client: ReturnType<typeof createClient>,
+  fnrhId: string,
+  reservaId: string,
+  now: string,
+  outcome: {
+    syncStatus: "enviado" | "erro" | "pendente";
+    erro?: string | null;
+    /** Só em enviado/erro: `enviado_oficial` | `erro_sincronizacao`. */
+    fichaStatus?: "enviado_oficial" | "erro_sincronizacao";
+    /** Nomes de campos enviados — nunca valores. */
+    campos?: string[];
+  },
+): Promise<void> {
+  const update: Record<string, unknown> = {
+    fnrh_sync_status: outcome.syncStatus,
+    fnrh_sync_erro: outcome.erro ? String(outcome.erro).slice(0, 500) : null,
+    updated_at: now,
+  };
+  if (outcome.syncStatus !== "pendente") update.fnrh_sync_enviado_em = now;
+  if (outcome.fichaStatus) update.status = outcome.fichaStatus;
+
+  await client.from("fnrh_hospedes").update(update).eq("id", fnrhId);
+  await client.from("operacional_reserva_eventos").insert({
+    reserva_id: reservaId,
+    tipo: "fnrh_sync_hits",
+    titulo: "Sync FNRH → HITS",
+    // Sem PII: status, erro sanitizado e a lista de NOMES de campos.
+    detalhe: JSON.stringify({
+      status: outcome.syncStatus,
+      erro: outcome.erro ?? null,
+      campos: outcome.campos ?? [],
+    }),
+  });
+}
+
+/**
+ * Envia os campos suportados da ficha para o cadastro PAX do HITS, pelo gateway
+ * (`PUT /v1/guests`) — a única fronteira de escrita que existe. Sem fila, sem
+ * webhook novo, sem tabela nova: o estado do envio continua em `fnrh_hospedes`.
+ *
+ * Escopo estrito: cadastro do hóspede. Não altera status da reserva, quarto,
+ * check-in, pagamento nem credencial.
+ */
 async function syncFnrhToHits(
   client: ReturnType<typeof createClient>,
   fnrhId: string,
   reservaId: string,
   now: string,
 ): Promise<void> {
-  const hitsWebhookUrl = Deno.env.get("HITS_FNRH_WEBHOOK_URL")?.trim();
-  if (!hitsWebhookUrl) {
-    await client
-      .from("fnrh_hospedes")
-      .update({
-        fnrh_sync_status: "pendente",
-        fnrh_sync_erro: "HITS_FNRH_WEBHOOK_URL não configurado.",
-        updated_at: now,
-      })
-      .eq("id", fnrhId);
-    await client.from("operacional_reserva_eventos").insert({
-      reserva_id: reservaId,
-      tipo: "fnrh_sync_hits",
-      titulo: "Sync FNRH → HITS",
-      detalhe: JSON.stringify({ status: "pendente", erro: "HITS_FNRH_WEBHOOK_URL não configurado." }),
+  const gatewayUrl = (Deno.env.get("HITS_GATEWAY_URL") ?? "").trim().replace(/\/+$/, "");
+  const gatewayToken = (Deno.env.get("HITS_GATEWAY_TOKEN") ?? "").trim();
+  if (!gatewayUrl || !gatewayToken) {
+    await registrarSyncFnrh(client, fnrhId, reservaId, now, {
+      syncStatus: "pendente",
+      erro: "HITS_GATEWAY_URL/HITS_GATEWAY_TOKEN não configurados.",
     });
     return;
   }
+
   try {
     const { data: fnrh } = await client
       .from("fnrh_hospedes")
-      .select("hospede_nome, documento, data_nascimento, nacionalidade, endereco, telefone, email, procedencia, destino, placa_veiculo, cor_veiculo, modelo_veiculo")
+      .select(FNRH_SYNC_SELECT)
       .eq("id", fnrhId)
       .single();
     if (!fnrh) return;
-    const payload = {
-      reserva_id: reservaId,
-      fnrh_id: fnrhId,
-      hospede_nome: (fnrh as Record<string, unknown>).hospede_nome,
-      documento: (fnrh as Record<string, unknown>).documento,
-      data_nascimento: (fnrh as Record<string, unknown>).data_nascimento,
-      nacionalidade: (fnrh as Record<string, unknown>).nacionalidade,
-      endereco: (fnrh as Record<string, unknown>).endereco,
-      telefone: (fnrh as Record<string, unknown>).telefone,
-      email: (fnrh as Record<string, unknown>).email,
-      procedencia: (fnrh as Record<string, unknown>).procedencia,
-      destino: (fnrh as Record<string, unknown>).destino,
-      placa_veiculo: (fnrh as Record<string, unknown>).placa_veiculo,
-      cor_veiculo: (fnrh as Record<string, unknown>).cor_veiculo,
-      modelo_veiculo: (fnrh as Record<string, unknown>).modelo_veiculo,
-    };
-    const res = await fetch(hitsWebhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+
+    // idReservation vem da reserva operacional; idEntity, do hóspede espelhado
+    // do HITS. Sem os dois não há o que atualizar — e não é erro: a reserva
+    // pode simplesmente não ter origem HITS.
+    const { data: reserva } = await client
+      .from("operacional_reservas")
+      .select("external_reservation_id")
+      .eq("id", reservaId)
+      .single();
+    const { data: hospede } = await client
+      .from("operacional_hospedes")
+      .select("pms_external_guest_id")
+      .eq("id", (fnrh as Record<string, unknown>).hospede_id)
+      .single();
+
+    const idReservation = toPositiveInt(
+      (reserva as Record<string, unknown> | null)?.external_reservation_id,
+    );
+    const idEntity = toPositiveInt(
+      (hospede as Record<string, unknown> | null)?.pms_external_guest_id,
+    );
+    if (idReservation == null || idEntity == null) {
+      await registrarSyncFnrh(client, fnrhId, reservaId, now, {
+        syncStatus: "pendente",
+        erro:
+          idReservation == null
+            ? "Reserva sem external_reservation_id numérico."
+            : "Hóspede sem pms_external_guest_id numérico.",
+      });
+      return;
+    }
+
+    const mapped = buildHitsGuestPutFromFnrh({
+      idEntity,
+      idReservation,
+      fnrh: fnrh as Record<string, unknown>,
+    });
+    if (!hasUpdatableFields(mapped)) {
+      await registrarSyncFnrh(client, fnrhId, reservaId, now, {
+        syncStatus: "pendente",
+        erro: "Nenhum campo suportado para enviar.",
+      });
+      return;
+    }
+
+    const res = await fetch(`${gatewayUrl}/v1/guests`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${gatewayToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(mapped.dto),
     });
     const ok = res.ok;
-    const errText = ok ? null : await res.text();
-    await client
-      .from("fnrh_hospedes")
-      .update({
-        fnrh_sync_status: ok ? "enviado" : "erro",
-        fnrh_sync_enviado_em: now,
-        fnrh_sync_erro: errText?.slice(0, 500) ?? (ok ? null : `HTTP ${res.status}`),
-        status: ok ? "enviado_oficial" : "erro_sincronizacao",
-        updated_at: now,
-      })
-      .eq("id", fnrhId);
-    await client.from("operacional_reserva_eventos").insert({
-      reserva_id: reservaId,
-      tipo: "fnrh_sync_hits",
-      titulo: "Sync FNRH → HITS",
-      detalhe: JSON.stringify({ status: ok ? "enviado" : "erro", erro: errText ?? null }),
+    // O corpo do gateway já é sanitizado (code + request_id, sem PII upstream).
+    const errText = ok ? null : (await res.text()).slice(0, 500);
+    await registrarSyncFnrh(client, fnrhId, reservaId, now, {
+      syncStatus: ok ? "enviado" : "erro",
+      erro: errText ?? (ok ? null : `HTTP ${res.status}`),
+      fichaStatus: ok ? "enviado_oficial" : "erro_sincronizacao",
+      campos: mapped.included,
     });
   } catch (e) {
+    // A ficha continua salva: aqui só se registra a falha, para retry posterior.
     const errMsg = e instanceof Error ? e.message : String(e);
-    await client
-      .from("fnrh_hospedes")
-      .update({
-        fnrh_sync_status: "erro",
-        fnrh_sync_enviado_em: now,
-        fnrh_sync_erro: errMsg.slice(0, 500),
-        status: "erro_sincronizacao",
-        updated_at: now,
-      })
-      .eq("id", fnrhId);
-    await client.from("operacional_reserva_eventos").insert({
-      reserva_id: reservaId,
-      tipo: "fnrh_sync_hits",
-      titulo: "Sync FNRH → HITS",
-      detalhe: JSON.stringify({ status: "erro", erro: errMsg }),
+    await registrarSyncFnrh(client, fnrhId, reservaId, now, {
+      syncStatus: "erro",
+      erro: errMsg,
+      fichaStatus: "erro_sincronizacao",
     });
   }
 }

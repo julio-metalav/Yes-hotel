@@ -5987,6 +5987,11 @@ function renderDetail(reserva) {
           <p class="guest-detail-fnrh-line">${escapeHtml(fnrhLine)}</p>
           ${responsibleLine}
           ${contactBlock}
+          ${
+            h.fnrhLink
+              ? `<button type="button" class="secondary-button guest-copiar-fnrh-btn" data-fnrh-link="${escapeHtml(h.fnrhLink)}">Copiar link FNRH</button>`
+              : ""
+          }
         </div>
       `,
         manageRowHtml: "",
@@ -6238,6 +6243,27 @@ function bindDetailListeners(reserva) {
     input.addEventListener("change", (e) => {
       const t = e.target;
       atualizarHospedeCampo(t.dataset.reservaId, t.dataset.guestIndex, "whatsapp", t.value);
+    });
+  });
+
+  // Porta de entrada da FNRH: entrega o link da página pública já existente.
+  // Não abre formulário aqui, não envia nada, não altera estado da reserva.
+  detailBodyElement.querySelectorAll(".guest-copiar-fnrh-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const link = btn.dataset.fnrhLink || "";
+      if (!link) return;
+      const absoluto = new URL(link, window.location.href).toString();
+      try {
+        await navigator.clipboard.writeText(absoluto);
+        btn.textContent = "Link copiado";
+      } catch (_e) {
+        // Sem permissão de clipboard: mostra o link para cópia manual.
+        window.prompt("Copie o link da FNRH:", absoluto);
+        return;
+      }
+      setTimeout(() => {
+        btn.textContent = "Copiar link FNRH";
+      }, 2000);
     });
   });
 
