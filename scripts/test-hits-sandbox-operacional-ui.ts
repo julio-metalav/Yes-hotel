@@ -56,6 +56,62 @@ function loadPreview(fetchImpl?: unknown): PreviewApi {
   return (sandbox as { YesHotelHitsSandboxPreview: PreviewApi }).YesHotelHitsSandboxPreview;
 }
 
+/**
+ * Carrega o painel operacional num contexto isolado e devolve
+ * `resolveHitsReadWindow`. A lógica de fuso fica onde já estava — o teste só
+ * a exercita com relógio injetado.
+ */
+function loadPainelWindow(): (now: Date) => { from: string; to: string } {
+  const src = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.js"), "utf8");
+  const el = () => ({
+    classList: { add() {}, remove() {}, toggle() {} },
+    addEventListener() {},
+    setAttribute() {},
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    style: {},
+    textContent: "",
+    innerHTML: "",
+    value: "",
+    options: [],
+    disabled: false,
+  });
+  const sandbox: Record<string, unknown> = {
+    console,
+    Intl,
+    // Date do host: sem isto, `now instanceof Date` falha entre realms e a
+    // função cai no relógio real, mascarando os casos de virada.
+    Date,
+    document: {
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      addEventListener() {},
+      createElement: () => el(),
+      getElementById: () => null,
+      body: el(),
+    },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    navigator: { userAgent: "node" },
+    location: { hostname: "localhost", search: "" },
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    fetch: async () => new Response("{}"),
+    HTMLElement: class {},
+    HTMLInputElement: class {},
+    HTMLSelectElement: class {},
+    Response,
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(src, sandbox);
+  const fn = (sandbox as { resolveHitsReadWindow?: unknown }).resolveHitsReadWindow;
+  assert.equal(typeof fn, "function", "resolveHitsReadWindow deve existir");
+  return fn as (now: Date) => { from: string; to: string };
+}
+
 const ROW = {
   external_reservation_id: "17613",
   apartamento: "07",
@@ -272,6 +328,71 @@ async function main() {
     assert.ok(iPreview > -1 && iPanel > -1);
     assert.ok(iPreview < iPanel, "preview precisa ser avaliado antes do painel");
     ok("ordem dos scripts garante a API disponível no init");
+  }
+
+  console.log("\n== Janela de leitura no dia operacional ==");
+  {
+    // Campo Grande é UTC-4. A Edge calcula o default em UTC; depois das 20h
+    // locais o UTC já virou e a janela começava em "amanhã", zerando o Hoje.
+    const janela = loadPainelWindow();
+
+    const casos: Array<[string, string, string]> = [
+      ["A) 15/09 19:59 CG", "2026-09-15T23:59:00Z", "2026-09-15"],
+      ["B) 15/09 20:01 CG (UTC ja 16/09)", "2026-09-16T00:01:00Z", "2026-09-15"],
+      ["C) 16/09 06:59 CG (antes do corte 7h)", "2026-09-16T10:59:00Z", "2026-09-15"],
+      ["D) 16/09 07:00 CG (apos o corte)", "2026-09-16T11:00:00Z", "2026-09-16"],
+    ];
+    for (const [nome, utc, esperado] of casos) {
+      const w = janela(new Date(utc));
+      assert.equal(w.from, esperado, `${nome}: date_from`);
+    }
+    ok("A/B/C/D da virada: janela segue o dia operacional, não o UTC");
+
+    const w = janela(new Date("2026-09-16T00:01:00Z"));
+    assert.equal(w.from, "2026-09-15");
+    assert.equal(w.to, "2026-10-15");
+    ok("date_to = date_from + 30 dias");
+  }
+
+  console.log("\n== Repasse da janela à Edge ==");
+  {
+    const calls: string[] = [];
+    const api = loadPreview(async (url: string) => {
+      calls.push(url);
+      return jsonResponse({ ok: true, rows: [ROW] });
+    });
+
+    await api.fetchReservasOperacionais({ dateFrom: "2026-09-15", dateTo: "2026-10-15" });
+    assert.equal(calls.length, 1);
+    assert.match(calls[0]!, /date_from=2026-09-15/);
+    assert.match(calls[0]!, /date_to=2026-10-15/);
+    ok("URL da Edge carrega date_from e date_to");
+
+    // Mesma janela, sem force: reusa o ciclo.
+    await api.fetchReservasOperacionais({ dateFrom: "2026-09-15", dateTo: "2026-10-15" });
+    assert.equal(calls.length, 1, "mesma janela nao refaz leitura");
+
+    // Botão do painel (sem janela) herda a última usada pela grade.
+    await api.loadCycle();
+    assert.equal(calls.length, 1, "painel reusa a janela da grade");
+    ok("painel e grade compartilham a mesma leitura");
+
+    // Virada do dia operacional: janela nova invalida o ciclo anterior.
+    await api.fetchReservasOperacionais({ dateFrom: "2026-09-16", dateTo: "2026-10-16" });
+    assert.equal(calls.length, 2, "janela diferente exige leitura nova");
+    assert.match(calls[1]!, /date_from=2026-09-16/);
+    ok("mudança de janela invalida o ciclo reaproveitado");
+  }
+  {
+    // Sem janela, a Edge aplica o default dela (fallback preservado).
+    const calls: string[] = [];
+    const api = loadPreview(async (url: string) => {
+      calls.push(url);
+      return jsonResponse({ ok: true, rows: [ROW] });
+    });
+    await api.fetchReservasOperacionais();
+    assert.doesNotMatch(calls[0]!, /date_from/);
+    ok("sem janela: URL limpa, default da Edge preservado");
   }
 
   console.log("\n== Painel compacto ==");

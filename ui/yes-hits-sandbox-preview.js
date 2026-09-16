@@ -75,10 +75,24 @@
     return s || "—";
   }
 
-  function functionsUrl() {
+  /**
+   * A janela vem pronta de quem calcula o dia operacional do hotel
+   * (checkin-operacional-mvp.js). Aqui só é repassada — nada de timezone.
+   * Sem janela, a Edge aplica o default dela.
+   */
+  function functionsUrl(win) {
     var cfg = global.YES_HOTEL_SUPABASE_CONFIG;
     if (!cfg || !cfg.url) return "";
-    return String(cfg.url).replace(/\/+$/, "") + "/functions/v1/hits-reservations-preview";
+    var url = String(cfg.url).replace(/\/+$/, "") + "/functions/v1/hits-reservations-preview";
+    if (win && win.from && win.to) {
+      url += "?date_from=" + encodeURIComponent(win.from) + "&date_to=" + encodeURIComponent(win.to);
+    }
+    return url;
+  }
+
+  /** Assinatura da janela — entra na memoização do ciclo. */
+  function windowKey(win) {
+    return win && win.from && win.to ? win.from + ".." + win.to : "default";
   }
 
   function renderRows(rows) {
@@ -115,6 +129,9 @@
   var inflight = null;
   var cycleResult = null;
   var cycleListeners = [];
+  /** Janela do último ciclo: o botão do painel reusa a mesma da grade. */
+  var lastWindow = null;
+  var cycleKey = null;
 
   function notifyCycle(payload) {
     cycleListeners.forEach(function (fn) {
@@ -133,9 +150,9 @@
     if (cycleResult) fn(cycleResult);
   }
 
-  async function requestCycle() {
+  async function requestCycle(win) {
     var auth = global.YesHotelAuthApp;
-    var url = functionsUrl();
+    var url = functionsUrl(win);
     if (!auth || !auth.getEdgeFunctionFetchHeaders || !url) {
       return { ok: false, raw: [], rows: [], error: "supabase_nao_configurado" };
     }
@@ -175,14 +192,25 @@
    * `force` inicia um ciclo novo (botão Atualizar / Consultar).
    */
   function loadCycle(options) {
-    var force = options && options.force === true;
-    if (inflight) return inflight;
-    if (!force && cycleResult) return Promise.resolve(cycleResult);
+    var opts = options || {};
+    var force = opts.force === true;
+    // Janela da chamada; o botão do painel herda a última usada pela grade.
+    var win =
+      opts.dateFrom && opts.dateTo
+        ? { from: opts.dateFrom, to: opts.dateTo }
+        : lastWindow;
+    var key = windowKey(win);
+
+    if (inflight && key === cycleKey) return inflight;
+    // Virada do dia operacional muda a janela: o ciclo anterior não serve mais.
+    if (!force && cycleResult && key === cycleKey) return Promise.resolve(cycleResult);
 
     if (btn) btn.disabled = true;
     setStatus("Consultando HITS Sandbox…", false);
 
-    inflight = requestCycle().then(function (result) {
+    lastWindow = win;
+    cycleKey = key;
+    inflight = requestCycle(win).then(function (result) {
       cycleResult = result;
       inflight = null;
       if (btn) btn.disabled = false;

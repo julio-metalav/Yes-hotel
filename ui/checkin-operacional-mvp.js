@@ -3380,11 +3380,31 @@ function refresh() {
  * Nada é gravado. Reserva já espelhada no banco (mesmo external_reservation_id)
  * não é duplicada — o registro real tem precedência.
  */
+/** Horizonte de leitura HITS — mantém os 30 dias já praticados. */
+const HITS_READ_WINDOW_DAYS = 30;
+
+/**
+ * Janela de leitura HITS no dia operacional do hotel.
+ *
+ * A Edge calcula o default em UTC. Depois das 20h em Campo Grande o UTC já
+ * virou, a janela começava em "amanhã" e o filtro Hoje da grade zerava mesmo
+ * com o HITS conectado. Aqui a origem da data é a mesma dos filtros da tela.
+ */
+function resolveHitsReadWindow(now) {
+  const from = resolveOperationalTodayYmd(now || new Date());
+  return { from, to: addDaysYmd(from, HITS_READ_WINDOW_DAYS) };
+}
+
 async function loadReservasSomenteLeituraHits(jaCarregadas, options) {
   if (PAINEL_DATA_SOURCE !== PAINEL_DATA_SOURCE_BACKEND) return [];
   const api = typeof window !== "undefined" ? window.YesHotelHitsSandboxPreview : null;
   if (!api || typeof api.fetchReservasOperacionais !== "function") return [];
-  const externas = await api.fetchReservasOperacionais(options);
+  const janela = resolveHitsReadWindow();
+  const externas = await api.fetchReservasOperacionais({
+    ...(options || {}),
+    dateFrom: janela.from,
+    dateTo: janela.to,
+  });
   if (!Array.isArray(externas) || externas.length === 0) return [];
   const jaNoBanco = new Set(
     (jaCarregadas || [])
