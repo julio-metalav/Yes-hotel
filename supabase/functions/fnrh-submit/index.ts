@@ -37,6 +37,7 @@ import {
   findIdEntityByDoc,
   hasUpdatableFields,
 } from "../../../src/lib/integrations/hits/fnrh-to-hits-guest.ts";
+import { resolveGuestIdentity } from "../../../src/lib/crm/identity.ts";
 import {
   isFinanceiroLiberadoParaAcesso,
 } from "../../../src/lib/domain/yes-hotel/guest-access-messages.ts";
@@ -525,6 +526,165 @@ async function syncLegadoAgregado(reservaId: string, now: string): Promise<strin
   return agregado;
 }
 
+// --- crm-guests:begin ---
+// Cadastro mestre reutilizável (crm_guests), alimentado no confirm da FNRH.
+//
+// Bloco autocontido: scripts/test-fnrh-crm-guests-upsert.ts o extrai pelos
+// marcadores e o executa contra um cliente Supabase falso. Por isso ele só
+// depende de resolveGuestIdentity (import no topo) e do `client` recebido.
+//
+// Regras: identidade forte (CPF válido ou passaporte com tipo declarado) é a
+// única chave; e-mail/telefone nunca identificam. Sem identidade não há
+// registro fraco. Valor vazio nunca sobrescreve valor existente. Nome social
+// nunca vira full_name. Falha aqui não derruba a confirmação da FNRH.
+
+type CrmGuestSource = {
+  hospede_nome?: string | null;
+  documento_tipo?: string | null;
+  documento_numero?: string | null;
+  nacionalidade?: string | null;
+  data_nascimento?: string | null;
+  email?: string | null;
+  telefone?: string | null;
+  cidade?: string | null;
+  uf?: string | null;
+  pais?: string | null;
+  is_minor?: boolean;
+};
+
+type CrmGuestUpsertOutcome =
+  | { status: "created" | "updated" }
+  | { status: "skipped"; reason: "no_strong_identity" }
+  | { status: "error"; code: string };
+
+function crmText(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s === "" ? null : s;
+}
+
+function crmDate(v: unknown): string | null {
+  const s = crmText(v);
+  if (!s) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : s.slice(0, 10);
+}
+
+/** Só chave forte: CPF com dígito verificador válido ou passaporte com tipo declarado. */
+function resolveCrmIdentity(
+  src: CrmGuestSource,
+): { kind: "cpf" | "passport"; value: string; matchKey: string } | null {
+  const r = resolveGuestIdentity({
+    documentType: src.documento_tipo,
+    documentNumber: src.documento_numero,
+    nationality: src.nacionalidade,
+  });
+  if (!r.identity || r.identity.confidence !== "confirmed" || !r.matchKey) return null;
+  return { kind: r.identity.kind, value: r.identity.valueNormalized, matchKey: r.matchKey };
+}
+
+/** Atributos confirmados e não vazios. Nome social fica fora — full_name é o nome civil. */
+function buildCrmGuestAttributes(src: CrmGuestSource): Record<string, string> {
+  const out: Record<string, string> = {};
+  const put = (key: string, value: unknown) => {
+    const s = crmText(value);
+    if (s) out[key] = s;
+  };
+  put("full_name", src.hospede_nome);
+  put("birth_date", crmDate(src.data_nascimento));
+  if (src.is_minor !== true) {
+    put("email", src.email);
+    put("phone", src.telefone);
+  }
+  put("city", src.cidade);
+  put("state", src.uf);
+  put("country", src.pais);
+  return out;
+}
+
+function crmErrorCode(error: { code?: string | null } | null | undefined, fallback: string): string {
+  const code = crmText(error?.code);
+  return code ?? fallback;
+}
+
+/**
+ * Upsert por match_key. Registro existente mantém first_seen_at e recebe
+ * last_seen_at + atributos não vazios; novo registro nasce com os dois.
+ * Não usa ON CONFLICT: o índice único de match_key é parcial.
+ */
+async function upsertCrmGuestFromFnrh(
+  client: ReturnType<typeof createClient>,
+  input: { source: CrmGuestSource; now: string },
+): Promise<CrmGuestUpsertOutcome> {
+  const identity = resolveCrmIdentity(input.source);
+  if (!identity) return { status: "skipped", reason: "no_strong_identity" };
+
+  const attrs = buildCrmGuestAttributes(input.source);
+  const touch = { ...attrs, last_seen_at: input.now, updated_at: input.now };
+  try {
+    const { data: existing, error: selErr } = await client
+      .from("crm_guests")
+      .select("id, first_seen_at")
+      .eq("match_key", identity.matchKey)
+      .maybeSingle();
+    if (selErr) return { status: "error", code: crmErrorCode(selErr, "select_failed") };
+
+    if (existing) {
+      const { error } = await client
+        .from("crm_guests")
+        .update(touch)
+        .eq("id", (existing as { id: string }).id);
+      if (error) return { status: "error", code: crmErrorCode(error, "update_failed") };
+      return { status: "updated" };
+    }
+
+    const { error: insErr } = await client.from("crm_guests").insert({
+      match_key: identity.matchKey,
+      document_type: identity.kind,
+      document_number_normalized: identity.value,
+      country_code: identity.kind === "cpf" ? "BR" : null,
+      full_name: attrs.full_name ?? "",
+      ...touch,
+      first_seen_at: input.now,
+    });
+    if (insErr) {
+      // Corrida entre dois confirms: o outro inseriu primeiro → vira update.
+      if (insErr.code === "23505") {
+        const { error } = await client
+          .from("crm_guests")
+          .update(touch)
+          .eq("match_key", identity.matchKey);
+        if (error) return { status: "error", code: crmErrorCode(error, "update_failed") };
+        return { status: "updated" };
+      }
+      return { status: "error", code: crmErrorCode(insErr, "insert_failed") };
+    }
+    return { status: "created" };
+  } catch {
+    return { status: "error", code: "exception" };
+  }
+}
+
+/** Falha do CRM: log e evento operacional sem PII — só o código do erro. */
+async function registrarFalhaCrmGuest(
+  client: ReturnType<typeof createClient>,
+  reservaId: string,
+  code: string,
+): Promise<void> {
+  console.warn("[fnrh-submit] crm_guests não atualizado:", code);
+  try {
+    await client.from("operacional_reserva_eventos").insert({
+      reserva_id: reservaId,
+      tipo: "crm_guest_upsert",
+      titulo: "Cadastro mestre (CRM) não atualizado",
+      detalhe: JSON.stringify({ status: "erro", code }),
+    });
+  } catch {
+    // Evento é apoio; a FNRH confirmada não depende dele.
+  }
+}
+// --- crm-guests:end ---
+
 async function confirmV2Guest(input: {
   fnrhId: string;
   reservaId: string;
@@ -545,7 +705,10 @@ async function confirmV2Guest(input: {
   confirmedIp: string | null;
   confirmedUa: string | null;
   now: string;
-}): Promise<{ ok: true } | { ok: false; error: string; status: number; details?: unknown }> {
+}): Promise<
+  | { ok: true; crm: CrmGuestUpsertOutcome }
+  | { ok: false; error: string; status: number; details?: unknown }
+> {
   const validation = validateFnrhCheckinV2Confirm(input.draft);
   if (!validation.ok) {
     return {
@@ -629,11 +792,25 @@ async function confirmV2Guest(input: {
     status_operacional: "confirmado",
     updated_at: input.now,
   };
+  // Cadastro operacional recebe o que o hóspede confirmou — só valores não
+  // vazios (vazio nunca apaga o que já existe) e nunca o nome social no lugar
+  // do nome civil. Dados da reserva não são tocados aqui.
+  const nomeCivilConfirmado = crmText(input.draft.hospede_nome);
+  if (nomeCivilConfirmado) hospedeUpdate.nome = nomeCivilConfirmado;
+  const nascimentoConfirmado = crmDate(input.draft.data_nascimento);
+  if (nascimentoConfirmado) hospedeUpdate.data_nascimento = nascimentoConfirmado;
   if (!input.draft.is_minor) {
     if (input.draft.email) hospedeUpdate.email = input.draft.email;
     if (input.draft.telefone) hospedeUpdate.whatsapp = input.draft.telefone;
   }
   await admin.from("operacional_hospedes").update(hospedeUpdate).eq("id", input.guestId);
+
+  // Cadastro mestre (crm_guests): só com identidade forte; falha não derruba a
+  // confirmação nem repete o envio ao HITS — fica no resultado interno.
+  const crm = await upsertCrmGuestFromFnrh(admin, { source: input.draft, now: input.now });
+  if (crm.status === "error") {
+    await registrarFalhaCrmGuest(admin, input.reservaId, crm.code);
+  }
 
   await writeFnrhConfirmedAudit({
     reservation_id: input.reservaId,
@@ -652,7 +829,7 @@ async function confirmV2Guest(input: {
   });
 
   await syncFnrhToHits(admin, input.fnrhId, input.reservaId, input.now);
-  return { ok: true };
+  return { ok: true, crm };
 }
 
 Deno.serve(async (req: Request) => {

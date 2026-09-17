@@ -748,16 +748,108 @@ function mapDbEventoToHistorico(row) {
   };
 }
 
-function mapDbHospedeToInternal(row, fnrhRow) {
+/** Colunas de fnrh_hospedes lidas pelo painel — só o necessário à exibição. */
+const FNRH_PAINEL_SELECT = [
+  "id",
+  "hospede_id",
+  "status",
+  "link_token",
+  "reserva_id",
+  "fnrh_lifecycle_status",
+  "hospede_nome",
+  "nome_social",
+  "data_nascimento",
+  "nacionalidade",
+  "documento_tipo",
+  "documento_numero",
+  "endereco",
+  "cidade",
+  "uf",
+  "pais",
+  "email",
+  "telefone",
+  "completed_at",
+  "preenchido_em",
+  "fnrh_sync_status",
+  "fnrh_sync_enviado_em",
+  "fnrh_sync_erro",
+].join(", ");
+
+/** FNRH confirmada/concluída — rascunho e pendente nunca sobrepõem o operacional. */
+function isFnrhRowConfirmada(fnrhRow) {
+  if (!fnrhRow) return false;
+  const status = String(fnrhRow.status || "").trim();
+  const lifecycle = String(fnrhRow.fnrh_lifecycle_status || "").trim();
+  return (
+    status === "confirmado_hospede" ||
+    status === "confirmado_hotel" ||
+    status === "enviado_oficial" ||
+    status === "erro_sincronizacao" ||
+    status === "preenchido" ||
+    lifecycle === "completed" ||
+    lifecycle === "manually_completed"
+  );
+}
+
+function textoOuVazio(v) {
+  return v == null ? "" : String(v).trim();
+}
+
+/** Snapshot confirmado da FNRH, já filtrado: sem token, IP, UA, hash, foto ou payload. */
+function mapFnrhRowToCadastroConfirmado(fnrhRow) {
+  if (!isFnrhRowConfirmada(fnrhRow)) return null;
+  const docTipo = textoOuVazio(fnrhRow.documento_tipo).toLowerCase();
+  return {
+    nomeCivil: textoOuVazio(fnrhRow.hospede_nome),
+    nomeSocial: textoOuVazio(fnrhRow.nome_social),
+    dataNascimento: textoOuVazio(fnrhRow.data_nascimento).slice(0, 10),
+    nacionalidade: textoOuVazio(fnrhRow.nacionalidade),
+    documentoTipo: docTipo,
+    documentoNumero: textoOuVazio(fnrhRow.documento_numero),
+    endereco: textoOuVazio(fnrhRow.endereco),
+    cidade: textoOuVazio(fnrhRow.cidade),
+    uf: textoOuVazio(fnrhRow.uf),
+    pais: textoOuVazio(fnrhRow.pais),
+    email: textoOuVazio(fnrhRow.email),
+    telefone: textoOuVazio(fnrhRow.telefone),
+    confirmadoEm: fnrhRow.completed_at || fnrhRow.preenchido_em || null,
+    syncStatus: textoOuVazio(fnrhRow.fnrh_sync_status).toLowerCase(),
+    syncEnviadoEm: fnrhRow.fnrh_sync_enviado_em || null,
+    syncErro: textoOuVazio(fnrhRow.fnrh_sync_erro),
+  };
+}
+
+/**
+ * Prioridade dos dados cadastrais: FNRH confirmada da reserva atual →
+ * operacional_hospedes → dados básicos da reserva. `nome` continua sendo o
+ * nome civil (é o que o painel grava de volta); a apresentação vai em
+ * `nomeApresentacao` (nome social confirmado, senão civil).
+ */
+function mapDbHospedeToInternal(row, fnrhRow, reservaRow) {
   if (!row) return null;
   const guestRole = (row.guest_role || "").trim() || null;
   const isMinor = row.is_minor === true || guestRole === "minor";
+  const cadastroConfirmado = mapFnrhRowToCadastroConfirmado(fnrhRow);
+  const nomeReserva =
+    row.principal && reservaRow ? textoOuVazio(reservaRow.hospede_principal) : "";
+  const nomeCivil =
+    (cadastroConfirmado && cadastroConfirmado.nomeCivil) || textoOuVazio(row.nome) || nomeReserva;
+  const nomeSocial = cadastroConfirmado ? cadastroConfirmado.nomeSocial : "";
   const base = {
     id: row.id || "",
-    nome: (row.nome || "").trim(),
+    nome: nomeCivil,
+    nomeApresentacao: nomeSocial || nomeCivil,
     principal: !!row.principal,
-    email: (row.email || "").trim(),
-    whatsapp: (row.whatsapp || "").trim(),
+    // Contato do menor pertence ao responsável (mesma regra do fnrh-submit).
+    email:
+      (!isMinor && cadastroConfirmado && cadastroConfirmado.email) || textoOuVazio(row.email),
+    whatsapp:
+      (!isMinor && cadastroConfirmado && cadastroConfirmado.telefone) ||
+      textoOuVazio(row.whatsapp),
+    dataNascimento:
+      (cadastroConfirmado && cadastroConfirmado.dataNascimento) ||
+      textoOuVazio(row.data_nascimento).slice(0, 10),
+    cadastroConfirmado: cadastroConfirmado,
     statusOperacional: row.status_operacional || GUEST_STATUS.NAO_IDENTIFICADO,
     origemCadastro: row.origem_cadastro || ORIGEM_CADASTRO.NOVO,
     modoColetaFnrh: row.modo_coleta_fnrh || MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO,
@@ -808,7 +900,7 @@ function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows, enviosRo
     return acc;
   }, {});
   const hospedes = (hospedesRows || []).map(function (row) {
-    return mapDbHospedeToInternal(row, fnrhMap[row.id]);
+    return mapDbHospedeToInternal(row, fnrhMap[row.id], r);
   }).filter(Boolean);
   const historico = (eventosRows || []).map(mapDbEventoToHistorico).filter(Boolean);
   const extId = (r.external_reservation_id || "").trim() || null;
@@ -1306,7 +1398,10 @@ async function loadReservasFromBackend(loadOpts) {
       .order("criado_em", { ascending: false }),
     supabase
       .from("fnrh_hospedes")
-      .select("id, hospede_id, status, link_token, reserva_id")
+      // Cadastro confirmado para o card "Hóspedes e contatos". Fora, de
+      // propósito: confirmed_ip, confirmed_user_agent, snapshot_hash,
+      // confirmation_snapshot, assinatura e qualquer conteúdo bruto.
+      .select(FNRH_PAINEL_SELECT)
       .in("reserva_id", ids),
     supabase
       .from("operacional_comunicacao_envios")
@@ -6108,6 +6203,66 @@ async function copyTextToClipboard(value) {
   if (!copied) throw new Error("Cópia não suportada neste navegador.");
 }
 
+function formatDataCompletaBR(ymd) {
+  const p = String(ymd || "").slice(0, 10).split("-");
+  if (p.length !== 3 || !p[0] || !p[1] || !p[2]) return "";
+  return `${p[2]}/${p[1]}/${p[0]}`;
+}
+
+function formatDocumentoTipoLabel(tipo) {
+  const t = String(tipo || "").trim().toLowerCase();
+  if (!t) return "";
+  if (t === "cpf") return "CPF";
+  if (t === "passport" || t === "passaporte") return "Passaporte";
+  return t.toUpperCase();
+}
+
+function formatFnrhSyncStatusLabel(status) {
+  const s = String(status || "").trim().toLowerCase();
+  if (s === "enviado") return "Enviada";
+  if (s === "erro") return "Erro";
+  if (s === "pendente") return "Pendente";
+  return s ? s : "";
+}
+
+/**
+ * Seção "Ver cadastro confirmado" do card do hóspede. Só existe com FNRH
+ * confirmada; mostra o snapshot já filtrado no mapper (sem token, IP,
+ * user-agent, hash, foto ou payload bruto). Mesmo <details> das outras seções.
+ */
+function buildGuestCadastroConfirmadoHtml(h) {
+  const c = h && h.cadastroConfirmado;
+  if (!c) return "";
+  const linhas = [];
+  const add = (rotulo, valor) => {
+    const v = String(valor == null ? "" : valor).trim();
+    if (!v) return;
+    linhas.push(`<div><dt>${escapeHtml(rotulo)}</dt><dd>${escapeHtml(v)}</dd></div>`);
+  };
+  add("Nome civil", c.nomeCivil);
+  add("Nome social", c.nomeSocial);
+  add("Data de nascimento", formatDataCompletaBR(c.dataNascimento));
+  add("Nacionalidade", c.nacionalidade);
+  add("Tipo de documento", formatDocumentoTipoLabel(c.documentoTipo));
+  add("Número do documento", c.documentoNumero);
+  add("Endereço", c.endereco);
+  add("Cidade", c.cidade);
+  add("UF", c.uf);
+  add("País", c.pais);
+  add("Confirmado em", formatIsoOperacional(c.confirmadoEm));
+  add("Sincronização HITS", formatFnrhSyncStatusLabel(c.syncStatus));
+  add("Enviado à HITS em", formatIsoOperacional(c.syncEnviadoEm));
+  add("Erro de sincronização", c.syncErro);
+  if (linhas.length === 0) return "";
+  return (
+    '<details class="detail-collapsible detail-collapsible--cadastro-confirmado guest-cadastro-confirmado">' +
+    '<summary class="detail-collapsible-summary">Ver cadastro confirmado</summary>' +
+    '<dl class="guest-detail-readout guest-detail-readout--compact">' +
+    linhas.join("") +
+    "</dl></details>"
+  );
+}
+
 function renderDetail(reserva) {
   if (!(detailBodyElement instanceof HTMLElement) || !reserva) return;
   const hospedes = Array.isArray(reserva.hospedes) ? reserva.hospedes : [];
@@ -6166,7 +6321,9 @@ function renderDetail(reserva) {
             ? Ppres.formatPhoneBrDisplay(waRaw)
             : waRaw,
       );
-      const nomeVal = escapeHtml((h.nome || "").trim());
+      // Apresentação: nome social confirmado, senão nome civil (h.nome, preservado).
+      const nomeVal = escapeHtml(((h.nomeApresentacao || h.nome) || "").trim());
+      const cadastroConfirmadoHtml = buildGuestCadastroConfirmadoHtml(h);
 
       // Menor: sem fluxo próprio de envio/assinatura; só leitura operacional.
       const contactBlock = isMinor
@@ -6198,6 +6355,7 @@ function renderDetail(reserva) {
           <p class="guest-detail-fnrh-line">${escapeHtml(fnrhLine)}</p>
           ${responsibleLine}
           ${contactBlock}
+          ${cadastroConfirmadoHtml}
           ${
             h.fnrhLink
               ? `<button type="button" class="secondary-button guest-copiar-fnrh-btn" data-fnrh-link="${escapeHtml(h.fnrhLink)}">Copiar link FNRH</button>`
