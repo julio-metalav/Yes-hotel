@@ -906,7 +906,7 @@
           : '<button type="button" class="btn secondary" id="v2-back">Voltar</button>';
       var nextLabel = "Continuar";
       if (step.id === "aceite") {
-        nextLabel = state.confirmBusy ? "Confirmando…" : "Confirmar check-in";
+        nextLabel = state.confirmBusy ? "Confirmando…" : "Confirmar e enviar";
       } else if (state.analyzing) {
         nextLabel =
           state.analyzingPhase === "ocr" ? "Lendo documento…" : "Enviando documento…";
@@ -1448,8 +1448,8 @@
     function renderConcluido() {
       return [
         '<div class="success-panel">',
-        "  <h2>Check-in concluído</h2>",
-        "  <p>Sua ficha de registro (FNRH) foi confirmada com sucesso.</p>",
+        "  <h2>Cadastro concluído com sucesso</h2>",
+        "  <p>Os dados da sua FNRH foram atualizados com sucesso.</p>",
         "  <p>As credenciais de acesso e demais orientações serão enviadas em breve.</p>",
         "  <p>Seja bem-vindo(a) ao Yes Hotel.</p>",
         "</div>",

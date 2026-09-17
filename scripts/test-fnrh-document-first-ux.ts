@@ -235,8 +235,10 @@ ok("CSS document-first presente");
 
   // G/H: texto final novo; antigo removido
   const concluido = js.slice(js.indexOf("function renderConcluido()"), js.indexOf("function render()"));
-  assert.match(concluido, /Check-in concluído/);
-  assert.match(concluido, /Sua ficha de registro \(FNRH\) foi confirmada com sucesso\./);
+  // Ciclo 1 FNRH/HITS: título neutro — não afirma check-in nem sync concluído.
+  assert.doesNotMatch(concluido, /Check-in concluído/);
+  assert.match(concluido, /Cadastro concluído com sucesso/);
+  assert.match(concluido, /Os dados da sua FNRH foram atualizados com sucesso\./);
   assert.match(concluido, /As credenciais de acesso e demais orientações serão enviadas em breve\./);
   assert.match(concluido, /Seja bem-vindo\(a\) ao Yes Hotel\./);
   assert.doesNotMatch(
