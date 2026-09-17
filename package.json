@@ -41,6 +41,7 @@
     "test:yes:fnrh-checkin-digital-v2": "tsx scripts/test-fnrh-checkin-digital-v2.ts",
     "test:yes:fnrh-document-first-ux": "tsx scripts/test-fnrh-document-first-ux.ts",
     "test:yes:fnrh-provenance-confirm": "tsx scripts/test-fnrh-provenance-confirm.ts",
+    "test:yes:central-acoes-operacional-ui": "tsx scripts/test-central-acoes-operacional-ui.ts",
     "test:yes:fnrh-azure-ocr": "tsx scripts/test-fnrh-azure-ocr.ts",
     "test:yes:fnrh-google-vision-ocr": "tsx scripts/test-fnrh-google-vision-ocr.ts",
     "test:yes:fnrh-ocr-cpf-passport": "tsx scripts/test-fnrh-ocr-cpf-passport.ts",
