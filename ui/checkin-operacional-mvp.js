@@ -5596,7 +5596,120 @@ function buildPagamentoSituacaoHtml(reserva, fin) {
   return html;
 }
 
-/** Topo do detalhe: situação única (pagamento/FNRH/acesso/próxima ação). */
+/**
+ * Central de ações do detalhe: FNRH e senha lado a lado, cada uma com o estado
+ * real da etapa e a ação disponível. Só apresentação — ids, classes e data-*
+ * dos botões são os que bindDetailListeners / executeRecomendacaoCta já tratam.
+ */
+function buildCentralAcoesHtml(reserva, ctx, rec, btns) {
+  var ctaKind = rec && rec.cta && rec.cta.kind ? String(rec.cta.kind) : "";
+  var fnrhCompleta = isFnrhCompleta(reserva);
+  var enviados = ctx.enviadosCount || 0;
+  var prontos = ctx.prontosCount || 0;
+  var faltam = ctx.faltamCount || 0;
+  var naoIdent = ctx.naoIdentCount || 0;
+
+  var fnrhEstado = formatFnrhSituacaoLabel(reserva);
+  var fnrhTom = fnrhCompleta ? "ok" : "pending";
+  var fnrhSub = "";
+  var fnrhAcoes = "";
+  if (fnrhCompleta) {
+    fnrhSub = "Ficha confirmada pelo hóspede. Nenhuma ação necessária.";
+  } else if (btns.enviarLinksBtnHtml) {
+    fnrhSub =
+      enviados > 0
+        ? "Link já enviado a " + enviados + " hóspede(s); " + prontos + " ainda sem link."
+        : "Link ainda não enviado ao hóspede.";
+    fnrhAcoes = btns.enviarLinksBtnHtml;
+  } else if (btns.reenviarFnrhTopoBtnHtml) {
+    fnrhSub = "Link enviado. Aguardando o hóspede preencher.";
+    fnrhAcoes = btns.reenviarFnrhTopoBtnHtml;
+  } else if (naoIdent > 0) {
+    fnrhSub = "Complete o nome do(s) hóspede(s) no cartão abaixo.";
+  } else if (faltam > 0) {
+    fnrhSub = "Falta e-mail ou WhatsApp. Corrija o contato no cartão do hóspede.";
+  } else if (enviados > 0) {
+    fnrhSub = "Link enviado. Aguardando o hóspede preencher.";
+  }
+
+  var senhaJaEnviada = !!(reserva.senhaEnviadaEm || obterUltimosEventosSenha(reserva).lastOkSenha);
+  var senhaGerada = acessoLiberadoEfetivo(reserva);
+  var falha = detectarUltimaFalhaCredencial(reserva);
+  var acesso = formatAcessoSituacaoLabel(reserva);
+  var senhaEstado = "";
+  var senhaTom = "pending";
+  var senhaSub = "";
+  if (reserva.entrouNoApto) {
+    senhaEstado = "Hóspede no apartamento";
+    senhaTom = "ok";
+  } else if (senhaJaEnviada) {
+    senhaEstado = "Enviada";
+    senhaTom = acesso.accent === "error" ? "error" : "ok";
+    var enviadaEm = reserva.senhaEnviadaEm
+      ? formatHistoricoTimestamp(new Date(reserva.senhaEnviadaEm))
+      : "";
+    senhaSub =
+      acesso.accent === "error"
+        ? acesso.label
+        : enviadaEm
+          ? "Enviada em " + enviadaEm + "."
+          : "Envio registrado no histórico.";
+  } else if (falha) {
+    senhaEstado = falha === "geracao" ? "Falha ao gerar" : "Falha ao enviar";
+    senhaTom = "error";
+    senhaSub = "Tente novamente ou confira o acesso TTLock abaixo.";
+  } else if (senhaGerada) {
+    senhaEstado = "Gerada, não enviada";
+    senhaSub = acesso.label + ".";
+  } else {
+    senhaEstado = "Não gerada";
+    if (isProntaParaLiberarAcesso(reserva)) {
+      senhaSub = "Pagamento e FNRH em dia. Pode gerar a senha.";
+    } else {
+      var pend = [];
+      if (!isPagamentoOk(reserva)) pend.push("pagamento");
+      if (!fnrhCompleta) pend.push("FNRH");
+      senhaSub = pend.length ? "Aguardando " + pend.join(" e ") + "." : "";
+    }
+  }
+  var senhaAcoes = (btns.gerarSenhaBtnHtml || "") + (btns.enviarSenhaBtnHtml || "");
+
+  var fnrhRec = ctaKind === "enviar_fnrh" || ctaKind === "reenviar_fnrh";
+  var senhaRec = ctaKind === "gerar_senha" || ctaKind === "liberar_acesso";
+
+  function item(key, titulo, estado, tom, sub, acoes, recomendada) {
+    return (
+      '<div class="detail-central-item detail-central-item--' +
+      key +
+      (recomendada ? " is-recomendada" : "") +
+      '">' +
+      '<p class="detail-central-item-title">' +
+      titulo +
+      "</p>" +
+      '<p class="detail-central-item-estado is-' +
+      tom +
+      '">' +
+      escapeHtml(estado) +
+      "</p>" +
+      (sub ? '<p class="detail-central-item-sub">' + escapeHtml(sub) + "</p>" : "") +
+      (acoes ? '<div class="detail-central-item-acoes">' + acoes + "</div>" : "") +
+      "</div>"
+    );
+  }
+
+  return {
+    temBotao: !!(fnrhAcoes || senhaAcoes),
+    html:
+      '<div class="detail-central-acoes" id="detail-central-acoes">' +
+      '<p class="detail-acao-kicker">Central de ações</p>' +
+      '<div class="detail-central-acoes-grid">' +
+      item("fnrh", "FNRH", fnrhEstado, fnrhTom, fnrhSub, fnrhAcoes, fnrhRec) +
+      item("senha", "Senha de acesso", senhaEstado, senhaTom, senhaSub, senhaAcoes, senhaRec) +
+      "</div></div>",
+  };
+}
+
+/** Topo do detalhe: situação única (pagamento/FNRH/acesso/próxima ação) + Central de ações. */
 function buildSituacaoAcaoTopoHtml(
   reserva,
   ctx,
@@ -5605,6 +5718,7 @@ function buildSituacaoAcaoTopoHtml(
   enviarSenhaBtnHtml,
   temBotaoSenhaBackend,
   topContextInnerHtml,
+  gerarSenhaBtnHtml,
 ) {
   var fin = resolveFinancialUi(reserva);
   var fnrhLabel = formatFnrhSituacaoLabel(reserva);
@@ -5616,8 +5730,16 @@ function buildSituacaoAcaoTopoHtml(
   var rec = derivarRecomendacaoOperacional(reserva, ctx);
   var rid = escapeHtml(String(reserva.id));
 
+  // FNRH, senha e liberação de acesso vivem na Central de ações; aqui só as
+  // demais próximas ações (cobrança, entrada, demo).
+  var kindsNaCentral = {
+    enviar_fnrh: true,
+    reenviar_fnrh: true,
+    gerar_senha: true,
+    liberar_acesso: true,
+    ir_hospedes: true,
+  };
   var primaryRow = "";
-  var usedSenhaAsPrimary = false;
   var aguardarChegada = !!(rec && rec.listaLabel === "Aguardar chegada" && !rec.cta);
   var payUiTopo = resolvePaymentUiForReserva(reserva);
   var isComissionado = fin.status === "pendente_comissionado";
@@ -5633,17 +5755,7 @@ function buildSituacaoAcaoTopoHtml(
           escapeHtml(payUiTopo.ctaLabel) +
           "</button>";
       }
-    } else if (enviarLinksBtnHtml && String(enviarLinksBtnHtml).indexOf("detail-enviar-links-btn") !== -1) {
-      primaryRow = enviarLinksBtnHtml;
-    } else if (
-      reenviarFnrhTopoBtnHtml &&
-      String(reenviarFnrhTopoBtnHtml).indexOf("detail-reenviar-fnrh-topo-btn") !== -1
-    ) {
-      primaryRow = reenviarFnrhTopoBtnHtml;
-    } else if (rec.cta && rec.cta.kind === "gerar_senha" && temBotaoSenhaBackend && enviarSenhaBtnHtml) {
-      primaryRow = enviarSenhaBtnHtml;
-      usedSenhaAsPrimary = true;
-    } else if (rec.cta && rec.cta.kind && rec.cta.kind !== "ir_hospedes" && rec.cta.label) {
+    } else if (rec.cta && rec.cta.kind && !kindsNaCentral[rec.cta.kind] && rec.cta.label) {
       if (
         String(rec.cta.kind).indexOf("pagarme_") !== 0 ||
         (fin.status === "pendente" && !isComissionado)
@@ -5658,18 +5770,17 @@ function buildSituacaoAcaoTopoHtml(
     }
   }
 
-  var secondaryRow = "";
-  if (temBotaoSenhaBackend && enviarSenhaBtnHtml && !usedSenhaAsPrimary) {
-    secondaryRow =
-      '<details class="detail-mais-acoes">' +
-      '<summary class="detail-mais-acoes-sum">Mais ações</summary>' +
-      '<div class="detail-mais-acoes-body">' +
-      enviarSenhaBtnHtml +
-      "</div></details>";
-  }
+  var central = buildCentralAcoesHtml(reserva, ctx, rec, {
+    enviarLinksBtnHtml: enviarLinksBtnHtml || "",
+    reenviarFnrhTopoBtnHtml: reenviarFnrhTopoBtnHtml || "",
+    enviarSenhaBtnHtml: enviarSenhaBtnHtml || "",
+    gerarSenhaBtnHtml: gerarSenhaBtnHtml || "",
+  });
 
+  // Painel de contato (e-mail / WhatsApp) antes de enviar FNRH ou senha:
+  // mesmo fluxo de openTopContatoPanel / submitDetailTopContatoPanel.
   var contatoPanelHtml = "";
-  if (primaryRow || secondaryRow) {
+  if (central.temBotao) {
     contatoPanelHtml =
       '<div class="detail-top-contato-panel hidden" id="detail-top-contato-panel" data-reserva-id="' +
       rid +
@@ -5689,19 +5800,17 @@ function buildSituacaoAcaoTopoHtml(
   }
 
   var acaoBlock = "";
-  if (primaryRow || secondaryRow || nextActionLabel) {
+  if (primaryRow || nextActionLabel) {
     acaoBlock =
       '<div class="detail-proxima-acao">' +
       '<p class="detail-acao-kicker">Próxima ação</p>' +
       (nextActionLabel
         ? '<p class="detail-acao-hint">' + escapeHtml(nextActionLabel) + "</p>"
         : "") +
-      (primaryRow || secondaryRow
-        ? '<div class="detail-top-actions">' + (primaryRow || "") + secondaryRow + "</div>"
-        : "") +
-      contatoPanelHtml +
+      (primaryRow ? '<div class="detail-top-actions">' + primaryRow + "</div>" : "") +
       "</div>";
   }
+  acaoBlock += central.html + contatoPanelHtml;
 
   var contextBlock = "";
   if (topContextInnerHtml && String(topContextInnerHtml).trim()) {
@@ -6392,15 +6501,26 @@ function renderDetail(reserva) {
     return "Enviar link FNRH (" + prontosCount + ")";
   }
 
+  // Central de ações: a ação recomendada ganha destaque (primary); as demais
+  // ficam visíveis como secundárias. Só muda a classe visual do botão.
+  const ctxRecomendacao = buildRecomendacaoOperacionalCtx(reserva);
+  const recomendacaoTopo = derivarRecomendacaoOperacional(reserva, ctxRecomendacao);
+  const ctaRecomendada =
+    recomendacaoTopo && recomendacaoTopo.cta && recomendacaoTopo.cta.kind
+      ? String(recomendacaoTopo.cta.kind)
+      : "";
+  const classeBotaoCentral = (kind) =>
+    ctaRecomendada === kind ? "primary-button" : "secondary-button";
+
   if (naoIdentCount > 0) {
     enviarAlertsOnly = `<div class="detail-enviar-links-alert is-warn">Completar dados de ${naoIdentCount} hóspede(s). Preencha o nome (evite "Hospede 2", "Acompanhante", etc.).</div>`;
   } else if (faltamCount > 0 && prontosCount === 0) {
     enviarAlertsOnly = `<div class="detail-enviar-links-alert is-warn">Falta contato para ${faltamCount} hóspede(s). Preencha e-mail ou WhatsApp para enviar o link.</div>`;
   } else if (faltamCount > 0 && prontosCount > 0) {
     enviarAlertsOnly = `<div class="detail-enviar-links-alert is-warn">Falta contato para ${faltamCount} hóspede(s).</div>`;
-    enviarLinksBtnHtml = `<button type="button" class="primary-button detail-top-acao-btn detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}" title="${escapeHtml(getEnviarButtonLabel())}">${escapeHtml(getEnviarLinkTopoLabel())}</button>`;
+    enviarLinksBtnHtml = `<button type="button" class="${classeBotaoCentral("enviar_fnrh")} detail-top-acao-btn detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}" title="${escapeHtml(getEnviarButtonLabel())}">${escapeHtml(getEnviarLinkTopoLabel())}</button>`;
   } else if (prontosCount > 0) {
-    enviarLinksBtnHtml = `<button type="button" class="primary-button detail-top-acao-btn detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}" title="${escapeHtml(getEnviarButtonLabel())}">${escapeHtml(getEnviarLinkTopoLabel())}</button>`;
+    enviarLinksBtnHtml = `<button type="button" class="${classeBotaoCentral("enviar_fnrh")} detail-top-acao-btn detail-enviar-links-btn" id="detail-enviar-links-btn" data-reserva-id="${escapeHtml(reserva.id)}" title="${escapeHtml(getEnviarButtonLabel())}">${escapeHtml(getEnviarLinkTopoLabel())}</button>`;
   } else if (confirmadosCount === totalH) {
     // Evita repetir o mesmo estado do card Situação / próxima ação.
     enviarAlertsOnly = "";
@@ -6409,13 +6529,19 @@ function renderDetail(reserva) {
   }
 
   const temBotaoSenhaBackend = PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND;
-  const labelCredenciais = labelAcaoCredenciaisPainel(reserva);
   const senhaJaEnviada = !!(
     reserva.senhaEnviadaEm || obterUltimosEventosSenha(reserva).lastOkSenha
   );
+  // Rótulo pelo estado real da senha (gerar / enviar / reenviar). O handler
+  // (data-acao-credencial) e a política de credenciais seguem iguais.
+  const labelCredenciais = senhaJaEnviada
+    ? "Reenviar senha"
+    : acessoLiberadoEfetivo(reserva)
+      ? "Enviar senha"
+      : "Gerar e enviar senha";
   const falhaCredencial = detectarUltimaFalhaCredencial(reserva);
   const enviarSenhaBtnHtml = temBotaoSenhaBackend
-    ? `<button type="button" class="primary-button detail-top-acao-btn detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-acao-credencial="${senhaJaEnviada ? "reenviar" : "gerar_enviar"}">${escapeHtml(labelCredenciais)}</button>` +
+    ? `<button type="button" class="${classeBotaoCentral("gerar_senha")} detail-top-acao-btn detail-enviar-senha-btn" id="detail-enviar-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-acao-credencial="${senhaJaEnviada ? "reenviar" : "gerar_enviar"}">${escapeHtml(labelCredenciais)}</button>` +
       (senhaJaEnviada
         ? `<button type="button" class="secondary-button detail-top-acao-btn detail-gerar-nova-senha-btn" id="detail-gerar-nova-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}">Gerar nova senha</button>`
         : "") +
@@ -6432,13 +6558,19 @@ function renderDetail(reserva) {
     prontosCount === 0 &&
     hospedes.some((h) => h.statusOperacional === GUEST_STATUS.ENVIADO && hasContatoSuficiente(h));
   if (podeReenviarFnrhTopo) {
-    reenviarFnrhTopoBtnHtml = `<button type="button" class="primary-button detail-top-acao-btn detail-reenviar-fnrh-topo-btn" id="detail-reenviar-fnrh-topo-btn" data-reserva-id="${escapeHtml(reserva.id)}">Reenviar link FNRH</button>`;
+    reenviarFnrhTopoBtnHtml = `<button type="button" class="${classeBotaoCentral("reenviar_fnrh")} detail-top-acao-btn detail-reenviar-fnrh-topo-btn" id="detail-reenviar-fnrh-topo-btn" data-reserva-id="${escapeHtml(reserva.id)}">Reenviar link FNRH</button>`;
+  }
+
+  // "Gerar senha" = liberar acesso (mesmo handler do CTA liberar_acesso):
+  // cria a credencial e provisiona no TTLock sem enviar nada ao hóspede.
+  let gerarSenhaBtnHtml = "";
+  if (isProntaParaLiberarAcesso(reserva)) {
+    gerarSenhaBtnHtml = `<button type="button" class="${classeBotaoCentral("liberar_acesso")} detail-top-acao-btn detail-recomendacao-cta-btn detail-gerar-senha-btn" id="detail-gerar-senha-btn" data-reserva-id="${escapeHtml(reserva.id)}" data-recomendacao-cta="liberar_acesso">Gerar senha</button>`;
   }
 
   // Ações manuais de tolerância removidas neste PR (sem auditoria append-only).
   const toleranciaAcoesHtml = "";
 
-  const ctxRecomendacao = buildRecomendacaoOperacionalCtx(reserva);
   const situacaoAcaoTopoHtml = buildSituacaoAcaoTopoHtml(
     reserva,
     ctxRecomendacao,
@@ -6447,6 +6579,7 @@ function renderDetail(reserva) {
     enviarSenhaBtnHtml,
     temBotaoSenhaBackend,
     enviarAlertsOnly,
+    gerarSenhaBtnHtml,
   );
 
   const ttlockSectionHtml =

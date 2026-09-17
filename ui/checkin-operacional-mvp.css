@@ -2622,6 +2622,94 @@ html {
   flex: 0 0 auto;
 }
 
+/* Central de acoes (FNRH + senha): estado real de cada etapa e a acao disponivel */
+.op-detail__scroll .detail-central-acoes {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.op-detail__scroll .detail-central-acoes-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.op-detail__scroll .detail-central-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.op-detail__scroll .detail-central-item.is-recomendada {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
+}
+
+.op-detail__scroll .detail-central-item-title {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+
+.op-detail__scroll .detail-central-item-estado {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.op-detail__scroll .detail-central-item-estado.is-ok {
+  color: #0f6b3c;
+}
+
+.op-detail__scroll .detail-central-item-estado.is-pending {
+  color: #b45309;
+}
+
+.op-detail__scroll .detail-central-item-estado.is-error {
+  color: #b91c1c;
+}
+
+.op-detail__scroll .detail-central-item-sub {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #475569;
+  overflow-wrap: anywhere;
+}
+
+.op-detail__scroll .detail-central-item-acoes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.op-detail__scroll .detail-central-item-acoes .primary-button,
+.op-detail__scroll .detail-central-item-acoes .secondary-button {
+  width: 100%;
+  justify-content: center;
+  white-space: normal;
+}
+
+@media (max-width: 767px) {
+  .op-detail__scroll .detail-central-acoes-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Contexto operacional dentro do mesmo card do topo (envios, pendÃªncias) */
 .op-detail__scroll .detail-top-context {
   margin-top: 14px;
