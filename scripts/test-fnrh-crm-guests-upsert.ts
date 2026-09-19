@@ -452,7 +452,7 @@ async function main() {
     ok("dados da reserva não são alterados no confirm");
 
     // CRM: chamado depois do update operacional, antes do sync; erro não interrompe.
-    const iHosp = confirmBlock.indexOf('.from("operacional_hospedes").update(hospedeUpdate)');
+    const iHosp = confirmBlock.indexOf("aplicarUpdateEspelhoOperacional(admin, input.guestId");
     const iCrm = confirmBlock.indexOf("await upsertCrmGuestFromFnrh(admin,");
     const iErr = confirmBlock.indexOf('if (crm.status === "error")');
     const iSync = confirmBlock.indexOf("await syncFnrhToHits(admin, input.fnrhId");
@@ -465,7 +465,20 @@ async function main() {
 
     assert.equal((confirmBlock.match(/syncFnrhToHits\(/g) || []).length, 1, "um único sync por confirm");
     ok("PUT HITS não é repetido por causa do CRM");
+
+    // Falha ao gravar operacional_hospedes: capturada via helper único
+    // (aplicarUpdateEspelhoOperacional), não interrompe CRM/auditoria/sync,
+    // e não é confundida com sucesso pleno. A cobertura comportamental do
+    // helper (erro -> falha; zero linhas -> falha; uma linha -> sucesso)
+    // está em scripts/test-fnrh-status-operacional-retry.ts.
+    assert.match(
+      confirmBlock,
+      /const mirrorConfirm = await aplicarUpdateEspelhoOperacional\(admin, input\.guestId, hospedeUpdate\);/,
+    );
+    assert.match(confirmBlock, /hospedeMirrorError: "Falha ao gravar operacional_hospedes\.status_operacional\."/);
+    ok("falha ao espelhar status_operacional é sinalizada via o helper único, não escondida");
   }
+
 
   console.log("\n== PUT HITS intocado ==");
   {

@@ -42,6 +42,38 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
+// --- fnrh-links-status-guard:begin ---
+// Compare-and-set exato: só marca "enviado" se status_operacional ainda for
+// exatamente o valor lido no início do job (qualquer mudança concorrente —
+// para "confirmado" ou para qualquer outro estado — faz o WHERE não bater
+// com nenhuma linha, já que ele roda dentro do próprio UPDATE, sem janela
+// entre ler e escrever). error nulo não basta: só ok:true com rowsAffected
+// === 1 garante que o hóspede esperado foi de fato atualizado.
+// Bloco autocontido (só depende do `client` recebido), extraído pelos
+// marcadores em scripts/test-send-fnrh-links-status-guard.ts.
+async function marcarEnviadoSeStatusOperacionalNaoMudou(
+  client: ReturnType<typeof createClient>,
+  hospedeId: string,
+  statusLidoNoJob: string | null,
+  patch: Record<string, unknown>,
+): Promise<{ ok: boolean; rowsAffected: number; error?: string }> {
+  const base = client.from("operacional_hospedes").update(patch).eq("id", hospedeId);
+  const filtrado = statusLidoNoJob == null
+    ? base.is("status_operacional", null)
+    : base.eq("status_operacional", statusLidoNoJob);
+  const { data, error } = await filtrado.select("id");
+  if (error) return { ok: false, rowsAffected: 0, error: error.message };
+  const rowsAffected = Array.isArray(data) ? data.length : 0;
+  return { ok: rowsAffected === 1, rowsAffected };
+}
+// --- fnrh-links-status-guard:end ---
+
+// Estados de operacional_hospedes.status_operacional que permitem enviar ou
+// reenviar o link da FNRH (schema: supabase/migrations/0005_yes_hotel_operacional_panel_tables.sql,
+// check constraint). "confirmado" e terminal; "nao_identificado" e
+// "aguardando_contato" ainda nao tem contato suficiente para o envio.
+const ESTADOS_QUE_PERMITEM_ENVIO_FNRH = new Set(["pronto_para_envio", "enviado"]);
+
 async function sendEmail(to: string, subject: string, html: string): Promise<{ ok: boolean; error?: string }> {
   if (!resendApiKey) {
     console.warn("[send-fnrh-links] RESEND_API_KEY não configurado; e-mail não enviado.");
@@ -123,7 +155,7 @@ Deno.serve(async (req: Request) => {
   const hospedeIds = pendentes.map((r: { hospede_id: string }) => r.hospede_id);
   const { data: hospedes } = await admin
     .from("operacional_hospedes")
-    .select("id, nome, email, whatsapp, tentativas_envio, guest_role")
+    .select("id, nome, email, whatsapp, tentativas_envio, guest_role, status_operacional")
     .in("id", hospedeIds);
 
   const now = new Date().toISOString();
@@ -138,6 +170,7 @@ Deno.serve(async (req: Request) => {
   let enviadosEmail = 0;
   let enviadosWhatsapp = 0;
   let skippedMinors = 0;
+  let skippedEstadoOperacionalNaoElegivel = 0;
   let skippedEmailIdempotency = 0;
   let skippedWhatsappIdempotency = 0;
   const erros: string[] = [];
@@ -166,10 +199,22 @@ Deno.serve(async (req: Request) => {
       whatsapp: string;
       tentativas_envio?: number;
       guest_role?: string | null;
+      status_operacional?: string | null;
     }[] | null)?.find((h) => h.id === p.hospede_id);
+    // Estado lido agora, no início do processamento deste hóspede — é contra
+    // ele, e só ele, que o compare-and-set do guard confere mais abaixo.
+    const statusOperacionalLido = hospede?.status_operacional ?? null;
     // Menores não recebem link próprio — confirmação via responsável.
     if (hospede?.guest_role === "minor") {
       skippedMinors++;
+      continue;
+    }
+    // Whitelist explícita: só tenta enviar/reenviar se o estado lido agora
+    // permitir (pronto_para_envio ou enviado). Qualquer outro estado —
+    // inclusive "confirmado" — é pulado antes de qualquer e-mail/WhatsApp
+    // e antes do update, sem depender só do compare-and-set posterior.
+    if (!ESTADOS_QUE_PERMITEM_ENVIO_FNRH.has(statusOperacionalLido ?? "")) {
+      skippedEstadoOperacionalNaoElegivel++;
       continue;
     }
     const email = (hospede?.email ?? "").trim();
@@ -300,21 +345,35 @@ Deno.serve(async (req: Request) => {
     if (agg.delivered) {
       enviados++;
       const teveEnvioNovo = idem.tryEmail || idem.tryWhatsapp;
-      if (teveEnvioNovo) {
-        const tentativas = typeof hospede?.tentativas_envio === "number" ? hospede.tentativas_envio + 1 : 1;
-        await admin.from("operacional_hospedes").update({
+      const patch: Record<string, unknown> = teveEnvioNovo
+        ? {
           status_operacional: "enviado",
           ultimo_envio_canal: agg.ultimoEnvioCanal,
           ultimo_envio_em: now,
-          tentativas_envio: tentativas,
+          tentativas_envio: typeof hospede?.tentativas_envio === "number" ? hospede.tentativas_envio + 1 : 1,
           updated_at: now,
-        }).eq("id", p.hospede_id);
-      } else {
-        await admin.from("operacional_hospedes").update({
+        }
+        : {
           status_operacional: "enviado",
           ultimo_envio_canal: agg.ultimoEnvioCanal,
           updated_at: now,
-        }).eq("id", p.hospede_id);
+        };
+      // Compare-and-set: só grava "enviado" se status_operacional ainda for
+      // exatamente o que este job leu para este hóspede. Qualquer mudança
+      // concorrente (confirmação ou qualquer outro estado) não é regredida.
+      const guard = await marcarEnviadoSeStatusOperacionalNaoMudou(
+        admin,
+        p.hospede_id,
+        statusOperacionalLido,
+        patch,
+      );
+      if (guard.error) {
+        console.warn("[send-fnrh-links] falha ao marcar status_operacional=enviado:", guard.error);
+      } else if (guard.rowsAffected !== 1) {
+        console.warn(
+          "[send-fnrh-links] status_operacional=enviado não gravado: estado mudou durante o envio.",
+          p.hospede_id,
+        );
       }
     }
 
@@ -335,6 +394,7 @@ Deno.serve(async (req: Request) => {
       enviados_email: enviadosEmail,
       enviados_whatsapp: enviadosWhatsapp,
       skipped_minors: skippedMinors,
+      skipped_estado_operacional: skippedEstadoOperacionalNaoElegivel,
       skipped_email_idempotency: skippedEmailIdempotency,
       skipped_whatsapp_idempotency: skippedWhatsappIdempotency,
       erros: erros.length,
@@ -346,7 +406,7 @@ Deno.serve(async (req: Request) => {
     }),
   });
 
-  const adultosPendentes = pendentes.length - skippedMinors;
+  const adultosPendentes = pendentes.length - skippedMinors - skippedEstadoOperacionalNaoElegivel;
   const houveTentativa = tentativasComEmail > 0 || tentativasComWhatsapp > 0;
   const soIdempotency =
     !houveTentativa &&
@@ -367,6 +427,7 @@ Deno.serve(async (req: Request) => {
       enviados_email: enviadosEmail,
       enviados_whatsapp: enviadosWhatsapp,
       skipped_minors: skippedMinors,
+      skipped_estado_operacional: skippedEstadoOperacionalNaoElegivel,
       skipped_email_idempotency: skippedEmailIdempotency,
       skipped_whatsapp_idempotency: skippedWhatsappIdempotency,
       erros: erros.length ? erros : undefined,
