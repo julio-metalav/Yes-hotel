@@ -685,6 +685,66 @@ async function registrarFalhaCrmGuest(
 }
 // --- crm-guests:end ---
 
+// --- fnrh-status-repair:begin ---
+// Escrita e reparo do espelho operacional (operacional_hospedes) após a FNRH
+// confirmada.
+//
+// Bloco autocontido (mesma convenção do crm-guests acima): só depende do
+// `client` recebido. Extraído pelos marcadores em
+// scripts/test-fnrh-status-operacional-retry.ts.
+
+/**
+ * Único ponto que escreve o espelho e valida o retorno: error nulo não
+ * basta — sem a linha de volta não há garantia de que o UPDATE tocou o
+ * hóspede esperado (id inexistente, RLS silenciosa, corrida etc.). Zero ou
+ * mais de uma linha é falha, não sucesso.
+ * Usado pela confirmação v2, pela legada e pelo reparo abaixo.
+ */
+async function aplicarUpdateEspelhoOperacional(
+  client: ReturnType<typeof createClient>,
+  guestId: string,
+  patch: Record<string, unknown>,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data, error } = await client
+    .from("operacional_hospedes")
+    .update(patch)
+    .eq("id", guestId)
+    .select("id");
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  if (!Array.isArray(data) || data.length !== 1 || (data[0] as { id?: string }).id !== guestId) {
+    return { ok: false, error: "Nenhuma linha do cadastro operacional foi atualizada." };
+  }
+  return { ok: true };
+}
+
+// Reparo idempotente do espelho operacional após a FNRH já confirmada.
+// Usado nos três pontos onde o fluxo trata a FNRH como "já finalizada"
+// (retry do próprio hóspede, retry por menor, retry do fluxo legado): se
+// operacional_hospedes.status_operacional já está "confirmado" não escreve
+// de novo; senão, grava só esse campo — sem repetir CRM, auditoria ou sync
+// HITS, que já rodaram (ou não, e não são o problema) na tentativa anterior.
+async function repararStatusOperacionalConfirmado(
+  client: ReturnType<typeof createClient>,
+  guestId: string,
+  now: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data, error: selErr } = await client
+    .from("operacional_hospedes")
+    .select("status_operacional")
+    .eq("id", guestId)
+    .maybeSingle();
+  if (selErr) {
+    return { ok: false, error: "Falha ao verificar cadastro operacional." };
+  }
+  if ((data as { status_operacional?: string } | null)?.status_operacional === "confirmado") {
+    return { ok: true };
+  }
+  return aplicarUpdateEspelhoOperacional(client, guestId, { status_operacional: "confirmado", updated_at: now });
+}
+// --- fnrh-status-repair:end ---
+
 async function confirmV2Guest(input: {
   fnrhId: string;
   reservaId: string;
@@ -706,7 +766,7 @@ async function confirmV2Guest(input: {
   confirmedUa: string | null;
   now: string;
 }): Promise<
-  | { ok: true; crm: CrmGuestUpsertOutcome }
+  | { ok: true; crm: CrmGuestUpsertOutcome; hospedeMirrorError?: string }
   | { ok: false; error: string; status: number; details?: unknown }
 > {
   const validation = validateFnrhCheckinV2Confirm(input.draft);
@@ -803,7 +863,14 @@ async function confirmV2Guest(input: {
     if (input.draft.email) hospedeUpdate.email = input.draft.email;
     if (input.draft.telefone) hospedeUpdate.whatsapp = input.draft.telefone;
   }
-  await admin.from("operacional_hospedes").update(hospedeUpdate).eq("id", input.guestId);
+  const mirrorConfirm = await aplicarUpdateEspelhoOperacional(admin, input.guestId, hospedeUpdate);
+  const hospedeMirrorFalhou = !mirrorConfirm.ok;
+  if (!mirrorConfirm.ok) {
+    console.warn(
+      "[fnrh-submit] falha ao gravar operacional_hospedes.status_operacional:",
+      mirrorConfirm.error,
+    );
+  }
 
   // Cadastro mestre (crm_guests): só com identidade forte; falha não derruba a
   // confirmação nem repete o envio ao HITS — fica no resultado interno.
@@ -829,6 +896,17 @@ async function confirmV2Guest(input: {
   });
 
   await syncFnrhToHits(admin, input.fnrhId, input.reservaId, input.now);
+  // A ficha e o sync HITS já se completaram independente deste espelho — não
+  // desfazemos nada aqui. Mas a resposta não pode dizer sucesso com
+  // operacional_hospedes.status_operacional fora de "confirmado": o chamador
+  // decide, no topo, como refletir isso sem repetir CRM/auditoria/HITS.
+  if (hospedeMirrorFalhou) {
+    return {
+      ok: true,
+      crm,
+      hospedeMirrorError: "Falha ao gravar operacional_hospedes.status_operacional.",
+    };
+  }
   return { ok: true, crm };
 }
 
@@ -982,6 +1060,13 @@ Deno.serve(async (req: Request) => {
     const confirmOwn = body.confirm_own !== false;
 
     if (actorAlreadyDone && confirmMinorsRaw.length === 0) {
+      // Retry puro: a ficha já está confirmada. Só falta garantir que o
+      // espelho operacional não ficou preso em "enviado" — sem repetir CRM,
+      // auditoria ou sync HITS, que já rodaram (ou não são o problema).
+      const reparo = await repararStatusOperacionalConfirmado(admin, row.hospede_id, now);
+      if (!reparo.ok) {
+        return jsonResponse({ ok: false, error: reparo.error }, 500);
+      }
       return jsonResponse({ ok: true, message: "FNRH já foi finalizada para este hóspede.", idempotente: true });
     }
 
@@ -999,6 +1084,7 @@ Deno.serve(async (req: Request) => {
       minor_relation?: string | null;
       minor_accompaniment?: string | null;
     }> = [];
+    let hospedeMirrorFailed = false;
 
     // Confirma o adulto (própria ficha) — não permite confirmar outro adulto.
     if (confirmOwn && !actorAlreadyDone) {
@@ -1057,6 +1143,7 @@ Deno.serve(async (req: Request) => {
           result.status,
         );
       }
+      if (result.hospedeMirrorError) hospedeMirrorFailed = true;
     }
 
     // Confirma menores do responsável
@@ -1113,6 +1200,11 @@ Deno.serve(async (req: Request) => {
         STATUS_FINAL_HOSPEDE.has(String(mf.status ?? "")) ||
         LIFECYCLE_COMPLETE.has(String(mf.fnrh_lifecycle_status ?? ""))
       ) {
+        // Mesmo retry idempotente do menor: repara só o espelho operacional.
+        const reparo = await repararStatusOperacionalConfirmado(admin, minorGuestId, now);
+        if (!reparo.ok) {
+          return jsonResponse({ ok: false, error: reparo.error }, 500);
+        }
         continue;
       }
 
@@ -1168,6 +1260,7 @@ Deno.serve(async (req: Request) => {
           result.status,
         );
       }
+      if (result.hospedeMirrorError) hospedeMirrorFailed = true;
       confirmedMinorSnapshots.push({
         guest_id: minorGuestId,
         hospede_nome: minorDraft.hospede_nome ?? mh.nome,
@@ -1183,6 +1276,18 @@ Deno.serve(async (req: Request) => {
       await maybeDispararLiberacaoPorRequisitos(row.reserva_id);
     }
 
+    // Ficha, CRM, auditoria e sync HITS já se completaram: só o espelho
+    // operacional pode ter falhado. Nesse caso a resposta não pode dizer
+    // sucesso pleno — o retry seguinte conclui via repararStatusOperacionalConfirmado.
+    if (hospedeMirrorFailed) {
+      return jsonResponse({
+        ok: false,
+        error: "FNRH confirmada, mas o cadastro operacional não foi atualizado. Tente novamente.",
+        reserva_id: row.reserva_id,
+        fnrh_status_agregado: agregado,
+      }, 500);
+    }
+
     return jsonResponse({
       ok: true,
       message: "FNRH confirmada com sucesso.",
@@ -1195,6 +1300,10 @@ Deno.serve(async (req: Request) => {
 
   // ---------- LEGACY CONFIRM ----------
   if (STATUS_FINAL_HOSPEDE.has(row.status)) {
+    const reparo = await repararStatusOperacionalConfirmado(admin, row.hospede_id, now);
+    if (!reparo.ok) {
+      return jsonResponse({ ok: false, error: reparo.error }, 500);
+    }
     return jsonResponse({ ok: true, message: "FNRH já foi finalizada para este hóspede.", idempotente: true });
   }
 
@@ -1244,7 +1353,14 @@ Deno.serve(async (req: Request) => {
   const hospedeUpdate: Record<string, unknown> = { status_operacional: "confirmado", updated_at: now };
   if (email) hospedeUpdate.email = email;
   if (telefone) hospedeUpdate.whatsapp = telefone;
-  await admin.from("operacional_hospedes").update(hospedeUpdate).eq("id", row.hospede_id);
+  const mirrorConfirm = await aplicarUpdateEspelhoOperacional(admin, row.hospede_id, hospedeUpdate);
+  const hospedeMirrorFalhou = !mirrorConfirm.ok;
+  if (!mirrorConfirm.ok) {
+    console.warn(
+      "[fnrh-submit] falha ao gravar operacional_hospedes.status_operacional (legacy):",
+      mirrorConfirm.error,
+    );
+  }
 
   const agregado = await syncLegadoAgregado(reservaId, now);
 
@@ -1252,6 +1368,15 @@ Deno.serve(async (req: Request) => {
 
   if (agregado === "fnrh_completo") {
     await maybeDispararLiberacaoPorRequisitos(reservaId);
+  }
+
+  if (hospedeMirrorFalhou) {
+    return jsonResponse({
+      ok: false,
+      error: "FNRH confirmada, mas o cadastro operacional não foi atualizado. Tente novamente.",
+      reserva_id: reservaId,
+      fnrh_status_agregado: agregado,
+    }, 500);
   }
 
   return jsonResponse({

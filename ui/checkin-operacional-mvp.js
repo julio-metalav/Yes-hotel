@@ -850,7 +850,15 @@ function mapDbHospedeToInternal(row, fnrhRow, reservaRow) {
       (cadastroConfirmado && cadastroConfirmado.dataNascimento) ||
       textoOuVazio(row.data_nascimento).slice(0, 10),
     cadastroConfirmado: cadastroConfirmado,
-    statusOperacional: row.status_operacional || GUEST_STATUS.NAO_IDENTIFICADO,
+    // A FNRH confirmada persistida em fnrh_hospedes é a fonte de verdade do
+    // estado da FNRH. Se operacional_hospedes.status_operacional ficou para
+    // trás (ex.: "enviado" depois da confirmação), o painel ainda reconhece
+    // a FNRH concluída. O valor bruto fica em statusOperacionalPersistido;
+    // nada é gravado de volta e os gates de acesso/senha não mudam.
+    statusOperacionalPersistido: row.status_operacional || GUEST_STATUS.NAO_IDENTIFICADO,
+    statusOperacional: cadastroConfirmado
+      ? GUEST_STATUS.CONFIRMADO
+      : row.status_operacional || GUEST_STATUS.NAO_IDENTIFICADO,
     origemCadastro: row.origem_cadastro || ORIGEM_CADASTRO.NOVO,
     modoColetaFnrh: row.modo_coleta_fnrh || MODO_COLETA_FNRH.PREENCHIMENTO_COMPLETO,
     ultimoEnvioCanal: row.ultimo_envio_canal || null,
@@ -892,6 +900,27 @@ function mapPagamentoStatusFromDb(value) {
   return "desconhecido";
 }
 
+/**
+ * Nome exibido na linha da lista e no cabeçalho do detalhe: o nome informado
+ * pelo hóspede principal na FNRH confirmada (nome social confirmado, senão
+ * civil — mesma regra do card). Sem FNRH confirmada ou sem nome preenchido,
+ * fica o nome original da reserva. Só apresentação: `hospedePrincipal` (o que
+ * veio do HITS) não é alterado nem gravado de volta.
+ */
+function resolveNomeExibicaoReserva(nomeOriginal, hospedes) {
+  const principal = (hospedes || []).find(function (h) {
+    return h && h.principal;
+  });
+  const c = principal && principal.cadastroConfirmado;
+  if (c && c.nomeCivil) return c.nomeSocial || c.nomeCivil;
+  return nomeOriginal || "";
+}
+
+function nomeReservaParaExibicao(reserva) {
+  if (!reserva) return "—";
+  return String(reserva.hospedePrincipalExibicao || reserva.hospedePrincipal || "").trim() || "—";
+}
+
 function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows, enviosRows) {
   const checkIn = r.check_in_previsto;
   const checkOut = r.check_out_previsto;
@@ -904,10 +933,12 @@ function mapDbReservaToInternal(r, hospedesRows, eventosRows, fnrhRows, enviosRo
   }).filter(Boolean);
   const historico = (eventosRows || []).map(mapDbEventoToHistorico).filter(Boolean);
   const extId = (r.external_reservation_id || "").trim() || null;
+  const hospedePrincipalOriginal = (r.hospede_principal || "").trim();
   return {
     id: r.id,
     apartamento: (r.apartamento || "").trim(),
-    hospedePrincipal: (r.hospede_principal || "").trim(),
+    hospedePrincipal: hospedePrincipalOriginal,
+    hospedePrincipalExibicao: resolveNomeExibicaoReserva(hospedePrincipalOriginal, hospedes),
     externalReservationId: extId,
     origemExterna: (r.origem_externa || "").trim() || null,
     checkInPrevisto: checkIn ? (typeof checkIn === "string" ? checkIn.slice(0, 10) : checkIn) : "",
@@ -2824,7 +2855,7 @@ function renderOperacionalLista() {
       const proxCls = proxInfo.destaque ? "op-next-action" : "op-next-action op-next-action--muted";
       const flux = linhaFluxoResumo(reserva);
       const rid = escapeHtml(String(reserva.id));
-      const guestName = reserva.hospedePrincipal || "—";
+      const guestName = nomeReservaParaExibicao(reserva);
       const guestTitle = titleAttrEscape(guestName);
       const statusBadgeHtml = renderOperacionalStatusBadgeHtml(status, reserva.id);
       const ppdLabel = presencialDiferidoLabelForReserva(reserva);
@@ -2874,7 +2905,7 @@ function renderOperacionalLista() {
       const proxInfoM = listaProximaAcaoOperacional(reserva);
       const prox = proxInfoM.texto;
       const rid = escapeHtml(String(reserva.id));
-      const mGuest = reserva.hospedePrincipal || "—";
+      const mGuest = nomeReservaParaExibicao(reserva);
       const mGuestTitle = titleAttrEscape(mGuest);
       const statusBadgeHtml = renderOperacionalStatusBadgeHtml(status, reserva.id);
       const ppdBtnM = canShowPresencialDiferidoBtn(reserva)
@@ -3120,7 +3151,7 @@ function syncDetailPanelChrome(reserva) {
     opDetailApto.textContent = String(reserva.apartamento || "—");
   }
   if (detailTitleElement instanceof HTMLElement) {
-    detailTitleElement.textContent = (reserva.hospedePrincipal || "").trim() || "—";
+    detailTitleElement.textContent = nomeReservaParaExibicao(reserva);
   }
   if (detailSubtitleElement instanceof HTMLElement) {
     const ci = formatDataBR(reserva.checkInPrevisto);
