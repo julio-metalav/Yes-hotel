@@ -36,23 +36,20 @@
         '<p>Faça login na <a href="./usuarios-login-mvp.html">tela inicial</a> para editar Wi-Fi.</p>';
       return null;
     }
+    var navPolicy = window.YesHotelNavPolicy;
+    if (!navPolicy || !navPolicy.isRouteAuthorized(user.role, "wifi")) {
+      var homeHref = navPolicy ? navPolicy.getHomeHrefForRole(user.role) : "./usuarios-login-mvp.html";
+      window.location.href = homeHref;
+      return null;
+    }
+
     accessEl.classList.add("hidden");
     panelEl.classList.remove("hidden");
 
-    var canManage =
-      typeof auth.canAccessManagement === "function"
-        ? auth.canAccessManagement(user)
-        : user.role === "admin" || user.role === "recepcao";
-    document.querySelectorAll('[data-nav="gestao"]').forEach(function (node) {
-      node.classList.toggle("hidden", !canManage);
-    });
-    var canFinancial =
-      typeof auth.canAccessFinancialRecon === "function"
-        ? auth.canAccessFinancialRecon(user)
-        : user.role === "admin";
-    document.querySelectorAll('[data-nav="financeiro"]').forEach(function (node) {
-      node.classList.toggle("hidden", !canFinancial);
-    });
+    var sidebarNavElement = document.querySelector(
+      '.yes-sidebar nav[aria-label="Navegação principal"]',
+    );
+    navPolicy.renderSidebarNav(sidebarNavElement, user.role, "wifi");
 
     return auth.getSupabaseClient();
   }

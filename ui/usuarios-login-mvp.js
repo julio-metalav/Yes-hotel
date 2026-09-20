@@ -37,39 +37,39 @@ function redirectUserByRole(user) {
     return true;
   }
 
+  // Início não faz parte do menu de café nem de hits_consulta — nunca
+  // devem ver o dashboard, mesmo que cheguem direto pela URL.
+  const navPolicy = window.YesHotelNavPolicy;
+  if (navPolicy && !navPolicy.isRouteAuthorized(user.role, "inicio")) {
+    window.location.href = navPolicy.getHomeHrefForRole(user.role);
+    return true;
+  }
+
   return false;
 }
 
 function applyDashboardCards(user) {
   const isAdmin = user?.role === "admin";
-  const isCafe = user?.role === "cafe";
-  const canManage =
-    typeof auth.canAccessManagement === "function"
-      ? auth.canAccessManagement(user)
-      : user?.role === "admin" || user?.role === "recepcao";
-  const canFinancial =
-    typeof auth.canAccessFinancialRecon === "function"
-      ? auth.canAccessFinancialRecon(user)
-      : user?.role === "admin";
+  const navPolicy = window.YesHotelNavPolicy;
+  const routeKeysByDataNav = {
+    checkin: "checkin",
+    cafe: "cafe",
+    "minhas-demandas": "demandas",
+    demandas: "demandas",
+    gestao: "gestao",
+    financeiro: "financeiro",
+    wifi: "wifi",
+    geo: "geo",
+    usuarios: "usuarios",
+  };
 
-  document.querySelectorAll('[data-nav="checkin"]').forEach((node) => {
-    node.classList.toggle("hidden", isCafe);
+  Object.entries(routeKeysByDataNav).forEach(([dataNav, routeKey]) => {
+    const authorized = navPolicy ? navPolicy.isRouteAuthorized(user?.role, routeKey) : isAdmin;
+    document.querySelectorAll(`[data-nav="${dataNav}"]`).forEach((node) => {
+      node.classList.toggle("hidden", !authorized);
+    });
   });
-  document.querySelectorAll('[data-nav="gestao"]').forEach((node) => {
-    node.classList.toggle("hidden", !canManage);
-  });
-  document.querySelectorAll('[data-nav="financeiro"]').forEach((node) => {
-    node.classList.toggle("hidden", !canFinancial);
-  });
-  document.querySelectorAll('[data-nav="wifi"]').forEach((node) => {
-    node.classList.toggle("hidden", !canManage);
-  });
-  document.querySelectorAll('[data-nav="geo"]').forEach((node) => {
-    node.classList.toggle("hidden", !isAdmin);
-  });
-  document.querySelectorAll('[data-nav="usuarios"]').forEach((node) => {
-    node.classList.toggle("hidden", !isAdmin);
-  });
+
   document.querySelectorAll(".dashboard-admin-only").forEach((node) => {
     node.classList.toggle("hidden", !isAdmin);
   });
@@ -279,7 +279,7 @@ async function renderPageState() {
   const currentUser = await auth.getCurrentUser();
 
   if (currentUser) {
-    if (isCafeDemoReturnRequested() && redirectUserByRole(currentUser)) {
+    if (redirectUserByRole(currentUser)) {
       return;
     }
 
@@ -405,7 +405,7 @@ loginFormElement?.addEventListener("submit", async (event) => {
   try {
     const { user } = await auth.login(formData.get("email"), formData.get("password"));
 
-    if (isCafeDemoReturnRequested() && redirectUserByRole(user)) {
+    if (redirectUserByRole(user)) {
       return;
     }
 

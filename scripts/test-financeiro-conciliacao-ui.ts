@@ -53,12 +53,16 @@ assert.match(html, /Possíveis agrupamentos/);
 assert.match(html, /Conta Sicredi/);
 ok("rota, KPIs e filtros presentes");
 
+// Matriz definitiva (entrega perfis-navegacao-hits-consulta): recepção passa
+// a ter os mesmos acessos operacionais do admin, incluindo Conciliação — só
+// Usuários continua exclusivo do admin. A página delega a decisão a
+// YesHotelNavPolicy (mesma fonte usada por todas as telas), em vez de checar
+// canAccessFinancialRecon/role==="cafe" localmente.
 assert.match(authSrc, /function canAccessFinancialRecon/);
-assert.match(authSrc, /user\?\.role === "admin"/);
-assert.match(pageSrc, /canAccessFinancialRecon/);
-assert.match(pageSrc, /Conciliação financeira é restrita a admin/);
-assert.match(pageSrc, /currentUser\.role === "cafe"/);
-ok("admin acessa; não-admin e café bloqueados");
+assert.match(authSrc, /user\?\.role === "admin" \|\| user\?\.role === "recepcao"/);
+assert.match(pageSrc, /YesHotelNavPolicy/);
+assert.match(pageSrc, /navPolicy\.isRouteAuthorized\(currentUser\.role, "financeiro"\)/);
+ok("admin e recepção acessam via YesHotelNavPolicy; café/hits bloqueados pela mesma checagem");
 
 assert.match(gestaoHtml, /financeiro-conciliacao\.html/);
 assert.match(checkinHtml, /financeiro-conciliacao\.html/);

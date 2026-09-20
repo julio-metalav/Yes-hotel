@@ -610,8 +610,15 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.match(pageSrc, /get\("escopo"\) === "minhas"/);
   assert.match(pageSrc, /function applyPageChrome/);
   assert.match(pageSrc, /title\.textContent = minhas \? "Minhas demandas" : "Demandas"/);
-  assert.match(pageSrc, /navMinhas\?\.classList\.toggle\("active", minhas\)/);
-  assert.match(pageSrc, /navTodas\?\.classList\.toggle\("active", !minhas\)/);
+  // Nav lateral (incluindo qual item fica "active") passou a ser responsabilidade
+  // centralizada de YesHotelNavPolicy.renderSidebarNav (entrega
+  // perfis-navegacao-hits-consulta) — o toggle manual de navMinhas/navTodas
+  // foi substituído por essa chamada única, reaproveitada por todas as páginas.
+  assert.match(pageSrc, /YesHotelNavPolicy/);
+  assert.match(
+    pageSrc,
+    /navPolicy\.renderSidebarNav\(\s*sidebarNavElement,\s*currentUser\.role,\s*isMinhasEscopo\(\)\s*\?\s*"minhas-demandas"\s*:\s*"demandas",?\s*\)/,
+  );
   assert.match(pageSrc, /applyPageChrome\(\);/);
   assert.match(pageSrc, /contentPanelElement\?\.classList\.remove\("hidden"\)/);
   const chromeIdx = pageSrc.indexOf("applyPageChrome();");
@@ -668,15 +675,23 @@ const usersEdge = read("supabase/functions/internal-users-admin/index.ts");
   assert.doesNotMatch(geoHtml, />Geolocalização</);
   assert.match(geoJs, /hotel_geo_config/);
   assert.match(geoJs, /demandas_atualizar_geo_config/);
-  assert.match(geoJs, /user\.role !== "admin"/);
+  // Guard de página passou a delegar a YesHotelNavPolicy (entrega
+  // perfis-navegacao-hits-consulta): recepção ganhou acesso, igualando ao
+  // admin — o backend (demandas_require_actor) já aceitava admin/recepção/
+  // café antes disso, então nada mudou no lado do banco.
+  assert.match(geoJs, /YesHotelNavPolicy/);
+  assert.match(geoJs, /navPolicy\.isRouteAuthorized\(user\.role, "geo"\)/);
   assert.doesNotMatch(geoJs, /innerHTML/);
   assert.match(loginHtml, /Geolocalização do hotel/);
   assert.match(indexHtml, /Geolocalização do hotel/);
   assert.match(loginHtml, /Coordenadas e raio para validação de presença/);
   assert.match(loginHtml, /href="\.\/geolocalizacao-hotel-mvp\.html"/);
   assert.match(loginHtml, /data-nav="geo"/);
-  assert.match(loginJs, /data-nav="geo"/);
-  assert.match(loginJs, /toggle\("hidden", !isAdmin\)/);
+  // Geo deixou de ser um caso especial admin-only isolado: agora entra no
+  // mesmo mapa data-driven (routeKeysByDataNav) que decide todos os cards,
+  // e recepção também passa a vê-lo (regra definitiva: admin - usuarios).
+  assert.match(loginJs, /geo:\s*"geo"/);
+  assert.match(loginJs, /navPolicy \? navPolicy\.isRouteAuthorized\(user\?\.role, routeKey\) : isAdmin/);
   const opSidebars = [
     "ui/checkin-operacional-mvp.html",
     "ui/cafe-da-manha-mvp.html",

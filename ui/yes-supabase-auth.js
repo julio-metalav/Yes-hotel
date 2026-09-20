@@ -68,6 +68,10 @@
       return "Cafe";
     }
 
+    if (role === "hits_consulta") {
+      return "Consulta HITS";
+    }
+
     return role;
   }
 
@@ -84,11 +88,19 @@
   }
 
   function canAccessFinancialRecon(user) {
-    return user?.role === "admin";
+    return user?.role === "admin" || user?.role === "recepcao";
   }
 
   function canAccessDemandas(user) {
     return Boolean(user?.active) && ["admin", "recepcao", "cafe"].includes(user?.role);
+  }
+
+  function canAccessCheckin(user) {
+    return Boolean(user?.active) && ["admin", "recepcao", "hits_consulta"].includes(user?.role);
+  }
+
+  function isHitsConsultaRole(user) {
+    return user?.role === "hits_consulta";
   }
 
   function mapProfile(profileRow) {
@@ -523,6 +535,8 @@
     canAccessManagement,
     canAccessFinancialRecon,
     canAccessDemandas,
+    canAccessCheckin,
+    isHitsConsultaRole,
     hasUsers,
     bootstrapFirstAdmin,
     login,

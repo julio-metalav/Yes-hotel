@@ -45,24 +45,19 @@
       showAccess("Login necessário", "Entre com um usuário interno.");
       return null;
     }
-    if (user.role !== "admin") {
-      showAccess("Acesso negado", "Somente admin configura a geolocalização do hotel.");
+    const navPolicy = window.YesHotelNavPolicy;
+    if (!navPolicy || !navPolicy.isRouteAuthorized(user.role, "geo")) {
+      showAccess("Acesso negado", "Seu perfil não acessa a geolocalização do hotel.");
       return null;
     }
 
     accessEl?.classList.add("hidden");
     panelEl?.classList.remove("hidden");
 
-    const canManage =
-      typeof auth.canAccessManagement === "function"
-        ? auth.canAccessManagement(user)
-        : user.role === "admin" || user.role === "recepcao";
-    document.querySelectorAll('[data-nav="gestao"]').forEach(function (node) {
-      node.classList.toggle("hidden", !canManage);
-    });
-    document.querySelectorAll('[data-nav="financeiro"]').forEach(function (node) {
-      node.classList.toggle("hidden", user.role !== "admin");
-    });
+    const sidebarNavElement = document.querySelector(
+      '.yes-sidebar nav[aria-label="Navegação principal"]',
+    );
+    navPolicy.renderSidebarNav(sidebarNavElement, user.role, "geo");
 
     return auth.getSupabaseClient();
   }
