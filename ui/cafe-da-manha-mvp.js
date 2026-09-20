@@ -561,21 +561,6 @@ function mapRowsToCards(reservas, atendimentosByReserva) {
   });
 }
 
-async function countGuestsFallback(supabase, reservaIds) {
-  const map = new Map();
-  if (!reservaIds.length) return map;
-  const { data, error } = await supabase
-    .from("operacional_hospedes")
-    .select("reserva_id, removed_from_reservation")
-    .in("reserva_id", reservaIds);
-  if (error || !data) return map;
-  for (const row of data) {
-    if (row.removed_from_reservation) continue;
-    map.set(row.reserva_id, (map.get(row.reserva_id) || 0) + 1);
-  }
-  return map;
-}
-
 async function loadCafeDataset() {
   const testDataset = window.__YES_CAFE_TEST_DATASET__;
   if (demoMode) {
@@ -630,26 +615,39 @@ async function loadCafeDataset() {
   const supabase = getAuth().getSupabaseClient();
   if (!supabase) throw new Error("Sessão inválida. Faça login novamente.");
 
-  // Janela ampla o bastante para estadias que cruzam a data do café.
-  const from = selectedYmd;
-  const { data: reservas, error: errRes } = await supabase
-    .from("operacional_reservas")
-    .select(
-      "id, apartamento, hospede_principal, check_in_previsto, check_out_previsto, status_reserva, external_reservation_id, total_hospedes_hits, meal_plan_desc, pagamento_status, pagamento_presencial_diferido_autorizado, pagamento_presencial_diferido_efetivado, pagamento_presencial_diferido_regularizado_em, pagamento_presencial_diferido_bloqueado_em, pagamento_presencial_diferido_deadline_em",
-    )
-    .neq("status_reserva", "cancelada")
-    .lt("check_in_previsto", from)
-    .gte("check_out_previsto", from);
+  // Fonte única para a listagem: RPC dedicada, somente leitura. O café não
+  // tem mais SELECT direto em operacional_reservas nem em
+  // operacional_hospedes (achado de auditoria corrigido) — a RPC já devolve
+  // a contagem de hóspedes agregada (total_guests) e a mesma janela de data
+  // que antes era calculada aqui (estadias que cruzam selectedYmd).
+  const { data: rpcRows, error: errRpc } = await supabase.rpc(
+    "operacional_cafe_listar_hospedagens",
+    { p_data_cafe: selectedYmd },
+  );
+  if (errRpc) throw new Error(errRpc.message || "Falha ao carregar reservas.");
 
-  if (errRes) throw new Error(errRes.message || "Falha ao carregar reservas.");
-
-  const ids = (reservas || []).map((r) => r.id);
-  const guestFallback = await countGuestsFallback(supabase, ids);
-  const enriched = (reservas || []).map((r) => ({
-    ...r,
-    __guest_count_fallback: guestFallback.get(r.id) || 1,
+  const enriched = (rpcRows || []).map((r) => ({
+    id: r.reservation_id,
+    apartamento: r.apartment_code,
+    hospede_principal: r.main_guest_name,
+    check_in_previsto: r.check_in_previsto,
+    check_out_previsto: r.check_out_previsto,
+    status_reserva: r.status_reserva,
+    external_reservation_id: r.external_reservation_id,
+    // Já agregado pela RPC (total_hospedes_hits oficial, senão contagem de
+    // hóspedes não removidos, com piso 1) — mapRowsToCards usa este valor
+    // direto, sem precisar de um fallback local.
+    total_hospedes_hits: r.total_guests,
+    meal_plan_desc: r.meal_plan_desc,
+    pagamento_status: r.pagamento_status,
+    pagamento_presencial_diferido_autorizado: r.pagamento_presencial_diferido_autorizado,
+    pagamento_presencial_diferido_efetivado: r.pagamento_presencial_diferido_efetivado,
+    pagamento_presencial_diferido_regularizado_em: r.pagamento_presencial_diferido_regularizado_em,
+    pagamento_presencial_diferido_bloqueado_em: r.pagamento_presencial_diferido_bloqueado_em,
+    pagamento_presencial_diferido_deadline_em: r.pagamento_presencial_diferido_deadline_em,
   }));
 
+  const ids = enriched.map((r) => r.id);
   const atendimentosByReserva = new Map();
   if (ids.length) {
     const { data: atts, error: errAtt } = await supabase
