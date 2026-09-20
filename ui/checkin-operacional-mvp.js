@@ -7706,6 +7706,123 @@ function showAccessState(title, message, actionLabel) {
   `;
 }
 
+/* ---------- Consulta somente leitura (perfil hits_consulta) ---------- */
+// Caminho de dados e de renderização totalmente separado do painel
+// interativo de admin/recepção: nenhum botão de escrita, diagnóstico ou
+// ação sobre reserva/hóspede é criado nesta função (não é ocultado por
+// CSS — simplesmente não existe no DOM para este perfil). Os dados vêm
+// exclusivamente da RPC operacional_hits_checkin_consulta(), que já
+// devolve só os campos autorizados; nada é filtrado aqui no cliente.
+let hitsReadOnlyRows = [];
+
+function formatYmdBr(ymd) {
+  if (!ymd || typeof ymd !== "string" || ymd.length < 10) return "—";
+  const [y, m, d] = ymd.slice(0, 10).split("-");
+  return `${d}/${m}/${y}`;
+}
+
+function hitsReadOnlyProximaEtapa(row) {
+  if (row.entrou_no_apto) return "Hóspede no apartamento";
+  if (row.acesso_liberado) return "Acesso liberado — aguardando entrada";
+  return "Aguardando liberação de acesso";
+}
+
+function hitsReadOnlyStatusLabel(status) {
+  if (status === "cancelada") return "Cancelada";
+  if (status === "ativa") return "Ativa";
+  return status || "—";
+}
+
+function escapeHitsReadOnlyHtml(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+  });
+}
+
+function normalizeHitsSearchTerm(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim();
+}
+
+function renderHitsReadOnlyList() {
+  const tbody = document.querySelector("#hits-readonly-body");
+  const emptyEl = document.querySelector("#hits-readonly-empty");
+  const countEl = document.querySelector("#hits-readonly-count");
+  const searchInput = document.querySelector("#hits-readonly-search");
+  if (!(tbody instanceof HTMLElement)) return;
+
+  const term = normalizeHitsSearchTerm(searchInput instanceof HTMLInputElement ? searchInput.value : "");
+  const visible = term
+    ? hitsReadOnlyRows.filter((row) => {
+        const haystack = normalizeHitsSearchTerm(`${row.apartment_code || ""} ${row.main_guest_name || ""}`);
+        return haystack.includes(term);
+      })
+    : hitsReadOnlyRows;
+
+  if (countEl instanceof HTMLElement) {
+    countEl.textContent = `${visible.length} reserva${visible.length === 1 ? "" : "s"}`;
+  }
+
+  if (visible.length === 0) {
+    tbody.innerHTML = "";
+    emptyEl?.classList.remove("hidden");
+    return;
+  }
+  emptyEl?.classList.add("hidden");
+
+  tbody.innerHTML = visible
+    .map((row) => {
+      const apto = escapeHitsReadOnlyHtml(row.apartment_code || "—");
+      const hospede = escapeHitsReadOnlyHtml(row.main_guest_name || "—");
+      const fluxo = escapeHitsReadOnlyHtml(row.fnrh_status_agregado || "—");
+      return (
+        "<tr>" +
+        `<td>${apto}</td>` +
+        `<td>${hospede}</td>` +
+        `<td>${formatYmdBr(row.check_in_previsto)}</td>` +
+        `<td>${formatYmdBr(row.check_out_previsto)}</td>` +
+        `<td>${hitsReadOnlyStatusLabel(row.status_reserva)}</td>` +
+        `<td>${fluxo}</td>` +
+        `<td>${hitsReadOnlyProximaEtapa(row)}</td>` +
+        "</tr>"
+      );
+    })
+    .join("");
+}
+
+async function initCheckinReadOnlyHits() {
+  const mainContent = document.querySelector("#hits-readonly-content");
+  const normalContent = document.querySelector("#op-main-content");
+  if (normalContent instanceof HTMLElement) normalContent.classList.add("hidden");
+  if (mainContent instanceof HTMLElement) mainContent.classList.remove("hidden");
+
+  const supabase = getSupabase();
+  if (!supabase) {
+    return;
+  }
+
+  const { data, error } = await supabase.rpc("operacional_hits_checkin_consulta");
+  if (error) {
+    const tbody = document.querySelector("#hits-readonly-body");
+    if (tbody instanceof HTMLElement) {
+      tbody.innerHTML = "";
+    }
+    document.querySelector("#hits-readonly-empty")?.classList.remove("hidden");
+    return;
+  }
+
+  hitsReadOnlyRows = Array.isArray(data) ? data : [];
+  renderHitsReadOnlyList();
+
+  const searchInput = document.querySelector("#hits-readonly-search");
+  if (searchInput instanceof HTMLInputElement) {
+    searchInput.addEventListener("input", renderHitsReadOnlyList);
+  }
+}
+
 /* ---------- Bindings / init ---------- */
 async function initCheckinOperacional() {
   let currentUser;
@@ -7729,21 +7846,23 @@ async function initCheckinOperacional() {
     return;
   }
 
-  if (currentUser.role === "cafe") {
-    window.location.href = "./cafe-da-manha-mvp.html";
+  const navPolicy = window.YesHotelNavPolicy;
+  if (!navPolicy || !navPolicy.isRouteAuthorized(currentUser.role, "checkin")) {
+    const homeHref = navPolicy
+      ? navPolicy.getHomeHrefForRole(currentUser.role)
+      : "./usuarios-login-mvp.html";
+    window.location.href = homeHref;
     return;
   }
 
-  if (currentUser.role !== "admin" && currentUser.role !== "recepcao") {
-    showAccessState(
-      "Acesso nao permitido",
-      "Seu perfil nao tem acesso a esta tela.",
-      "Voltar para login",
-    );
-    return;
-  }
-
-  painelOperadorRole = String(currentUser.role || "").trim().toLowerCase();
+  const sidebarNavElement = document.querySelector(
+    '.yes-sidebar nav[aria-label="Navegação principal"]',
+  );
+  navPolicy.renderSidebarNav(
+    sidebarNavElement,
+    currentUser.role,
+    auth.isHitsConsultaRole(currentUser) ? "checkin-hits" : "operacao",
+  );
 
   if (accessStateElement instanceof HTMLElement) accessStateElement.classList.add("hidden");
   if (contentPanelElement instanceof HTMLElement) contentPanelElement.classList.remove("hidden");
@@ -7757,13 +7876,11 @@ async function initCheckinOperacional() {
     sessionUserRoleElement.textContent = auth.getRoleLabel(currentUser.role);
   }
 
-  var canFinancialRecon =
-    typeof auth.canAccessFinancialRecon === "function"
-      ? auth.canAccessFinancialRecon(currentUser)
-      : currentUser.role === "admin";
-  document.querySelectorAll('[data-nav="financeiro"]').forEach(function (node) {
-    node.classList.toggle("hidden", !canFinancialRecon);
-  });
+  if (auth.isHitsConsultaRole(currentUser)) {
+    return initCheckinReadOnlyHits();
+  }
+
+  painelOperadorRole = String(currentUser.role || "").trim().toLowerCase();
 
   // Reservas manuais descontinuadas: HITS é a única fonte. Mantém o nó por contrato, sempre oculto.
   if (opImportLink instanceof HTMLElement) {

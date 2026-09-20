@@ -63,8 +63,8 @@
     }
 
     const user = await auth.getCurrentUser();
-    if (!user || user.role !== "admin") {
-      showMessage("Acesso negado. Apenas perfil admin pode importar reservas.", "error");
+    if (!user || (user.role !== "admin" && user.role !== "recepcao")) {
+      showMessage("Acesso negado. Apenas admin e recepção podem importar reservas.", "error");
       return;
     }
 

@@ -972,6 +972,14 @@ async function initBreakfastPage() {
     return;
   }
 
+  const navPolicy = window.YesHotelNavPolicy;
+  if (navPolicy) {
+    const sidebarNavElement = document.querySelector(
+      '.yes-sidebar nav[aria-label="Navegação principal"]',
+    );
+    navPolicy.renderSidebarNav(sidebarNavElement, currentUser.role, "cafe");
+  }
+
   await ensureDemoModuleLoaded();
   document.body.classList.toggle("is-demo", demoMode);
   cafeDemoBanner?.classList.toggle("hidden", !demoMode);

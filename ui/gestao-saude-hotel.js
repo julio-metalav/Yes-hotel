@@ -327,24 +327,19 @@
       return;
     }
 
-    if (currentUser.role === "cafe") {
-      window.location.href = "./cafe-da-manha-mvp.html";
+    var navPolicy = window.YesHotelNavPolicy;
+    if (!navPolicy || !navPolicy.isRouteAuthorized(currentUser.role, "gestao")) {
+      var homeHref = navPolicy
+        ? navPolicy.getHomeHrefForRole(currentUser.role)
+        : "./usuarios-login-mvp.html";
+      window.location.href = homeHref;
       return;
     }
 
-    var canManage =
-      typeof auth.canAccessManagement === "function"
-        ? auth.canAccessManagement(currentUser)
-        : currentUser.role === "admin" || currentUser.role === "recepcao";
-
-    if (!canManage) {
-      showAccessState(
-        "Acesso não permitido",
-        "Gestão é restrita a admin e recepção.",
-        "Voltar para login",
-      );
-      return;
-    }
+    var sidebarNavElement = document.querySelector(
+      '.yes-sidebar nav[aria-label="Navegação principal"]',
+    );
+    navPolicy.renderSidebarNav(sidebarNavElement, currentUser.role, "gestao");
 
     if (accessStateElement instanceof HTMLElement) accessStateElement.classList.add("hidden");
     if (contentPanelElement instanceof HTMLElement) contentPanelElement.classList.remove("hidden");
@@ -355,18 +350,6 @@
     if (sessionUserRoleElement instanceof HTMLElement) {
       sessionUserRoleElement.textContent = auth.getRoleLabel(currentUser.role);
     }
-
-    var canBreakfast = auth.canAccessBreakfast(currentUser);
-    document.querySelectorAll('[data-nav="cafe"]').forEach(function (node) {
-      node.classList.toggle("hidden", !canBreakfast);
-    });
-    var canFinancial =
-      typeof auth.canAccessFinancialRecon === "function"
-        ? auth.canAccessFinancialRecon(currentUser)
-        : currentUser.role === "admin";
-    document.querySelectorAll('[data-nav="financeiro"]').forEach(function (node) {
-      node.classList.toggle("hidden", !canFinancial);
-    });
 
     if (!historico || !historico.periods) {
       showAccessState(

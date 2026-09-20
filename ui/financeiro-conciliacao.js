@@ -960,35 +960,23 @@
       showAccessState("Login necessário", "Entre com um usuário interno admin.", "Fazer login");
       return;
     }
-    if (currentUser.role === "cafe") {
-      window.location.href = "./cafe-da-manha-mvp.html";
+    var navPolicy = window.YesHotelNavPolicy;
+    if (!navPolicy || !navPolicy.isRouteAuthorized(currentUser.role, "financeiro")) {
+      var homeHref = navPolicy
+        ? navPolicy.getHomeHrefForRole(currentUser.role)
+        : "./usuarios-login-mvp.html";
+      window.location.href = homeHref;
       return;
     }
-    var canRecon =
-      typeof auth.canAccessFinancialRecon === "function"
-        ? auth.canAccessFinancialRecon(currentUser)
-        : currentUser.role === "admin";
-    if (!canRecon) {
-      showAccessState(
-        "Acesso não permitido",
-        "Conciliação financeira é restrita a admin.",
-        "Voltar para login",
-      );
-      return;
-    }
+    var sidebarNavElement = document.querySelector(
+      '.yes-sidebar nav[aria-label="Navegação principal"]',
+    );
+    navPolicy.renderSidebarNav(sidebarNavElement, currentUser.role, "financeiro");
+
     if (accessStateElement instanceof HTMLElement) accessStateElement.classList.add("hidden");
     if (contentPanelElement instanceof HTMLElement) contentPanelElement.classList.remove("hidden");
     if (sessionUserNameElement) sessionUserNameElement.textContent = currentUser.name;
     if (sessionUserRoleElement) sessionUserRoleElement.textContent = auth.getRoleLabel(currentUser.role);
-    document.querySelectorAll('[data-nav="cafe"]').forEach(function (node) {
-      node.classList.toggle("hidden", !auth.canAccessBreakfast(currentUser));
-    });
-    document.querySelectorAll('[data-nav="gestao"]').forEach(function (node) {
-      node.classList.toggle("hidden", !auth.canAccessManagement(currentUser));
-    });
-    document.querySelectorAll('[data-nav="financeiro"]').forEach(function (node) {
-      node.classList.toggle("hidden", !canRecon);
-    });
     try {
       await loadOverview();
     } catch (error) {

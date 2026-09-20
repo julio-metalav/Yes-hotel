@@ -60,11 +60,14 @@ ok("menu Gestão aparece em Operação, Recepção e Wi-Fi");
 assert.equal(cafeHtml.includes("gestao-saude-hotel.html"), false);
 ok("sidebar do Café não inclui Gestão");
 
+// Guard de Gestão passou a delegar a YesHotelNavPolicy (mesma fonte de
+// verdade das demais páginas) em vez de checar canAccessManagement/role
+// localmente; café continua bloqueado, só que pelo mecanismo centralizado.
 assert.match(authSrc, /function canAccessManagement/);
 assert.match(authSrc, /user\?\.role === "admin" \|\| user\?\.role === "recepcao"/);
-assert.match(pageSrc, /currentUser\.role === "cafe"/);
-assert.match(pageSrc, /cafe-da-manha-mvp\.html/);
-ok("guard: admin/recepção acessam; café é redirecionado");
+assert.match(pageSrc, /YesHotelNavPolicy/);
+assert.match(pageSrc, /navPolicy\.isRouteAuthorized\(currentUser\.role, "gestao"\)/);
+ok("guard: admin/recepção acessam via YesHotelNavPolicy; café é redirecionado");
 
 const historicoSrc = read("ui/data/management-historical-2026.js");
 const sandbox: { window: Record<string, unknown>; globalThis: unknown } = {
@@ -110,9 +113,10 @@ ok("CRM futuro sem rota morta");
 
 const wifiJs = read("ui/apartamentos-wifi-mvp.js");
 assert.match(wifiHtml, /data-nav="gestao"/);
-assert.match(wifiJs, /canAccessManagement/);
-assert.match(wifiJs, /data-nav="gestao"/);
-ok("Wi-Fi esconde Gestão via canAccessManagement");
+// Guard de Wi-Fi também passou a delegar a YesHotelNavPolicy.
+assert.match(wifiJs, /YesHotelNavPolicy/);
+assert.match(wifiJs, /navPolicy\.isRouteAuthorized\(user\.role, "wifi"\)/);
+ok("Wi-Fi protege a rota e a nav de Gestão via YesHotelNavPolicy");
 
 {
   assert.equal(existsSync(join(root, "ui/apartamentos-wifi-mvp.html")), true);
@@ -133,8 +137,11 @@ ok("Wi-Fi esconde Gestão via canAccessManagement");
     assert.match(src, /href="\.\/apartamentos-wifi-mvp\.html"/);
     assert.match(src, /data-nav="wifi"/);
   }
-  assert.match(loginJs, /data-nav="wifi"/);
-  assert.match(loginJs, /classList\.toggle\("hidden", !canManage\)/);
+  // applyDashboardCards passou a decidir a visibilidade de cada card a
+  // partir de YesHotelNavPolicy.isRouteAuthorized (mapa data-nav -> routeKey),
+  // em vez de uma variável canManage local por card.
+  assert.match(loginJs, /wifi:\s*"wifi"/);
+  assert.match(loginJs, /navPolicy \? navPolicy\.isRouteAuthorized\(user\?\.role, routeKey\) : isAdmin/);
   const demandasHtml = read("ui/demandas-mvp.html");
   const finHtml = read("ui/financeiro-conciliacao.html");
   for (const src of [demandasHtml, finHtml]) {

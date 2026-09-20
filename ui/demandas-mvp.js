@@ -842,7 +842,16 @@ function bindPhotoInput(input) {
 }
 
 function isMinhasEscopo() {
+  // Café só enxerga "minhas demandas" — nunca a listagem geral, mesmo que
+  // a URL seja aberta sem o parâmetro de escopo.
+  if (currentUser?.role === "cafe") {
+    return true;
+  }
   return new URLSearchParams(window.location.search).get("escopo") === "minhas";
+}
+
+function isNovaDemandaSolicitada() {
+  return new URLSearchParams(window.location.search).get("novo") === "1";
 }
 
 function applyPageChrome() {
@@ -858,20 +867,9 @@ function applyPageChrome() {
   if (listHeading) {
     listHeading.textContent = minhas ? "Minhas demandas" : "Todas as demandas";
   }
-  const navMinhas = document.querySelector("#nav-minhas");
-  const navTodas = document.querySelector("#nav-todas");
-  navMinhas?.classList.toggle("active", minhas);
-  navTodas?.classList.toggle("active", !minhas);
-  if (minhas) {
-    navMinhas?.setAttribute("aria-current", "page");
-    navTodas?.removeAttribute("aria-current");
-  } else {
-    navTodas?.setAttribute("aria-current", "page");
-    navMinhas?.removeAttribute("aria-current");
-  }
   document.querySelector("#kpis-gestao")?.classList.toggle("hidden", minhas);
   document.querySelector("#kpis-minhas")?.classList.toggle("hidden", !minhas);
-  document.querySelector("#btn-nova")?.classList.toggle("hidden", minhas);
+  document.querySelector("#btn-nova")?.classList.toggle("hidden", minhas && currentUser?.role !== "cafe");
   document.querySelectorAll("[data-filter]").forEach((node) => {
     const key = node.getAttribute("data-filter");
     const keep = minhas ? key === "status" || key === "prioridade" : true;
@@ -947,21 +945,26 @@ async function init() {
     showAccessState("Login necessário", "Entre com um usuário interno.");
     return;
   }
-  if (typeof auth.canAccessDemandas === "function" && !auth.canAccessDemandas(currentUser)) {
-    showAccessState("Acesso negado", "Seu perfil não acessa Demandas.");
+
+  const navPolicy = window.YesHotelNavPolicy;
+  if (!navPolicy || !navPolicy.isRouteAuthorized(currentUser.role, "demandas")) {
+    const homeHref = navPolicy
+      ? navPolicy.getHomeHrefForRole(currentUser.role)
+      : "./usuarios-login-mvp.html";
+    window.location.href = homeHref;
     return;
   }
 
+  const sidebarNavElement = document.querySelector(
+    '.yes-sidebar nav[aria-label="Navegação principal"]',
+  );
+  navPolicy.renderSidebarNav(
+    sidebarNavElement,
+    currentUser.role,
+    isMinhasEscopo() ? "minhas-demandas" : "demandas",
+  );
+
   applyPageChrome();
-  document.querySelectorAll('[data-nav="operacao"]').forEach((node) => {
-    node.classList.toggle("hidden", currentUser.role === "cafe");
-  });
-  document.querySelectorAll('[data-nav="gestao"]').forEach((node) => {
-    node.classList.toggle("hidden", currentUser.role === "cafe");
-  });
-  document.querySelectorAll('[data-nav="financeiro"]').forEach((node) => {
-    node.classList.toggle("hidden", currentUser.role !== "admin");
-  });
 
   accessStateElement?.classList.add("hidden");
   contentPanelElement?.classList.remove("hidden");
@@ -971,6 +974,10 @@ async function init() {
   );
 
   await Promise.all([loadAtribuiveis(), refreshList()]);
+
+  if (isNovaDemandaSolicitada() && currentUser.role === "cafe") {
+    openCreatePanel();
+  }
 }
 
 document.querySelector("#logout-button")?.addEventListener("click", async () => {

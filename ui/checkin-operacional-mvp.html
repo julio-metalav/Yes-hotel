@@ -125,7 +125,7 @@
           </div>
         </header>
 
-        <main class="op-content">
+        <main id="op-main-content" class="op-content">
           <section class="yes-kpis yes-kpis--five metric-strip" aria-label="Indicadores do dia">
             <article>
               <span>Chegadas hoje</span>
@@ -458,6 +458,52 @@
             </aside>
           </div>
         </main>
+
+        <main id="hits-readonly-content" class="op-content hidden" aria-label="Consulta Check-in (somente leitura)">
+          <section class="op-panel" aria-label="Reservas — consulta somente leitura">
+            <div class="op-panel__head">
+              <span class="op-panel__title">Check-in — consulta</span>
+              <span id="hits-readonly-count" class="op-panel__count"></span>
+            </div>
+            <div class="op-panel__body">
+              <div class="op-toolbar" role="toolbar" aria-label="Buscar reservas">
+                <label class="op-search-field">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m21 21-4.3-4.3M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z" />
+                  </svg>
+                  <span class="sr-only">Buscar reservas</span>
+                  <input
+                    type="search"
+                    id="hits-readonly-search"
+                    class="op-field op-toolbar__search"
+                    placeholder="Buscar apto ou hóspede"
+                    aria-label="Buscar reservas"
+                    autocomplete="off"
+                  />
+                </label>
+              </div>
+              <div class="op-table-wrap">
+                <table class="op-table" aria-label="Lista de reservas (somente leitura)">
+                  <thead>
+                    <tr>
+                      <th>Apartamento</th>
+                      <th>Hóspede</th>
+                      <th>Check-in</th>
+                      <th>Check-out</th>
+                      <th>Status</th>
+                      <th>Fluxo FNRH</th>
+                      <th>Próxima etapa</th>
+                    </tr>
+                  </thead>
+                  <tbody id="hits-readonly-body"></tbody>
+                </table>
+              </div>
+              <div id="hits-readonly-empty" class="op-empty hidden">
+                <p class="op-empty__title">Nenhuma reserva encontrada</p>
+              </div>
+            </div>
+          </section>
+        </main>
       </div>
 
       <div class="modal-overlay hidden" id="modal-enviar-senha-overlay" aria-hidden="true">
@@ -523,6 +569,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
+    <script defer src="./yes-nav-policy.js?v=1"></script>
     <script defer src="./yes-credential-release-policy.js"></script>
     <script defer src="./yes-access-tolerance-policy.js?v=1"></script>
     <script defer src="./yes-arrivals-policy.js?v=1"></script>
