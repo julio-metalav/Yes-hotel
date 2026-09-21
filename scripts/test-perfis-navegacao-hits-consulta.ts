@@ -35,15 +35,11 @@ function menuKeysFor(navPolicy: any, role: string): string[] {
   return Array.from(navPolicy.getNavItemsForRole(role)).map((i: any) => String(i.key));
 }
 
-function routeKeysFor(navPolicy: any, role: string): Set<string> {
-  return new Set(Array.from(navPolicy.getNavItemsForRole(role)).map((i: any) => String(i.routeKey)));
-}
-
 function main() {
   const navPolicy = loadBrowserGlobal("ui/yes-nav-policy.js", "YesHotelNavPolicy");
   const authApp = loadBrowserGlobal("ui/yes-supabase-auth.js", "YesHotelAuthApp");
 
-  console.log("\n== 1. Admin recebe o menu completo, incluindo Usuários ==");
+  console.log("\n== 1. Admin recebe o menu operacional; Wi-Fi/Geolocalização/Usuários saíram do sidebar (agora em Configurações) ==");
   {
     const items = menuKeysFor(navPolicy, "admin");
     assert.deepEqual(items, [
@@ -54,20 +50,17 @@ function main() {
       "financeiro",
       "minhas-demandas",
       "demandas",
-      "wifi",
-      "geo",
-      "usuarios",
     ]);
-    ok("admin vê os 10 itens na ordem canônica, incluindo geo e usuarios");
+    assert.ok(!items.includes("wifi") && !items.includes("geo") && !items.includes("usuarios"));
+    ok("admin vê os 7 itens operacionais na ordem canônica; wifi/geo/usuarios não aparecem mais no sidebar");
   }
 
-  console.log("\n== 2. Recepção recebe o mesmo menu do Admin, exceto Usuários ==");
+  console.log("\n== 2. Recepção recebe exatamente o mesmo menu lateral do Admin ==");
   {
     const adminItems = menuKeysFor(navPolicy, "admin");
     const recepcaoItems = menuKeysFor(navPolicy, "recepcao");
-    assert.deepEqual(recepcaoItems, adminItems.filter((k: string) => k !== "usuarios"));
-    assert.ok(!recepcaoItems.includes("usuarios"));
-    ok("menu da recepção = menu do admin menos usuarios, mesma ordem relativa");
+    assert.deepEqual(recepcaoItems, adminItems);
+    ok("menu lateral de admin e recepção é idêntico (usuarios já não aparece em nenhum dos dois)");
   }
 
   console.log("\n== 3. Recepção continua com acesso ao Início ==");
@@ -277,21 +270,30 @@ function main() {
     ok("perfil desconhecido ou ausente não recebe nenhuma rota nem item de menu");
   }
 
-  console.log("\n== 14. acessos_recepcao = acessos_admin - usuarios (regra definitiva, sem segunda diferença) ==");
+  console.log("\n== 14. acessos_recepcao = acessos_admin - usuarios (regra definitiva, agora ao nível de rota/Configurações) ==");
   {
-    const adminRoutes = routeKeysFor(navPolicy, "admin");
-    const recepcaoRoutes = routeKeysFor(navPolicy, "recepcao");
-    const expectedRecepcaoRoutes = new Set([...adminRoutes].filter((r) => r !== "usuarios"));
+    // Wi-Fi, Geolocalização e Usuários saíram do sidebar (item de menu) e
+    // passaram a viver dentro da tela Configurações; a autorização por rota
+    // (isRouteAuthorized/ROUTE_ACCESS) continua sendo a fonte única de
+    // verdade de quem pode abrir cada uma delas.
+    const ALL_ROUTE_KEYS = [
+      "inicio",
+      "checkin",
+      "cafe",
+      "gestao",
+      "financeiro",
+      "demandas",
+      "wifi",
+      "geo",
+      "usuarios",
+    ];
 
-    assert.deepEqual(
-      [...recepcaoRoutes].sort(),
-      [...expectedRecepcaoRoutes].sort(),
-      "acessos_recepcao deve ser exatamente acessos_admin menos usuarios — qualquer outra diferença falha aqui",
-    );
-
-    // Confere tambem pela mesma funcao que os guards de pagina usam
-    // (isRouteAuthorized), para as duas fontes nunca divergirem entre si.
-    for (const routeKey of adminRoutes) {
+    for (const routeKey of ALL_ROUTE_KEYS) {
+      assert.equal(
+        navPolicy.isRouteAuthorized("admin", routeKey),
+        true,
+        `admin deveria acessar ${routeKey}`,
+      );
       const expected = routeKey !== "usuarios";
       assert.equal(
         navPolicy.isRouteAuthorized("recepcao", routeKey),
@@ -301,11 +303,11 @@ function main() {
     }
     assert.equal(navPolicy.isRouteAuthorized("recepcao", "usuarios"), false);
     assert.equal(navPolicy.isRouteAuthorized("admin", "usuarios"), true);
-    assert.ok(adminRoutes.has("geo"), "admin deve ter geo na matriz (achado corrigido nesta rodada)");
-    assert.ok(recepcaoRoutes.has("geo"), "recepção deve ter geo — mesma regra: tudo do admin, exceto usuarios");
+    assert.ok(navPolicy.isRouteAuthorized("admin", "geo"), "admin deve ter geo na matriz");
+    assert.ok(navPolicy.isRouteAuthorized("recepcao", "geo"), "recepção deve ter geo — mesma regra: tudo do admin, exceto usuarios");
 
     ok(
-      `recepção tem exatamente os ${expectedRecepcaoRoutes.size} acessos do admin (${[...expectedRecepcaoRoutes].sort().join(", ")}), com usuarios como única exceção`,
+      "recepção tem exatamente os mesmos acessos de rota do admin, com usuarios como única exceção (wifi/geo inclusive, mesmo fora do sidebar)",
     );
   }
 

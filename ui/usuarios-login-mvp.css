@@ -252,6 +252,18 @@ body {
   font-size: 20px;
 }
 
+.operacional-nav-back {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.operacional-nav-back:hover {
+  text-decoration: underline;
+}
+
 .operacional-nav-intro {
   margin: 0 0 14px;
 }

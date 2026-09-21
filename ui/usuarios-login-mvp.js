@@ -20,8 +20,12 @@ const loginPasswordElement = document.querySelector("#login-password");
 const rememberEmailElement = document.querySelector("#remember-email");
 const passwordToggleElement = document.querySelector(".password-toggle");
 const loginSubmitButtonElement = loginFormElement?.querySelector('[type="submit"]');
+const viewHomeElement = document.querySelector("#view-home");
+const viewConfiguracoesElement = document.querySelector("#view-configuracoes");
+const viewUsuariosElement = document.querySelector("#view-usuarios");
 const REMEMBERED_EMAIL_STORAGE_KEY = "yesHotel.rememberedEmail";
 let usersCache = [];
+let currentSessionUser = null;
 
 function isCafeDemoReturnRequested() {
   return new URLSearchParams(window.location.search).get("next") === "cafe-demo";
@@ -72,6 +76,33 @@ function applyDashboardCards(user) {
 
   document.querySelectorAll(".dashboard-admin-only").forEach((node) => {
     node.classList.toggle("hidden", !isAdmin);
+  });
+}
+
+// Início mostra os cards operacionais por padrão; Configurações e Usuários
+// são subtelas do mesmo painel, trocadas por hash (sem navegar de página),
+// reaproveitando a lista/formulário de usuários já existentes.
+function applyDashboardView(user) {
+  const navPolicy = window.YesHotelNavPolicy;
+  const isAdmin = user?.role === "admin";
+  const canOpenUsuarios = navPolicy
+    ? navPolicy.isRouteAuthorized(user?.role, "usuarios")
+    : isAdmin;
+  const hash = window.location.hash.replace("#", "");
+  const view = hash === "usuarios" && canOpenUsuarios
+    ? "usuarios"
+    : hash === "configuracoes"
+      ? "configuracoes"
+      : "home";
+
+  [
+    [viewHomeElement, view === "home"],
+    [viewConfiguracoesElement, view === "configuracoes"],
+    [viewUsuariosElement, view === "usuarios"],
+  ].forEach(([element, isVisible]) => {
+    if (element instanceof HTMLElement) {
+      element.classList.toggle("hidden", !isVisible);
+    }
   });
 }
 
@@ -248,8 +279,10 @@ async function renderDashboard() {
     return;
   }
 
+  currentSessionUser = currentUser;
   showOnlyPanel(appPanelElement);
   applyDashboardCards(currentUser);
+  applyDashboardView(currentUser);
   resetUserForm();
   if (auth.canAccessUserManagement(currentUser)) {
     await renderUsersList();
@@ -468,6 +501,12 @@ logoutButtonElement?.addEventListener("click", async () => {
 cancelEditButtonElement?.addEventListener("click", () => {
   hideNotice();
   resetUserForm();
+});
+
+window.addEventListener("hashchange", () => {
+  if (currentSessionUser) {
+    applyDashboardView(currentSessionUser);
+  }
 });
 
 renderPageState().catch((error) => {
