@@ -30,11 +30,11 @@ function normalizeEmail(email: unknown): string {
   return String(email ?? "").trim().toLowerCase();
 }
 
-function normalizeRole(role: unknown): "admin" | "recepcao" | "cafe" {
+function normalizeRole(role: unknown): "admin" | "recepcao" | "cafe" | "hits_consulta" {
   const value = String(role ?? "").trim();
 
-  if (value !== "admin" && value !== "recepcao" && value !== "cafe") {
-    throw new Error("Perfil invalido. Use admin, recepcao ou cafe.");
+  if (value !== "admin" && value !== "recepcao" && value !== "cafe" && value !== "hits_consulta") {
+    throw new Error("Perfil invalido. Use admin, recepcao, cafe ou hits_consulta.");
   }
 
   return value;

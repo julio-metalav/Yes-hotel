@@ -311,6 +311,52 @@ function main() {
     );
   }
 
+  console.log("\n== 15. internal-users-admin aceita hits_consulta sem ampliar permissões ==");
+  {
+    const edgeSrc = readFileSync(
+      resolve(ROOT, "supabase/functions/internal-users-admin/index.ts"),
+      "utf8",
+    );
+    const fnStart = edgeSrc.indexOf("function normalizeRole(");
+    assert.ok(fnStart > -1, "normalizeRole existe na Edge Function");
+    const fnEnd = edgeSrc.indexOf("\n}", fnStart) + 2;
+    // Remove só a assinatura TypeScript para avaliar a função real em JS.
+    const fnJs = edgeSrc
+      .slice(fnStart, fnEnd)
+      .replace(/function normalizeRole\(role: unknown\):[^{]*\{/, "function normalizeRole(role) {");
+    const normalizeRole = new Function(`${fnJs}; return normalizeRole;`)() as (r: unknown) => string;
+
+    assert.equal(normalizeRole("hits_consulta"), "hits_consulta");
+    assert.equal(normalizeRole(" hits_consulta "), "hits_consulta");
+    ok("A. normalizeRole aceita hits_consulta");
+
+    for (const r of ["admin", "recepcao", "cafe"]) assert.equal(normalizeRole(r), r);
+    ok("B. admin, recepcao e cafe continuam aceitos");
+
+    for (const r of ["", "superadmin", "HITS_CONSULTA", "hits", "financeiro", null, undefined]) {
+      assert.throws(() => normalizeRole(r), /Perfil invalido\. Use admin, recepcao, cafe ou hits_consulta\./);
+    }
+    ok("C. perfil inválido continua rejeitado, com mensagem dos quatro perfis");
+
+    const bodyOf = (name: string) => {
+      const i = edgeSrc.indexOf(`async function ${name}(`);
+      assert.ok(i > -1, `${name} existe`);
+      return edgeSrc.slice(i, edgeSrc.indexOf("\nasync function ", i + 1));
+    };
+    for (const name of ["createUser", "updateUser"]) {
+      const body = bodyOf(name);
+      const iAdmin = body.indexOf("await ensureAdminCaller(request);");
+      const iRole = body.indexOf("normalizeRole(payload.role)");
+      assert.ok(iAdmin > -1 && iRole > iAdmin, `${name}: exige admin antes de validar o perfil`);
+    }
+    ok("D/E. create_user e update_user usam a mesma validação, depois de exigir admin");
+
+    assert.match(edgeSrc, /callerProfile\.role !== "admin" \|\| !callerProfile\.active/);
+    const mencoes = edgeSrc.match(/hits_consulta/g) || [];
+    assert.equal(mencoes.length, 3, "hits_consulta só aparece no tipo, na validação e na mensagem de normalizeRole");
+    ok("F. ensureAdminCaller inalterado; hits_consulta não ganha nenhuma permissão administrativa");
+  }
+
   console.log(`\nOK test-perfis-navegacao-hits-consulta (${cases} casos)`);
 }
 
