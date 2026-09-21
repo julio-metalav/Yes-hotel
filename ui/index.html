@@ -107,7 +107,7 @@
           <p>Escolha uma área para continuar.</p>
         </section>
 
-        <nav class="operacional-nav" aria-label="Áreas operacionais">
+        <nav class="operacional-nav" id="view-home" aria-label="Áreas operacionais">
           <h2 class="operacional-nav-title">Áreas operacionais</h2>
           <p class="helper-text operacional-nav-intro">
             Acesse as rotinas disponíveis para a operação do hotel.
@@ -190,6 +190,29 @@
               </span>
               <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
             </a>
+            <a class="operacional-nav-card" href="#configuracoes">
+              <span class="operacional-nav-card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82V15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+                </svg>
+              </span>
+              <span class="operacional-nav-card-content">
+                <span class="operacional-nav-card-label">Configurações</span>
+                <span class="operacional-nav-card-desc">Wi-Fi, geolocalização e usuários</span>
+              </span>
+              <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
+            </a>
+          </div>
+        </nav>
+
+        <nav class="operacional-nav hidden" id="view-configuracoes" aria-label="Configurações">
+          <a class="operacional-nav-back" href="#">&larr; Voltar ao início</a>
+          <h2 class="operacional-nav-title">Configurações</h2>
+          <p class="helper-text operacional-nav-intro">
+            Wi-Fi, geolocalização e usuários.
+          </p>
+          <div class="operacional-nav-grid">
             <a class="operacional-nav-card" href="./apartamentos-wifi-mvp.html" data-nav="wifi">
               <span class="operacional-nav-card-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
@@ -217,7 +240,7 @@
               </span>
               <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
             </a>
-            <a class="operacional-nav-card operacional-nav-card--anchor" href="#gestao-usuarios-section" data-nav="usuarios">
+            <a class="operacional-nav-card" href="#usuarios" data-nav="usuarios">
               <span class="operacional-nav-card-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
                   <path d="M16 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" />
@@ -226,86 +249,90 @@
                 </svg>
               </span>
               <span class="operacional-nav-card-content">
-                <span class="operacional-nav-card-label">Usuários internos</span>
-                <span class="operacional-nav-card-desc">Cadastro e perfis nesta página, abaixo</span>
+                <span class="operacional-nav-card-label">Usuários</span>
+                <span class="operacional-nav-card-desc">Cadastro, edição e perfis dos usuários internos</span>
               </span>
-              <span class="operacional-nav-card-arrow" aria-hidden="true">↓</span>
+              <span class="operacional-nav-card-arrow" aria-hidden="true">→</span>
             </a>
           </div>
         </nav>
 
-        <section class="users-section dashboard-section dashboard-admin-only" id="gestao-usuarios-section">
-          <div class="section-header">
-            <div>
-              <h2>Usuários cadastrados</h2>
-              <p class="helper-text">
-                Admin gerencia usuários. Recepção e café usam apenas as telas
-                operacionais.
-              </p>
-            </div>
-          </div>
+        <div class="hidden" id="view-usuarios">
+          <a class="operacional-nav-back" href="#configuracoes">&larr; Voltar a Configurações</a>
 
-          <div class="users-list" id="users-list"></div>
-        </section>
-
-        <section class="users-section dashboard-section dashboard-admin-only">
-          <div class="section-header">
-            <div>
-              <h2 id="user-form-title">Novo usuário</h2>
-              <p class="helper-text">
-                Cadastre ou edite usuários internos com perfil simples.
-              </p>
+          <section class="users-section dashboard-section dashboard-admin-only" id="gestao-usuarios-section">
+            <div class="section-header">
+              <div>
+                <h2>Usuários cadastrados</h2>
+                <p class="helper-text">
+                  Admin gerencia usuários. Recepção e café usam apenas as telas
+                  operacionais.
+                </p>
+              </div>
             </div>
-          </div>
 
-          <form class="stack-form" id="user-form">
-            <input type="hidden" name="userId" />
-            <label>
-              Nome
-              <input type="text" name="name" required />
-            </label>
-            <label>
-              Email
-              <input type="email" name="email" required />
-            </label>
-            <label>
-              Senha
-              <input
-                type="password"
-                name="password"
-                placeholder="Obrigatoria no cadastro, opcional na edicao"
-              />
-            </label>
-            <label>
-              Telefone / WhatsApp
-              <input
-                type="tel"
-                name="telefoneWhatsapp"
-                inputmode="tel"
-                placeholder="(67) 99999-0000"
-                autocomplete="tel"
-              />
-            </label>
-            <label>
-              Perfil
-              <select name="role" required>
-                <option value="admin">Admin</option>
-                <option value="recepcao">Recepcao</option>
-                <option value="cafe">Cafe</option>
-              </select>
-            </label>
-            <label class="checkbox-line">
-              <input type="checkbox" name="active" checked />
-              Usuario ativo
-            </label>
-            <div class="form-actions">
-              <button class="primary-button" type="submit">Salvar</button>
-              <button class="secondary-button" id="cancel-edit-button" type="button">
-                Cancelar
-              </button>
+            <div class="users-list" id="users-list"></div>
+          </section>
+
+          <section class="users-section dashboard-section dashboard-admin-only">
+            <div class="section-header">
+              <div>
+                <h2 id="user-form-title">Novo usuário</h2>
+                <p class="helper-text">
+                  Cadastre ou edite usuários internos com perfil simples.
+                </p>
+              </div>
             </div>
-          </form>
-        </section>
+
+            <form class="stack-form" id="user-form">
+              <input type="hidden" name="userId" />
+              <label>
+                Nome
+                <input type="text" name="name" required />
+              </label>
+              <label>
+                Email
+                <input type="email" name="email" required />
+              </label>
+              <label>
+                Senha
+                <input
+                  type="password"
+                  name="password"
+                  placeholder="Obrigatoria no cadastro, opcional na edicao"
+                />
+              </label>
+              <label>
+                Telefone / WhatsApp
+                <input
+                  type="tel"
+                  name="telefoneWhatsapp"
+                  inputmode="tel"
+                  placeholder="(67) 99999-0000"
+                  autocomplete="tel"
+                />
+              </label>
+              <label>
+                Perfil
+                <select name="role" required>
+                  <option value="admin">Admin</option>
+                  <option value="recepcao">Recepcao</option>
+                  <option value="cafe">Cafe</option>
+                </select>
+              </label>
+              <label class="checkbox-line">
+                <input type="checkbox" name="active" checked />
+                Usuario ativo
+              </label>
+              <div class="form-actions">
+                <button class="primary-button" type="submit">Salvar</button>
+                <button class="secondary-button" id="cancel-edit-button" type="button">
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
       </section>
     </main>
 

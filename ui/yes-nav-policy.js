@@ -34,15 +34,15 @@
     demandar: { routeKey: "demandas", label: "Demandar", href: "./demandas-mvp.html?escopo=minhas&novo=1", icon: ICONS.demandar },
     wifi: { routeKey: "wifi", label: "Wi-Fi dos apartamentos", href: "./apartamentos-wifi-mvp.html", icon: ICONS.wifi },
     geo: { routeKey: "geo", label: "Geolocalização do hotel", href: "./geolocalizacao-hotel-mvp.html", icon: ICONS.geo },
-    usuarios: { routeKey: "usuarios", label: "Usuários", href: "./usuarios-login-mvp.html#gestao-usuarios-section", icon: ICONS.usuarios },
+    usuarios: { routeKey: "usuarios", label: "Usuários", href: "./usuarios-login-mvp.html#usuarios", icon: ICONS.usuarios },
   };
 
   // Conjunto e ORDEM exatos de itens de menu por perfil — fonte de verdade
   // única (matriz definitiva). Qualquer página que renderize o menu lateral
   // deve usar getNavItemsForRole, nunca uma lista própria.
   const ROLE_MENU_KEYS = {
-    admin: ["inicio", "operacao", "cafe", "gestao", "financeiro", "minhas-demandas", "demandas", "wifi", "geo", "usuarios"],
-    recepcao: ["inicio", "operacao", "cafe", "gestao", "financeiro", "minhas-demandas", "demandas", "wifi", "geo"],
+    admin: ["inicio", "operacao", "cafe", "gestao", "financeiro", "minhas-demandas", "demandas"],
+    recepcao: ["inicio", "operacao", "cafe", "gestao", "financeiro", "minhas-demandas", "demandas"],
     cafe: ["cafe", "minhas-demandas", "demandar"],
     hits_consulta: ["checkin-hits"],
   };
