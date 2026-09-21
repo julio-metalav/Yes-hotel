@@ -256,10 +256,13 @@ function getPrioridadeLabel(prioridade) {
 function getFilaOperacionalRank(reserva) {
   // Fora da fila operacional: não há pagamento, FNRH nem acesso a avaliar.
   if (isReservaSomenteLeituraHits(reserva)) return 4;
+  // Consulta: mesma régua da Recepção, sem o degrau de pagamento.
   if (isReservaConsultaHits(reserva)) {
-    if (reserva.entrouNoApto) return 4;
-    if (reserva.acessoLiberado) return 3;
-    return isFnrhConsultaCompleta(reserva) ? 2 : 1;
+    if (isConsultaSomenteNoHits(reserva)) return 4;
+    if (hasFnrhPendente(reserva) || !isFnrhCompleta(reserva)) return 1;
+    if (!acessoLiberadoEfetivo(reserva)) return 2;
+    if (!reserva.entrouNoApto) return 3;
+    return 4;
   }
   if (!isPagamentoOk(reserva)) return 0;
   if (hasFnrhPendente(reserva) || !isFnrhCompleta(reserva)) return 1;
@@ -1040,16 +1043,20 @@ function isReservaConsultaHits(reserva) {
   return !!(reserva && reserva.consultaHits === true);
 }
 
-function isFnrhConsultaCompleta(reserva) {
-  return String((reserva && reserva.fnrhStatusAgregado) || "").trim() === "fnrh_completo";
+/** Reserva de consulta que só existe no HITS (ainda não materializada no Yes). */
+function isConsultaSomenteNoHits(reserva) {
+  return isReservaConsultaHits(reserva) && reserva.origemHitsPreview === true;
 }
 
 /** Status da reserva de consulta: só FNRH, acesso e entrada (nunca pagamento). */
 function derivarStatusConsultaHits(reserva) {
-  if (reserva.entrouNoApto) return { label: "Entrou no apto", type: "entrou" };
-  if (reserva.acessoLiberado) return { label: "Acesso liberado", type: "aguardando-chegada" };
-  if (!isFnrhConsultaCompleta(reserva)) return { label: "Pendente FNRH", type: "pendente-fnrh" };
-  return { label: "Aguardando acesso", type: "neutral" };
+  // Mesmo selo da Recepção para reserva que só existe no HITS.
+  if (isConsultaSomenteNoHits(reserva)) return { label: "HITS · leitura", type: "neutral" };
+  // Mesma precedência não financeira de derivarStatusOperacional (Recepção).
+  if (hasFnrhPendente(reserva)) return { label: "Pendente FNRH", type: "pendente-fnrh" };
+  if (!acessoLiberadoEfetivo(reserva)) return { label: "Aguardando acesso", type: "neutral" };
+  if (!reserva.entrouNoApto) return { label: "Acesso liberado", type: "aguardando-chegada" };
+  return { label: "Entrou no apto", type: "entrou" };
 }
 
 /**
@@ -1061,10 +1068,10 @@ function derivarStatusConsultaHits(reserva) {
  * botão, campo ou link é criado e nada é consultado ao abrir/fechar.
  */
 function buildSituacaoConsultaHitsHtml(reserva) {
-  const fnrhLabel = isFnrhConsultaCompleta(reserva) ? "Concluída" : "Pendente";
+  const fnrhLabel = formatFnrhSituacaoLabel(reserva);
   const acesso = reserva.entrouNoApto
     ? { label: "Entrou no apartamento", accent: "entrou" }
-    : reserva.acessoLiberado
+    : acessoLiberadoEfetivo(reserva)
       ? { label: "Acesso liberado", accent: "ok" }
       : { label: "Aguardando liberação", accent: "pending" };
   const acessoClass =
@@ -1097,9 +1104,10 @@ function buildSituacaoConsultaHitsHtml(reserva) {
 }
 
 function proximaEtapaConsultaHits(reserva) {
+  if (isConsultaSomenteNoHits(reserva)) return "Preparar FNRH";
   if (reserva.entrouNoApto) return "Hóspede no apartamento";
-  if (reserva.acessoLiberado) return "Acesso liberado — aguardando entrada";
-  if (!isFnrhConsultaCompleta(reserva)) return "Aguardando FNRH";
+  if (acessoLiberadoEfetivo(reserva)) return "Acesso liberado — aguardando entrada";
+  if (hasFnrhPendente(reserva) || !isFnrhCompleta(reserva)) return "Aguardando FNRH";
   return "Aguardando liberação de acesso";
 }
 
@@ -1902,6 +1910,8 @@ function loadReservasFromLocalRepository() {
 }
 
 function loadReservasOperacionaisFromProvider() {
+  // hits_consulta: banco pela projeção read-only (sem SELECT em tabela).
+  if (modoConsultaHits) return loadReservasConsultaHits().then(filtrarReservasOperacionaisAtivas);
   if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_LOCAL_REPOSITORY) {
     return loadReservasFromLocalRepository();
   }
@@ -2074,7 +2084,6 @@ function getFnrhPreenchidas(reserva) {
 }
 
 function hasFnrhPendente(reserva) {
-  if (isReservaConsultaHits(reserva)) return !isFnrhConsultaCompleta(reserva);
   const total = getHospedesTotal(reserva);
   const confirmadas = getFnrhConfirmadas(reserva);
   return total > 0 && confirmadas < total;
@@ -2232,7 +2241,6 @@ function isPagamentoPendenteOperacional(reserva) {
 }
 
 function isFnrhCompleta(reserva) {
-  if (isReservaConsultaHits(reserva)) return isFnrhConsultaCompleta(reserva);
   const total = getHospedesTotal(reserva);
   if (total === 0) return false;
   return getFnrhConfirmadas(reserva) === total;
@@ -2604,6 +2612,9 @@ function temPendenciaOperacionalRelevanteParaListaPadrao(reserva) {
 function reservaOcultaDaListaPadraoOperacional(reserva) {
   // Leitura HITS permanece visível: é justamente o que se quer conferir.
   if (isReservaSomenteLeituraHits(reserva)) return false;
+  if (isConsultaSomenteNoHits(reserva)) return false;
+  // Consulta: mesma população da Recepção pela decisão neutra do servidor.
+  if (isReservaConsultaHits(reserva) && reserva.manterNaListaOperacional === true) return false;
   if (temPendenciaOperacionalRelevanteParaListaPadrao(reserva)) return false;
   const cutoff = getCutoffOcultarListaPadraoAposCheckin(reserva.checkInPrevisto);
   if (!cutoff) return false;
@@ -2686,7 +2697,10 @@ function syncToolbarSelectFromFiltro() {
 function renderStatusTabs() {
   if (!(opStatusTabsElement instanceof HTMLElement)) return;
   const base = listaBaseContagens();
-  const tabsHtml = OP_TAB_DEFS.map(([key, label]) => {
+  const tabDefs = modoConsultaHits
+    ? OP_TAB_DEFS.filter(([key]) => key !== FILTER_PENDENTE_PAGAMENTO)
+    : OP_TAB_DEFS;
+  const tabsHtml = tabDefs.map(([key, label]) => {
     const count = filtrarReservas(base, key).length;
     const selected = filtroAtivo === key;
     return `<button type="button" role="tab" class="op-tab" data-filter="${key}" aria-selected="${selected}" aria-label="${escapeHtml(label + ", " + count + " reservas")}">
@@ -2843,6 +2857,26 @@ function listaProximaAcaoOperacional(reserva) {
   return { texto, destaque: !!cta, cta: cta };
 }
 
+function linhaFluxoConsultaHits(reserva) {
+  if (isConsultaSomenteNoHits(reserva)) {
+    const pax = Math.max(1, Number(reserva.totalHospedesHits) || 1);
+    return `<span class="op-flux__item">${pax} ${pax === 1 ? "hóspede" : "hóspedes"}</span>`;
+  }
+  const total = getHospedesTotal(reserva);
+  const confirmadas = getFnrhConfirmadas(reserva);
+  let fnrh;
+  if (total === 0) fnrh = "FNRH —";
+  else if (confirmadas === 0) fnrh = `FNRH 0/${total}`;
+  else if (confirmadas < total) fnrh = "FNRH parcial";
+  else fnrh = `FNRH ${total}/${total}`;
+  const rest = [fnrh];
+  if (reserva.entrouNoApto) rest.push("Entrou");
+  else if (total > 0 && confirmadas === total) {
+    rest.push(acessoLiberadoEfetivo(reserva) ? "Acesso ok" : "Sem acesso");
+  }
+  return `<span class="op-flux__item">${rest.map((t) => escapeHtml(t)).join(" · ")}</span>`;
+}
+
 /** Resumo curto para coluna Fluxo (lista): PAGO/NÃO PAGO em destaque + FNRH + no máximo um terceiro sinal. Retorna HTML seguro. */
 function linhaFluxoResumo(reserva) {
   // Só o que o HITS entregou: pax e nada de FNRH/pagamento/acesso.
@@ -2850,10 +2884,8 @@ function linhaFluxoResumo(reserva) {
     const pax = Math.max(1, Number(reserva.totalHospedesHits) || 1);
     return `<span class="op-flux__item">${pax} ${pax === 1 ? "hóspede" : "hóspedes"}</span>`;
   }
-  // Consulta: só o fluxo FNRH autorizado; pagamento não é exibido.
-  if (isReservaConsultaHits(reserva)) {
-    return `<span class="op-flux__item">${isFnrhConsultaCompleta(reserva) ? "FNRH completa" : "FNRH pendente"}</span>`;
-  }
+  // Consulta: mesmo texto de FNRH/acesso da Recepção; pagamento não é exibido.
+  if (isReservaConsultaHits(reserva)) return linhaFluxoConsultaHits(reserva);
   const total = getHospedesTotal(reserva);
   const confirmadas = getFnrhConfirmadas(reserva);
   const finUi = resolveFinancialUi(reserva);
@@ -3365,8 +3397,13 @@ function buildArrivalsInputFromInternal(r) {
     pagamento_status: isReservaConsultaHits(r) ? "" : r.pagamento || "desconhecido",
     entrou_no_apto: !!r.entrouNoApto,
     acesso_liberado: !!r.acessoLiberado,
-    total_hospedes: Math.max(guests.length, 1),
-    fnrh_pendente: hasFnrhPendente(r),
+    total_hospedes: isReservaConsultaHits(r)
+      ? Math.max(Number(r.totalHospedesAtivos) || 0, 1)
+      : Math.max(guests.length, 1),
+    // Consulta: mesma regra da aba Chegadas da Recepção (agregado do banco).
+    fnrh_pendente: isReservaConsultaHits(r)
+      ? isFnrhAggregatePending(r.fnrhStatusAgregado)
+      : hasFnrhPendente(r),
     recent_change_labels: recentChangeLabelsFromHistorico(r.historicoOperacional),
     recent_cancel_event: (r.historicoOperacional || []).some(function (ev) {
       return String(ev.tipo || "") === "hits_reserva_cancelada";
@@ -3374,7 +3411,9 @@ function buildArrivalsInputFromInternal(r) {
     tolerancia_ativa: tol.grace_status === "active",
     senha_suspensa: tol.grace_status === "suspended",
     comunicacao_falha: !!tol.communication_failed,
-    credencial_ausente: !r.acessoLiberado && !r.ttlockPrincipalTodosProvisionados,
+    credencial_ausente: isReservaConsultaHits(r)
+      ? !r.acessoLiberado
+      : !r.acessoLiberado && !r.ttlockPrincipalTodosProvisionados,
   };
 }
 
@@ -3509,7 +3548,11 @@ let arrivalsTruncatedWarning = false;
 
 async function ensureArrivalsDataset() {
   if (arrivalsDatasetCache) return arrivalsDatasetCache;
-  if (!modoConsultaHits && PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && getSupabase()) {
+  if (modoConsultaHits) {
+    // Mesma base da Recepção (todas as reservas do banco), pela projeção da RPC.
+    arrivalsDatasetCache = consultaHitsTodas.map(buildArrivalsInputFromInternal);
+    arrivalsTruncatedWarning = false;
+  } else if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && getSupabase()) {
     const loaded = await loadArrivalsDatasetFromBackend();
     arrivalsDatasetCache = loaded.items || [];
     arrivalsTruncatedWarning = !!loaded.truncated;
@@ -3528,7 +3571,10 @@ function invalidateArrivalsCache() {
 
 function renderOccupiedGuestsCard() {
   const policy = getArrivalsPolicy();
-  const raw = arrivalsDatasetCache || (reservas || []).map(buildArrivalsInputFromInternal);
+  // Consulta: mesma base da Recepção (banco), nunca a lista mesclada.
+  const raw =
+    arrivalsDatasetCache ||
+    (modoConsultaHits ? consultaHitsTodas : reservas || []).map(buildArrivalsInputFromInternal);
   const items = Array.isArray(raw) ? raw : [];
   occupiedSummaryCache = policy
     ? policy.summarizeOccupiedGuests(items)
@@ -3881,7 +3927,8 @@ async function loadReservasSomenteLeituraHits(jaCarregadas, options) {
   if (!Array.isArray(externas) || externas.length === 0) return [];
   // Feed lido com sucesso: quem está no banco e sumiu dele é confirmado no detalhe.
   // Reaproveitando a última leitura, a reconciliação já rodou naquele ciclo.
-  if (!(options && options.reuseOnly === true)) {
+  // hits_consulta nunca reconcilia: a reconciliação grava no banco.
+  if (!modoConsultaHits && !(options && options.reuseOnly === true)) {
     await reconciliarCanceladasHits(jaCarregadas, externas);
   }
   const jaNoBanco = new Set(
@@ -3889,7 +3936,9 @@ async function loadReservasSomenteLeituraHits(jaCarregadas, options) {
       .map((r) => String((r && r.externalReservationId) || "").trim())
       .filter(Boolean),
   );
-  return externas.filter((r) => !jaNoBanco.has(String(r.externalReservationId)));
+  const novas = externas.filter((r) => !jaNoBanco.has(String(r.externalReservationId)));
+  // Consulta: mesmas reservas, apresentadas como consulta (sem CTA de preparo).
+  return modoConsultaHits ? novas.map(paraConsultaSomenteNoHits) : novas;
 }
 
 /**
@@ -3898,7 +3947,6 @@ async function loadReservasSomenteLeituraHits(jaCarregadas, options) {
  * abriria vazia e só populasse depois de uma ação do operador.
  */
 async function loadReservasOperacionaisComLeituraHits(options) {
-  if (modoConsultaHits) return loadReservasConsultaHits();
   const base = (await loadReservasOperacionaisFromProvider()) || [];
   const hits = await loadReservasSomenteLeituraHits(base, options);
   // A reconciliação pode ter marcado canceladas em `base`: elas saem da grade.
@@ -3914,7 +3962,6 @@ async function loadReservasOperacionaisComLeituraHits(options) {
  * listeners — a grade ficava vazia e o botão Atualizar, inerte.
  */
 function aplicarLeituraHitsQuandoPronta(options) {
-  if (modoConsultaHits) return;
   loadReservasSomenteLeituraHits(reservas, options)
     .then((hits) => {
       // Canceladas confirmadas na reconciliação saem da grade mesmo sem linha nova.
@@ -7881,19 +7928,64 @@ function showAccessState(title, message, actionLabel) {
 let modoConsultaHits = false;
 
 function mapConsultaHitsRow(row) {
+  const r = row || {};
+  const total = Math.max(0, Number(r.fnrh_hospedes_total) || 0);
+  const confirmados = Math.min(total, Math.max(0, Number(r.fnrh_hospedes_confirmados) || 0));
+  // Só contagem: mesma régua de FNRH da Recepção sem trazer nenhum dado de hóspede.
+  const hospedes = [];
+  for (let i = 0; i < total; i++) {
+    hospedes.push({
+      consultaSintetico: true,
+      statusOperacional: i < confirmados ? GUEST_STATUS.CONFIRMADO : GUEST_STATUS.NAO_IDENTIFICADO,
+    });
+  }
+  const original = String(r.main_guest_name || "").trim();
   return {
-    id: String((row && row.reservation_id) || ""),
+    id: String(r.reservation_id || ""),
     consultaHits: true,
-    apartamento: String((row && row.apartment_code) || "").trim(),
-    hospedePrincipal: String((row && row.main_guest_name) || "").trim(),
-    externalReservationId: null,
-    checkInPrevisto: String((row && row.check_in_previsto) || "").slice(0, 10),
-    checkOutPrevisto: String((row && row.check_out_previsto) || "").slice(0, 10),
-    statusReserva: row && row.status_reserva === "cancelada" ? "cancelada" : "ativa",
-    fnrhStatusAgregado: String((row && row.fnrh_status_agregado) || "").trim() || "fnrh_pendente",
-    acessoLiberado: !!(row && row.acesso_liberado),
-    entrouNoApto: !!(row && row.entrou_no_apto),
+    apartamento: String(r.apartment_code || "").trim(),
+    hospedePrincipal: original,
+    hospedePrincipalExibicao: String(r.main_guest_display_name || "").trim() || original,
+    externalReservationId: String(r.external_reservation_id || "").trim() || null,
+    checkInPrevisto: String(r.check_in_previsto || "").slice(0, 10),
+    checkOutPrevisto: String(r.check_out_previsto || "").slice(0, 10),
+    statusReserva: r.status_reserva === "cancelada" ? "cancelada" : "ativa",
+    fnrhStatusAgregado: String(r.fnrh_status_agregado || "").trim() || "fnrh_pendente",
+    acessoLiberado: !!r.acesso_liberado,
+    // Acesso efetivo (mesma regra da Recepção), só o booleano.
+    ttlockPrincipalTodosProvisionados: !!r.acesso_efetivo,
+    entrouNoApto: !!r.entrou_no_apto,
+    totalHospedesAtivos: Math.max(0, Number(r.total_hospedes) || 0),
+    // Decisão neutra do servidor: a Recepção mantém esta reserva na lista
+    // padrão (mesma régua). O motivo não é fornecido a este perfil.
+    manterNaListaOperacional: r.manter_na_lista_operacional === true,
     // Pagamento não é fornecido a este perfil e nunca é exibido.
+    pagamento: "",
+    hospedes,
+    historicoOperacional: [],
+    comunicacaoEnviosOperacional: [],
+    cobrancasPagarme: [],
+    pagamentosPagarme: [],
+  };
+}
+
+/** Reserva lida do HITS e ainda não materializada, no formato de consulta. */
+function paraConsultaSomenteNoHits(r) {
+  return {
+    id: r.id,
+    consultaHits: true,
+    origemHitsPreview: true,
+    apartamento: r.apartamento,
+    hospedePrincipal: r.hospedePrincipal,
+    externalReservationId: r.externalReservationId,
+    checkInPrevisto: r.checkInPrevisto,
+    checkOutPrevisto: r.checkOutPrevisto,
+    statusReserva: r.statusReserva,
+    totalHospedesHits: r.totalHospedesHits,
+    totalHospedesAtivos: r.totalHospedesHits,
+    acessoLiberado: false,
+    entrouNoApto: !!r.entrouNoApto,
+    fnrhStatusAgregado: "",
     pagamento: "",
     hospedes: [],
     historicoOperacional: [],
@@ -7903,15 +7995,32 @@ function mapConsultaHitsRow(row) {
   };
 }
 
-/** Única fonte de dados do perfil hits_consulta. */
+/** Todas as reservas da projeção (base da aba Chegadas, como na Recepção). */
+let consultaHitsTodas = [];
+
+/**
+ * Banco para hits_consulta: só pela RPC operacional_hits_checkin_consulta().
+ * Mesmo recorte da Recepção (loadReservasFromBackend): check-in no período
+ * OU estadia em curso hoje.
+ */
 async function loadReservasConsultaHits() {
   const supabase = getSupabase();
   if (!supabase) return [];
   const { data, error } = await supabase.rpc("operacional_hits_checkin_consulta");
   if (error || !Array.isArray(data)) return [];
-  return data
-    .map(mapConsultaHitsRow)
-    .filter((r) => r.id && r.statusReserva !== "cancelada");
+  consultaHitsTodas = data.map(mapConsultaHitsRow).filter((r) => r.id);
+  const range = resolvePeriodRangeYmd(periodoAtivo || "hoje", {
+    fromYmd: periodoCustomFrom,
+    toYmd: periodoCustomTo,
+  });
+  const today = resolveOperationalTodayYmd(new Date());
+  return consultaHitsTodas.filter((r) => {
+    const ci = r.checkInPrevisto;
+    const co = r.checkOutPrevisto;
+    const noPeriodo = ci >= range.from && ci <= range.to;
+    const emEstadia = !!ci && !!co && ci <= today && co > today;
+    return noPeriodo || emEstadia;
+  });
 }
 
 /** Remove da tela o que não é consulta: diagnóstico técnico do HITS. */
@@ -7919,8 +8028,10 @@ function prepararTelaConsultaHits() {
   document.body.classList.add("op-consulta-hits");
   document.querySelector("#op-hits-sandbox-toggle")?.remove();
   document.querySelector("#op-hits-sandbox-details")?.remove();
-  const countEl = document.querySelector("#op-hits-sandbox-count");
-  if (countEl instanceof HTMLElement) countEl.textContent = "Somente consulta";
+  // Sem filtro financeiro para o perfil.
+  document.querySelector('#op-toolbar-status option[value="' + FILTER_PENDENTE_PAGAMENTO + '"]')?.remove();
+  // "Só problemas" (Chegadas) usa alertas internos da Recepção: não existe aqui.
+  document.querySelector('[data-arrivals-filter="so_problemas"]')?.remove();
 }
 
 /* ---------- Bindings / init ---------- */
@@ -7988,12 +8099,8 @@ async function initCheckinOperacional() {
 
   // Banco primeiro: a tela sobe e os listeners são registrados de imediato.
   // A leitura HITS entra logo em seguida, no mesmo ciclo compartilhado.
-  if (modoConsultaHits) {
-    reservas = await loadReservasConsultaHits();
-  } else {
-    reservas = (await loadReservasOperacionaisFromProvider()) || [];
-    aplicarLeituraHitsQuandoPronta();
-  }
+  reservas = (await loadReservasOperacionaisFromProvider()) || [];
+  aplicarLeituraHitsQuandoPronta();
   invalidateArrivalsCache();
   await ensureArrivalsDataset();
 
