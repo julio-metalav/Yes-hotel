@@ -151,11 +151,16 @@ function main() {
     for (const token of [".from(", ".update(", ".insert(", ".delete(", ".upsert(", "functions.invoke"]) {
       assert.ok(!load.includes(token), `loadReservasConsultaHits não usa ${token}`);
     }
-    assert.match(fnBody("loadReservasOperacionaisComLeituraHits"), /if \(modoConsultaHits\) return loadReservasConsultaHits\(\);/);
-    assert.match(fnBody("aplicarLeituraHitsQuandoPronta"), /if \(modoConsultaHits\) return;/);
-    assert.match(fnBody("ensureArrivalsDataset"), /!modoConsultaHits && PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND/);
-    assert.match(init, /if \(modoConsultaHits\) \{\s*reservas = await loadReservasConsultaHits\(\);/);
-    ok("carga inicial, Atualizar, período e Chegadas usam só operacional_hits_checkin_consulta()");
+    // Banco só pela RPC; a leitura HITS é a mesma da Recepção, sem reconciliação (que grava).
+    assert.match(
+      fnBody("loadReservasOperacionaisFromProvider"),
+      /if \(modoConsultaHits\) return loadReservasConsultaHits\(\)\.then\(filtrarReservasOperacionaisAtivas\);/,
+    );
+    assert.match(fnBody("ensureArrivalsDataset"), /if \(modoConsultaHits\) \{\s*\/\/[^\n]*\n\s*arrivalsDatasetCache = consultaHitsTodas\.map/);
+    const leituraHits = fnBody("loadReservasSomenteLeituraHits");
+    assert.match(leituraHits, /if \(!modoConsultaHits && !\(options && options\.reuseOnly === true\)\) \{\s*await reconciliarCanceladasHits/);
+    assert.match(leituraHits, /modoConsultaHits \? novas\.map\(paraConsultaSomenteNoHits\) : novas/);
+    ok("banco só pela RPC operacional_hits_checkin_consulta(); leitura HITS igual à Recepção, sem reconciliação");
 
     // Nenhum comando de escrita para reservas de consulta.
     for (const fn of [
@@ -285,6 +290,58 @@ function main() {
       "entrou_no_apto",
     ]);
     ok("RPC devolve exatamente as 9 colunas mínimas, nenhuma delas sensível");
+
+    // Projeção de homologação (20260921120000): mesma população, só campos operacionais.
+    const sql2 = readFileSync(
+      resolve(ROOT, "supabase/migrations/20260921120000_hits_consulta_projecao_homologacao.sql"),
+      "utf8",
+    );
+    const r2i = sql2.indexOf("returns table (", sql2.indexOf("create function public.operacional_hits_checkin_consulta()")) + "returns table (".length;
+    const returns2 = sql2.slice(r2i, sql2.indexOf("\n)", r2i));
+    for (const pattern of forbiddenColumnPatterns) {
+      assert.doesNotMatch(returns2, pattern, `projeção não retorna coluna proibida (${pattern})`);
+    }
+    assert.deepEqual([...returns2.matchAll(/^\s*(\w+)\s+\w+/gm)].map((m) => m[1]), [
+      "reservation_id",
+      "external_reservation_id",
+      "apartment_code",
+      "main_guest_name",
+      "main_guest_display_name",
+      "check_in_previsto",
+      "check_out_previsto",
+      "status_reserva",
+      "fnrh_status_agregado",
+      "fnrh_hospedes_total",
+      "fnrh_hospedes_confirmados",
+      "total_hospedes",
+      "acesso_liberado",
+      "acesso_efetivo",
+      "entrou_no_apto",
+      "manter_na_lista_operacional",
+    ]);
+    const corpo2Inteiro = sql2.slice(sql2.indexOf("as $$"), sql2.lastIndexOf("$$;"));
+    // Estado interno (pagamento/saldo/cobrança/comissionamento) só dentro do bloco
+    // [permanencia], que produz um único booleano e não é projetado ao perfil.
+    const iniPerm = corpo2Inteiro.indexOf("-- [permanencia:inicio]");
+    const fimPerm = corpo2Inteiro.indexOf("-- [permanencia:fim]");
+    assert.ok(iniPerm > 0 && fimPerm > iniPerm, "bloco [permanencia] delimitado");
+    const blocoPerm = corpo2Inteiro.slice(iniPerm, fimPerm);
+    const corpo2 = corpo2Inteiro.slice(0, iniPerm) + corpo2Inteiro.slice(fimPerm);
+    assert.deepEqual([...blocoPerm.matchAll(/\)\s+as\s+(\w+)/g)].map((m) => m[1]), ["pendencia_interna", "quitado_centavos"], "bloco [permanencia] só produz o booleano (e o subtotal interno)");
+    assert.ok(!/perm\.(?!pendencia_interna)\w+/.test(corpo2), "fora do bloco só se usa perm.pendencia_interna");
+    assert.match(corpo2, /coalesce\(perm\.pendencia_interna, true\)[\s\S]*\) as manter_na_lista_operacional/, "pendência interna só entra na decisão neutra");
+    assert.ok(!/q\.quitado_centavos/.test(corpo2), "subtotal interno não sai do bloco");
+    assert.match(corpo2, /if not public\.is_yes_hotel_hits_consulta_reader\(\) then/);
+    assert.match(sql2, /security definer\s*\nset search_path = ''/);
+    for (const col of ["pagamento", "balance", "amount", "email", "whatsapp", "telefone", "documento", "placa", "comiss", "senha", "payload"]) {
+      assert.ok(!new RegExp(col, "i").test(corpo2), `corpo da RPC não lê ${col}`);
+    }
+    assert.doesNotMatch(sql2, /\b(insert|update|delete)\b\s+(into|public\.|from)/i, "RPC sem escrita");
+    assert.doesNotMatch(sql2, /grant\s+(select|insert|update|delete)/i, "nenhum GRANT em tabela");
+    assert.doesNotMatch(sql2, /create policy|alter policy|enable row level/i, "RLS intocada");
+    assert.match(sql2, /revoke all on function public\.operacional_hits_checkin_consulta\(\) from public, anon;/);
+    assert.match(sql2, /grant execute on function public\.operacional_hits_checkin_consulta\(\) to authenticated;/);
+    ok("projeção de homologação: 16 colunas operacionais (decisão de permanência só booleana), sem financeiro/contato/documento, sem escrita, RLS e grants inalterados");
   }
 
   console.log("\n== 10. O backend rejeita tentativas de escrita da HITS ==");
