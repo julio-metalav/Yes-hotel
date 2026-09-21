@@ -357,6 +357,76 @@ function main() {
     ok("F. ensureAdminCaller inalterado; hits_consulta não ganha nenhuma permissão administrativa");
   }
 
+  console.log("\n== 16. Login pela raiz (ui/index.html) redireciona hits_consulta para o Check-in ==");
+  {
+    const indexHtml = readFileSync(resolve(ROOT, "ui/index.html"), "utf8");
+    const loginHtml = readFileSync(resolve(ROOT, "ui/usuarios-login-mvp.html"), "utf8");
+
+    for (const [nome, html] of [["index.html", indexHtml], ["usuarios-login-mvp.html", loginHtml]] as const) {
+      const iPolicy = html.indexOf('src="./yes-nav-policy.js');
+      const iLogin = html.indexOf('src="./usuarios-login-mvp.js');
+      assert.ok(iPolicy > -1, `${nome} carrega yes-nav-policy.js`);
+      assert.ok(iLogin > -1 && iPolicy < iLogin, `${nome}: yes-nav-policy.js antes de usuarios-login-mvp.js`);
+    }
+    ok("A. index.html carrega yes-nav-policy.js antes de usuarios-login-mvp.js");
+
+    assert.match(indexHtml, /<option value="hits_consulta">HITS \(consulta\)<\/option>/);
+    ok("B. index.html oferece o perfil hits_consulta");
+
+    // Mesma lógica real de redirectUserByRole, com a política carregada.
+    const loginJs = readFileSync(resolve(ROOT, "ui/usuarios-login-mvp.js"), "utf8");
+    const pick = (name: string) => {
+      const i = loginJs.indexOf(`function ${name}(`);
+      assert.ok(i > -1, `${name} existe em usuarios-login-mvp.js`);
+      return loginJs.slice(i, loginJs.indexOf("\n}", i) + 2);
+    };
+    const src = `${pick("isCafeDemoReturnRequested")}\n${pick("redirectUserByRole")}\nthis.redirectUserByRole = redirectUserByRole;`;
+    const redirectCom = (policy: unknown, role: string) => {
+      const window = { location: { search: "", href: "" }, YesHotelNavPolicy: policy };
+      const ctx = createContext({
+        window,
+        URLSearchParams,
+        auth: { canAccessBreakfast: () => false },
+      } as any);
+      runInContext(src, ctx);
+      const redirected = (ctx as any).redirectUserByRole({ role });
+      return { redirected, href: window.location.href };
+    };
+
+    const hits = redirectCom(navPolicy, "hits_consulta");
+    assert.equal(hits.redirected, true);
+    assert.equal(hits.href, "./checkin-operacional-mvp.html");
+    ok("C. hits_consulta, com a política carregada, vai direto para ./checkin-operacional-mvp.html");
+
+    for (const role of ["admin", "recepcao"]) {
+      const r = redirectCom(navPolicy, role);
+      assert.equal(r.redirected, false, `${role} permanece na Home`);
+      assert.equal(r.href, "");
+    }
+    ok("D. admin e recepção continuam na Home");
+
+    const cafe = redirectCom(navPolicy, "cafe");
+    assert.equal(cafe.redirected, true);
+    assert.equal(cafe.href, navPolicy.getHomeHrefForRole("cafe"));
+    ok("E. café segue a política atual (primeiro item do seu menu)");
+
+    // O defeito original: sem a política carregada, hits_consulta ficava na Home.
+    assert.equal(redirectCom(undefined, "hits_consulta").redirected, false);
+
+    const criticos = [
+      'src="./yes-nav-policy.js',
+      '<option value="hits_consulta">HITS (consulta)</option>',
+      'placeholder="+5567999887766"',
+    ];
+    for (const trecho of criticos) {
+      assert.equal(indexHtml.includes(trecho), loginHtml.includes(trecho), `divergência em: ${trecho}`);
+      assert.ok(indexHtml.includes(trecho), `index.html sem: ${trecho}`);
+    }
+    const scripts = (html: string) => Array.from(html.matchAll(/<script[^>]*src="([^"]+)"/g), (m) => m[1]);
+    assert.deepEqual(scripts(indexHtml), scripts(loginHtml), "mesmos scripts, na mesma ordem");
+    ok("F. index.html e usuarios-login-mvp.html alinhados nos elementos críticos (scripts, perfil e telefone)");
+  }
+
   console.log(`\nOK test-perfis-navegacao-hits-consulta (${cases} casos)`);
 }
 
