@@ -912,7 +912,7 @@ function resolveNomeExibicaoReserva(nomeOriginal, hospedes) {
     return h && h.principal;
   });
   const c = principal && principal.cadastroConfirmado;
-  if (c && c.nomeCivil) return c.nomeSocial || c.nomeCivil;
+  if (c) return c.nomeSocial || c.nomeCivil || nomeOriginal || "";
   return nomeOriginal || "";
 }
 
