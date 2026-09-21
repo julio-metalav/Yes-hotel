@@ -159,7 +159,7 @@ function main() {
 
     // Nenhum comando de escrita para reservas de consulta.
     for (const fn of [
-      "openDetail",
+      "renderDetail",
       "canShowPresencialDiferidoBtn",
       "listaProximaAcaoOperacional",
       "derivarExcecaoOperacionalReserva",
@@ -178,13 +178,63 @@ function main() {
       2,
       "tabela e cartão usam o status de consulta (sem pagamento)",
     );
-    assert.match(lista, /consulta\s*\?\s*""\s*:\s*`\s*<div class="op-actions-cell">/, "sem Ver/⋯/PPD na tabela");
-    assert.match(lista, /mConsulta\s*\?\s*""\s*:\s*`<span class="op-mcard__actions">/, "sem Ver/PPD no cartão");
+    // A. Ver existe para o perfil; B. nada além dele (sem ⋯, PPD, cobrança, CTA).
+    const celConsulta = lista.match(/consulta\s*\?\s*`([\s\S]*?)`\s*:\s*`/);
+    assert.ok(celConsulta, "célula de ações da consulta isolável");
+    assert.match(celConsulta![1], /class="op-btn-table op-btn-ver" data-id="\$\{rid\}">Ver<\/button>/);
+    assert.equal((celConsulta![1].match(/<button/g) || []).length, 1, "tabela: só o botão Ver");
+    const cardConsulta = lista.match(/mConsulta\s*\?\s*`([\s\S]*?)`\s*:\s*`/);
+    assert.ok(cardConsulta, "ações do cartão de consulta isoláveis");
+    assert.match(cardConsulta![1], /op-btn-ver-inline/);
+    assert.equal((cardConsulta![1].match(/<button/g) || []).length, 1, "cartão: só o botão Ver");
+    for (const proibido of ["op-btn-more", "data-ppd", "ppdBtn", "data-payment-badge", "op-next-action-btn", "data-cta-kind"]) {
+      assert.ok(!celConsulta![1].includes(proibido) && !cardConsulta![1].includes(proibido), `sem ${proibido} na consulta`);
+    }
+    ok("A/B. hits_consulta tem só o botão Ver (tabela e cartão); sem ⋯, PPD, cobrança ou CTA");
+
+    // C. Ver abre o MESMO drawer (openDetail → syncDetailPanelChrome → renderDetail).
+    const abrir = fnBody("openDetail");
+    assert.doesNotMatch(abrir, /isReservaConsultaHits/, "sem caminho paralelo de abertura");
+    const render = fnBody("renderDetail");
+    assert.match(
+      render,
+      /if \(isReservaConsultaHits\(reserva\)\) \{\s*detailBodyElement\.innerHTML = buildSituacaoConsultaHitsHtml\(reserva\);\s*return;\s*\}/,
+      "consulta sai antes de montar ações e de bindDetailListeners",
+    );
+    assert.ok(
+      render.indexOf("buildSituacaoConsultaHitsHtml") < render.indexOf("bindDetailListeners"),
+      "nenhum listener do detalhe operacional é ligado para consulta",
+    );
+    ok("C/I. Ver abre o mesmo drawer do admin; consulta não liga listeners nem carrega fechaduras");
+
+    // D/E. Mesmo bloco "Situação atual" do admin, só com dados da RPC e sem controles.
+    const det = fnBody("buildSituacaoConsultaHitsHtml");
+    for (const cls of ["reservation-detail-section reservation-detail-top-hero", "detail-situacao-kicker", "detail-situacao-grid", "detail-situacao-acesso", "detail-proxima-acao", "detail-acao-kicker", "detail-acao-hint"]) {
+      assert.ok(det.includes(cls), `reaproveita a marcação do admin (${cls})`);
+    }
+    for (const tag of ["<button", "<form", "<input", "<select", "<textarea", "<a ", "href=", "data-cta", "data-recomendacao", "onclick", "Pagamento"]) {
+      assert.ok(!det.includes(tag), `drawer de consulta sem ${tag}`);
+    }
+    const campos = [...det.matchAll(/reserva\.(\w+)/g)].map((m) => m[1]);
+    const permitidos = new Set(["acessoLiberado", "entrouNoApto"]);
+    for (const c of campos) assert.ok(permitidos.has(c), `drawer só usa campos da RPC (achou reserva.${c})`);
+    ok("D/E. drawer de consulta reaproveita o bloco do admin, sem pagamento e sem nenhum controle");
+
+    // F. Linha e cartão inteiros não abrem o detalhe; só o botão Ver.
     assert.match(lista, /if \(!id \|\| isReservaConsultaHits\(getReservaById\(id\)\)\) return;/, "linha não abre detalhe");
-    assert.match(lista, /if \(isReservaConsultaHits\(getReservaById\(card\.getAttribute\("data-id"\)\)\)\) return;/, "cartão não abre detalhe");
+    assert.match(
+      lista,
+      /isReservaConsultaHits\(getReservaById\(card\.getAttribute\("data-id"\)\)\)\) \{\s*card\.querySelector\("\.op-btn-ver-inline"\)\?\.addEventListener\("click"[\s\S]{0,160}openDetail\(id\);[\s\S]{0,40}return;/,
+      "cartão de consulta: só o botão Ver abre",
+    );
     const prep = fnBody("prepararTelaConsultaHits");
     assert.match(prep, /#op-hits-sandbox-toggle"\)\?\.remove\(\)/, "diagnóstico técnico removido do DOM");
-    ok("próxima ação só como texto; Ver, ⋯, PPD, cobrança, detalhe e diagnóstico não existem para o perfil");
+    ok("F. linha e cartão não abrem detalhe por outros caminhos; diagnóstico continua removido");
+
+    // G. Admin/recepção: renderDetail completo inalterado no caminho normal.
+    assert.match(fnBody("openDetail"), /detailReservaId = reservaId;\s*syncDetailPanelChrome\(reserva\);\s*renderDetail\(reserva\);/);
+    assert.match(lista, /<button type="button" class="op-btn-icon op-btn-more" data-id="\$\{rid\}" title="Detalhes" aria-label="Abrir detalhes">⋯<\/button>/);
+    ok("G. admin/recepção mantêm Ver + ⋯ e o detalhe operacional completo");
   }
 
   console.log("\n== 9. O caminho de dados da HITS não retorna campos sensíveis ==");

@@ -1052,6 +1052,50 @@ function derivarStatusConsultaHits(reserva) {
   return { label: "Aguardando acesso", type: "neutral" };
 }
 
+/**
+ * Detalhe do perfil hits_consulta: o MESMO drawer e o mesmo bloco "Situação
+ * atual" de admin/recepção (mesmas classes e marcação), só com o que a RPC
+ * operacional_hits_checkin_consulta() fornece: FNRH, acesso e a próxima etapa.
+ * Seções que dependem de dados não autorizados (pagamento, hóspedes/contatos,
+ * origem comercial, fechaduras, comunicações, histórico) são omitidas. Nenhum
+ * botão, campo ou link é criado e nada é consultado ao abrir/fechar.
+ */
+function buildSituacaoConsultaHitsHtml(reserva) {
+  const fnrhLabel = isFnrhConsultaCompleta(reserva) ? "Concluída" : "Pendente";
+  const acesso = reserva.entrouNoApto
+    ? { label: "Entrou no apartamento", accent: "entrou" }
+    : reserva.acessoLiberado
+      ? { label: "Acesso liberado", accent: "ok" }
+      : { label: "Aguardando liberação", accent: "pending" };
+  const acessoClass =
+    acesso.accent === "entrou"
+      ? " detail-situacao-acesso--entrou"
+      : acesso.accent === "ok"
+        ? " detail-situacao-acesso--ok"
+        : "";
+  return (
+    '<div class="reservation-detail-section reservation-detail-top-hero">' +
+    '<p class="detail-situacao-kicker">Situação atual</p>' +
+    '<dl class="detail-situacao-grid">' +
+    "<div><dt>FNRH</dt><dd>" +
+    escapeHtml(fnrhLabel) +
+    "</dd></div>" +
+    '<div class="detail-situacao-acesso' +
+    acessoClass +
+    '"><dt>Acesso</dt><dd>' +
+    escapeHtml(acesso.label) +
+    "</dd></div>" +
+    "</dl>" +
+    '<div class="detail-proxima-acao">' +
+    '<p class="detail-acao-kicker">Próxima ação</p>' +
+    '<p class="detail-acao-hint">' +
+    escapeHtml(proximaEtapaConsultaHits(reserva)) +
+    "</p>" +
+    "</div>" +
+    "</div>"
+  );
+}
+
 function proximaEtapaConsultaHits(reserva) {
   if (reserva.entrouNoApto) return "Hóspede no apartamento";
   if (reserva.acessoLiberado) return "Acesso liberado — aguardando entrada";
@@ -1787,7 +1831,7 @@ async function backendLiberarAcesso(reservaId) {
       }
       if (data && data.ok === false) {
         await supabase.from("operacional_reservas").update({ acesso_liberado: false }).eq("id", rid);
-        return { ok: false, error: data.error ? String(data.error) : "Provisionamento TTLock recusado." };
+        return { ok: false, error: data.error ? String(data.error) : "Provisionamento da fechadura recusado." };
       }
       const falhas = Number(data?.falhas ?? 0);
       const st = String(data?.status ?? "");
@@ -1797,7 +1841,7 @@ async function backendLiberarAcesso(reservaId) {
         return {
           ok: false,
           error:
-            "TTLock não concluiu o provisionamento de todos os itens. " +
+            "As fechaduras não concluíram o provisionamento de todos os itens. " +
             (erros || `status=${st || "—"}, falhas=${falhas}.`) +
             " Corrija e tente liberar de novo.",
         };
@@ -2276,7 +2320,7 @@ function getStatusOperacionalReservaTexto(reserva) {
     isPagamentoOk(reserva) &&
     isFnrhCompleta(reserva)
   ) {
-    return "Acesso marcado; TTLock ainda não provisionado nos itens.";
+    return "Acesso marcado; fechaduras ainda não provisionadas nos itens.";
   }
   if (isProntaParaLiberarAcesso(reserva)) return "Pronta para liberar acesso";
   if (acessoLiberadoEfetivo(reserva) && !reserva.entrouNoApto) return "Acesso liberado, aguardando chegada";
@@ -2375,7 +2419,7 @@ function derivarStatusOperacional(reserva) {
   }
   if (!acessoLiberadoEfetivo(reserva)) {
     if (ttlockBloqueiaLiberadoNoPainel(reserva) && reserva.acessoLiberado && !reserva.ttlockPrincipalTodosProvisionados) {
-      return { label: "TTLock pendente (liberação incompleta)", type: "pronto-liberar" };
+      return { label: "Fechadura pendente (liberação incompleta)", type: "pronto-liberar" };
     }
     return { label: "Pronto para liberar acesso", type: "pronto-liberar" };
   }
@@ -2945,7 +2989,13 @@ function renderOperacionalLista() {
         <td class="op-td op-td--next">${proxHtml}</td>
         <td class="op-td op-td--actions">${
           consulta
-            ? ""
+            ? `
+          <div class="op-actions-cell">
+            <div class="op-actions-primary">
+              <button type="button" class="op-btn-table op-btn-ver" data-id="${rid}">Ver</button>
+            </div>
+          </div>
+        `
             : `
           <div class="op-actions-cell">
             <div class="op-actions-primary">
@@ -2999,7 +3049,9 @@ function renderOperacionalLista() {
           ${proxMobileHtml}
           ${
             mConsulta
-              ? ""
+              ? `<span class="op-mcard__actions">
+            <button type="button" class="op-btn-table op-btn-ver-inline" data-id="${rid}" aria-label="Ver detalhes da reserva">Ver</button>
+          </span>`
               : `<span class="op-mcard__actions">
             ${ppdBtnM}
             <button type="button" class="op-btn-table op-btn-ver-inline" data-id="${rid}" data-stop="1" aria-label="Ver detalhes da reserva">Ver</button>
@@ -3066,7 +3118,14 @@ function renderOperacionalLista() {
   });
 
   opMobileList?.querySelectorAll(".op-mcard").forEach((card) => {
-    if (isReservaConsultaHits(getReservaById(card.getAttribute("data-id")))) return;
+    if (isReservaConsultaHits(getReservaById(card.getAttribute("data-id")))) {
+      card.querySelector(".op-btn-ver-inline")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = card.getAttribute("data-id");
+        if (id) openDetail(id);
+      });
+      return;
+    }
     card.addEventListener("keydown", (e) => {
       if (e.target !== card || (e.key !== "Enter" && e.key !== " ")) return;
       e.preventDefault();
@@ -3932,7 +3991,7 @@ function presentTtlockPasswordStatus(data) {
   if (status === "provisionando" || syncStatus === "pending") {
     return {
       statusClass: "sync-pending",
-      statusLabel: "Provisionando senha — aguardando confirmação da TTLock",
+      statusLabel: "Provisionando senha — aguardando confirmação da fechadura",
       resumoText: resumoRaw,
     };
   }
@@ -3981,7 +4040,7 @@ async function loadAndRenderTtlockSection(reservaId) {
       typeof reservas !== "undefined" && Array.isArray(reservas)
         ? reservas.find((r) => String(r.id) === String(reservaId))
         : null;
-    let fallbackLabel = "Status TTLock indisponível (sessão sem lifecycle)";
+    let fallbackLabel = "Status da fechadura indisponível (sessão sem lifecycle)";
     let statusClass = "sync-pending";
     if (reserva && reserva.ttlockPrincipalTodosProvisionados) {
       fallbackLabel = "Senha pronta (cache local)";
@@ -4019,8 +4078,8 @@ async function loadAndRenderTtlockSection(reservaId) {
     }
     if (data.temCredencial && data.status !== "revogada") {
       html += `<div class="reservation-detail-ttlock-actions">
-        <button type="button" class="secondary-button detail-ttlock-btn detail-ttlock-btn--danger detail-ttlock-cancel-btn" data-reserva-id="${escapeHtml(reservaId)}">Revogar acesso TTLock (exceção — não cancela no PMS)</button>
-        <button type="button" class="secondary-button detail-ttlock-btn detail-ttlock-btn--neutral detail-ttlock-checkout-btn" data-reserva-id="${escapeHtml(reservaId)}">Checkout (revogar acesso TTLock)</button>
+        <button type="button" class="secondary-button detail-ttlock-btn detail-ttlock-btn--danger detail-ttlock-cancel-btn" data-reserva-id="${escapeHtml(reservaId)}">Revogar acesso às fechaduras (exceção — não cancela no PMS)</button>
+        <button type="button" class="secondary-button detail-ttlock-btn detail-ttlock-btn--neutral detail-ttlock-checkout-btn" data-reserva-id="${escapeHtml(reservaId)}">Checkout (revogar acesso às fechaduras)</button>
       </div>`;
     }
     if (data.temCredencial && data.status === "revogada" && data.syncStatus && data.syncStatus !== "ok") {
@@ -4051,7 +4110,7 @@ async function loadAndRenderTtlockSection(reservaId) {
 
 async function acaoLifecycleCancel(reservaId) {
   if (!reservaId || !auth?.invokeLifecycleAction) return;
-  if (!confirm("Revogar credencial TTLock (exceção operacional)? Não altera a reserva no PMS. Ação irreversível para a credencial.")) return;
+  if (!confirm("Revogar credencial das fechaduras (exceção operacional)? Não altera a reserva no PMS. Ação irreversível para a credencial.")) return;
   try {
     const data = await auth.invokeLifecycleAction("lifecycle_cancel", { reservaId });
     const msg = data.idempotente
@@ -4070,7 +4129,7 @@ async function acaoLifecycleCancel(reservaId) {
 
 async function acaoLifecycleCheckout(reservaId) {
   if (!reservaId || !auth?.invokeLifecycleAction) return;
-  if (!confirm("Fazer checkout e revogar acesso TTLock desta reserva?")) return;
+  if (!confirm("Fazer checkout e revogar acesso às fechaduras desta reserva?")) return;
   try {
     const data = await auth.invokeLifecycleAction("lifecycle_checkout", { reservaId });
     const msg = data.idempotente
@@ -4109,8 +4168,6 @@ function openDetail(reservaId) {
   // O detalhe operacional depende de hóspedes, eventos, FNRH e TTLock do banco.
   // Reserva HITS não tem nada disso: não abre.
   if (isReservaSomenteLeituraHits(reserva)) return;
-  // Consulta: o detalhe operacional tem comandos de escrita — não abre.
-  if (isReservaConsultaHits(reserva)) return;
   detailReservaId = reservaId;
   syncDetailPanelChrome(reserva);
   renderDetail(reserva);
@@ -5558,9 +5615,9 @@ function derivarRecomendacaoOperacional(reserva, ctx) {
     if (tb === "provisionamento") {
       return {
         variant: "warn",
-        texto: lastFail.p.motivo_bloqueio || "Falha ao provisionar senha no TTLock.",
-        listaLabel: listaLabelBloqueioCurto(lastFail.p.motivo_bloqueio) || "Conferir TTLock",
-        cta: { kind: "ir_ttlock", label: "Ver status TTLock" },
+        texto: lastFail.p.motivo_bloqueio || "Falha ao provisionar senha na fechadura.",
+        listaLabel: listaLabelBloqueioCurto(lastFail.p.motivo_bloqueio) || "Conferir fechadura",
+        cta: { kind: "ir_ttlock", label: "Ver status da fechadura" },
       };
     }
   }
@@ -5651,7 +5708,7 @@ function formatAcessoSituacaoLabel(reserva) {
   }
   if (reserva.senhaEnviadaEm && !reserva.ttlockPrincipalTodosProvisionados) {
     return {
-      label: "Inconsistência: mensagem enviada sem provisioning TTLock",
+      label: "Inconsistência: mensagem enviada sem provisionamento da fechadura",
       accent: "error",
     };
   }
@@ -5661,7 +5718,7 @@ function formatAcessoSituacaoLabel(reserva) {
   }
   if (st === "provisionando") {
     return {
-      label: "Provisionando senha — aguardando confirmação da TTLock",
+      label: "Provisionando senha — aguardando confirmação da fechadura",
       accent: "pending",
     };
   }
@@ -5791,7 +5848,7 @@ function buildCentralAcoesHtml(reserva, ctx, rec, btns) {
   } else if (falha) {
     senhaEstado = falha === "geracao" ? "Falha ao gerar" : "Falha ao enviar";
     senhaTom = "error";
-    senhaSub = "Tente novamente ou confira o acesso TTLock abaixo.";
+    senhaSub = "Tente novamente ou confira o acesso às fechaduras abaixo.";
   } else if (senhaGerada) {
     senhaEstado = "Gerada, não enviada";
     senhaSub = acesso.label + ".";
@@ -6407,7 +6464,7 @@ function buildLocalModeDetailHtml(reserva) {
         <div><dt>Período</dt><dd>${escapeHtml(formatDataBR(reserva.checkInPrevisto))} ${escapeHtml(reserva.checkInHorario || "14:00")} → ${escapeHtml(formatDataBR(reserva.checkOutPrevisto))} ${escapeHtml(reserva.checkOutHorario || "12:00")}</dd></div>
         <div><dt>Ocupação</dt><dd>${escapeHtml(String(reserva.quantidadeHospedes || reserva.hospedes?.length || 1))} hóspede(s)</dd></div>
         <div><dt>FNRH</dt><dd>${escapeHtml(isFnrhCompleta(reserva) ? "Completa (simulação local)" : "Pendente (simulação local)")}</dd></div>
-        <div><dt>Acesso</dt><dd>TTLock mock · nenhuma credencial real</dd></div>
+        <div><dt>Acesso</dt><dd>Fechaduras (mock) · nenhuma credencial real</dd></div>
         <div><dt>Comunicação</dt><dd>Mock · nenhum envio real</dd></div>
         <div class="detail-local-grid__full"><dt>Observações</dt><dd>${escapeHtml(observation || "Sem observações")}</dd></div>
       </dl>
@@ -6424,7 +6481,7 @@ function buildLocalAccessClipboardText(reserva) {
     `Hóspede: ${reserva.hospedePrincipal || "—"}`,
     `Check-in: ${formatDataBR(reserva.checkInPrevisto)} às ${reserva.checkInHorario || "14:00"}`,
     `Check-out: ${formatDataBR(reserva.checkOutPrevisto)} às ${reserva.checkOutHorario || "12:00"}`,
-    "TTLock: modo mock — nenhuma senha ou credencial real foi gerada.",
+    "Fechaduras: modo mock — nenhuma senha ou credencial real foi gerada.",
     "Comunicação: modo mock — mensagem não enviada.",
   ].join("\n");
 }
@@ -6508,6 +6565,11 @@ function buildGuestCadastroConfirmadoHtml(h) {
 
 function renderDetail(reserva) {
   if (!(detailBodyElement instanceof HTMLElement) || !reserva) return;
+  // hits_consulta: mesmo drawer, só dados autorizados e nenhum comando.
+  if (isReservaConsultaHits(reserva)) {
+    detailBodyElement.innerHTML = buildSituacaoConsultaHitsHtml(reserva);
+    return;
+  }
   const hospedes = Array.isArray(reserva.hospedes) ? reserva.hospedes : [];
   const naoIdentificados = getNaoIdentificados(reserva);
   const faltamContato = getFaltamContato(reserva);
@@ -6720,7 +6782,7 @@ function renderDetail(reserva) {
     PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && auth?.invokeLifecycleAction
       ? `<div class="reservation-detail-section reservation-detail-ttlock-card" id="detail-ttlock-wrap">
     <div class="ttlock-card-head">
-      <p class="ttlock-card-title">Acesso TTLock</p>
+      <p class="ttlock-card-title">Acesso Fechaduras</p>
     </div>
     <div class="ttlock-card-body" id="detail-ttlock-section">
       <p class="reservation-detail-ttlock-loading" id="detail-ttlock-loading">Carregando status…</p>
@@ -7114,7 +7176,7 @@ function humanizarMensagemModalEnviarSenha(raw) {
     return "Ainda não há senha disponível para envio. Conclua a liberação de acesso no fluxo da reserva e tente de novo.";
   }
   if (lower.includes("falha no provisionamento") || lower.includes("provisionamento da senha")) {
-    return "Não foi possível preparar a senha na fechadura. Verifique o TTLock e tente novamente em instantes.";
+    return "Não foi possível preparar a senha na fechadura. Verifique as fechaduras e tente novamente em instantes.";
   }
   if (lower.includes("failed to fetch") || lower.includes("networkerror") || lower === "load failed") {
     return "Sem conexão com o servidor. Verifique a internet e tente novamente.";

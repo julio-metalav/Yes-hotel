@@ -5538,16 +5538,7 @@ body.checkin-view #op-reservas-main .op-panel__title {
   }
 }
 
-/* Perfil hits_consulta: mesma tela, sem a coluna de ações (não há comandos) */
-body.checkin-view.op-consulta-hits .op-table--desktop .op-th--actions,
-body.checkin-view.op-consulta-hits .op-table--desktop .op-td--actions {
-  display: none;
-}
-
-body.checkin-view.op-consulta-hits .op-table--desktop .op-col-actions {
-  width: 0;
-}
-
+/* Perfil hits_consulta: mesma tela; a coluna Ações tem só "Ver" */
 body.checkin-view.op-consulta-hits .op-table--desktop tr.op-tr,
 body.checkin-view.op-consulta-hits .op-mcard {
   cursor: default;

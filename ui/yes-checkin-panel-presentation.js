@@ -873,7 +873,7 @@
     if (status === "provisionando" || syncStatus === "pending") {
       return {
         statusClass: "sync-pending",
-        statusLabel: "Provisionando senha — aguardando confirmação da TTLock",
+        statusLabel: "Provisionando senha — aguardando confirmação da fechadura",
         resumoText: "",
       };
     }
@@ -935,7 +935,7 @@
       return { listaLabel: "Corrigir contatos", cta: null, ctaKind: "ir_hospedes" };
     }
     if (input.falhaSenhaAtiva) {
-      return { listaLabel: "Conferir TTLock", cta: null, ctaKind: "ir_ttlock" };
+      return { listaLabel: "Conferir fechadura", cta: null, ctaKind: "ir_ttlock" };
     }
     if (input.senhaPendente || input.credencialNaoEnviada) {
       return { listaLabel: "Gerar e enviar credenciais", cta: null, ctaKind: "gerar_senha" };
