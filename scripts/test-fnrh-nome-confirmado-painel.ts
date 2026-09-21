@@ -330,14 +330,23 @@ function main() {
     assert.equal(S.nomeReservaParaExibicao(social), "Nome Social Da Fnrh");
     ok("nome social confirmado tem a mesma prioridade do card");
 
-    const semNome = montar(
+    const socialSemCivil = montar(
       reservaRow(hoje, { fnrh_status_agregado: "fnrh_completo" }),
       [hospedeRow({ status_operacional: "confirmado" })],
       [fnrhConfirmadaRow({ hospede_nome: "   ", nome_social: "Social Sem Civil" })],
     );
+    assert.equal(socialSemCivil.hospedePrincipalExibicao, "Social Sem Civil");
+    assert.equal(S.getFnrhConfirmadas(socialSemCivil), 1, "FNRH continua contada como concluída");
+    ok("FNRH confirmada com civil vazio e social preenchido: exibe o nome social");
+
+    const semNome = montar(
+      reservaRow(hoje, { fnrh_status_agregado: "fnrh_completo" }),
+      [hospedeRow({ status_operacional: "confirmado" })],
+      [fnrhConfirmadaRow({ hospede_nome: "   ", nome_social: "" })],
+    );
     assert.equal(semNome.hospedePrincipalExibicao, NOME_ORIGINAL_HITS);
     assert.equal(S.getFnrhConfirmadas(semNome), 1, "FNRH continua contada como concluída");
-    ok("FNRH confirmada sem nome preenchido: mantém o nome original da reserva");
+    ok("FNRH confirmada sem nome civil nem social: mantém o nome original da reserva");
 
     const acompanhante = montar(
       reservaRow(hoje),
