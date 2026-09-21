@@ -340,7 +340,16 @@ async function main() {
     ok("boot carrega o banco e aplica HITS sem bloquear o init");
 
     assert.match(src, /async function refreshFromSource[\s\S]{0,200}force: true/);
-    ok("Atualizar força um ciclo novo de leitura HITS");
+    ok("recarga pós-ação (refreshFromSource) mantém o ciclo novo de leitura HITS");
+
+    // O botão Atualizar da listagem não é um "Atualizar HITS" disfarçado.
+    const listagem = src.slice(src.indexOf("async function refreshListagem("));
+    const listagemBody = listagem.slice(0, listagem.search(/\r?\n\}\r?\n/) + 3);
+    assert.match(listagemBody, /reuseOnly: true/);
+    assert.doesNotMatch(listagemBody, /force: true/);
+    assert.match(src, /opRefreshBtn\?\.addEventListener\("click", \(\) => \{\s*refreshListagem\(\)/);
+    assert.match(src, /options\.reuseOnly === true\)\) \{\s*await reconciliarCanceladasHits/);
+    ok("Atualizar da listagem reaproveita a última leitura HITS, sem GET novo");
 
     // Nenhuma escrita a partir das reservas HITS.
     assert.doesNotMatch(src, /somenteLeituraHits[\s\S]{0,200}\.insert\(/);
@@ -588,15 +597,20 @@ async function main() {
       "op-hits-sandbox-badge",
       "op-hits-sandbox-count",
       "op-hits-sandbox-updated",
-      "op-hits-sandbox-refresh",
       "op-hits-sandbox-toggle",
       "op-hits-sandbox-details",
     ]) {
       assert.ok(html.includes(`id="${id}"`), `faltou ${id}`);
     }
-    assert.match(html, /Leitura direta via API HITS — somente leitura/);
-    assert.match(html, />\s*Atualizar HITS\s*</);
-    ok("barra compacta traz badge, contagem, hora, hint e ações");
+    ok("barra compacta traz badge, contagem, hora e diagnóstico");
+
+    // Sincronização é automática: a faixa operacional não oferece leitura
+    // manual nem expõe ambiente/detalhe técnico (isso fica no diagnóstico).
+    assert.ok(!html.includes('id="op-hits-sandbox-refresh"'), "botão manual Atualizar HITS removido");
+    assert.doesNotMatch(html, />\s*Atualizar HITS\s*</);
+    assert.doesNotMatch(html, /Leitura direta via API HITS/);
+    assert.doesNotMatch(html, /class="op-hits-bar__title">\s*HITS Sandbox/);
+    ok("faixa operacional sem Atualizar HITS, sem ambiente e sem texto técnico");
 
     const details = html.slice(html.indexOf('id="op-hits-sandbox-details"'));
     assert.match(
@@ -620,6 +634,7 @@ async function main() {
     assert.match(js, /setDetailsOpen\(!isDetailsOpen\(\)\)/, "toggle abre e fecha");
     assert.match(js, /setDetailsOpen\(false\)/, "estado inicial recolhido");
     assert.match(js, /function renderResumo/);
+    assert.doesNotMatch(js, /op-hits-sandbox-refresh/, "sem referência ao botão manual removido");
     ok("toggle alterna e o resumo alimenta a barra");
   }
 

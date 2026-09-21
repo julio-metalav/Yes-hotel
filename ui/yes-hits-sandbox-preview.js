@@ -15,7 +15,6 @@
   var panel = doc.querySelector("#op-hits-sandbox-panel");
   if (!panel) return;
 
-  var btn = doc.querySelector("#op-hits-sandbox-refresh");
   var body = doc.querySelector("#op-hits-sandbox-body");
   var count = doc.querySelector("#op-hits-sandbox-count");
   var statusEl = doc.querySelector("#op-hits-sandbox-status");
@@ -194,18 +193,23 @@
   function loadCycle(options) {
     var opts = options || {};
     var force = opts.force === true;
-    // Janela da chamada; o botão do painel herda a última usada pela grade.
+    // Janela da chamada; sem janela explícita, herda a última usada pela grade.
     var win =
       opts.dateFrom && opts.dateTo
         ? { from: opts.dateFrom, to: opts.dateTo }
         : lastWindow;
     var key = windowKey(win);
 
+    // Reaproveita a última leitura (boot/ciclo em andamento) e nunca abre GET novo:
+    // o botão Atualizar da listagem não é uma atualização manual do HITS.
+    if (opts.reuseOnly === true) {
+      if (inflight) return inflight;
+      return Promise.resolve(cycleResult || { ok: false, raw: [], rows: [], error: "sem_leitura" });
+    }
     if (inflight && key === cycleKey) return inflight;
     // Virada do dia operacional muda a janela: o ciclo anterior não serve mais.
     if (!force && cycleResult && key === cycleKey) return Promise.resolve(cycleResult);
 
-    if (btn) btn.disabled = true;
     setStatus("Consultando HITS Sandbox…", false);
 
     lastWindow = win;
@@ -213,7 +217,6 @@
     inflight = requestCycle(win).then(function (result) {
       cycleResult = result;
       inflight = null;
-      if (btn) btn.disabled = false;
       renderCycle(result);
       notifyCycle(result);
       return result;
@@ -242,7 +245,6 @@
     return loadCycle({ force: true });
   }
 
-  if (btn) btn.addEventListener("click", load);
   if (toggleEl) {
     toggleEl.addEventListener("click", function () {
       setDetailsOpen(!isDetailsOpen());
