@@ -3868,3 +3868,1672 @@ html {
     grid-template-columns: 1fr;
   }
 }
+
+/* =====================================================================
+   Check-in Operacional — Design System Yes Hotel (ui/checkin-design-system)
+   Camada de apresentação. Escopada a body.checkin-view: nada aqui vale
+   para as outras telas que compartilham este arquivo. Desktop/notebook
+   (>= 769px); o layout mobile existente permanece como está.
+   ===================================================================== */
+
+body.checkin-view {
+  --ys-teal-800: #103943;
+  --ys-teal-700: #164a54;
+  --ys-teal-600: #2c6069;
+  --ys-teal-100: #dbe9e8;
+  --ys-teal-50: #ecf4f4;
+  --ys-gold-700: #856512;
+  --ys-gold-200: #e6dfc4;
+  --ys-gold-100: #f1efe5;
+  --ys-surface-0: #ffffff;
+  --ys-surface-50: #f8faf9;
+  --ys-surface-100: #f2f5f3;
+  --ys-surface-200: #eef3f2;
+  --ys-border-subtle: #e7edeb;
+  --ys-border: #d7e1df;
+  --ys-border-control: #798e8c;
+  --ys-ink: #103943;
+  --ys-ink-muted: #586d72;
+  --ys-ink-subtle: #7b8f93;
+  --ys-success-fg: #0f6b4d;
+  --ys-success-bg: #e6f2ec;
+  --ys-success-border: #bcdccd;
+  --ys-warning-fg: #8a5a10;
+  --ys-warning-bg: #faf0da;
+  --ys-warning-border: #ecd7a6;
+  --ys-pending-fg: #6b5a3e;
+  --ys-pending-bg: #f4f0e4;
+  --ys-pending-border: #e0d7bf;
+  --ys-danger-fg: #a3312e;
+  --ys-danger-bg: #fbeceb;
+  --ys-danger-border: #eec7c5;
+  --ys-info-fg: #2b4f8f;
+  --ys-info-bg: #edf1fa;
+  --ys-info-border: #ccd8ef;
+  --ys-neutral-fg: #4d6469;
+  --ys-neutral-bg: #eef2f1;
+  --ys-focus: #2f7f8c;
+  --ys-radius-sm: 6px;
+  --ys-radius-md: 8px;
+  --ys-shadow-xs: 0 1px 2px rgba(16, 57, 67, 0.05);
+  --ys-gap: 12px;
+}
+
+/* Linguagem visual comum a todas as larguras (desktop, tablet e celular) */
+body.checkin-view .yes-workspace {
+  background: var(--ys-surface-100);
+}
+
+/* ----- Exceções: âmbar suave, informação principal primeiro ----- */
+body.checkin-view .op-excecoes .operacional-excecoes-inner {
+  background: var(--ys-warning-bg);
+  border: 1px solid var(--ys-warning-border);
+  border-left: 3px solid var(--ys-warning-fg);
+  border-radius: var(--ys-radius-md);
+  box-shadow: none;
+}
+
+body.checkin-view .op-excecoes details.operacional-excecoes-inner > summary.operacional-excecoes-head {
+  min-height: 44px;
+  padding: 10px 16px;
+  gap: 16px;
+}
+
+body.checkin-view .op-excecoes .operacional-excecoes-title {
+  color: var(--ys-warning-fg);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+body.checkin-view .op-excecoes .operacional-excecoes-title strong {
+  color: var(--ys-warning-fg);
+  font-weight: 700;
+}
+
+body.checkin-view .op-excecoes .operacional-excecoes-counts {
+  color: var(--ys-warning-fg);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+body.checkin-view .op-excecoes .operacional-excecoes-body {
+  background: var(--ys-surface-0);
+  border-top: 1px solid var(--ys-warning-border);
+  border-radius: 0 0 var(--ys-radius-md) var(--ys-radius-md);
+}
+
+/* ----- Faixa HITS: integração · status · quantidade · horário ----- */
+body.checkin-view .op-hits-bar {
+  min-height: 40px;
+  gap: 8px 12px;
+  padding: 8px 16px;
+  background: var(--ys-gold-100);
+  border: 1px solid var(--ys-gold-200);
+  border-radius: var(--ys-radius-md);
+}
+
+body.checkin-view .op-hits-bar__id {
+  gap: 10px;
+}
+
+body.checkin-view .op-hits-bar__title {
+  color: var(--ys-ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+body.checkin-view .op-hits-bar__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  background: var(--ys-success-bg);
+  border: 1px solid var(--ys-success-border);
+  border-radius: 999px;
+  color: var(--ys-success-fg);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+body.checkin-view .op-hits-bar__badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+body.checkin-view .op-hits-bar__badge.hidden {
+  display: none;
+}
+
+body.checkin-view .op-hits-bar__meta {
+  gap: 6px;
+  color: var(--ys-ink-muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+body.checkin-view .op-hits-bar__updated:not(:empty)::before {
+  content: "· ";
+}
+
+body.checkin-view .op-hits-bar__count--error {
+  color: var(--ys-danger-fg);
+}
+
+/* Diagnóstico: técnico/administrativo, discreto, não compete com a operação */
+body.checkin-view .op-hits-bar__toggle {
+  min-height: 32px;
+  padding: 0 4px;
+  color: var(--ys-ink-muted);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+body.checkin-view .op-hits-bar__toggle:hover {
+  color: var(--ys-ink);
+  text-decoration: underline;
+}
+
+body.checkin-view .op-hits-details {
+  margin-top: 8px;
+  border-color: var(--ys-border);
+  border-radius: var(--ys-radius-md);
+}
+
+/* Chips de situação */
+body.checkin-view .op-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+body.checkin-view .op-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 12px;
+  background: var(--ys-surface-0);
+  border: 1px solid var(--ys-border);
+  border-radius: 999px;
+  box-shadow: none;
+  color: var(--ys-ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+body.checkin-view .op-tab:hover {
+  background: var(--ys-neutral-bg);
+  color: var(--ys-ink);
+}
+
+body.checkin-view .op-tab__count {
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ys-ink-muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+body.checkin-view .op-tab[aria-selected="true"] {
+  background: var(--ys-teal-700);
+  border-color: var(--ys-teal-700);
+  color: #ffffff;
+}
+
+body.checkin-view .op-tab[aria-selected="true"] .op-tab__count {
+  background: transparent;
+  color: var(--ys-teal-50);
+}
+
+body.checkin-view .op-apt-num {
+  color: var(--ys-ink);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+body.checkin-view .op-guest-name {
+  display: block;
+  color: var(--ys-ink);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+body.checkin-view .op-guest-sub {
+  display: block;
+  color: var(--ys-ink-muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
+body.checkin-view .op-period-line {
+  color: var(--ys-ink);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+body.checkin-view .op-period-sub {
+  color: var(--ys-ink-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+body.checkin-view .op-flux {
+  color: var(--ys-ink-muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+body.checkin-view .op-flux-pag {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+body.checkin-view .op-flux-pag--unpaid {
+  color: var(--ys-warning-fg);
+}
+
+body.checkin-view .op-flux-pag--paid {
+  color: var(--ys-success-fg);
+}
+
+body.checkin-view .op-flux-pag--comiss {
+  color: var(--ys-pending-fg);
+}
+
+body.checkin-view .op-flux__item {
+  color: var(--ys-ink-muted);
+}
+
+/* Status em pill: fundo suave, texto forte, rótulo sempre escrito */
+body.checkin-view :is(.op-table--desktop, .op-mobile-cards) .op-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--ys-border);
+  border-radius: 999px;
+  background: var(--ys-neutral-bg);
+  color: var(--ys-neutral-fg);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+body.checkin-view :is(.op-table--desktop, .op-mobile-cards) .op-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+body.checkin-view :is(.op-table--desktop, .op-mobile-cards) .op-badge--pend-pag {
+  background: var(--ys-danger-bg);
+  border-color: var(--ys-danger-border);
+  color: var(--ys-danger-fg);
+}
+
+body.checkin-view :is(.op-table--desktop, .op-mobile-cards) .op-badge--pend-fnrh {
+  background: var(--ys-warning-bg);
+  border-color: var(--ys-warning-border);
+  color: var(--ys-warning-fg);
+}
+
+body.checkin-view :is(.op-table--desktop, .op-mobile-cards) .op-badge--pend-comiss,
+body.checkin-view :is(.op-table--desktop, .op-mobile-cards) .op-badge--aguardando {
+  background: var(--ys-pending-bg);
+  border-color: var(--ys-pending-border);
+  color: var(--ys-pending-fg);
+}
+
+body.checkin-view :is(.op-table--desktop, .op-mobile-cards) .op-badge--pagarme-hits {
+  background: var(--ys-info-bg);
+  border-color: var(--ys-info-border);
+  color: var(--ys-info-fg);
+}
+
+body.checkin-view :is(.op-table--desktop, .op-mobile-cards) .op-badge--pronto,
+body.checkin-view :is(.op-table--desktop, .op-mobile-cards) .op-badge--concluido {
+  background: var(--ys-success-bg);
+  border-color: var(--ys-success-border);
+  color: var(--ys-success-fg);
+}
+
+/* Próxima ação: sempre visível, peso de botão secundário */
+body.checkin-view :is(.op-table--desktop, .op-mobile-cards) .op-next-action-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  background: var(--ys-surface-0);
+  border: 1px solid var(--ys-border-control);
+  border-radius: var(--ys-radius-sm);
+  box-shadow: none;
+  color: var(--ys-ink);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+body.checkin-view :is(.op-table--desktop, .op-mobile-cards) .op-next-action-btn:hover {
+  background: var(--ys-surface-100);
+  border-color: var(--ys-teal-700);
+}
+
+body.checkin-view :is(.op-table--desktop, .op-mobile-cards) .op-next-action {
+  color: var(--ys-ink);
+  font-size: 13px;
+}
+
+body.checkin-view :is(.op-table--desktop, .op-mobile-cards) .op-next-action--muted {
+  color: var(--ys-ink-muted);
+}
+
+/* Idênticas no desktop e no celular */
+body.checkin-view .op-view-tab.active,
+body.checkin-view .op-view-tab[aria-selected="true"] {
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid var(--ys-teal-700);
+  box-shadow: none;
+  color: var(--ys-teal-700);
+}
+
+body.checkin-view .op-search-field:focus-within {
+  outline: 2px solid var(--ys-focus);
+  outline-offset: 2px;
+}
+
+body.checkin-view .op-toolbar .op-btn--secondary {
+  background: var(--ys-surface-0);
+  border: 1px solid var(--ys-border-control);
+  color: var(--ys-ink);
+}
+
+body.checkin-view #op-reservas-main .op-panel__title {
+  color: var(--ys-ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Composição desktop/notebook (>= 860px) */
+@media (min-width: 860px) {
+  /* ----- Cabeçalho ----- */
+  body.checkin-view .op-header {
+    height: auto;
+    min-height: 64px;
+    padding: 10px 20px;
+    background: var(--ys-surface-0);
+    border-bottom: 1px solid var(--ys-border);
+  }
+
+  body.checkin-view .op-header__eyebrow {
+    color: var(--ys-gold-700);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 14px;
+    letter-spacing: 0.09em;
+  }
+
+  body.checkin-view .op-header__title {
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 30px;
+    letter-spacing: -0.015em;
+  }
+
+  body.checkin-view .op-header__subtitle {
+    margin: 2px 0 0;
+    color: var(--ys-ink-muted);
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  /* ----- Pilha principal ----- */
+  body.checkin-view .op-content {
+    gap: var(--ys-gap);
+    padding: 16px 20px 20px;
+  }
+
+  /* ----- KPIs: faixa única, ~54px ----- */
+  body.checkin-view .yes-kpis--five {
+    background: var(--ys-surface-0);
+    border: 1px solid var(--ys-border);
+    border-radius: var(--ys-radius-md);
+    box-shadow: var(--ys-shadow-xs);
+  }
+
+  body.checkin-view .yes-kpis article,
+  body.checkin-view .yes-kpi-card {
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 54px;
+    padding: 8px 16px;
+  }
+
+  body.checkin-view .yes-kpis article + article,
+  body.checkin-view .yes-kpis article + .yes-kpi-card,
+  body.checkin-view .yes-kpi-card + article {
+    border-left: 1px solid var(--ys-border-subtle);
+  }
+
+  body.checkin-view .yes-kpis article > span,
+  body.checkin-view .yes-kpi-card > span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ys-ink-muted);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 16px;
+  }
+
+  body.checkin-view .op-kpi__icon {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    color: var(--ys-ink-subtle);
+  }
+
+  body.checkin-view .yes-kpis article > strong,
+  body.checkin-view .yes-kpi-card > strong {
+    color: var(--ys-ink);
+    font-size: 21px;
+    font-weight: 700;
+    line-height: 26px;
+  }
+
+  /* Notas dos KPIs seguem visualmente ocultas (legíveis por leitor de tela), como hoje. */
+
+  body.checkin-view .yes-kpis .op-kpi--zero > strong,
+  body.checkin-view .yes-kpis .op-kpi--zero > #op-kpi-fnrh {
+    color: var(--ys-ink-subtle);
+  }
+
+  body.checkin-view .yes-kpis .op-kpi--attention > strong,
+  body.checkin-view .yes-kpis .op-kpi--attention > #op-kpi-fnrh,
+  body.checkin-view .yes-kpis .op-kpi--attention .op-kpi__icon {
+    color: var(--ys-warning-fg);
+  }
+
+  body.checkin-view #op-kpi-occupied-btn {
+    min-width: 212px;
+  }
+
+  body.checkin-view .yes-kpi-card:hover {
+    background: var(--ys-surface-50);
+  }
+
+  /* ----- Bloco Reservas/Chegadas: abas + filtros + chips + tabela ----- */
+  body.checkin-view .op-controls-shell {
+    gap: 0;
+    padding: 0;
+    background: var(--ys-surface-0);
+    border: 1px solid var(--ys-border);
+    border-bottom: 0;
+    border-radius: var(--ys-radius-md) var(--ys-radius-md) 0 0;
+    box-shadow: none;
+  }
+
+  body.checkin-view .op-view-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 16px;
+    margin: 0;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--ys-border);
+    border-radius: 0;
+  }
+
+  body.checkin-view .op-view-tab {
+    min-height: 40px;
+    padding: 8px 12px;
+    margin: 0 0 -1px;
+    background: transparent;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    border-radius: 0;
+    box-shadow: none;
+    color: var(--ys-ink-muted);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  body.checkin-view .op-view-tab:hover {
+    color: var(--ys-ink);
+  }
+
+  body.checkin-view .op-controls {
+    gap: 12px;
+    padding: 16px;
+    border-bottom: 1px solid var(--ys-border-subtle);
+  }
+
+  body.checkin-view .op-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+  }
+
+  body.checkin-view .op-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 168px;
+  }
+
+  body.checkin-view .op-filter--search {
+    flex: 1 1 360px;
+    min-width: 260px;
+  }
+
+  body.checkin-view .op-filter__label {
+    color: var(--ys-ink);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+  }
+
+  body.checkin-view .op-search-field {
+    width: 100%;
+    max-width: none;
+    height: 34px;
+    min-width: 0;
+    flex: none;
+    gap: 8px;
+    padding: 0 12px;
+    background: var(--ys-surface-0);
+    border: 1px solid var(--ys-border-control);
+    border-radius: var(--ys-radius-sm);
+    color: var(--ys-ink-muted);
+  }
+
+  body.checkin-view .op-search-field:hover {
+    border-color: var(--ys-teal-700);
+  }
+
+  body.checkin-view .op-search-field svg {
+    width: 15px;
+    height: 15px;
+    flex: none;
+  }
+
+  body.checkin-view .op-search-field .op-field {
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: var(--ys-ink);
+    font-size: 14px;
+  }
+
+  body.checkin-view .op-toolbar > .op-filter > .op-field,
+  body.checkin-view .op-period-custom .op-field {
+    width: 100%;
+    height: 34px;
+    min-height: 34px;
+    background-color: var(--ys-surface-0);
+    border: 1px solid var(--ys-border-control);
+    border-radius: var(--ys-radius-sm);
+    color: var(--ys-ink);
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  body.checkin-view .op-toolbar__status,
+  body.checkin-view .op-toolbar__period {
+    width: 100%;
+    min-width: 168px;
+  }
+
+  body.checkin-view .op-toolbar__period-date {
+    width: auto;
+  }
+
+  body.checkin-view .op-toolbar .op-field::placeholder {
+    color: var(--ys-ink-muted);
+  }
+
+  body.checkin-view .op-toolbar > .op-filter > .op-field:hover,
+  body.checkin-view .op-period-custom .op-field:hover {
+    border-color: var(--ys-teal-700);
+  }
+
+  body.checkin-view .op-toolbar > .op-filter > .op-field:focus-visible,
+  body.checkin-view .op-period-custom .op-field:focus-visible,
+  body.checkin-view .op-toolbar .op-btn:focus-visible,
+  body.checkin-view .op-view-tab:focus-visible,
+  body.checkin-view .op-tab:focus-visible,
+  body.checkin-view .op-next-action-btn:focus-visible,
+  body.checkin-view .op-btn-ver:focus-visible,
+  body.checkin-view .op-btn-more:focus-visible,
+  body.checkin-view .op-hits-bar__toggle:focus-visible {
+    outline: 2px solid var(--ys-focus);
+    outline-offset: 2px;
+  }
+
+  body.checkin-view .op-toolbar .op-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 34px;
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: var(--ys-radius-sm);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  body.checkin-view .op-toolbar .op-btn--secondary:hover {
+    background: var(--ys-surface-100);
+    border-color: var(--ys-teal-700);
+  }
+
+  body.checkin-view #op-refresh-btn svg {
+    width: 15px;
+    height: 15px;
+    flex: none;
+  }
+
+  /* Tabela e Chegadas encaixam sob o bloco de controles */
+  body.checkin-view #op-reservas-main,
+  body.checkin-view #op-chegadas-panel {
+    margin-top: calc(-1 * var(--ys-gap));
+  }
+
+  body.checkin-view #op-reservas-main .op-master > .op-panel {
+    background: var(--ys-surface-0);
+    border: 1px solid var(--ys-border) !important;
+    border-top: 0 !important;
+    border-radius: 0 0 var(--ys-radius-md) var(--ys-radius-md);
+    box-shadow: var(--ys-shadow-xs) !important;
+  }
+
+  body.checkin-view #op-chegadas-panel {
+    padding: 12px 16px 16px;
+    background: var(--ys-surface-0);
+    border: 1px solid var(--ys-border);
+    border-top: 0;
+    border-radius: 0 0 var(--ys-radius-md) var(--ys-radius-md);
+  }
+
+  body.checkin-view #op-reservas-main .op-panel__head {
+    height: 40px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--ys-border-subtle);
+  }
+
+  body.checkin-view #op-reservas-main .op-panel__count {
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: var(--ys-ink-muted);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  /* ----- Tabela de reservas ----- */
+  body.checkin-view .op-table--desktop thead th,
+  body.checkin-view .op-table--desktop .op-th {
+    height: 36px;
+    padding: 8px 12px;
+    background: var(--ys-surface-200);
+    border-bottom: 1px solid var(--ys-border);
+    color: var(--ys-ink-muted);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 16px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  body.checkin-view .op-table--desktop .op-td {
+    height: 56px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--ys-border-subtle);
+    color: var(--ys-ink);
+    font-size: 14px;
+    line-height: 20px;
+    vertical-align: middle;
+  }
+
+  body.checkin-view .op-table--desktop tr.op-tr:hover .op-td {
+    background: var(--ys-surface-50);
+  }
+
+  body.checkin-view .op-table--desktop tr.op-tr[aria-selected="true"] .op-td {
+    background: var(--ys-teal-50);
+  }
+
+  /* Ações discretas: Ver + ⋯ */
+  body.checkin-view .op-table--desktop .op-btn-ver {
+    min-height: 32px;
+    padding: 0 6px;
+    background: transparent;
+    border: 0;
+    color: var(--ys-teal-700);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  body.checkin-view .op-table--desktop .op-btn-ver:hover {
+    text-decoration: underline;
+  }
+
+  body.checkin-view .op-table--desktop .op-btn-more {
+    width: 32px;
+    height: 32px;
+    min-height: 32px;
+    background: transparent;
+    border: 0;
+    border-radius: var(--ys-radius-sm);
+    color: var(--ys-ink-muted);
+  }
+
+  body.checkin-view .op-table--desktop .op-btn-more:hover {
+    background: var(--ys-neutral-bg);
+    color: var(--ys-ink);
+  }
+}
+
+/* Notebook (1366×768 e afins): reduz espaços antes de reduzir tipografia */
+@media (min-width: 860px) and (max-width: 1440px) {
+  body.checkin-view {
+    --ys-gap: 10px;
+  }
+
+  body.checkin-view .op-header {
+    min-height: 58px;
+    padding: 8px 16px;
+  }
+
+  body.checkin-view .op-content {
+    padding: 12px 16px 16px;
+  }
+
+  body.checkin-view .yes-kpis article,
+  body.checkin-view .yes-kpi-card {
+    padding: 8px 12px;
+  }
+
+  body.checkin-view #op-kpi-occupied-guests {
+    font-size: 18px;
+  }
+
+  body.checkin-view .op-controls {
+    padding: 12px 16px;
+  }
+
+  body.checkin-view .op-table--desktop .op-td,
+  body.checkin-view .op-table--desktop .op-th {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
+
+/* =====================================================================
+   Responsivo — Design System Yes Hotel
+   >= 1180  desktop completo (referência de densidade)
+   1101–1179 sidebar fixa (já compacta, 176px), tabela completa
+   860–1100 sidebar em drawer, tabela preservada, espaços reduzidos
+   < 860    celular / tablet retrato: plataforma operacional própria
+   ===================================================================== */
+
+/* Navegação em drawer (≤ 1100): alvos de toque confortáveis */
+@media (max-width: 1100px) {
+  body.checkin-view .yes-sidebar {
+    width: min(300px, 84vw);
+    z-index: 40;
+  }
+
+  body.checkin-view.op-sidebar-open .yes-sidebar {
+    box-shadow: 0 16px 40px rgba(16, 57, 67, 0.28);
+  }
+
+  body.checkin-view .op-sidebar-backdrop {
+    z-index: 35;
+  }
+
+  body.checkin-view .yes-sidebar-brand {
+    height: 64px;
+    padding: 0 8px 0 20px;
+  }
+
+  body.checkin-view .yes-sidebar-close {
+    width: 44px;
+    height: 44px;
+    justify-content: center;
+  }
+
+  body.checkin-view .yes-sidebar nav {
+    gap: 4px;
+    padding: 12px;
+  }
+
+  body.checkin-view .yes-sidebar-label {
+    padding: 4px 12px 8px;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+  }
+
+  body.checkin-view .yes-sidebar a {
+    min-height: 48px;
+    gap: 12px;
+    padding: 0 14px;
+    border-radius: var(--ys-radius-md);
+    font-size: 15px;
+  }
+
+  body.checkin-view .yes-sidebar a > svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  body.checkin-view .yes-sidebar-foot {
+    padding: 12px 20px 16px;
+    font-size: 12px;
+  }
+
+  body.checkin-view .op-menu-toggle {
+    width: 40px;
+    height: 40px;
+    justify-content: center;
+  }
+}
+
+/* Tablet paisagem / notebook estreito (860–1279): tabela preservada */
+@media (min-width: 860px) and (max-width: 1279px) {
+  body.checkin-view .op-toolbar {
+    align-items: flex-end;
+  }
+
+  body.checkin-view .op-toolbar > .op-filter > .op-field {
+    flex: none;
+  }
+
+  body.checkin-view .op-filter,
+  body.checkin-view .op-toolbar__status,
+  body.checkin-view .op-toolbar__period {
+    min-width: 140px;
+  }
+
+  body.checkin-view .op-filter--search {
+    flex: 1 1 280px;
+    min-width: 220px;
+  }
+
+  body.checkin-view .op-toolbar > .op-filter:not(.op-filter--search) {
+    flex: 0 1 168px;
+  }
+
+  body.checkin-view .op-col-apt { width: 6%; }
+  body.checkin-view .op-col-guest { width: 19%; }
+  body.checkin-view .op-col-period { width: 12%; }
+  body.checkin-view .op-col-flux { width: 14%; }
+  body.checkin-view .op-col-status { width: 18%; }
+  body.checkin-view .op-col-next { width: 20%; }
+  body.checkin-view .op-col-actions { width: 11%; }
+
+  body.checkin-view .op-table--desktop .op-td,
+  body.checkin-view .op-table--desktop .op-th {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  body.checkin-view .op-table--desktop .op-badge {
+    height: auto;
+    min-height: 22px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    white-space: normal;
+  }
+
+  body.checkin-view .op-table--desktop .op-next-action-btn {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* Com a sidebar em drawer (860–1100): menos respiro lateral */
+@media (min-width: 860px) and (max-width: 1100px) {
+  body.checkin-view .op-header {
+    gap: 12px;
+    padding: 8px 16px 8px 12px;
+  }
+
+  body.checkin-view .op-content {
+    padding: 12px;
+  }
+
+  body.checkin-view .yes-kpis article,
+  body.checkin-view .yes-kpi-card {
+    min-width: 0;
+    padding: 8px 10px;
+  }
+
+  body.checkin-view #op-kpi-occupied-btn {
+    min-width: 180px;
+  }
+}
+
+/* =====================================================================
+   Celular e tablet retrato (< 860px)
+   Mesma linguagem do desktop, composição própria: cabeçalho fixo com
+   menu, KPIs em grade, filtros empilhados, chips roláveis e uma lista
+   compacta de reservas (#op-mobile-list / .op-mcard).
+   ===================================================================== */
+@media (max-width: 859px) {
+  body.checkin-view {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  body.checkin-view .op-app,
+  body.checkin-view .yes-workspace {
+    height: auto;
+    max-height: none;
+    min-height: 100dvh;
+    overflow-x: clip;
+    overflow-y: visible;
+  }
+
+  /* ----- Cabeçalho: fixo no topo, menu sempre à mão ----- */
+  body.checkin-view .op-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    height: auto;
+    min-height: 56px;
+    gap: 8px;
+    padding: 6px 8px 6px 4px;
+    background: var(--ys-surface-0);
+    border-bottom: 1px solid var(--ys-border);
+  }
+
+  body.checkin-view .op-header__left {
+    gap: 4px;
+    min-width: 0;
+  }
+
+  body.checkin-view .op-menu-toggle,
+  body.checkin-view #op-logout-btn {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+    flex: none;
+    justify-content: center;
+  }
+
+  body.checkin-view .op-header-logo {
+    display: block;
+    width: 96px;
+    height: 30px;
+    max-width: none;
+    max-height: none;
+    margin-right: 6px;
+    object-fit: cover;
+    object-position: 47% 51%;
+    flex-shrink: 0;
+  }
+
+  body.checkin-view #op-logout-btn span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  body.checkin-view .op-header__eyebrow {
+    margin: 0;
+    color: var(--ys-gold-700);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 14px;
+    letter-spacing: 0.12em;
+  }
+
+  body.checkin-view .op-header__title {
+    overflow: hidden;
+    color: var(--ys-ink);
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 22px;
+    letter-spacing: -0.01em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.checkin-view .op-header__subtitle,
+  body.checkin-view .op-kpi__icon {
+    display: none;
+  }
+
+  body.checkin-view .op-header__user strong {
+    font-size: 13px;
+  }
+
+  /* ----- Pilha principal ----- */
+  body.checkin-view .op-content {
+    gap: 12px;
+    padding: 12px 12px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  /* ----- KPIs em grade 2 colunas; Hóspedes hospedados ocupa a linha ----- */
+  body.checkin-view .yes-kpis,
+  body.checkin-view .yes-kpis--five {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    background: var(--ys-surface-0);
+    border: 1px solid var(--ys-border);
+    border-radius: var(--ys-radius-md);
+    box-shadow: var(--ys-shadow-xs);
+  }
+
+  body.checkin-view .yes-kpis article,
+  body.checkin-view .yes-kpis .yes-kpi-card {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    min-height: 56px;
+    padding: 8px 14px;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--ys-border-subtle);
+    border-radius: 0;
+    box-shadow: none;
+    text-align: left;
+  }
+
+  body.checkin-view .yes-kpis article:nth-child(odd) {
+    border-right: 1px solid var(--ys-border-subtle);
+  }
+
+  body.checkin-view .yes-kpis #op-kpi-occupied-btn {
+    grid-column: 1 / -1;
+    min-width: 0;
+    border-bottom: 0;
+  }
+
+  body.checkin-view .yes-kpis article > span,
+  body.checkin-view .yes-kpis .yes-kpi-card > span {
+    max-width: none;
+    color: var(--ys-ink-muted);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 17px;
+    white-space: normal;
+  }
+
+  body.checkin-view .yes-kpis article > strong,
+  body.checkin-view .yes-kpis .yes-kpi-card > strong {
+    flex: none;
+    color: var(--ys-ink);
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 26px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  body.checkin-view .yes-kpis .op-kpi--zero > strong,
+  body.checkin-view .yes-kpis .op-kpi--zero > #op-kpi-fnrh {
+    color: var(--ys-ink-subtle);
+  }
+
+  body.checkin-view .yes-kpis .op-kpi--attention > strong,
+  body.checkin-view .yes-kpis .op-kpi--attention > #op-kpi-fnrh {
+    color: var(--ys-warning-fg);
+  }
+
+  /* ----- Exceções: texto quebra em vez de cortar ----- */
+  body.checkin-view .op-excecoes details.operacional-excecoes-inner > summary.operacional-excecoes-head {
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    min-height: 48px;
+    padding: 12px 14px;
+  }
+
+  body.checkin-view .op-excecoes .operacional-excecoes-title {
+    flex: 1 1 100%;
+    overflow: visible;
+    white-space: normal;
+  }
+
+  body.checkin-view .op-excecoes .operacional-excecoes-counts {
+    white-space: normal;
+  }
+
+  body.checkin-view .op-excecoes .operacional-excecao-item {
+    flex-wrap: wrap;
+  }
+
+  /* ----- Faixa HITS: duas linhas, Diagnóstico discreto à direita ----- */
+  body.checkin-view .op-hits-bar {
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 8px 8px 8px 14px;
+  }
+
+  body.checkin-view .op-hits-bar__id {
+    order: 1;
+  }
+
+  body.checkin-view .op-hits-bar__actions {
+    order: 2;
+    margin-left: auto;
+  }
+
+  body.checkin-view .op-hits-bar__meta {
+    order: 3;
+    flex: 1 1 100%;
+    padding-bottom: 4px;
+  }
+
+  body.checkin-view .op-hits-bar__toggle {
+    min-height: 40px;
+    padding: 0 8px;
+  }
+
+  /* ----- Bloco de controles: abas, filtros e chips ----- */
+  body.checkin-view .op-controls-shell {
+    gap: 0;
+    padding: 0;
+    background: var(--ys-surface-0);
+    border: 1px solid var(--ys-border);
+    border-radius: var(--ys-radius-md);
+    box-shadow: none;
+  }
+
+  body.checkin-view .op-view-tabs {
+    display: flex;
+    width: auto;
+    gap: 0;
+    margin: 0;
+    padding: 0 8px;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--ys-border);
+    border-radius: 0;
+  }
+
+  body.checkin-view .op-view-tab {
+    flex: 1 1 0;
+    min-height: 48px;
+    margin: 0 0 -1px;
+    padding: 0 12px;
+    background: transparent;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    border-radius: 0;
+    box-shadow: none;
+    color: var(--ys-ink-muted);
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  body.checkin-view .op-controls {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  body.checkin-view .op-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+    gap: 10px 8px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+  }
+
+  body.checkin-view .op-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  body.checkin-view .op-filter--search,
+  body.checkin-view .op-period-custom,
+  body.checkin-view .op-toolbar__import,
+  body.checkin-view .op-toolbar #op-refresh-btn {
+    grid-column: 1 / -1;
+  }
+
+  body.checkin-view .op-filter__label {
+    display: block;
+    color: var(--ys-ink);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 18px;
+  }
+
+  body.checkin-view .op-filter--search .op-filter__label {
+    display: none;
+  }
+
+  body.checkin-view .op-search-field {
+    width: 100%;
+    min-width: 0;
+    height: 44px;
+    flex: none;
+    gap: 8px;
+    padding: 0 12px;
+    background: var(--ys-surface-0);
+    border: 1px solid var(--ys-border-control);
+    border-radius: var(--ys-radius-sm);
+    color: var(--ys-ink-muted);
+  }
+
+  body.checkin-view .op-search-field svg {
+    width: 16px;
+    height: 16px;
+    flex: none;
+  }
+
+  body.checkin-view .op-search-field .op-field {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: var(--ys-ink);
+    font-size: 16px;
+  }
+
+  body.checkin-view .op-toolbar > .op-filter > .op-field,
+  body.checkin-view .op-period-custom .op-field {
+    flex: none;
+    width: 100%;
+    min-width: 0;
+    height: 44px;
+    min-height: 44px;
+    background-color: var(--ys-surface-0);
+    border: 1px solid var(--ys-border-control);
+    border-radius: var(--ys-radius-sm);
+    color: var(--ys-ink);
+    font-size: 16px;
+  }
+
+  body.checkin-view .op-toolbar .op-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    height: 44px;
+    min-height: 44px;
+    border-radius: var(--ys-radius-sm);
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  body.checkin-view .op-toolbar #op-refresh-btn {
+    width: 100%;
+  }
+
+  body.checkin-view #op-refresh-btn svg {
+    width: 16px;
+    height: 16px;
+    flex: none;
+  }
+
+  /* Chips em uma linha rolável: sem empilhar 4 linhas de filtro */
+  body.checkin-view .op-tabs {
+    flex-wrap: nowrap;
+    gap: 8px;
+    margin: 0 -12px;
+    padding: 0 12px 2px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  body.checkin-view .op-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  body.checkin-view .op-tab {
+    flex: none;
+    height: 40px;
+    min-height: 40px;
+    padding: 0 14px;
+    font-size: 13px;
+  }
+
+  body.checkin-view .op-tab__count {
+    font-size: 12px;
+  }
+
+  /* ----- Lista de reservas: um cartão compacto por reserva ----- */
+  body.checkin-view .op-main {
+    display: block;
+    flex: 1 1 auto;
+    overflow: visible;
+  }
+
+  body.checkin-view .op-master,
+  body.checkin-view .op-panel,
+  body.checkin-view .op-panel__body {
+    height: auto;
+    max-height: none;
+    flex: none;
+  }
+
+  body.checkin-view #op-reservas-main .op-master > .op-panel {
+    overflow: hidden;
+    background: var(--ys-surface-0);
+    border: 1px solid var(--ys-border);
+    border-radius: var(--ys-radius-md);
+    box-shadow: var(--ys-shadow-xs);
+  }
+
+  body.checkin-view #op-reservas-main .op-panel__head {
+    height: 44px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--ys-border-subtle);
+  }
+
+  body.checkin-view #op-reservas-main .op-panel__count {
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: var(--ys-ink-muted);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  body.checkin-view #op-reservas-main .op-table-wrap {
+    display: none;
+  }
+
+  body.checkin-view .op-mobile-cards {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    overflow: visible;
+  }
+
+  body.checkin-view .op-mcard {
+    display: grid;
+    grid-template-columns: 48px auto minmax(0, 1fr);
+    grid-template-areas:
+      "apt name name"
+      "apt meta meta"
+      "status status flux"
+      "act act act";
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 6px;
+    width: 100%;
+    padding: 14px 16px;
+    background: var(--ys-surface-0);
+    border: 0;
+    border-bottom: 1px solid var(--ys-border-subtle);
+    border-radius: 0;
+    box-shadow: none;
+    color: var(--ys-ink);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  body.checkin-view .op-mcard:last-child {
+    border-bottom: 0;
+  }
+
+  body.checkin-view .op-mcard[aria-selected="true"] {
+    background: var(--ys-teal-50);
+    box-shadow: inset 3px 0 0 var(--ys-teal-700);
+  }
+
+  body.checkin-view .op-mcard:focus-visible {
+    outline: 2px solid var(--ys-focus);
+    outline-offset: -2px;
+  }
+
+  body.checkin-view .op-mcard__r1 {
+    display: contents;
+  }
+
+  body.checkin-view .op-mcard__apt {
+    grid-area: apt;
+    align-self: start;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    background: var(--ys-teal-50);
+    border: 1px solid var(--ys-teal-100);
+    border-radius: var(--ys-radius-md);
+    color: var(--ys-ink);
+    font-size: 17px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  body.checkin-view .op-mcard__r1 > .op-badge {
+    grid-area: status;
+    justify-self: start;
+    max-width: 100%;
+  }
+
+  body.checkin-view .op-mcard__name {
+    grid-area: name;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--ys-ink);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 22px;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow-wrap: anywhere;
+  }
+
+  body.checkin-view .op-mcard__meta {
+    grid-area: meta;
+    color: var(--ys-ink-muted);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  body.checkin-view .op-mcard__flux {
+    grid-area: flux;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 4px;
+    min-width: 0;
+    color: var(--ys-ink-muted);
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  body.checkin-view .op-mcard__flux > span {
+    white-space: nowrap;
+  }
+
+  body.checkin-view .op-mcard__row5 {
+    grid-area: act;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin-top: 4px;
+  }
+
+  body.checkin-view .op-mcard__row5 > .op-next-action-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
+    height: 44px;
+    min-height: 44px;
+    overflow: hidden;
+    font-size: 14px;
+    text-overflow: ellipsis;
+  }
+
+  body.checkin-view .op-mcard__row5 > .op-next-action {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  body.checkin-view .op-mcard__actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    margin-left: auto;
+  }
+
+  body.checkin-view .op-mcard__actions .op-btn-ver-inline,
+  body.checkin-view .op-mcard__actions .op-btn-ppd--mcard {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 44px;
+    min-height: 44px;
+    min-width: 64px;
+    padding: 0 14px;
+    background: var(--ys-surface-0);
+    border: 1px solid var(--ys-border);
+    border-radius: var(--ys-radius-sm);
+    color: var(--ys-teal-700);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  body.checkin-view .op-mcard__actions .op-btn-ver-inline:focus-visible,
+  body.checkin-view .op-mcard__actions .op-btn-ppd--mcard:focus-visible,
+  body.checkin-view .op-mcard .op-next-action-btn:focus-visible {
+    outline: 2px solid var(--ys-focus);
+    outline-offset: 2px;
+  }
+
+  /* ----- Chegadas: filtros roláveis; tabela rola dentro do cartão ----- */
+  body.checkin-view #op-chegadas-panel {
+    padding: 12px;
+    background: var(--ys-surface-0);
+    border: 1px solid var(--ys-border);
+    border-radius: var(--ys-radius-md);
+  }
+
+  body.checkin-view .op-chegadas__filters {
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  body.checkin-view .op-chegadas__filter {
+    flex: none;
+    min-height: 40px;
+  }
+
+  body.checkin-view .op-chegadas .op-table-wrap {
+    display: block;
+    overflow-x: auto;
+  }
+
+  body.checkin-view .op-chegadas .op-table {
+    display: table;
+    min-width: 720px;
+  }
+
+  /* ----- Detalhe e hospedados ocupam a tela inteira ----- */
+  body.checkin-view .op-detail__surface {
+    width: 100vw;
+    max-width: 100vw;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  body.checkin-view .op-detail__top {
+    min-height: 56px;
+    align-items: center;
+    padding: 6px 8px;
+  }
+
+  body.checkin-view .op-detail__close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  body.checkin-view .op-occupied-drawer__panel {
+    width: 100%;
+    box-shadow: none;
+  }
+}
+
+/* Tablet retrato: próxima ação no tamanho do rótulo, não da linha */
+@media (min-width: 600px) and (max-width: 859px) {
+  body.checkin-view .op-mcard__row5 > .op-next-action-btn {
+    flex: 0 1 auto;
+    padding: 0 20px;
+  }
+}
+
+/* Celular: a marca fica no menu em drawer; o título ganha a largura */
+@media (max-width: 479px) {
+  body.checkin-view .op-header-logo {
+    display: none;
+  }
+}

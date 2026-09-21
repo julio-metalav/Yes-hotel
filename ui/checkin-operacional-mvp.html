@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=60" />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=61" />
   </head>
   <body class="op-body checkin-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -109,6 +109,7 @@
             <div class="op-header__heading">
               <span class="op-header__eyebrow">Operação</span>
               <h1 class="op-header__title">Check-in Operacional</h1>
+              <p class="op-header__subtitle">Acompanhe chegadas, check-ins e pendências da operação.</p>
             </div>
           </div>
           <div class="op-header__right">
@@ -128,22 +129,22 @@
         <main id="op-main-content" class="op-content">
           <section class="yes-kpis yes-kpis--five metric-strip" aria-label="Indicadores do dia">
             <article>
-              <span>Chegadas hoje</span>
+              <span><svg class="op-kpi__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M6 20V6l6-2 6 2v14M10 20v-4h4v4"/></svg>Chegadas hoje</span>
               <strong id="op-kpi-arrivals">0</strong>
               <small id="op-kpi-arrivals-note">Nenhuma chegada</small>
             </article>
             <article>
-              <span>Check-ins concluídos</span>
+              <span><svg class="op-kpi__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM8 12.5l2.5 2.5L16 9.5"/></svg>Check-ins concluídos</span>
               <strong id="op-kpi-completed">0</strong>
               <small id="op-kpi-completed-note">0% das chegadas</small>
             </article>
             <article>
-              <span>FNRH pendentes</span>
+              <span><svg class="op-kpi__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM9 8h6M9 12h6M9 16h3"/></svg>FNRH pendentes</span>
               <strong id="op-kpi-fnrh">0</strong>
               <small id="op-kpi-fnrh-note">Sem pendências</small>
             </article>
             <article>
-              <span>Acessos liberados</span>
+              <span><svg class="op-kpi__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 10h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2ZM8 10V7a4 4 0 0 1 7.5-2"/></svg>Acessos liberados</span>
               <strong id="op-kpi-access">0</strong>
               <small>Na lista operacional</small>
             </article>
@@ -153,10 +154,62 @@
               id="op-kpi-occupied-btn"
               aria-label="Ver hóspedes hospedados"
             >
-              <span>Hóspedes hospedados</span>
+              <span><svg class="op-kpi__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6M3 15h18M6 10V7h5v3"/></svg>Hóspedes hospedados</span>
               <strong id="op-kpi-occupied-guests">0 hóspedes</strong>
               <small id="op-kpi-occupied-apts">0 apartamentos ocupados</small>
             </button>
+          </section>
+
+          <section id="operacional-excecoes" class="op-excecoes hidden" aria-label="Exceções operacionais"></section>
+
+          <section
+            id="op-hits-sandbox-panel"
+            class="op-hits-sandbox"
+            aria-label="Integração HITS"
+          >
+            <div class="op-hits-bar">
+              <div class="op-hits-bar__id">
+                <span class="op-hits-bar__title">HITS</span>
+                <span id="op-hits-sandbox-badge" class="op-hits-bar__badge hidden">Conectado</span>
+              </div>
+              <div class="op-hits-bar__meta">
+                <span id="op-hits-sandbox-count" class="op-hits-bar__count"></span>
+                <span id="op-hits-sandbox-updated" class="op-hits-bar__updated"></span>
+              </div>
+              <div class="op-hits-bar__actions">
+                <button
+                  type="button"
+                  class="op-hits-bar__toggle"
+                  id="op-hits-sandbox-toggle"
+                  aria-expanded="false"
+                  aria-controls="op-hits-sandbox-details"
+                >
+                  Ver diagnóstico
+                </button>
+              </div>
+            </div>
+            <div id="op-hits-sandbox-details" class="op-hits-details hidden">
+              <p id="op-hits-sandbox-status" class="op-hits-sandbox__status hidden" role="status"></p>
+              <div class="op-table-wrap">
+                <table class="op-table" aria-label="Reservas no HITS Sandbox">
+                  <thead>
+                    <tr>
+                      <th>idReservation</th>
+                      <th>Apto</th>
+                      <th>Hóspede</th>
+                      <th>Entrada</th>
+                      <th>Saída</th>
+                      <th>Status</th>
+                      <th>Hóspedes</th>
+                    </tr>
+                  </thead>
+                  <tbody id="op-hits-sandbox-body"></tbody>
+                </table>
+              </div>
+              <div id="op-hits-sandbox-empty" class="op-empty">
+                <p class="op-empty__title">Nenhuma reserva carregada</p>
+              </div>
+            </div>
           </section>
 
           <section class="op-controls-shell" aria-label="Controles do painel">
@@ -184,40 +237,49 @@
             </nav>
             <div id="op-reservas-controls" class="op-controls" aria-label="Filtros e situação">
               <div class="op-toolbar" role="toolbar" aria-label="Ferramentas do painel">
-                <label class="op-search-field">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="m21 21-4.3-4.3M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z" />
-                  </svg>
-                  <span class="sr-only">Buscar reservas</span>
-                  <input
-                    type="search"
-                    id="op-search"
-                    class="op-field op-toolbar__search"
-                    placeholder="Buscar apto, hóspede ou reserva"
-                    aria-label="Buscar reservas"
-                    autocomplete="off"
-                  />
-                </label>
-                <select
-                  id="op-toolbar-status"
-                  class="op-field op-toolbar__status"
-                  aria-label="Filtrar por situação (atalho)"
-                >
-                  <option value="all">Todos</option>
-                  <option value="chegando_hoje">Chegando hoje</option>
-                  <option value="pendente_pagamento">Pendente pagamento</option>
-                  <option value="pendente_fnrh">Pendente FNRH</option>
-                  <option value="acesso_liberado">Acesso liberado</option>
-                  <option value="nao_entrou">Não entrou</option>
-                  <option value="entrou">Concluído</option>
-                </select>
-                <select id="op-period" class="op-field op-toolbar__period" aria-label="Período operacional do check-in">
-                  <option value="hoje" selected>Hoje</option>
-                  <option value="ontem">Ontem</option>
-                  <option value="7dias">7 dias</option>
-                  <option value="este_mes">Este mês</option>
-                  <option value="periodo">Período</option>
-                </select>
+                <div class="op-filter op-filter--search">
+                  <span class="op-filter__label" aria-hidden="true">Buscar</span>
+                  <label class="op-search-field">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m21 21-4.3-4.3M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z" />
+                    </svg>
+                    <span class="sr-only">Buscar reservas</span>
+                    <input
+                      type="search"
+                      id="op-search"
+                      class="op-field op-toolbar__search"
+                      placeholder="Buscar apto, hóspede ou reserva..."
+                      aria-label="Buscar reservas"
+                      autocomplete="off"
+                    />
+                  </label>
+                </div>
+                <div class="op-filter">
+                  <label class="op-filter__label" for="op-toolbar-status">Status</label>
+                  <select
+                    id="op-toolbar-status"
+                    class="op-field op-toolbar__status"
+                    aria-label="Filtrar por situação (atalho)"
+                  >
+                    <option value="all">Todos</option>
+                    <option value="chegando_hoje">Chegando hoje</option>
+                    <option value="pendente_pagamento">Pendente pagamento</option>
+                    <option value="pendente_fnrh">Pendente FNRH</option>
+                    <option value="acesso_liberado">Acesso liberado</option>
+                    <option value="nao_entrou">Não entrou</option>
+                    <option value="entrou">Concluído</option>
+                  </select>
+                </div>
+                <div class="op-filter">
+                  <label class="op-filter__label" for="op-period">Período</label>
+                  <select id="op-period" class="op-field op-toolbar__period" aria-label="Período operacional do check-in">
+                    <option value="hoje" selected>Hoje</option>
+                    <option value="ontem">Ontem</option>
+                    <option value="7dias">7 dias</option>
+                    <option value="este_mes">Este mês</option>
+                    <option value="periodo">Período</option>
+                  </select>
+                </div>
                 <div id="op-period-custom" class="op-period-custom hidden" hidden>
                   <label class="sr-only" for="op-period-from">Data inicial</label>
                   <input type="date" id="op-period-from" class="op-field op-toolbar__period-date" aria-label="Data inicial do período" />
@@ -236,6 +298,7 @@
                   Importar
                 </a>
                 <button type="button" class="op-btn op-btn--secondary" id="op-refresh-btn" aria-label="Atualizar">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></svg>
                   Atualizar
                 </button>
               </div>
@@ -292,79 +355,6 @@
               </div>
             </div>
           </section>
-
-          <section
-            id="op-hits-sandbox-panel"
-            class="op-hits-sandbox"
-            aria-label="Reservas no HITS Sandbox (somente leitura)"
-          >
-            <div class="op-hits-bar">
-              <div class="op-hits-bar__id">
-                <span class="op-hits-bar__title">HITS Sandbox</span>
-                <span id="op-hits-sandbox-badge" class="op-hits-bar__badge hidden">Conectado</span>
-              </div>
-              <div class="op-hits-bar__meta">
-                <span id="op-hits-sandbox-count" class="op-hits-bar__count"></span>
-                <span id="op-hits-sandbox-updated" class="op-hits-bar__updated"></span>
-              </div>
-              <p class="op-hits-bar__hint">Leitura direta via API HITS — somente leitura</p>
-              <div class="op-hits-bar__actions">
-                <button
-                  type="button"
-                  class="op-btn op-btn--secondary"
-                  id="op-hits-sandbox-refresh"
-                >
-                  Atualizar HITS
-                </button>
-                <button
-                  type="button"
-                  class="op-hits-bar__toggle"
-                  id="op-hits-sandbox-toggle"
-                  aria-expanded="false"
-                  aria-controls="op-hits-sandbox-details"
-                >
-                  Ver diagnóstico
-                </button>
-              </div>
-            </div>
-            <div id="op-hits-sandbox-details" class="op-hits-details hidden">
-              <p id="op-hits-sandbox-status" class="op-hits-sandbox__status hidden" role="status"></p>
-              <div class="op-table-wrap">
-                <table class="op-table" aria-label="Reservas no HITS Sandbox">
-                  <thead>
-                    <tr>
-                      <th>idReservation</th>
-                      <th>Apto</th>
-                      <th>Hóspede</th>
-                      <th>Entrada</th>
-                      <th>Saída</th>
-                      <th>Status</th>
-                      <th>Hóspedes</th>
-                    </tr>
-                  </thead>
-                  <tbody id="op-hits-sandbox-body"></tbody>
-                </table>
-              </div>
-              <div id="op-hits-sandbox-empty" class="op-empty">
-                <p class="op-empty__title">Nenhuma reserva carregada</p>
-              </div>
-            </div>
-          </section>
-
-          <div id="op-occupied-drawer" class="op-occupied-drawer hidden" aria-hidden="true">
-            <div class="op-occupied-drawer__backdrop" id="op-occupied-backdrop"></div>
-            <aside class="op-occupied-drawer__panel" role="dialog" aria-labelledby="op-occupied-title">
-              <header class="op-occupied-drawer__head">
-                <h2 id="op-occupied-title">Hospedagens atuais</h2>
-                <button type="button" class="op-detail__close" id="op-occupied-close" aria-label="Fechar">
-                  Fechar
-                </button>
-              </header>
-              <ul id="op-occupied-list" class="op-occupied-drawer__list"></ul>
-            </aside>
-          </div>
-
-          <section id="operacional-excecoes" class="op-excecoes hidden" aria-label="Exceções operacionais"></section>
 
           <div id="op-reservas-main" class="op-main">
             <div class="op-master">
@@ -455,6 +445,19 @@
                   <div id="reservation-detail-body" class="op-detail__scroll"></div>
                 </div>
               </div>
+            </aside>
+          </div>
+
+          <div id="op-occupied-drawer" class="op-occupied-drawer hidden" aria-hidden="true">
+            <div class="op-occupied-drawer__backdrop" id="op-occupied-backdrop"></div>
+            <aside class="op-occupied-drawer__panel" role="dialog" aria-labelledby="op-occupied-title">
+              <header class="op-occupied-drawer__head">
+                <h2 id="op-occupied-title">Hospedagens atuais</h2>
+                <button type="button" class="op-detail__close" id="op-occupied-close" aria-label="Fechar">
+                  Fechar
+                </button>
+              </header>
+              <ul id="op-occupied-list" class="op-occupied-drawer__list"></ul>
             </aside>
           </div>
         </main>
@@ -577,7 +580,7 @@
     <script defer src="./yes-pagarme-payment-ui.js?v=6"></script>
     <script defer src="./yes-pagamento-presencial-diferido-ui.js?v=1"></script>
     <script defer src="./yes-reservation-financial.js?v=3"></script>
-    <script defer src="./yes-hits-sandbox-preview.js?v=3"></script>
-    <script defer src="./checkin-operacional-mvp.js?v=56"></script>
+    <script defer src="./yes-hits-sandbox-preview.js?v=4"></script>
+    <script defer src="./checkin-operacional-mvp.js?v=57"></script>
   </body>
 </html>

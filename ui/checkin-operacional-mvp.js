@@ -2390,6 +2390,17 @@ function calcularResumo(lista) {
   return getResumoFunil(lista);
 }
 
+/**
+ * Apresentação dos KPIs (Design System): esmaece indicador zerado e destaca
+ * FNRH pendentes > 0. Só alterna classes no card; valores e cálculos não mudam.
+ */
+function marcarTomKpi(valorEl, n, atencao) {
+  const card = valorEl && valorEl.closest ? valorEl.closest("article, .yes-kpi-card") : null;
+  if (!card) return;
+  card.classList.toggle("op-kpi--zero", n === 0);
+  card.classList.toggle("op-kpi--attention", !!atencao && n > 0);
+}
+
 function renderOperationalMetrics() {
   const list = Array.isArray(reservas) ? reservas : [];
   const summary = calcularResumo(list);
@@ -2405,6 +2416,7 @@ function renderOperationalMetrics() {
     : 0;
 
   if (opKpiArrivals) opKpiArrivals.textContent = String(summary.chegadasHoje);
+  marcarTomKpi(opKpiArrivals, summary.chegadasHoje);
   if (opKpiArrivalsNote) {
     opKpiArrivalsNote.textContent =
       summary.chegadasHoje === 1
@@ -2413,11 +2425,13 @@ function renderOperationalMetrics() {
   }
   if (opKpiCompleted) {
     opKpiCompleted.textContent = String(completedToday);
+    marcarTomKpi(opKpiCompleted, completedToday);
   }
   if (opKpiCompletedNote) {
     opKpiCompletedNote.textContent = `${completionPercent}% das chegadas`;
   }
   if (opKpiFnrh) opKpiFnrh.textContent = String(fnrhPending);
+  marcarTomKpi(opKpiFnrh, fnrhPending, true);
   if (opKpiFnrhNote) {
     opKpiFnrhNote.textContent =
       fnrhPending > 0 ? "Requer atenção" : "Sem pendências";
@@ -2431,6 +2445,7 @@ function renderOperationalMetrics() {
       ? Pcount.countAcessosLiberados(baseLista)
       : baseLista.filter((r) => acessoLiberadoEfetivo(r)).length;
   if (opKpiAccess) opKpiAccess.textContent = String(accessGrantedOperacional);
+  marcarTomKpi(opKpiAccess, accessGrantedOperacional);
   renderOccupiedGuestsCard();
 }
 
@@ -2821,7 +2836,7 @@ function updateRowSelectionUi() {
     const id = tr.getAttribute("data-id");
     tr.setAttribute("aria-selected", id === sel ? "true" : "false");
   });
-  document.querySelectorAll("button.op-mcard").forEach((btn) => {
+  document.querySelectorAll(".op-mcard").forEach((btn) => {
     const id = btn.getAttribute("data-id");
     btn.setAttribute("aria-selected", id === sel ? "true" : "false");
   });
@@ -2909,13 +2924,16 @@ function renderOperacionalLista() {
       const mGuestTitle = titleAttrEscape(mGuest);
       const statusBadgeHtml = renderOperacionalStatusBadgeHtml(status, reserva.id);
       const ppdBtnM = canShowPresencialDiferidoBtn(reserva)
-        ? `<span class="op-btn-table op-btn-ppd op-btn-ppd--mcard" role="button" tabindex="0" data-id="${rid}" data-ppd="1" data-stop="1" title="Autorizar pagamento presencial diferido" aria-label="Pagamento presencial diferido"><span class="op-btn-ppd__short">PPD</span><span class="op-btn-ppd__full">Pagto presencial diferido</span></span>`
+        ? `<button type="button" class="op-btn-table op-btn-ppd op-btn-ppd--mcard" data-id="${rid}" data-ppd="1" data-stop="1" title="Autorizar pagamento presencial diferido" aria-label="Pagamento presencial diferido"><span class="op-btn-ppd__short">PPD</span><span class="op-btn-ppd__full">Pagto presencial diferido</span></button>`
         : "";
       const proxMobileHtml =
         proxInfoM.cta && proxInfoM.cta.kind
           ? `<button type="button" class="op-next-action-btn op-next-action-btn--mcard" data-id="${rid}" data-cta-kind="${escapeHtml(proxInfoM.cta.kind)}" data-stop="1">${escapeHtml(prox)}</button>`
           : `<span class="op-next-action${proxInfoM.destaque ? "" : " op-next-action--muted"}">${escapeHtml(prox)}</span>`;
-      return `<button type="button" class="op-mcard" data-id="${rid}">
+      const mAptTxt = escapeHtml(String(reserva.apartamento || "—"));
+      // Cartão é contêiner (não <button>): o cartão tem botões internos (próxima ação,
+      // cobrança, Ver) e <button> aninhado quebra o HTML no celular.
+      return `<article class="op-mcard" data-id="${rid}" tabindex="0" aria-label="Apto ${mAptTxt} · ${mGuestTitle}">
         <div class="op-mcard__r1">
           <span class="op-mcard__apt">${escapeHtml(String(reserva.apartamento || "—"))}</span>
           ${statusBadgeHtml}
@@ -2927,10 +2945,10 @@ function renderOperacionalLista() {
           ${proxMobileHtml}
           <span class="op-mcard__actions">
             ${ppdBtnM}
-            <span class="op-btn-table op-btn-ver-inline" data-stop="1">Ver</span>
+            <button type="button" class="op-btn-table op-btn-ver-inline" data-id="${rid}" data-stop="1" aria-label="Ver detalhes da reserva">Ver</button>
           </span>
         </div>
-      </button>`;
+      </article>`;
     })
     .join("");
   if (opMobileList instanceof HTMLElement) opMobileList.innerHTML = mobileHtml;
@@ -2990,6 +3008,12 @@ function renderOperacionalLista() {
   });
 
   opMobileList?.querySelectorAll(".op-mcard").forEach((card) => {
+    card.addEventListener("keydown", (e) => {
+      if (e.target !== card || (e.key !== "Enter" && e.key !== " ")) return;
+      e.preventDefault();
+      const id = card.getAttribute("data-id");
+      if (id) openDetail(id);
+    });
     card.addEventListener("click", (e) => {
       const id = card.getAttribute("data-id");
       if (!id) return;
@@ -3394,6 +3418,7 @@ function renderOccupiedGuestsCard() {
   if (opKpiOccupiedGuests) {
     const n = occupiedSummaryCache.total_guests;
     opKpiOccupiedGuests.textContent = n + (n === 1 ? " hóspede" : " hóspedes");
+    marcarTomKpi(opKpiOccupiedGuests, n);
   }
   if (opKpiOccupiedApts) {
     const a = occupiedSummaryCache.occupied_apartments;
@@ -3736,7 +3761,10 @@ async function loadReservasSomenteLeituraHits(jaCarregadas, options) {
   });
   if (!Array.isArray(externas) || externas.length === 0) return [];
   // Feed lido com sucesso: quem está no banco e sumiu dele é confirmado no detalhe.
-  await reconciliarCanceladasHits(jaCarregadas, externas);
+  // Reaproveitando a última leitura, a reconciliação já rodou naquele ciclo.
+  if (!(options && options.reuseOnly === true)) {
+    await reconciliarCanceladasHits(jaCarregadas, externas);
+  }
   const jaNoBanco = new Set(
     (jaCarregadas || [])
       .map((r) => String((r && r.externalReservationId) || "").trim())
@@ -3792,6 +3820,16 @@ function aplicarLeituraHitsQuandoPronta(options) {
 async function refreshFromSource() {
   invalidateArrivalsCache();
   reservas = await loadReservasOperacionaisComLeituraHits({ force: true });
+  refresh();
+}
+
+/**
+ * Botão Atualizar da listagem: relê o banco e reaplica a última leitura HITS já
+ * disponível. Não abre consulta nova ao HITS — a sincronização é automática.
+ */
+async function refreshListagem() {
+  invalidateArrivalsCache();
+  reservas = await loadReservasOperacionaisComLeituraHits({ reuseOnly: true });
   refresh();
 }
 
@@ -7989,7 +8027,7 @@ async function initCheckinOperacional() {
     });
   }
   opRefreshBtn?.addEventListener("click", () => {
-    refreshFromSource().catch(() => refresh());
+    refreshListagem().catch(() => refresh());
   });
 
   // Apresentação: menu lateral em overlay no tablet/celular (padrão v0).
@@ -8009,7 +8047,7 @@ async function initCheckinOperacional() {
   });
 
   window.addEventListener("resize", () => {
-    if (window.innerWidth >= 1024) setSidebarOpen(false);
+    if (window.innerWidth >= 1101) setSidebarOpen(false);
     if (!detailReservaId) {
       detailPanelElement?.classList.remove("op-detail--open");
       detailBackdropElement?.classList.add("hidden");
