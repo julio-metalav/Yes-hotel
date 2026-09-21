@@ -256,6 +256,11 @@ function getPrioridadeLabel(prioridade) {
 function getFilaOperacionalRank(reserva) {
   // Fora da fila operacional: não há pagamento, FNRH nem acesso a avaliar.
   if (isReservaSomenteLeituraHits(reserva)) return 4;
+  if (isReservaConsultaHits(reserva)) {
+    if (reserva.entrouNoApto) return 4;
+    if (reserva.acessoLiberado) return 3;
+    return isFnrhConsultaCompleta(reserva) ? 2 : 1;
+  }
   if (!isPagamentoOk(reserva)) return 0;
   if (hasFnrhPendente(reserva) || !isFnrhCompleta(reserva)) return 1;
   if (!acessoLiberadoEfetivo(reserva)) return 2;
@@ -1030,8 +1035,33 @@ function isReservaSomenteLeituraHits(reserva) {
   return !!(reserva && reserva.somenteLeituraHits === true);
 }
 
+/** Reserva do perfil hits_consulta: só consulta, nenhum comando de escrita. */
+function isReservaConsultaHits(reserva) {
+  return !!(reserva && reserva.consultaHits === true);
+}
+
+function isFnrhConsultaCompleta(reserva) {
+  return String((reserva && reserva.fnrhStatusAgregado) || "").trim() === "fnrh_completo";
+}
+
+/** Status da reserva de consulta: só FNRH, acesso e entrada (nunca pagamento). */
+function derivarStatusConsultaHits(reserva) {
+  if (reserva.entrouNoApto) return { label: "Entrou no apto", type: "entrou" };
+  if (reserva.acessoLiberado) return { label: "Acesso liberado", type: "aguardando-chegada" };
+  if (!isFnrhConsultaCompleta(reserva)) return { label: "Pendente FNRH", type: "pendente-fnrh" };
+  return { label: "Aguardando acesso", type: "neutral" };
+}
+
+function proximaEtapaConsultaHits(reserva) {
+  if (reserva.entrouNoApto) return "Hóspede no apartamento";
+  if (reserva.acessoLiberado) return "Acesso liberado — aguardando entrada";
+  if (!isFnrhConsultaCompleta(reserva)) return "Aguardando FNRH";
+  return "Aguardando liberação de acesso";
+}
+
 function canShowPresencialDiferidoBtn(reserva) {
   if (isReservaSomenteLeituraHits(reserva)) return false;
+  if (isReservaConsultaHits(reserva)) return false;
   const api = getPresencialDiferidoUiApi();
   if (!api || typeof api.canShowPresencialDiferidoButton !== "function") return false;
   const d = api.canShowPresencialDiferidoButton({
@@ -2000,6 +2030,7 @@ function getFnrhPreenchidas(reserva) {
 }
 
 function hasFnrhPendente(reserva) {
+  if (isReservaConsultaHits(reserva)) return !isFnrhConsultaCompleta(reserva);
   const total = getHospedesTotal(reserva);
   const confirmadas = getFnrhConfirmadas(reserva);
   return total > 0 && confirmadas < total;
@@ -2146,15 +2177,18 @@ function resolveFinancialUi(reserva) {
 }
 
 function isPagamentoOk(reserva) {
+  if (isReservaConsultaHits(reserva)) return false;
   return resolveFinancialUi(reserva).accessOk === true;
 }
 
 function isPagamentoPendenteOperacional(reserva) {
+  if (isReservaConsultaHits(reserva)) return false;
   const st = resolveFinancialUi(reserva).status;
   return st === "pendente" || st === "pendente_comissionado";
 }
 
 function isFnrhCompleta(reserva) {
+  if (isReservaConsultaHits(reserva)) return isFnrhConsultaCompleta(reserva);
   const total = getHospedesTotal(reserva);
   if (total === 0) return false;
   return getFnrhConfirmadas(reserva) === total;
@@ -2753,6 +2787,10 @@ function listaProximaAcaoOperacional(reserva) {
       cta: { kind: "preparar_fnrh", label: "Preparar FNRH" },
     };
   }
+  // Consulta: só o texto da etapa, nunca um comando.
+  if (isReservaConsultaHits(reserva)) {
+    return { texto: proximaEtapaConsultaHits(reserva), destaque: false, cta: null };
+  }
   const ctx = buildRecomendacaoOperacionalCtx(reserva);
   const rec = derivarRecomendacaoOperacional(reserva, ctx);
   const raw = rec && rec.listaLabel != null ? String(rec.listaLabel).trim() : "";
@@ -2767,6 +2805,10 @@ function linhaFluxoResumo(reserva) {
   if (isReservaSomenteLeituraHits(reserva)) {
     const pax = Math.max(1, Number(reserva.totalHospedesHits) || 1);
     return `<span class="op-flux__item">${pax} ${pax === 1 ? "hóspede" : "hóspedes"}</span>`;
+  }
+  // Consulta: só o fluxo FNRH autorizado; pagamento não é exibido.
+  if (isReservaConsultaHits(reserva)) {
+    return `<span class="op-flux__item">${isFnrhConsultaCompleta(reserva) ? "FNRH completa" : "FNRH pendente"}</span>`;
   }
   const total = getHospedesTotal(reserva);
   const confirmadas = getFnrhConfirmadas(reserva);
@@ -2860,7 +2902,10 @@ function renderOperacionalLista() {
 
   const rowsHtml = ordenadas
     .map((reserva) => {
-      const status = derivarStatusOperacional(reserva);
+      // Consulta (hits_consulta): status só de FNRH, acesso e entrada.
+      const status = isReservaConsultaHits(reserva)
+        ? derivarStatusConsultaHits(reserva)
+        : derivarStatusOperacional(reserva);
       const ci = formatDataBR(reserva.checkInPrevisto);
       const co = formatDataBR(reserva.checkOutPrevisto);
       const n = noitesEntre(reserva.checkInPrevisto, reserva.checkOutPrevisto);
@@ -2884,7 +2929,8 @@ function renderOperacionalLista() {
         proxInfo.cta && proxInfo.cta.kind
           ? `<button type="button" class="op-next-action-btn" data-id="${rid}" data-cta-kind="${escapeHtml(proxInfo.cta.kind)}" title="${titleAttrEscape(prox)}">${escapeHtml(prox)}</button>`
           : `<span class="${proxCls}">${escapeHtml(prox)}</span>`;
-      return `<tr class="op-tr${ppdBtn ? " op-tr--with-ppd" : ""}" data-id="${rid}" tabindex="0" role="row">
+      const consulta = isReservaConsultaHits(reserva);
+      return `<tr class="op-tr${ppdBtn ? " op-tr--with-ppd" : ""}" data-id="${rid}"${consulta ? "" : ' tabindex="0"'} role="row">
         <td class="op-td op-td--apt"><span class="op-apt-num">${escapeHtml(String(reserva.apartamento || "—"))}</span></td>
         <td class="op-td op-td--guest">
           <span class="op-guest-name" title="${guestTitle}">${escapeHtml(guestName)}</span>
@@ -2897,7 +2943,10 @@ function renderOperacionalLista() {
         <td class="op-td op-td--flux"><div class="op-flux">${flux}</div>${ppdStateHtml}</td>
         <td class="op-td op-td--status">${statusBadgeHtml}</td>
         <td class="op-td op-td--next">${proxHtml}</td>
-        <td class="op-td op-td--actions">
+        <td class="op-td op-td--actions">${
+          consulta
+            ? ""
+            : `
           <div class="op-actions-cell">
             <div class="op-actions-primary">
               <button type="button" class="op-btn-table op-btn-ver" data-id="${rid}">Ver</button>
@@ -2905,7 +2954,8 @@ function renderOperacionalLista() {
             </div>
             ${ppdBtn ? `<div class="op-actions-secondary">${ppdBtn}</div>` : ""}
           </div>
-        </td>
+        `
+        }</td>
       </tr>`;
     })
     .join("");
@@ -2914,7 +2964,10 @@ function renderOperacionalLista() {
 
   const mobileHtml = ordenadas
     .map((reserva) => {
-      const status = derivarStatusOperacional(reserva);
+      // Consulta (hits_consulta): status só de FNRH, acesso e entrada.
+      const status = isReservaConsultaHits(reserva)
+        ? derivarStatusConsultaHits(reserva)
+        : derivarStatusOperacional(reserva);
       const ci = formatDataBR(reserva.checkInPrevisto);
       const co = formatDataBR(reserva.checkOutPrevisto);
       const proxInfoM = listaProximaAcaoOperacional(reserva);
@@ -2933,7 +2986,8 @@ function renderOperacionalLista() {
       const mAptTxt = escapeHtml(String(reserva.apartamento || "—"));
       // Cartão é contêiner (não <button>): o cartão tem botões internos (próxima ação,
       // cobrança, Ver) e <button> aninhado quebra o HTML no celular.
-      return `<article class="op-mcard" data-id="${rid}" tabindex="0" aria-label="Apto ${mAptTxt} · ${mGuestTitle}">
+      const mConsulta = isReservaConsultaHits(reserva);
+      return `<article class="op-mcard" data-id="${rid}"${mConsulta ? "" : ' tabindex="0"'} aria-label="Apto ${mAptTxt} · ${mGuestTitle}">
         <div class="op-mcard__r1">
           <span class="op-mcard__apt">${escapeHtml(String(reserva.apartamento || "—"))}</span>
           ${statusBadgeHtml}
@@ -2943,10 +2997,14 @@ function renderOperacionalLista() {
         <div class="op-mcard__flux">${linhaFluxoResumo(reserva)}</div>
         <div class="op-mcard__row5">
           ${proxMobileHtml}
-          <span class="op-mcard__actions">
+          ${
+            mConsulta
+              ? ""
+              : `<span class="op-mcard__actions">
             ${ppdBtnM}
             <button type="button" class="op-btn-table op-btn-ver-inline" data-id="${rid}" data-stop="1" aria-label="Ver detalhes da reserva">Ver</button>
-          </span>
+          </span>`
+          }
         </div>
       </article>`;
     })
@@ -2955,7 +3013,7 @@ function renderOperacionalLista() {
 
   function bindRowOpen(tr) {
     const id = tr.getAttribute("data-id");
-    if (!id) return;
+    if (!id || isReservaConsultaHits(getReservaById(id))) return;
     tr.addEventListener("click", (e) => {
       if (e.target.closest("button")) return;
       openDetail(id);
@@ -3008,6 +3066,7 @@ function renderOperacionalLista() {
   });
 
   opMobileList?.querySelectorAll(".op-mcard").forEach((card) => {
+    if (isReservaConsultaHits(getReservaById(card.getAttribute("data-id")))) return;
     card.addEventListener("keydown", (e) => {
       if (e.target !== card || (e.key !== "Enter" && e.key !== " ")) return;
       e.preventDefault();
@@ -3244,7 +3303,7 @@ function buildArrivalsInputFromInternal(r) {
     check_in_previsto: r.checkInPrevisto || "",
     check_out_previsto: r.checkOutPrevisto || "",
     status_reserva: r.statusReserva || "ativa",
-    pagamento_status: r.pagamento || "desconhecido",
+    pagamento_status: isReservaConsultaHits(r) ? "" : r.pagamento || "desconhecido",
     entrou_no_apto: !!r.entrouNoApto,
     acesso_liberado: !!r.acessoLiberado,
     total_hospedes: Math.max(guests.length, 1),
@@ -3391,7 +3450,7 @@ let arrivalsTruncatedWarning = false;
 
 async function ensureArrivalsDataset() {
   if (arrivalsDatasetCache) return arrivalsDatasetCache;
-  if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && getSupabase()) {
+  if (!modoConsultaHits && PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && getSupabase()) {
     const loaded = await loadArrivalsDatasetFromBackend();
     arrivalsDatasetCache = loaded.items || [];
     arrivalsTruncatedWarning = !!loaded.truncated;
@@ -3510,6 +3569,7 @@ async function renderChegadasPanel() {
   }
 
   opChegadasBody.querySelectorAll("tr[data-reserva-id]").forEach(function (tr) {
+    if (modoConsultaHits) return;
     tr.addEventListener("click", function () {
       const id = tr.getAttribute("data-reserva-id");
       if (id && getReservaById(id)) openDetail(id);
@@ -3779,6 +3839,7 @@ async function loadReservasSomenteLeituraHits(jaCarregadas, options) {
  * abriria vazia e só populasse depois de uma ação do operador.
  */
 async function loadReservasOperacionaisComLeituraHits(options) {
+  if (modoConsultaHits) return loadReservasConsultaHits();
   const base = (await loadReservasOperacionaisFromProvider()) || [];
   const hits = await loadReservasSomenteLeituraHits(base, options);
   // A reconciliação pode ter marcado canceladas em `base`: elas saem da grade.
@@ -3794,6 +3855,7 @@ async function loadReservasOperacionaisComLeituraHits(options) {
  * listeners — a grade ficava vazia e o botão Atualizar, inerte.
  */
 function aplicarLeituraHitsQuandoPronta(options) {
+  if (modoConsultaHits) return;
   loadReservasSomenteLeituraHits(reservas, options)
     .then((hits) => {
       // Canceladas confirmadas na reconciliação saem da grade mesmo sem linha nova.
@@ -4047,6 +4109,8 @@ function openDetail(reservaId) {
   // O detalhe operacional depende de hóspedes, eventos, FNRH e TTLock do banco.
   // Reserva HITS não tem nada disso: não abre.
   if (isReservaSomenteLeituraHits(reserva)) return;
+  // Consulta: o detalhe operacional tem comandos de escrita — não abre.
+  if (isReservaConsultaHits(reserva)) return;
   detailReservaId = reservaId;
   syncDetailPanelChrome(reserva);
   renderDetail(reserva);
@@ -5074,6 +5138,7 @@ function derivarExcecaoOperacionalReserva(reserva) {
   if (!reserva || isCheckinConcluido(reserva)) return null;
   // Sem estado operacional no banco, não há exceção a derivar.
   if (isReservaSomenteLeituraHits(reserva)) return null;
+  if (isReservaConsultaHits(reserva)) return null;
 
   const tolEx = derivarExcecaoToleranciaAcesso(reserva);
   if (tolEx) return tolEx;
@@ -7744,121 +7809,56 @@ function showAccessState(title, message, actionLabel) {
   `;
 }
 
-/* ---------- Consulta somente leitura (perfil hits_consulta) ---------- */
-// Caminho de dados e de renderização totalmente separado do painel
-// interativo de admin/recepção: nenhum botão de escrita, diagnóstico ou
-// ação sobre reserva/hóspede é criado nesta função (não é ocultado por
-// CSS — simplesmente não existe no DOM para este perfil). Os dados vêm
-// exclusivamente da RPC operacional_hits_checkin_consulta(), que já
-// devolve só os campos autorizados; nada é filtrado aqui no cliente.
-let hitsReadOnlyRows = [];
+/* ---------- Perfil hits_consulta: mesma tela, somente consulta ---------- */
+// O perfil vê exatamente a interface operacional (#op-main-content) de
+// admin/recepção; muda só a permissão. Os dados vêm exclusivamente da RPC
+// operacional_hits_checkin_consulta() (campos mínimos: sem financeiro,
+// contato, documento ou credenciais). Para essas reservas nenhum comando de
+// escrita é criado no DOM (não é escondido por CSS: o botão não existe) e o
+// detalhe operacional não abre.
+let modoConsultaHits = false;
 
-function formatYmdBr(ymd) {
-  if (!ymd || typeof ymd !== "string" || ymd.length < 10) return "—";
-  const [y, m, d] = ymd.slice(0, 10).split("-");
-  return `${d}/${m}/${y}`;
+function mapConsultaHitsRow(row) {
+  return {
+    id: String((row && row.reservation_id) || ""),
+    consultaHits: true,
+    apartamento: String((row && row.apartment_code) || "").trim(),
+    hospedePrincipal: String((row && row.main_guest_name) || "").trim(),
+    externalReservationId: null,
+    checkInPrevisto: String((row && row.check_in_previsto) || "").slice(0, 10),
+    checkOutPrevisto: String((row && row.check_out_previsto) || "").slice(0, 10),
+    statusReserva: row && row.status_reserva === "cancelada" ? "cancelada" : "ativa",
+    fnrhStatusAgregado: String((row && row.fnrh_status_agregado) || "").trim() || "fnrh_pendente",
+    acessoLiberado: !!(row && row.acesso_liberado),
+    entrouNoApto: !!(row && row.entrou_no_apto),
+    // Pagamento não é fornecido a este perfil e nunca é exibido.
+    pagamento: "",
+    hospedes: [],
+    historicoOperacional: [],
+    comunicacaoEnviosOperacional: [],
+    cobrancasPagarme: [],
+    pagamentosPagarme: [],
+  };
 }
 
-function hitsReadOnlyProximaEtapa(row) {
-  if (row.entrou_no_apto) return "Hóspede no apartamento";
-  if (row.acesso_liberado) return "Acesso liberado — aguardando entrada";
-  return "Aguardando liberação de acesso";
-}
-
-function hitsReadOnlyStatusLabel(status) {
-  if (status === "cancelada") return "Cancelada";
-  if (status === "ativa") return "Ativa";
-  return status || "—";
-}
-
-function escapeHitsReadOnlyHtml(value) {
-  return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => {
-    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
-  });
-}
-
-function normalizeHitsSearchTerm(value) {
-  return String(value || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .trim();
-}
-
-function renderHitsReadOnlyList() {
-  const tbody = document.querySelector("#hits-readonly-body");
-  const emptyEl = document.querySelector("#hits-readonly-empty");
-  const countEl = document.querySelector("#hits-readonly-count");
-  const searchInput = document.querySelector("#hits-readonly-search");
-  if (!(tbody instanceof HTMLElement)) return;
-
-  const term = normalizeHitsSearchTerm(searchInput instanceof HTMLInputElement ? searchInput.value : "");
-  const visible = term
-    ? hitsReadOnlyRows.filter((row) => {
-        const haystack = normalizeHitsSearchTerm(`${row.apartment_code || ""} ${row.main_guest_name || ""}`);
-        return haystack.includes(term);
-      })
-    : hitsReadOnlyRows;
-
-  if (countEl instanceof HTMLElement) {
-    countEl.textContent = `${visible.length} reserva${visible.length === 1 ? "" : "s"}`;
-  }
-
-  if (visible.length === 0) {
-    tbody.innerHTML = "";
-    emptyEl?.classList.remove("hidden");
-    return;
-  }
-  emptyEl?.classList.add("hidden");
-
-  tbody.innerHTML = visible
-    .map((row) => {
-      const apto = escapeHitsReadOnlyHtml(row.apartment_code || "—");
-      const hospede = escapeHitsReadOnlyHtml(row.main_guest_name || "—");
-      const fluxo = escapeHitsReadOnlyHtml(row.fnrh_status_agregado || "—");
-      return (
-        "<tr>" +
-        `<td>${apto}</td>` +
-        `<td>${hospede}</td>` +
-        `<td>${formatYmdBr(row.check_in_previsto)}</td>` +
-        `<td>${formatYmdBr(row.check_out_previsto)}</td>` +
-        `<td>${hitsReadOnlyStatusLabel(row.status_reserva)}</td>` +
-        `<td>${fluxo}</td>` +
-        `<td>${hitsReadOnlyProximaEtapa(row)}</td>` +
-        "</tr>"
-      );
-    })
-    .join("");
-}
-
-async function initCheckinReadOnlyHits() {
-  const mainContent = document.querySelector("#hits-readonly-content");
-  const normalContent = document.querySelector("#op-main-content");
-  if (normalContent instanceof HTMLElement) normalContent.classList.add("hidden");
-  if (mainContent instanceof HTMLElement) mainContent.classList.remove("hidden");
-
+/** Única fonte de dados do perfil hits_consulta. */
+async function loadReservasConsultaHits() {
   const supabase = getSupabase();
-  if (!supabase) {
-    return;
-  }
-
+  if (!supabase) return [];
   const { data, error } = await supabase.rpc("operacional_hits_checkin_consulta");
-  if (error) {
-    const tbody = document.querySelector("#hits-readonly-body");
-    if (tbody instanceof HTMLElement) {
-      tbody.innerHTML = "";
-    }
-    document.querySelector("#hits-readonly-empty")?.classList.remove("hidden");
-    return;
-  }
+  if (error || !Array.isArray(data)) return [];
+  return data
+    .map(mapConsultaHitsRow)
+    .filter((r) => r.id && r.statusReserva !== "cancelada");
+}
 
-  hitsReadOnlyRows = Array.isArray(data) ? data : [];
-  renderHitsReadOnlyList();
-
-  const searchInput = document.querySelector("#hits-readonly-search");
-  if (searchInput instanceof HTMLInputElement) {
-    searchInput.addEventListener("input", renderHitsReadOnlyList);
-  }
+/** Remove da tela o que não é consulta: diagnóstico técnico do HITS. */
+function prepararTelaConsultaHits() {
+  document.body.classList.add("op-consulta-hits");
+  document.querySelector("#op-hits-sandbox-toggle")?.remove();
+  document.querySelector("#op-hits-sandbox-details")?.remove();
+  const countEl = document.querySelector("#op-hits-sandbox-count");
+  if (countEl instanceof HTMLElement) countEl.textContent = "Somente consulta";
 }
 
 /* ---------- Bindings / init ---------- */
@@ -7914,9 +7914,8 @@ async function initCheckinOperacional() {
     sessionUserRoleElement.textContent = auth.getRoleLabel(currentUser.role);
   }
 
-  if (auth.isHitsConsultaRole(currentUser)) {
-    return initCheckinReadOnlyHits();
-  }
+  modoConsultaHits = auth.isHitsConsultaRole(currentUser);
+  if (modoConsultaHits) prepararTelaConsultaHits();
 
   painelOperadorRole = String(currentUser.role || "").trim().toLowerCase();
 
@@ -7927,8 +7926,12 @@ async function initCheckinOperacional() {
 
   // Banco primeiro: a tela sobe e os listeners são registrados de imediato.
   // A leitura HITS entra logo em seguida, no mesmo ciclo compartilhado.
-  reservas = (await loadReservasOperacionaisFromProvider()) || [];
-  aplicarLeituraHitsQuandoPronta();
+  if (modoConsultaHits) {
+    reservas = await loadReservasConsultaHits();
+  } else {
+    reservas = (await loadReservasOperacionaisFromProvider()) || [];
+    aplicarLeituraHitsQuandoPronta();
+  }
   invalidateArrivalsCache();
   await ensureArrivalsDataset();
 

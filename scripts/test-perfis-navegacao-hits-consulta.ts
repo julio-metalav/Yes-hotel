@@ -126,34 +126,65 @@ function main() {
     ok("hits_consulta bloqueado em todas as 7 rotas restantes, autorizado só em checkin");
   }
 
-  console.log("\n== 8. HITS não recebe controles de escrita na tela de Check-in ==");
+  console.log("\n== 8. HITS usa a mesma tela operacional, sem comandos de escrita ==");
   {
     const checkinSrc = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.js"), "utf8");
-    const start = checkinSrc.indexOf("async function initCheckinReadOnlyHits");
-    assert.ok(start > -1, "initCheckinReadOnlyHits deve existir");
-    const nextFnIdx = checkinSrc.indexOf("\n/* ---------- Bindings / init ---------- */", start);
-    assert.ok(nextFnIdx > start, "consegue isolar o corpo de initCheckinReadOnlyHits");
-    const body = checkinSrc.slice(start, nextFnIdx);
+    const checkinHtml = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.html"), "utf8");
+    const fnBody = (name: string) => {
+      const i = checkinSrc.search(new RegExp(`(async )?function ${name}\\(`));
+      assert.ok(i > -1, `${name} existe`);
+      return checkinSrc.slice(i, checkinSrc.indexOf("\n}", i) + 2);
+    };
 
-    const forbiddenTokens = [
-      ".update(",
-      ".insert(",
-      ".delete(",
-      "op-refresh-btn",
-      "op-hits-sandbox-refresh",
-      "liberarAcesso",
-      "reenviar",
-      "modal-enviar-senha",
-    ];
-    for (const token of forbiddenTokens) {
-      assert.doesNotMatch(
-        body,
-        new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
-        `initCheckinReadOnlyHits não deve referenciar "${token}"`,
-      );
+    // Não existe mais uma segunda interface para o perfil.
+    assert.doesNotMatch(checkinHtml, /hits-readonly/);
+    assert.doesNotMatch(checkinSrc, /initCheckinReadOnlyHits|hits-readonly/);
+    assert.match(checkinHtml, /id="op-main-content"/);
+    const init = fnBody("initCheckinOperacional");
+    assert.match(init, /modoConsultaHits = auth\.isHitsConsultaRole\(currentUser\);/);
+    assert.doesNotMatch(init, /isHitsConsultaRole\(currentUser\)\)\s*\{\s*return/);
+    ok("hits_consulta fica em #op-main-content: não há mais segunda tela nem desvio no init");
+
+    // Dados: só a RPC dedicada, sem escrita e sem SELECT direto em tabela.
+    const load = fnBody("loadReservasConsultaHits");
+    assert.match(load, /\.rpc\("operacional_hits_checkin_consulta"\)/);
+    for (const token of [".from(", ".update(", ".insert(", ".delete(", ".upsert(", "functions.invoke"]) {
+      assert.ok(!load.includes(token), `loadReservasConsultaHits não usa ${token}`);
     }
-    assert.match(body, /\.rpc\("operacional_hits_checkin_consulta"\)/, "usa a RPC dedicada de leitura");
-    ok("initCheckinReadOnlyHits não contém nenhum insert/update/delete nem botão de ação de escrita");
+    assert.match(fnBody("loadReservasOperacionaisComLeituraHits"), /if \(modoConsultaHits\) return loadReservasConsultaHits\(\);/);
+    assert.match(fnBody("aplicarLeituraHitsQuandoPronta"), /if \(modoConsultaHits\) return;/);
+    assert.match(fnBody("ensureArrivalsDataset"), /!modoConsultaHits && PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND/);
+    assert.match(init, /if \(modoConsultaHits\) \{\s*reservas = await loadReservasConsultaHits\(\);/);
+    ok("carga inicial, Atualizar, período e Chegadas usam só operacional_hits_checkin_consulta()");
+
+    // Nenhum comando de escrita para reservas de consulta.
+    for (const fn of [
+      "openDetail",
+      "canShowPresencialDiferidoBtn",
+      "listaProximaAcaoOperacional",
+      "derivarExcecaoOperacionalReserva",
+      "linhaFluxoResumo",
+      "isPagamentoPendenteOperacional",
+    ]) {
+      assert.match(fnBody(fn), /isReservaConsultaHits\(reserva\)/, `${fn} respeita o modo consulta`);
+    }
+    assert.match(
+      fnBody("listaProximaAcaoOperacional"),
+      /isReservaConsultaHits\(reserva\)\) \{\s*return \{ texto: proximaEtapaConsultaHits\(reserva\), destaque: false, cta: null \};/,
+    );
+    const lista = fnBody("renderOperacionalLista");
+    assert.equal(
+      (lista.match(/isReservaConsultaHits\(reserva\)\s*\?\s*derivarStatusConsultaHits\(reserva\)/g) || []).length,
+      2,
+      "tabela e cartão usam o status de consulta (sem pagamento)",
+    );
+    assert.match(lista, /consulta\s*\?\s*""\s*:\s*`\s*<div class="op-actions-cell">/, "sem Ver/⋯/PPD na tabela");
+    assert.match(lista, /mConsulta\s*\?\s*""\s*:\s*`<span class="op-mcard__actions">/, "sem Ver/PPD no cartão");
+    assert.match(lista, /if \(!id \|\| isReservaConsultaHits\(getReservaById\(id\)\)\) return;/, "linha não abre detalhe");
+    assert.match(lista, /if \(isReservaConsultaHits\(getReservaById\(card\.getAttribute\("data-id"\)\)\)\) return;/, "cartão não abre detalhe");
+    const prep = fnBody("prepararTelaConsultaHits");
+    assert.match(prep, /#op-hits-sandbox-toggle"\)\?\.remove\(\)/, "diagnóstico técnico removido do DOM");
+    ok("próxima ação só como texto; Ver, ⋯, PPD, cobrança, detalhe e diagnóstico não existem para o perfil");
   }
 
   console.log("\n== 9. O caminho de dados da HITS não retorna campos sensíveis ==");

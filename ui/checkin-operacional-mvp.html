@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=61" />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=62" />
   </head>
   <body class="op-body checkin-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -461,52 +461,6 @@
             </aside>
           </div>
         </main>
-
-        <main id="hits-readonly-content" class="op-content hidden" aria-label="Consulta Check-in (somente leitura)">
-          <section class="op-panel" aria-label="Reservas — consulta somente leitura">
-            <div class="op-panel__head">
-              <span class="op-panel__title">Check-in — consulta</span>
-              <span id="hits-readonly-count" class="op-panel__count"></span>
-            </div>
-            <div class="op-panel__body">
-              <div class="op-toolbar" role="toolbar" aria-label="Buscar reservas">
-                <label class="op-search-field">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="m21 21-4.3-4.3M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z" />
-                  </svg>
-                  <span class="sr-only">Buscar reservas</span>
-                  <input
-                    type="search"
-                    id="hits-readonly-search"
-                    class="op-field op-toolbar__search"
-                    placeholder="Buscar apto ou hóspede"
-                    aria-label="Buscar reservas"
-                    autocomplete="off"
-                  />
-                </label>
-              </div>
-              <div class="op-table-wrap">
-                <table class="op-table" aria-label="Lista de reservas (somente leitura)">
-                  <thead>
-                    <tr>
-                      <th>Apartamento</th>
-                      <th>Hóspede</th>
-                      <th>Check-in</th>
-                      <th>Check-out</th>
-                      <th>Status</th>
-                      <th>Fluxo FNRH</th>
-                      <th>Próxima etapa</th>
-                    </tr>
-                  </thead>
-                  <tbody id="hits-readonly-body"></tbody>
-                </table>
-              </div>
-              <div id="hits-readonly-empty" class="op-empty hidden">
-                <p class="op-empty__title">Nenhuma reserva encontrada</p>
-              </div>
-            </div>
-          </section>
-        </main>
       </div>
 
       <div class="modal-overlay hidden" id="modal-enviar-senha-overlay" aria-hidden="true">
@@ -581,6 +535,6 @@
     <script defer src="./yes-pagamento-presencial-diferido-ui.js?v=1"></script>
     <script defer src="./yes-reservation-financial.js?v=3"></script>
     <script defer src="./yes-hits-sandbox-preview.js?v=4"></script>
-    <script defer src="./checkin-operacional-mvp.js?v=57"></script>
+    <script defer src="./checkin-operacional-mvp.js?v=58"></script>
   </body>
 </html>

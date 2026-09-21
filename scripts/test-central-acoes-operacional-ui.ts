@@ -414,8 +414,8 @@ function main() {
     assert.match(cssSrc, /\.op-detail__scroll \.detail-central-item-acoes \.secondary-button \{[^}]*width: 100%;/);
     ok("duas colunas no desktop, uma coluna até 767px, botões em largura total");
 
-    assert.match(htmlSrc, /checkin-operacional-mvp\.css\?v=61/);
-    assert.match(htmlSrc, /checkin-operacional-mvp\.js\?v=57/);
+    assert.match(htmlSrc, /checkin-operacional-mvp\.css\?v=62/);
+    assert.match(htmlSrc, /checkin-operacional-mvp\.js\?v=58/);
     ok("cache-buster do CSS/JS atualizado");
   }
 
