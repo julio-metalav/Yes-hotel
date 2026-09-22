@@ -82,6 +82,7 @@ Deno.serve(async (req: Request) => {
     ? idsRaw.split(",").map((s) => s.trim()).filter(Boolean)
     : undefined;
 
+  const startedAt = Date.now();
   try {
     const result = await fetchHitsSandboxReservations({
       config: gate.config,
@@ -90,6 +91,15 @@ Deno.serve(async (req: Request) => {
       page: parseInt0(url.searchParams.get("page")),
       size: parseInt0(url.searchParams.get("size")),
       reservationIds,
+    });
+
+    // Log de sucesso: só metadados não sensíveis (sem hóspede/apto/IDs/token).
+    console.log("[HITS_RESERVATIONS_PREVIEW] ok", {
+      count: result.rows.length,
+      pages_fetched: result.pages_fetched,
+      failed_count: result.failed.length,
+      stopped_reason: result.stopped_reason,
+      duration_ms: Date.now() - startedAt,
     });
 
     return json({
