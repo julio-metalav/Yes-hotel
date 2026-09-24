@@ -3,11 +3,15 @@
  * Determinísticos, sem rede — fetch injetado.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
+  HITS_GATEWAY_PROD_HOSTS,
   assertHitsGatewayReadReady,
   fetchHitsSandboxReservations,
   getHitsGatewayReadConfig,
   hitsGatewayReadStatus,
+  hitsGatewayTargetsProd,
   toHitsSandboxRow,
   type HitsGatewayReadConfig,
 } from "../src/lib/integrations/hits/hits-gateway-read";
@@ -20,6 +24,8 @@ function ok(name: string) {
 }
 
 const TOKEN = "t".repeat(32);
+const PROD_URL = "https://hits-prod.yeshotel.com.br";
+const HOMO_URL = "https://hits-homo.yeshotel.com.br";
 
 function config(patch: Partial<HitsGatewayReadConfig> = {}): HitsGatewayReadConfig {
   return {
@@ -27,8 +33,13 @@ function config(patch: Partial<HitsGatewayReadConfig> = {}): HitsGatewayReadConf
     token: TOKEN,
     requestTimeoutMs: 5_000,
     enabled: true,
+    prodReadEnabled: false,
     ...patch,
   };
+}
+
+function readRepo(rel: string): string {
+  return readFileSync(join(process.cwd(), rel), "utf8");
 }
 
 type Call = { url: string; method: string; headers: Record<string, string> };
@@ -87,16 +98,109 @@ async function main() {
     ok("flag desligada / token ausente / url ausente bloqueiam");
   }
   {
-    const prod = assertHitsGatewayReadReady(config({ baseUrl: "http://167.172.2.24:3001" }));
-    assert.equal(prod.ok, false);
-    assert.equal(prod.ok === false && prod.reason, "gateway_forbidden_host");
-    ok("host de produção 167.172.2.24 é recusado");
+    // 1. HOMO continua permitido, com ou sem a trava de produção.
+    for (const prodReadEnabled of [false, true]) {
+      const homo = assertHitsGatewayReadReady(config({ baseUrl: HOMO_URL, prodReadEnabled }));
+      assert.equal(homo.ok, true, `HOMO deve passar com prodReadEnabled=${prodReadEnabled}`);
+    }
+    assert.equal(hitsGatewayTargetsProd(HOMO_URL), false);
+    ok("HOMO (hits-homo.yeshotel.com.br) continua permitido");
   }
   {
-    const status = hitsGatewayReadStatus(config());
+    // 2. PROD sem a trava explícita é recusado — domínio, IP e variações de porta/caixa.
+    assert.deepEqual([...HITS_GATEWAY_PROD_HOSTS], ["hits-prod.yeshotel.com.br", "167.172.2.24"]);
+    for (const url of [
+      PROD_URL,
+      `${PROD_URL}:443`,
+      "https://HITS-PROD.yeshotel.com.br",
+      "http://167.172.2.24:3001",
+      "https://167.172.2.24",
+    ]) {
+      const prod = assertHitsGatewayReadReady(config({ baseUrl: url }));
+      assert.equal(prod.ok, false, `${url} sem trava deve ser recusado`);
+      assert.equal(prod.ok === false && prod.reason, "gateway_prod_read_disabled");
+      assert.equal(hitsGatewayTargetsProd(url), true);
+    }
+    ok("PROD (domínio e IP) sem HITS_GATEWAY_PROD_READ_ENABLED é recusado");
+  }
+  {
+    // 3. PROD com a trava explícita `true` é permitido (somente leitura pelo gateway).
+    const prod = assertHitsGatewayReadReady(config({ baseUrl: PROD_URL, prodReadEnabled: true }));
+    assert.equal(prod.ok, true);
+    const viaEnv = getHitsGatewayReadConfig({
+      HITS_GATEWAY_URL: `${PROD_URL}/`,
+      HITS_GATEWAY_TOKEN: TOKEN,
+      HITS_GATEWAY_READ_ENABLED: "true",
+      HITS_GATEWAY_PROD_READ_ENABLED: "true",
+    });
+    assert.equal(viaEnv.prodReadEnabled, true);
+    assert.equal(assertHitsGatewayReadReady(viaEnv).ok, true);
+    // A trava de produção não substitui a trava geral de leitura.
+    const semLeitura = assertHitsGatewayReadReady(
+      config({ baseUrl: PROD_URL, prodReadEnabled: true, enabled: false }),
+    );
+    assert.equal(semLeitura.ok === false && semLeitura.reason, "gateway_read_disabled");
+    ok("PROD com HITS_GATEWAY_PROD_READ_ENABLED=true é permitido (e ainda exige READ_ENABLED)");
+  }
+  {
+    // 4. Qualquer outro valor da trava não libera produção.
+    for (const flag of ["", "TRUE", "True", " true", "true ", "1", "yes", "on", "false", "prod"]) {
+      const cfg = getHitsGatewayReadConfig({
+        HITS_GATEWAY_URL: PROD_URL,
+        HITS_GATEWAY_TOKEN: TOKEN,
+        HITS_GATEWAY_READ_ENABLED: "true",
+        HITS_GATEWAY_PROD_READ_ENABLED: flag,
+      });
+      // `read()` faz trim: " true" vira "true" e libera — igual a READ_ENABLED. Os
+      // demais valores precisam falhar.
+      const trimmed = flag.trim();
+      const gate = assertHitsGatewayReadReady(cfg);
+      if (trimmed === "true") {
+        assert.equal(gate.ok, true);
+      } else {
+        assert.equal(cfg.prodReadEnabled, false, `flag ${JSON.stringify(flag)} não pode liberar`);
+        assert.equal(gate.ok === false && gate.reason, "gateway_prod_read_disabled");
+      }
+    }
+    const ausente = getHitsGatewayReadConfig({
+      HITS_GATEWAY_URL: PROD_URL,
+      HITS_GATEWAY_TOKEN: TOKEN,
+      HITS_GATEWAY_READ_ENABLED: "true",
+    });
+    assert.equal(ausente.prodReadEnabled, false);
+    assert.equal(assertHitsGatewayReadReady(ausente).ok, false);
+    ok("trava de produção só aceita exatamente \"true\" (ausente/outros valores recusam)");
+  }
+  {
+    // 7. Nenhum segredo em status/erro: nem o token nem a URL do gateway.
+    const cfg = config({ baseUrl: PROD_URL, prodReadEnabled: true });
+    const status = hitsGatewayReadStatus(cfg);
     assert.equal(status.has_token, true);
-    assert.equal(JSON.stringify(status).includes(TOKEN), false);
-    ok("status não expõe o token");
+    assert.equal(status.targets_prod, true);
+    assert.equal(status.prod_read_enabled, true);
+    const serialized = JSON.stringify(status);
+    assert.equal(serialized.includes(TOKEN), false);
+    assert.equal(serialized.includes("hits-prod"), false);
+    const negado = assertHitsGatewayReadReady(config({ baseUrl: PROD_URL, token: "s3cr3t".repeat(6) }));
+    assert.equal(negado.ok, false);
+    assert.equal(negado.ok === false && negado.message.includes("s3cr3t"), false);
+    ok("status/erro da trava não expõem token nem URL");
+  }
+  {
+    // 8/9/10. A Edge continua GET-only, passa a trava só para a leitura, e a
+    // materialização não conhece a flag (produção continua bloqueada lá).
+    const edge = readRepo("supabase/functions/hits-reservations-preview/index.ts");
+    assert.match(edge, /req\.method !== "GET"/);
+    assert.match(edge, /"Access-Control-Allow-Methods": "GET, OPTIONS"/);
+    assert.match(edge, /"HITS_GATEWAY_PROD_READ_ENABLED"/);
+    assert.doesNotMatch(edge, /method:\s*"(POST|PUT|PATCH|DELETE)"/);
+    const materializar = readRepo("supabase/functions/hits-reserva-materializar/index.ts");
+    assert.doesNotMatch(materializar, /HITS_GATEWAY_PROD_READ_ENABLED/);
+    const leitor = readRepo("src/lib/integrations/hits/hits-gateway-read.ts");
+    assert.doesNotMatch(leitor, /method:\s*"(POST|PUT|PATCH|DELETE)"/);
+    // A trava é lida só pelo leitor GET: nenhuma flag de escrita/check-in mora aqui.
+    assert.doesNotMatch(leitor, /guestWriteEnabled|checkinEnabled|HITS_GUEST_WRITE_ENABLED|HITS_CHECKIN_ENABLED/);
+    ok("Edge preview GET-only com a trava; materializar e leitor sem escrita/check-in");
   }
 
   console.log("\n== Leitura pelo gateway ==");

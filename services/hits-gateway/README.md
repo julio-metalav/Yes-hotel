@@ -32,6 +32,35 @@ O Node escuta **somente** `127.0.0.1`. Produção executa `node dist/server.js` 
 
 Mesmo código. Secrets e URLs separados. Nenhuma credencial de PROD no HOMO.
 
+### Produção: somente leitura, com trava explícita na Edge
+
+O gateway PROD usa o mesmo artefato e as mesmas guardas. O que muda é só o env
+(`HITS_TENANT_NAME=yeshotel`, `HITS_PROPERTY_CODE=1`, `HITS_AUTHORIZE_SCOPES=WebCheckIn`,
+secret/propertyId de produção). Nele:
+
+- escrita PAX fica **bloqueada** (tenant ≠ `develop`), mesmo com `HITS_GUEST_WRITE_ENABLED=true`;
+- check-in continua **inexistente** (`checkinEnabled` é sempre `false`);
+- `/health` não chama o HITS e é a única validação prevista antes do cutover.
+
+Quem decide se o Yes lê produção é a Edge `hits-reservations-preview`
+(`src/lib/integrations/hits/hits-gateway-read.ts`), não este serviço:
+
+| Env da Edge | HOMO | PROD |
+|---|---|---|
+| `HITS_GATEWAY_URL` | `https://hits-homo.yeshotel.com.br` | `https://hits-prod.yeshotel.com.br` |
+| `HITS_GATEWAY_TOKEN` | token HOMO | token PROD |
+| `HITS_GATEWAY_READ_ENABLED` | `true` | `true` |
+| `HITS_GATEWAY_PROD_READ_ENABLED` | ignorada | **obrigatória `true`** |
+
+Se `HITS_GATEWAY_URL` apontar para `hits-prod.yeshotel.com.br` ou `167.172.2.24` sem
+`HITS_GATEWAY_PROD_READ_ENABLED=true` (exato, minúsculo), a leitura é recusada com
+`gateway_prod_read_disabled` — sem chamada de rede. A flag libera **apenas** o GET pelo
+gateway: não liga escrita PAX, check-in, sync de escrita nem materialização
+(`hits-reserva-materializar` não lê essa flag e continua recusando produção).
+
+A ativação final (trocar a Edge para PROD) só acontece depois do `/health` de produção
+validado local e externamente, e é coordenada com a HITS. O scheduler não muda.
+
 ## Endpoints externos
 
 | Método | Rota | Auth | Destino HITS |

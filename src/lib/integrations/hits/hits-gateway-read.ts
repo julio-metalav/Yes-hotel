@@ -69,8 +69,17 @@ export const HITS_LIST_MAX_PAGES = 10;
  */
 export const HITS_LIST_MAX_RESERVATIONS = 50;
 
-/** Host de produção — proibido nesta etapa. */
-export const HITS_GATEWAY_FORBIDDEN_HOSTS = ["167.172.2.24"] as const;
+/**
+ * Hosts do gateway de PRODUÇÃO (domínio e reserved IP — services/hits-gateway/README.md).
+ * Ler por aqui exige a trava explícita `HITS_GATEWAY_PROD_READ_ENABLED=true`,
+ * além de `HITS_GATEWAY_READ_ENABLED=true`. HOMO não passa por essa trava.
+ *
+ * A trava só libera LEITURA (GET) pelo gateway. Ela não é lida por nenhum outro
+ * caminho: escrita PAX, check-in, sync de escrita e materialização continuam
+ * regidos pelas próprias guardas (gateway: tenant `develop` + flag própria;
+ * Edge: `hits-reserva-materializar` não conhece esta flag).
+ */
+export const HITS_GATEWAY_PROD_HOSTS = ["hits-prod.yeshotel.com.br", "167.172.2.24"] as const;
 
 /** Leitura tolera um retry de 429/5xx; nenhuma mutação existe aqui. */
 const READ_MAX_RETRIES = 1;
@@ -82,6 +91,22 @@ export interface HitsGatewayReadConfig {
   token: string;
   requestTimeoutMs: number;
   enabled: boolean;
+  /** `HITS_GATEWAY_PROD_READ_ENABLED === "true"` — exigido só quando a URL é PROD. */
+  prodReadEnabled: boolean;
+}
+
+/** Hostname já normalizado pela URL (minúsculo, sem porta). */
+export function isHitsGatewayProdHost(hostname: string): boolean {
+  return (HITS_GATEWAY_PROD_HOSTS as readonly string[]).includes(hostname);
+}
+
+/** `true` só quando a base URL é válida e aponta para um host de produção. */
+export function hitsGatewayTargetsProd(baseUrl: string): boolean {
+  try {
+    return isHitsGatewayProdHost(new URL(baseUrl).hostname);
+  } catch {
+    return false;
+  }
 }
 
 export type HitsGatewayEnv = Record<string, string | undefined>;
@@ -105,6 +130,7 @@ export function getHitsGatewayReadConfig(env: HitsGatewayEnv): HitsGatewayReadCo
     token: read(env, "HITS_GATEWAY_TOKEN"),
     requestTimeoutMs: parseTimeoutMs(read(env, "HITS_GATEWAY_TIMEOUT_MS")),
     enabled: read(env, "HITS_GATEWAY_READ_ENABLED") === "true",
+    prodReadEnabled: read(env, "HITS_GATEWAY_PROD_READ_ENABLED") === "true",
   };
 }
 
@@ -117,11 +143,14 @@ export type HitsGatewayReadReadiness =
         | "gateway_missing_url"
         | "gateway_missing_token"
         | "gateway_invalid_url"
-        | "gateway_forbidden_host";
+        | "gateway_prod_read_disabled";
       message: string;
     };
 
-/** Gate sem rede — testável. O host de produção é recusado de propósito. */
+/**
+ * Gate sem rede — testável. Produção só passa com a trava explícita
+ * (`HITS_GATEWAY_PROD_READ_ENABLED=true`); HOMO mantém o comportamento anterior.
+ */
 export function assertHitsGatewayReadReady(
   config: HitsGatewayReadConfig,
 ): HitsGatewayReadReadiness {
@@ -160,11 +189,11 @@ export function assertHitsGatewayReadReady(
       message: "HITS_GATEWAY_URL deve usar http(s)",
     };
   }
-  if ((HITS_GATEWAY_FORBIDDEN_HOSTS as readonly string[]).includes(parsed.hostname)) {
+  if (isHitsGatewayProdHost(parsed.hostname) && !config.prodReadEnabled) {
     return {
       ok: false,
-      reason: "gateway_forbidden_host",
-      message: "Host de produção proibido nesta etapa",
+      reason: "gateway_prod_read_disabled",
+      message: "HITS_GATEWAY_URL aponta para produção e HITS_GATEWAY_PROD_READ_ENABLED != true",
     };
   }
 
@@ -177,12 +206,17 @@ export function hitsGatewayReadStatus(config: HitsGatewayReadConfig): {
   has_url: boolean;
   has_token: boolean;
   request_timeout_ms: number;
+  /** A URL configurada é um host de produção (sem revelar a URL). */
+  targets_prod: boolean;
+  prod_read_enabled: boolean;
 } {
   return {
     enabled: config.enabled,
     has_url: Boolean(config.baseUrl),
     has_token: Boolean(config.token),
     request_timeout_ms: config.requestTimeoutMs,
+    targets_prod: hitsGatewayTargetsProd(config.baseUrl),
+    prod_read_enabled: config.prodReadEnabled,
   };
 }
 
