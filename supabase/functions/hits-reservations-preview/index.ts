@@ -131,7 +131,7 @@ Deno.serve(async (req: Request) => {
   const rpc = decision.persist ? snapshotRpc() : null;
 
   const startedAt = Date.now();
-  let result;
+  let result: Awaited<ReturnType<typeof read>>;
   let snapshot: Record<string, unknown>;
 
   if (decision.persist && rpc) {
