@@ -70,6 +70,24 @@ export const HITS_LIST_MAX_PAGES = 10;
 export const HITS_LIST_MAX_RESERVATIONS = 50;
 
 /**
+ * Cadência mínima entre INÍCIOS de requisições ao gateway (listagens, detalhes
+ * e retries). O gateway limita a 60 req/min por IP de origem e toda a Edge sai
+ * pelo mesmo egresso: sem cadência, ~75 requisições sequenciais a ~1 s de
+ * latência batiam no limite e viravam 429 em reservas aleatórias. 1 100 ms ≈
+ * 54 req/min, com folga. Não é "sleep após a resposta": se a chamada anterior
+ * já demorou mais que o intervalo, a próxima sai na hora.
+ */
+export const HITS_GATEWAY_MIN_INTERVAL_MS = 1_100;
+
+/**
+ * Orçamento total de um ciclo de leitura, medido do início da rodada. O gateway
+ * de funções corta a resposta aos 150 s; com o orçamento, o ciclo termina
+ * antes como `time_budget` (parcial: ids não lidos vão para `failed` e o
+ * snapshot preserva a fotografia anterior deles) em vez de ser morto.
+ */
+export const HITS_READ_TIME_BUDGET_MS = 110_000;
+
+/**
  * Hosts do gateway de PRODUÇÃO (domínio e reserved IP — services/hits-gateway/README.md).
  * Ler por aqui exige a trava explícita `HITS_GATEWAY_PROD_READ_ENABLED=true`,
  * além de `HITS_GATEWAY_READ_ENABLED=true`. HOMO não passa por essa trava.
@@ -276,6 +294,14 @@ export type FetchHitsSandboxReservationsInput = {
   status?: 1 | 2 | 3 | 4;
   /** Relógio injetável — só afeta a janela default de datas. */
   nowIso?: string;
+  /** Relógio monotônico (ms) para cadência/orçamento. Default Date.now. */
+  nowMs?: () => number;
+  /** Sleep injetável para cadência e backoff. Default setTimeout. */
+  sleepImpl?: (ms: number) => Promise<void>;
+  /** Cadência mínima entre inícios de requisição. Default HITS_GATEWAY_MIN_INTERVAL_MS. */
+  minIntervalMs?: number;
+  /** Orçamento total do ciclo. Default HITS_READ_TIME_BUDGET_MS. */
+  timeBudgetMs?: number;
 };
 
 export type FetchHitsSandboxReservationsResult = {
@@ -291,9 +317,17 @@ export type FetchHitsSandboxReservationsResult = {
     | "empty_page"
     | "max_pages"
     | "max_reservations"
-    | "explicit_ids";
+    | "explicit_ids"
+    | "time_budget";
   /** Detalhes que falharam individualmente — sem PII, só id e código. */
   failed: Array<{ external_reservation_id: string; code: string }>;
+  /**
+   * false só quando o orçamento acabou ANTES de a listagem terminar: aí o
+   * conjunto de ids é desconhecido e o snapshot não pode remover nada.
+   */
+  listing_complete: boolean;
+  /** Duração do ciclo (ms), do início da rodada ao retorno. */
+  elapsed_ms: number;
 };
 
 function clampPage(page: number | undefined): number {
@@ -357,7 +391,43 @@ export async function fetchHitsSandboxReservations(
   }
 
   const config = gate.config;
-  const transport = input.transport ?? createHitsTransport(input.fetchImpl ?? fetch);
+  const now = input.nowMs ?? (() => Date.now());
+  const doSleep =
+    input.sleepImpl ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const minIntervalMs = Math.max(0, input.minIntervalMs ?? HITS_GATEWAY_MIN_INTERVAL_MS);
+  const timeBudgetMs = Math.max(1_000, input.timeBudgetMs ?? HITS_READ_TIME_BUDGET_MS);
+  const startedAt = now();
+  const deadlineMs = startedAt + timeBudgetMs;
+  const budgetLeft = () => now() < deadlineMs;
+  const budgetError = () =>
+    new HitsError({
+      code: "time_budget",
+      message: "Orçamento de tempo do ciclo de leitura esgotado.",
+      httpStatus: null,
+      retryable: false,
+    });
+  const isBudgetError = (e: unknown) => e instanceof HitsError && e.code === "time_budget";
+
+  // Cadência: próximo início >= início anterior + minIntervalMs. Vale para
+  // listagens, detalhes e retries (o transporte chama pacedFetch a cada
+  // tentativa). Nunca dorme além do orçamento: se a espera não cabe, lança
+  // time_budget e a chamada não é iniciada.
+  let lastStartMs: number | null = null;
+  const baseFetch = input.fetchImpl ?? fetch;
+  const pacedFetch: HitsFetch = async (url, init) => {
+    const t = now();
+    if (t >= deadlineMs) throw budgetError();
+    const wait = lastStartMs == null ? 0 : lastStartMs + minIntervalMs - t;
+    if (wait > 0) {
+      if (t + wait >= deadlineMs) throw budgetError();
+      await doSleep(wait);
+    }
+    lastStartMs = now();
+    return baseFetch(url, init);
+  };
+  // Transporte injetado (testes) não passa pela cadência — por escolha do teste.
+  const transport =
+    input.transport ?? createHitsTransport(pacedFetch, { nowMs: now, sleepImpl: doSleep });
   const page = clampPage(input.page);
   const size = clampSize(input.size);
   const headers = gatewayHeaders(config);
@@ -368,6 +438,7 @@ export async function fetchHitsSandboxReservations(
   const hospedadas = new Set<string>();
   let pagesFetched = 0;
   let stoppedReason: FetchHitsSandboxReservationsResult["stopped_reason"] = "last_page";
+  let listingComplete = true;
 
   if (input.reservationIds && input.reservationIds.length > 0) {
     stoppedReason = "explicit_ids";
@@ -394,7 +465,7 @@ export async function fetchHitsSandboxReservations(
     // Sequencial de propósito, entre status e entre páginas: o gateway limita a
     // 60 req/min e cada reserva ainda custa um GET de detalhe. Paralelizar
     // aqui produz 429.
-    for (const status of statuses) {
+    statusLoop: for (const status of statuses) {
       // As duas leituras olham para trás: hospedados só podem ter entrado no
       // passado, e confirmadas com check-in passado e check-out futuro são
       // estadias em curso sem check-in registrado no HITS (caso 17792). O que
@@ -418,13 +489,31 @@ export async function fetchHitsSandboxReservations(
         qs.set("Page", String(currentPage));
         qs.set("Size", String(size));
 
-        const listRes = await transport.request({
-          method: "GET",
-          url: `${config.baseUrl}/v1/reservations?${qs.toString()}`,
-          headers,
-          timeoutMs: config.requestTimeoutMs,
-          maxRetries: READ_MAX_RETRIES,
-        });
+        // Orçamento esgotado antes de terminar a listagem: o conjunto de ids
+        // fica desconhecido — nenhum detalhe é lido e o snapshot não remove nada.
+        if (!budgetLeft()) {
+          stoppedReason = "time_budget";
+          listingComplete = false;
+          break statusLoop;
+        }
+        let listRes;
+        try {
+          listRes = await transport.request({
+            method: "GET",
+            url: `${config.baseUrl}/v1/reservations?${qs.toString()}`,
+            headers,
+            timeoutMs: config.requestTimeoutMs,
+            maxRetries: READ_MAX_RETRIES,
+            deadlineMs,
+          });
+        } catch (e) {
+          if (isBudgetError(e)) {
+            stoppedReason = "time_budget";
+            listingComplete = false;
+            break statusLoop;
+          }
+          throw e;
+        }
         pagesFetched += 1;
 
         const items = extractGatewayListItems(listRes.body);
@@ -474,7 +563,24 @@ export async function fetchHitsSandboxReservations(
   const rows: HitsSandboxReservationRow[] = [];
   const failed: FetchHitsSandboxReservationsResult["failed"] = [];
 
-  for (const id of ids) {
+  /**
+   * Orçamento acabou no meio dos detalhes: os ids ainda não lidos entram em
+   * `failed` com código `time_budget`. A RPC do snapshot trata `failed` como
+   * "preservar a fotografia anterior" — nada é apagado por falta de tempo.
+   */
+  const markRemainingAsTimeBudget = (from: number) => {
+    stoppedReason = "time_budget";
+    for (let j = from; j < ids.length; j += 1) {
+      failed.push({ external_reservation_id: ids[j]!, code: "time_budget" });
+    }
+  };
+
+  for (let i = 0; i < ids.length; i += 1) {
+    const id = ids[i]!;
+    if (!budgetLeft()) {
+      markRemainingAsTimeBudget(i);
+      break;
+    }
     try {
       const detailRes = await transport.request({
         method: "GET",
@@ -482,6 +588,7 @@ export async function fetchHitsSandboxReservations(
         headers,
         timeoutMs: config.requestTimeoutMs,
         maxRetries: READ_MAX_RETRIES,
+        deadlineMs,
       });
       const synced = normalizeHitsDetailToSynced(
         (detailRes.body ?? {}) as HitsReservationDetails as Record<string, unknown>,
@@ -489,6 +596,10 @@ export async function fetchHitsSandboxReservations(
       );
       rows.push(toHitsSandboxRow(synced, hospedadas.has(id) ? "hospedada" : "confirmada"));
     } catch (e) {
+      if (isBudgetError(e)) {
+        markRemainingAsTimeBudget(i);
+        break;
+      }
       failed.push({
         external_reservation_id: id,
         code: e instanceof HitsError ? e.code : "detail_failed",
@@ -502,5 +613,14 @@ export async function fetchHitsSandboxReservations(
     return a.external_reservation_id < b.external_reservation_id ? -1 : 1;
   });
 
-  return { rows, page, size, pages_fetched: pagesFetched, stopped_reason: stoppedReason, failed };
+  return {
+    rows,
+    page,
+    size,
+    pages_fetched: pagesFetched,
+    stopped_reason: stoppedReason,
+    failed,
+    listing_complete: listingComplete,
+    elapsed_ms: now() - startedAt,
+  };
 }

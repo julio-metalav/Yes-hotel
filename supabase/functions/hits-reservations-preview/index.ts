@@ -167,6 +167,8 @@ Deno.serve(async (req: Request) => {
     pages_fetched: result.pages_fetched,
     failed_count: result.failed.length,
     stopped_reason: result.stopped_reason,
+    listing_complete: result.listing_complete,
+    elapsed_ms: result.elapsed_ms,
     duration_ms: Date.now() - startedAt,
     snapshot,
   });
@@ -179,6 +181,8 @@ Deno.serve(async (req: Request) => {
     size: result.size,
     pages_fetched: result.pages_fetched,
     stopped_reason: result.stopped_reason,
+    listing_complete: result.listing_complete,
+    elapsed_ms: result.elapsed_ms,
     count: result.rows.length,
     rows: result.rows,
     failed: result.failed,

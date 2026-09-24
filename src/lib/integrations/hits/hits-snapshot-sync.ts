@@ -145,7 +145,7 @@ export type SnapshotOutcome =
   | {
       persisted: false;
       batch_id: string;
-      stage: "start" | "read" | "apply";
+      stage: "start" | "read" | "apply" | "listing_incomplete";
       error: string;
     };
 
@@ -208,6 +208,25 @@ export async function runHitsSnapshotSync(input: {
     };
   }
 
+  // Orçamento esgotado ANTES de a listagem terminar: o conjunto de ids é
+  // desconhecido, então o `apply` removeria reservas válidas que só não foram
+  // listadas. Registra como falha e preserva o snapshot inteiro.
+  if (result.listing_complete === false) {
+    const error = "time_budget: listagem incompleta; snapshot anterior preservado";
+    try {
+      await input.rpc(HITS_SNAPSHOT_RPC_FAIL, { p_batch_id: batchId, p_error: error });
+    } catch {
+      /* diagnóstico; a projeção já está preservada por não haver apply */
+    }
+    return {
+      result,
+      readError: null,
+      snapshot: { persisted: false, batch_id: batchId, stage: "listing_incomplete", error },
+    };
+  }
+
+  // Detalhes não lidos por orçamento (`time_budget`) entram em failedIds como
+  // qualquer detalhe falho: a RPC preserva a fotografia anterior deles.
   const failedIds = (result.failed ?? [])
     .map((f) => String(f?.external_reservation_id ?? "").trim())
     .filter(Boolean);

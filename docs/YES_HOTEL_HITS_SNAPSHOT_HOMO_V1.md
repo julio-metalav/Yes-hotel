@@ -157,6 +157,23 @@ tsx scripts/test-hits-reservations-preview-scheduler-cron.ts
 tsx scripts/test-hits-edge-deno-imports.ts
 ```
 
+## 8b. Cadência e orçamento de tempo do ciclo (branch `fix/hits-read-cadence`)
+
+Por quê: o gateway limita a **60 req/min por IP de origem** (`@fastify/rate-limit`, `services/hits-gateway/src/app.ts`) e toda a Edge sai pelo mesmo egresso do Supabase. Sem cadência, ~75 requisições sequenciais a ~1 s de latência batiam no limite → 429 `rate_limited` em reservas aleatórias, e o retry (Retry-After cortado em 30 s) caía na mesma janela de 60 s → 2º 429 → detalhe marcado como falho.
+
+O que mudou (`src/lib/integrations/hits/hits-gateway-read.ts` + `transport.ts`):
+
+- **Cadência** `HITS_GATEWAY_MIN_INTERVAL_MS = 1 100 ms` entre **inícios** de requisição ao gateway — listagens, detalhes e retries (o transporte chama o fetch cadenciado a cada tentativa). Não é sleep após a resposta: se a chamada anterior demorou ≥ 1 100 ms, a próxima sai na hora; se demorou 900 ms, espera só 200 ms. ≈ 54 req/min, folga de 5/min para outros chamadores.
+- **Orçamento** `HITS_READ_TIME_BUDGET_MS = 110 000 ms` medido do início da rodada. Antes de cada listagem/detalhe/retry o orçamento restante é verificado; nenhuma espera (cadência ou backoff) é feita se não couber no prazo (`deadlineMs` no transporte → desiste em vez de dormir além do prazo).
+- Ao estourar o orçamento: `stopped_reason = "time_budget"`; ids ainda não lidos entram em `failed` com código `time_budget` → a RPC `apply` os trata como qualquer detalhe falho e **preserva a fotografia anterior**; `last_status = partial`. Nunca vira erro geral.
+- Caso raro: orçamento acaba **antes de a listagem terminar** → `listing_complete = false`; o sync **não** chama `apply` (o conjunto de ids é desconhecido e a remoção apagaria reservas válidas) e registra `hits_snapshot_sync_fail` com "listagem incompleta; snapshot anterior preservado".
+- Resposta da Edge ganha `listing_complete` e `elapsed_ms`; `count`, `pages_fetched`, `failed`, `stopped_reason` e o snapshot continuam iguais.
+- Relógio e sleep injetáveis (`nowMs`, `sleepImpl`) — os testes rodam sem timers reais.
+
+Impacto esperado: piso de N × 1,1 s (≈ 83 s para 75 requisições); custo adicional ≈ 0 quando a latência já é ≥ 1,1 s; sem os sonos de 30 s do retry → ciclo ≈ 80–95 s, sempre encerrado antes dos 150 s.
+
+Teste: `npm run test:hits-read-cadence` (15 casos) + suítes existentes.
+
 ## 9. Riscos restantes / follow-ups
 
 - Reconciliação de canceladas (banco × HITS) fica desligada na tela; em PROD não havia reservas
