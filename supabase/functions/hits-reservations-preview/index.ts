@@ -8,7 +8,8 @@
  * próprio JWT do usuário (verify_jwt default = true) e nunca vê o token.
  *
  * Env: HITS_GATEWAY_URL, HITS_GATEWAY_TOKEN, HITS_GATEWAY_READ_ENABLED,
- *      HITS_GATEWAY_TIMEOUT_MS (opcional).
+ *      HITS_GATEWAY_PROD_READ_ENABLED (exigida =true só quando a URL é o gateway
+ *      de produção; libera apenas esta leitura), HITS_GATEWAY_TIMEOUT_MS (opcional).
  */
 import {
   fetchHitsSandboxReservations,
@@ -47,6 +48,7 @@ function denoEnv(): Record<string, string | undefined> {
     "HITS_GATEWAY_URL",
     "HITS_GATEWAY_TOKEN",
     "HITS_GATEWAY_READ_ENABLED",
+    "HITS_GATEWAY_PROD_READ_ENABLED",
     "HITS_GATEWAY_TIMEOUT_MS",
   ];
   const env: Record<string, string | undefined> = {};
