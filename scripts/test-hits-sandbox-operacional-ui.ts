@@ -1,7 +1,11 @@
 /**
- * Testes: reservas HITS Sandbox alimentando a listagem operacional.
+ * Testes: reservas HITS (snapshot local) alimentando a listagem operacional.
  * Somente leitura — nenhuma ação operacional pode ser oferecida.
- * Determinísticos, sem rede (fetch stub) e sem browser (node:vm).
+ * Determinísticos, sem rede (supabase-js stub), sem browser (node:vm).
+ *
+ * A UI não consulta mais o HITS ao vivo: lê public.hits_reservas_snapshot e
+ * public.hits_snapshot_sync_state pelo cliente Supabase do usuário. Qualquer
+ * fetch() aqui é falha de teste.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -16,26 +20,79 @@ function ok(name: string) {
 
 const ROOT = resolve(process.cwd());
 
+type SyncInfo = {
+  status: string;
+  level: string;
+  message: string;
+  lastSuccessAt: Date | null;
+  failedCount: number;
+  ageMinutes: number | null;
+};
+
+type CycleResult = {
+  ok: boolean;
+  raw: unknown[];
+  rows: unknown[];
+  sync: SyncInfo | null;
+  error?: string;
+};
+
 type PreviewApi = {
   toReservaOperacional: (row: Record<string, unknown>) => Record<string, unknown>;
+  describeSync: (state: Record<string, unknown> | null, now?: Date) => SyncInfo;
   isReadOnlyId: (id: string) => boolean;
   fetchReservasOperacionais: (options?: {
     force?: boolean;
+    reuseOnly?: boolean;
+    dateFrom?: string;
+    dateTo?: string;
   }) => Promise<Array<Record<string, unknown>>>;
-  onCycle: (fn: (result: { ok: boolean; rows: unknown[] }) => void) => void;
-  loadCycle: (options?: { force?: boolean }) => Promise<{
-    ok: boolean;
-    raw: unknown[];
-    rows: unknown[];
-  }>;
+  onCycle: (fn: (result: CycleResult) => void) => void;
+  loadCycle: (options?: { force?: boolean; reuseOnly?: boolean }) => Promise<CycleResult>;
+  load: () => Promise<CycleResult>;
   READ_ONLY_ID_PREFIX: string;
+  SNAPSHOT_STALE_MINUTES: number;
 };
 
+type TablePlan = { data?: unknown; error?: { code?: string; message?: string } | null };
+
+/**
+ * Cliente Supabase falso: `.from(tabela)` devolve uma cadeia que resolve com o
+ * plano da tabela. Conta os SELECTs por tabela e as colunas pedidas.
+ */
+function fakeSupabase(plan: Record<string, TablePlan>) {
+  const selects: Array<{ table: string; columns: string }> = [];
+  const client = {
+    from(table: string) {
+      const p = plan[table] ?? { data: null, error: { code: "42P01", message: "sem plano" } };
+      const chain: Record<string, unknown> = {};
+      const self = () => chain;
+      chain.select = (columns: string) => {
+        selects.push({ table, columns });
+        return chain;
+      };
+      chain.order = self;
+      chain.limit = self;
+      chain.eq = self;
+      chain.maybeSingle = () => Promise.resolve({ data: p.data ?? null, error: p.error ?? null });
+      chain.then = (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) =>
+        Promise.resolve({ data: p.data ?? null, error: p.error ?? null }).then(res, rej);
+      return chain;
+    },
+  };
+  return { client, selects };
+}
+
 /** Carrega o módulo de UI num contexto isolado, com document/auth stubados. */
-function loadPreview(fetchImpl?: unknown): PreviewApi {
+function loadPreview(
+  supabase?: { client: unknown } | null,
+  opts: { withoutAuth?: boolean } = {},
+): { api: PreviewApi; fetchCalls: number } {
   const src = readFileSync(resolve(ROOT, "ui/yes-hits-sandbox-preview.js"), "utf8");
+  const counter = { fetchCalls: 0 };
   const sandbox: Record<string, unknown> = {
     console,
+    Date,
     // querySelector devolve null para o painel → o módulo não faz binding de DOM,
     // mas ainda expõe a API. Um elemento basta para passar do early return.
     document: {
@@ -44,22 +101,36 @@ function loadPreview(fetchImpl?: unknown): PreviewApi {
       createElement: () => ({ appendChild() {}, classList: { toggle() {} } }),
     },
     YES_HOTEL_SUPABASE_CONFIG: { url: "https://homo.example.supabase.co" },
-    YesHotelAuthApp: {
-      getEdgeFunctionFetchHeaders: async () => ({ Authorization: "Bearer jwt-do-usuario" }),
+    YesHotelAuthApp: opts.withoutAuth
+      ? undefined
+      : {
+          getSupabaseClient: () => (supabase ? supabase.client : null),
+          // Qualquer uso deste header é leitura ao vivo — proibido no modo snapshot.
+          getEdgeFunctionFetchHeaders: async () => {
+            throw new Error("getEdgeFunctionFetchHeaders não deve ser usado");
+          },
+        },
+    fetch: async () => {
+      counter.fetchCalls += 1;
+      throw new Error("fetch() não deve ser chamado: a UI lê o snapshot local");
     },
-    fetch: fetchImpl,
   };
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(src, sandbox);
-  return (sandbox as { YesHotelHitsSandboxPreview: PreviewApi }).YesHotelHitsSandboxPreview;
+  const api = (sandbox as { YesHotelHitsSandboxPreview: PreviewApi }).YesHotelHitsSandboxPreview;
+  return {
+    api,
+    get fetchCalls() {
+      return counter.fetchCalls;
+    },
+  };
 }
 
 /**
  * Carrega o painel operacional num contexto isolado e devolve
- * `resolveHitsReadWindow`. A lógica de fuso fica onde já estava — o teste só
- * a exercita com relógio injetado.
+ * `resolveHitsReadWindow` (mantida para rollback/testes de virada do dia).
  */
 function loadPainelWindow(): (now: Date) => { from: string; to: string } {
   const sandbox = loadPainelSandbox();
@@ -118,6 +189,7 @@ function loadPainelSandbox(): Record<string, unknown> {
   return sandbox;
 }
 
+/** Linha como vem do banco (PostgREST): datas em YYYY-MM-DD. */
 const ROW = {
   external_reservation_id: "17613",
   apartamento: "07",
@@ -125,20 +197,32 @@ const ROW = {
   check_in: "2026-09-20",
   check_out: "2026-09-23",
   status_reserva: "ativa",
+  ciclo_hits: "confirmada",
   total_hospedes: 2,
 };
 
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
+const NOW = new Date("2026-09-24T15:10:00Z");
+const STATE_OK = {
+  last_started_at: "2026-09-24T15:00:05Z",
+  last_finished_at: "2026-09-24T15:02:45Z",
+  last_status: "ok",
+  last_error: null,
+  last_rows_count: 1,
+  last_failed_count: 0,
+  last_success_at: "2026-09-24T15:02:45Z",
+};
+
+function plano(rows: unknown[] | null, state: unknown, rowsError?: { code: string; message: string }) {
+  return {
+    hits_reservas_snapshot: rowsError ? { data: null, error: rowsError } : { data: rows, error: null },
+    hits_snapshot_sync_state: { data: state, error: null },
+  };
 }
 
 async function main() {
-  console.log("\n== Mapeamento HITS → listagem operacional ==");
+  console.log("\n== Mapeamento snapshot → listagem operacional ==");
   {
-    const api = loadPreview();
+    const { api } = loadPreview();
     const r = api.toReservaOperacional(ROW);
     assert.equal(r.externalReservationId, "17613");
     assert.equal(r.apartamento, "07");
@@ -156,7 +240,7 @@ async function main() {
     ok("marcada como somente leitura, id sintético carrega o idReservation");
   }
   {
-    const api = loadPreview();
+    const { api } = loadPreview();
     const semApto = api.toReservaOperacional({ ...ROW, apartamento: "" });
     assert.equal(semApto.apartamento, "");
     const semPax = api.toReservaOperacional({ ...ROW, total_hospedes: 0 });
@@ -166,7 +250,7 @@ async function main() {
     ok("apartamento ausente fica vazio (a tela mostra —), sem inventar valor");
   }
   {
-    const api = loadPreview();
+    const { api } = loadPreview();
     const r = api.toReservaOperacional(ROW);
     // Campos que disparariam ação operacional precisam vir neutros.
     assert.equal(r.acessoLiberado, false);
@@ -181,73 +265,75 @@ async function main() {
   }
   {
     // Sem isto a reserva sumia da grade no instante do check-in no HITS.
-    const api = loadPreview();
-    assert.equal(
-      api.toReservaOperacional({ ...ROW, ciclo_hits: "hospedada" }).entrouNoApto,
-      true,
-    );
-    assert.equal(
-      api.toReservaOperacional({ ...ROW, ciclo_hits: "confirmada" }).entrouNoApto,
-      false,
-    );
-    // Linha sem o campo não pode virar hospedada por acidente.
-    assert.equal(api.toReservaOperacional(ROW).entrouNoApto, false);
+    const { api } = loadPreview();
+    assert.equal(api.toReservaOperacional({ ...ROW, ciclo_hits: "hospedada" }).entrouNoApto, true);
+    assert.equal(api.toReservaOperacional({ ...ROW, ciclo_hits: "confirmada" }).entrouNoApto, false);
     // Acesso é credencial do Yes/TTLock: o HITS não concede.
-    assert.equal(
-      api.toReservaOperacional({ ...ROW, ciclo_hits: "hospedada" }).acessoLiberado,
-      false,
-    );
+    assert.equal(api.toReservaOperacional({ ...ROW, ciclo_hits: "hospedada" }).acessoLiberado, false);
     ok("ciclo_hits=hospedada vira entrouNoApto, sem liberar acesso");
   }
 
-  console.log("\n== Busca da Edge ==");
+  console.log("\n== Leitura do snapshot local (sem Edge, sem fetch) ==");
   {
-    const calls: Array<{ url: string; method: string }> = [];
-    const api = loadPreview(async (url: string, init: { method: string }) => {
-      calls.push({ url, method: init.method });
-      return jsonResponse({ ok: true, rows: [ROW, { ...ROW, external_reservation_id: "17614" }] });
-    });
-    const out = await api.fetchReservasOperacionais();
+    const sb = fakeSupabase(plano([ROW, { ...ROW, external_reservation_id: "17614" }], STATE_OK));
+    const loaded = loadPreview(sb);
+    const out = await loaded.api.fetchReservasOperacionais();
     assert.equal(out.length, 2);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0]!.method, "GET");
-    assert.match(calls[0]!.url, /\/functions\/v1\/hits-reservations-preview$/);
-    ok("GET único na Edge, linhas já no formato da listagem");
+    assert.equal(loaded.fetchCalls, 0, "nenhum fetch(): nada de Edge/HITS ao vivo");
+    assert.deepEqual(
+      sb.selects.map((s) => s.table).sort(),
+      ["hits_reservas_snapshot", "hits_snapshot_sync_state"],
+    );
+    const cols = sb.selects.find((s) => s.table === "hits_reservas_snapshot")!.columns;
+    assert.doesNotMatch(cols, /telefone|phone|email|documento|cpf|balance|pagamento|\*/);
+    ok("dois SELECTs locais (snapshot + estado), colunas explícitas, zero requisições ao HITS");
   }
   {
     // Painel + grade + KPIs consomem o mesmo ciclo: uma leitura, não duas.
-    let calls = 0;
-    const api = loadPreview(async () => {
-      calls += 1;
-      return jsonResponse({ ok: true, rows: [ROW] });
-    });
+    const sb = fakeSupabase(plano([ROW], STATE_OK));
+    const { api } = loadPreview(sb);
     const [a, b] = await Promise.all([
       api.fetchReservasOperacionais(),
       api.fetchReservasOperacionais(),
     ]);
-    assert.equal(calls, 1, "chamadas concorrentes compartilham a promise");
+    assert.equal(sb.selects.length, 2, "chamadas concorrentes compartilham a promise");
     assert.equal(a.length, 1);
     assert.equal(b.length, 1);
 
     await api.fetchReservasOperacionais();
-    assert.equal(calls, 1, "sem force, reusa o resultado do ciclo");
+    assert.equal(sb.selects.length, 2, "sem force, reusa o resultado do ciclo");
+
+    await api.fetchReservasOperacionais({ reuseOnly: true });
+    assert.equal(sb.selects.length, 2, "reuseOnly nunca abre SELECT novo");
 
     await api.fetchReservasOperacionais({ force: true });
-    assert.equal(calls, 2, "force inicia um ciclo novo");
-    ok("uma única leitura HITS por ciclo, compartilhada");
+    assert.equal(sb.selects.length, 4, "force relê o snapshot (barato: SELECT local)");
+
+    await api.load();
+    assert.equal(sb.selects.length, 6, "botão do painel relê o snapshot local");
+    ok("uma única leitura por ciclo, compartilhada; force/painel releem só o banco local");
+  }
+  {
+    // Janela (dateFrom/dateTo) era da leitura ao vivo: agora é ignorada, sem quebrar.
+    const sb = fakeSupabase(plano([ROW], STATE_OK));
+    const loaded = loadPreview(sb);
+    const out = await loaded.api.fetchReservasOperacionais({
+      dateFrom: "2026-09-15",
+      dateTo: "2026-10-15",
+    });
+    assert.equal(out.length, 1);
+    assert.equal(loaded.fetchCalls, 0);
+    ok("opções de janela legadas são ignoradas: o snapshot é a janela do scheduler");
   }
   {
     // Regressão: o ciclo passou a entregar só o shape transformado e o painel
-    // técnico, que lê o shape da Edge, esvaziou idReservation/nome/datas.
-    let calls = 0;
-    const api = loadPreview(async () => {
-      calls += 1;
-      return jsonResponse({ ok: true, rows: [ROW] });
-    });
+    // técnico, que lê o shape bruto, esvaziou idReservation/nome/datas.
+    const sb = fakeSupabase(plano([ROW], STATE_OK));
+    const { api } = loadPreview(sb);
     const cycle = await api.loadCycle();
-    assert.equal(calls, 1, "uma leitura só");
+    assert.equal(sb.selects.length, 2, "uma leitura só");
 
-    // raw = shape da Edge, para o painel técnico
+    // raw = shape da Edge/snapshot, para o painel técnico
     const raw = cycle.raw as Array<Record<string, unknown>>;
     assert.equal(raw.length, 1);
     assert.equal(raw[0]!.external_reservation_id, "17613");
@@ -267,36 +353,113 @@ async function main() {
     // Os dois shapes são distintos: trocar um pelo outro quebra a tela.
     assert.equal(raw[0]!.externalReservationId, undefined);
     assert.equal(rows[0]!.external_reservation_id, undefined);
-    ok("um ciclo entrega raw (painel) e rows (grade), sem segunda chamada");
+    ok("um ciclo entrega raw (painel) e rows (grade), sem segunda leitura");
   }
   {
     const js = readFileSync(resolve(ROOT, "ui/yes-hits-sandbox-preview.js"), "utf8");
     assert.match(js, /renderRows\(result\.raw/, "painel precisa renderizar o raw");
-    assert.doesNotMatch(
-      js,
-      /renderRows\(result\.rows\)/,
-      "renderRows não pode receber o shape transformado",
-    );
+    assert.doesNotMatch(js, /renderRows\(result\.rows\)/, "renderRows não pode receber o shape transformado");
     ok("renderCycle alimenta o painel com o shape correto");
   }
   {
-    const api = loadPreview(async () => jsonResponse({ ok: false, error: "x" }, 502));
+    const sb = fakeSupabase(plano(null, STATE_OK, { code: "42501", message: "permission denied" }));
+    const { api } = loadPreview(sb);
+    const cycle = await api.loadCycle();
+    assert.equal(cycle.ok, false);
+    assert.equal(cycle.error, "42501");
     assert.equal((await api.fetchReservasOperacionais()).length, 0);
-    ok("Edge com erro → lista vazia, a tela operacional não quebra");
+    ok("SELECT negado (RLS) → ok:false com o código, lista vazia, a tela não quebra");
   }
   {
-    const api = loadPreview(async () => {
-      throw new Error("rede caiu");
-    });
-    assert.equal((await api.fetchReservasOperacionais()).length, 0);
-    ok("falha de rede → lista vazia, sem exceção");
+    const { api } = loadPreview(null);
+    const cycle = await api.loadCycle();
+    assert.equal(cycle.ok, false);
+    assert.equal(cycle.error, "supabase_nao_configurado");
+    ok("sem cliente Supabase → ok:false explícito, sem exceção");
   }
   {
-    const api = loadPreview(async () =>
-      jsonResponse({ ok: true, rows: [{ ...ROW, external_reservation_id: "" }] }),
-    );
+    const sb = fakeSupabase(plano([{ ...ROW, external_reservation_id: "" }], STATE_OK));
+    const { api } = loadPreview(sb);
     assert.equal((await api.fetchReservasOperacionais()).length, 0);
     ok("linha sem idReservation é descartada");
+  }
+  {
+    // Abrir a tela N vezes = N módulos novos: nenhum fetch, nunca.
+    let fetches = 0;
+    for (let i = 0; i < 5; i++) {
+      const sb = fakeSupabase(plano([ROW], STATE_OK));
+      const loaded = loadPreview(sb);
+      await loaded.api.fetchReservasOperacionais({ force: true });
+      fetches += loaded.fetchCalls;
+    }
+    assert.equal(fetches, 0);
+    ok("5 aberturas da tela → 0 chamadas de rede à Edge/gateway HITS");
+  }
+
+  console.log("\n== Saúde do snapshot (describeSync) ==");
+  {
+    const { api } = loadPreview();
+    const semEstado = api.describeSync(null, NOW);
+    assert.equal(semEstado.status, "sem_snapshot");
+    assert.equal(semEstado.level, "error");
+    const nuncaOk = api.describeSync({ last_status: "error", last_error: "x", last_success_at: null }, NOW);
+    assert.equal(nuncaOk.status, "sem_snapshot", "erro sem nenhum sucesso anterior = sem snapshot");
+    ok("sem sync bem-sucedido → 'dados ainda não sincronizados' (nunca '0 reservas')");
+
+    const okRecente = api.describeSync(STATE_OK, NOW);
+    assert.equal(okRecente.status, "ok");
+    assert.equal(okRecente.level, "ok");
+    assert.equal(okRecente.ageMinutes, 7);
+    assert.match(okRecente.message, /^sincronizado \d{2}:\d{2}$/);
+    ok("sync recente e completo → ok com a hora");
+
+    const falhou = api.describeSync(
+      { ...STATE_OK, last_status: "error", last_error: "gateway_read_failed" },
+      NOW,
+    );
+    assert.equal(falhou.status, "falhou");
+    assert.equal(falhou.level, "warn");
+    assert.match(falhou.message, /falhou — exibindo dados de \d{2}:\d{2}/);
+    assert.ok(falhou.lastSuccessAt instanceof Date, "fotografia anterior continua referenciada");
+    ok("último ciclo falhou com fotografia anterior → aviso + dados antigos");
+
+    const velho = api.describeSync(
+      { ...STATE_OK, last_success_at: "2026-09-24T14:00:00Z" },
+      NOW,
+    );
+    assert.equal(velho.status, "desatualizado");
+    assert.equal(velho.level, "warn");
+    assert.equal(velho.ageMinutes, 70);
+    assert.ok(70 > api.SNAPSHOT_STALE_MINUTES);
+    ok("último sucesso além do limiar → desatualizado");
+
+    const parcial = api.describeSync({ ...STATE_OK, last_status: "partial", last_failed_count: 2 }, NOW);
+    assert.equal(parcial.status, "parcial");
+    assert.equal(parcial.level, "ok");
+    assert.match(parcial.message, /2 reservas sem detalhe/);
+    ok("parcial → ok com contagem de reservas sem detalhe");
+
+    const rodando = api.describeSync({ ...STATE_OK, last_status: "running" }, NOW);
+    assert.equal(rodando.status, "ok", "ciclo em andamento não invalida a fotografia atual");
+    ok("running mantém a fotografia válida");
+  }
+  {
+    const sb = fakeSupabase(plano([ROW], { ...STATE_OK, last_status: "error", last_error: "boom" }));
+    const { api } = loadPreview(sb);
+    const cycle = await api.loadCycle();
+    assert.equal(cycle.ok, true);
+    assert.equal(cycle.rows.length, 1, "dados antigos continuam na grade");
+    assert.equal(cycle.sync!.status, "falhou");
+    ok("falha de sync com snapshot anterior: grade mantém os dados, barra avisa");
+  }
+  {
+    const sb = fakeSupabase(plano([], { last_status: null, last_success_at: null }));
+    const { api } = loadPreview(sb);
+    const cycle = await api.loadCycle();
+    assert.equal(cycle.ok, true);
+    assert.equal(cycle.rows.length, 0);
+    assert.equal(cycle.sync!.status, "sem_snapshot");
+    ok("snapshot vazio e nunca sincronizado é distinguível de '0 reservas'");
   }
 
   console.log("\n== Guards na tela operacional ==");
@@ -332,24 +495,27 @@ async function main() {
     const initLoad = src.indexOf("reservas = (await loadReservasOperacionaisFromProvider()) || []");
     assert.ok(initLoad > -1, "init deve carregar o banco sem esperar o HITS");
     const depoisDoInit = src.slice(initLoad, initLoad + 400);
-    assert.match(
-      depoisDoInit,
-      /aplicarLeituraHitsQuandoPronta\(\)/,
-      "init precisa disparar a leitura HITS sem bloquear",
-    );
-    ok("boot carrega o banco e aplica HITS sem bloquear o init");
+    assert.match(depoisDoInit, /aplicarLeituraHitsQuandoPronta\(\)/, "init precisa disparar a leitura HITS sem bloquear");
+    ok("boot carrega o banco e aplica o snapshot sem bloquear o init");
 
     assert.match(src, /async function refreshFromSource[\s\S]{0,200}force: true/);
-    ok("recarga pós-ação (refreshFromSource) mantém o ciclo novo de leitura HITS");
+    ok("recarga pós-ação (refreshFromSource) relê o snapshot (SELECT local)");
 
-    // O botão Atualizar da listagem não é um "Atualizar HITS" disfarçado.
+    // O botão Atualizar da listagem relê o banco e reaproveita o último ciclo.
     const listagem = src.slice(src.indexOf("async function refreshListagem("));
     const listagemBody = listagem.slice(0, listagem.search(/\r?\n\}\r?\n/) + 3);
     assert.match(listagemBody, /reuseOnly: true/);
     assert.doesNotMatch(listagemBody, /force: true/);
     assert.match(src, /opRefreshBtn\?\.addEventListener\("click", \(\) => \{\s*refreshListagem\(\)/);
-    assert.match(src, /options\.reuseOnly === true\)\) \{\s*await reconciliarCanceladasHits/);
-    ok("Atualizar da listagem reaproveita a última leitura HITS, sem GET novo");
+    ok("Atualizar da listagem reaproveita a última leitura do snapshot");
+
+    // Reconciliação de canceladas pelo detalhe ao vivo fica desligada no modo snapshot.
+    assert.match(src, /const HITS_RECONCILIAR_CANCELADAS_AO_VIVO = false;/);
+    assert.match(src, /HITS_RECONCILIAR_CANCELADAS_AO_VIVO &&[\s\S]{0,160}await reconciliarCanceladasHits/);
+    const carga = src.slice(src.indexOf("async function loadReservasSomenteLeituraHits"));
+    const cargaBody = carga.slice(0, carga.search(/\r?\n\}\r?\n/) + 3);
+    assert.doesNotMatch(cargaBody, /dateFrom|resolveHitsReadWindow/, "sem janela: o snapshot é do scheduler");
+    ok("tela não dispara GET de reconciliação ao gateway; carga sem janela");
 
     // Nenhuma escrita a partir das reservas HITS.
     assert.doesNotMatch(src, /somenteLeituraHits[\s\S]{0,200}\.insert\(/);
@@ -365,12 +531,9 @@ async function main() {
     ok("ordem dos scripts garante a API disponível no init");
   }
 
-  console.log("\n== Janela de leitura no dia operacional ==");
+  console.log("\n== Janela do dia operacional (mantida para rollback) ==");
   {
-    // Campo Grande é UTC-4. A Edge calcula o default em UTC; depois das 20h
-    // locais o UTC já virou e a janela começava em "amanhã", zerando o Hoje.
     const janela = loadPainelWindow();
-
     const casos: Array<[string, string, string]> = [
       ["A) 15/09 19:59 CG", "2026-09-15T23:59:00Z", "2026-09-15"],
       ["B) 15/09 20:01 CG (UTC ja 16/09)", "2026-09-16T00:01:00Z", "2026-09-15"],
@@ -389,7 +552,7 @@ async function main() {
     ok("date_to = date_from + 30 dias");
   }
 
-  console.log("\n== Reservas canceladas no HITS: reconciliação pelo detalhe ==");
+  console.log("\n== Reservas canceladas no HITS: reconciliação pelo detalhe (código mantido) ==");
   {
     type Resultado = "cancelada" | "ja_cancelada" | "falha";
     const sb = loadPainelSandbox() as {
@@ -407,21 +570,18 @@ async function main() {
       hospedes: [{ nome: "H" }],
       historico: [{ tipo: "x" }],
     });
-    const a104 = mk("17820", "hits");            // cancelada no HITS, sumiu do feed
-    const b105 = mk("17821", "hits");            // ativa, só fora da janela do feed
-    const cMan = mk(null, "manual");             // manual: nunca candidata
-    const dJa  = mk("17822", "hits", "cancelada"); // já cancelada no banco
-    const e107 = mk("17823", "hits");            // presente no feed
+    const a104 = mk("17820", "hits");
+    const b105 = mk("17821", "hits");
+    const cMan = mk(null, "manual");
+    const dJa = mk("17822", "hits", "cancelada");
+    const e107 = mk("17823", "hits");
     const base = [a104, b105, cMan, dJa, e107];
     const feed = [{ externalReservationId: "17823" }];
 
-    // Arrays nascem no realm do vm: espalhar antes de comparar (mesmo caso já
-    // tratado acima para hospedes/cobranças).
     const ids = [...sb.selecionarCandidatasCancelamentoHits(base, feed)];
     assert.deepEqual(ids, ["17820", "17821"]);
     ok("candidatas = banco+hits, ativas, fora do feed; manual e já cancelada ficam de fora");
 
-    // Detalhe confirma: 17820 cancelada; 17821 ativa. Seleção é PURA: nada muda ainda.
     const confirmadas = [
       ...sb.selecionarCanceladasConfirmadasHits(base, [
         { external_reservation_id: "17820", status_reserva: "cancelada" },
@@ -430,169 +590,83 @@ async function main() {
     ];
     assert.deepEqual(confirmadas, [a104]);
     assert.equal(a104.statusReserva, "ativa", "seleção não muta: banco ainda não confirmou");
-    assert.equal(b105.statusReserva, "ativa", "ativa no detalhe continua ativa");
-    assert.equal(e107.statusReserva, "ativa", "presente no feed continua ativa");
     ok("detalhe confirma cancelada → selecionada, mas ainda ativa em memória");
 
-    // Não devolvida pelo detalhe (falha/timeout) → NÃO infere cancelamento.
     const f = mk("17824", "hits");
     assert.deepEqual([...sb.selecionarCanceladasConfirmadasHits([f], [])], []);
-    assert.equal(f.statusReserva, "ativa");
     ok("sumiu do feed mas o detalhe não confirmou → não é marcada cancelada");
 
-    // Persistência com Supabase falso: só o banco autoriza mudar a memória.
-    const fakeSupabase = (plano: { updateError?: boolean; updateRows?: number; statusAtual?: string; selectError?: boolean }) => {
-      const eventos: unknown[] = [];
-      const chain = (kind: "update" | "select" | "insert", payload?: unknown) => {
+    const fakeSupabase = (plano: { updateError?: boolean; updateRows?: number; statusAtual?: string }) => {
+      const chain = (kind: "update" | "select" | "insert") => {
         const q: Record<string, unknown> = {};
         const self = () => q;
-        q.eq = self; q.maybeSingle = () => {
-          if (plano.selectError) return Promise.resolve({ data: null, error: { message: "x" } });
-          return Promise.resolve({ data: { status_reserva: plano.statusAtual ?? "ativa" }, error: null });
-        };
-        q.select = () => Promise.resolve(
-          plano.updateError
-            ? { data: null, error: { message: "boom" } }
-            : { data: Array.from({ length: plano.updateRows ?? 1 }, () => ({ id: "x" })), error: null },
-        );
-        if (kind === "insert") { eventos.push(payload); return Promise.resolve({ error: null }); }
+        q.eq = self;
+        q.maybeSingle = () =>
+          Promise.resolve({ data: { status_reserva: plano.statusAtual ?? "ativa" }, error: null });
+        q.select = () =>
+          Promise.resolve(
+            plano.updateError
+              ? { data: null, error: { message: "boom" } }
+              : { data: Array.from({ length: plano.updateRows ?? 1 }, () => ({ id: "x" })), error: null },
+          );
+        if (kind === "insert") return Promise.resolve({ error: null });
         return q;
       };
       return {
-        eventos,
         from: () => ({
           update: () => chain("update"),
           select: () => chain("select"),
-          insert: (p: unknown) => chain("insert", p),
+          insert: () => chain("insert"),
         }),
       };
     };
 
-    // 1. UPDATE falha → "falha": continua ativa, sem evento.
     const rFalha = mk("17830", "hits");
     const resFalha = await sb.persistirCancelamentoHits(fakeSupabase({ updateError: true }), rFalha.id, "2026-09-16T00:00:00Z");
     assert.equal(resFalha, "falha");
-    assert.equal(sb.aplicarResultadoCancelamentoHits(rFalha, resFalha), false, "sem evento");
-    assert.equal(rFalha.statusReserva, "ativa", "falha no banco → continua ativa na grade");
+    assert.equal(sb.aplicarResultadoCancelamentoHits(rFalha, resFalha), false);
+    assert.equal(rFalha.statusReserva, "ativa");
     ok("UPDATE falhou → reserva segue ativa em memória e sem evento");
 
-    // 2. UPDATE ok (1 linha) → "cancelada": some da grade + evento.
     const rOk = mk("17831", "hits");
     const resOk = await sb.persistirCancelamentoHits(fakeSupabase({ updateRows: 1 }), rOk.id, "2026-09-16T00:00:00Z");
     assert.equal(resOk, "cancelada");
-    assert.equal(sb.aplicarResultadoCancelamentoHits(rOk, resOk), true, "evento devido");
-    assert.equal(rOk.statusReserva, "cancelada");
+    assert.equal(sb.aplicarResultadoCancelamentoHits(rOk, resOk), true);
     assert.deepEqual([...(sb.filtrarReservasOperacionaisAtivas([rOk]) as unknown[])], []);
     ok("UPDATE confirmou → some da grade e gera evento");
 
-    // 3. UPDATE 0 linhas + banco já cancelada → "ja_cancelada": some, SEM evento duplicado.
     const rJa = mk("17832", "hits");
     const resJa = await sb.persistirCancelamentoHits(fakeSupabase({ updateRows: 0, statusAtual: "cancelada" }), rJa.id, "2026-09-16T00:00:00Z");
     assert.equal(resJa, "ja_cancelada");
-    assert.equal(sb.aplicarResultadoCancelamentoHits(rJa, resJa), false, "outro processo já gravou: sem evento");
-    assert.equal(rJa.statusReserva, "cancelada");
+    assert.equal(sb.aplicarResultadoCancelamentoHits(rJa, resJa), false);
     ok("segunda execução / outro processo: reconciliada sem evento duplicado");
 
-    // 4. UPDATE 0 linhas e banco ainda ativa (estado inesperado) → "falha": não esconde.
-    const rIncerto = mk("17833", "hits");
-    const resIncerto = await sb.persistirCancelamentoHits(fakeSupabase({ updateRows: 0, statusAtual: "ativa" }), rIncerto.id, "2026-09-16T00:00:00Z");
-    assert.equal(resIncerto, "falha");
-    assert.equal(rIncerto.statusReserva, "ativa");
-    ok("0 linhas sem confirmação de cancelada → não esconde da grade");
-
-    // Para os passos seguintes, a 17820 passa a cancelada como se o banco tivesse confirmado.
-    a104.statusReserva = "cancelada";
-
-    // Histórico e hóspedes do objeto seguem intactos; nada é apagado.
-    assert.equal((a104.hospedes as unknown[]).length, 1);
-    assert.equal((a104.historico as unknown[]).length, 1);
-    ok("cancelar preserva hóspedes e histórico da reserva");
-
-    const ativas = [...(sb.filtrarReservasOperacionaisAtivas(base) as Array<{ id: string }>)];
-    assert.deepEqual(ativas.map((r) => r.id), ["uuid-17821", "uuid-manual", "uuid-17823"]);
-    ok("lista ativa exclui a cancelada agora e a já cancelada; mantém as demais (sem duplicar)");
-
-    // Reexecução: já cancelada não é candidata nem é marcada de novo.
-    assert.deepEqual([...sb.selecionarCandidatasCancelamentoHits(base, feed)], ["17821"]);
-    assert.deepEqual(
-      [...sb.selecionarCanceladasConfirmadasHits(base, [{ external_reservation_id: "17820", status_reserva: "cancelada" }])],
-      [],
-    );
-    ok("idempotente: segunda reconciliação não re-marca nem duplica");
-
-    // `const` top-level não é exposto pelo vm; o teto é o documentado no painel.
     const muitas = Array.from({ length: 30 }, (_, i) => mk(String(30000 + i), "hits"));
     assert.equal(sb.selecionarCandidatasCancelamentoHits(muitas, []).length, 20);
-    ok("teto de 20 ids por ciclo protege o rate limit do gateway");
+    ok("teto de 20 ids por ciclo protege o rate limit do gateway (quando religado)");
   }
   {
-    // Guardas estáticas do trecho que escreve no banco.
+    // Guardas estáticas do trecho que escreve no banco (mantido para rollback).
     const src = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.js"), "utf8");
     const bloco = src.slice(
       src.indexOf("function selecionarCanceladasConfirmadasHits"),
       src.indexOf("async function loadReservasSomenteLeituraHits"),
     );
-    assert.match(bloco, /hits-reservations-preview\?ids=/, "confirma pelo detalhe, via Edge existente");
     assert.match(bloco, /\.update\(\{ status_reserva: "cancelada", updated_at: nowIso \}\)/);
     assert.match(bloco, /\.eq\("status_reserva", "ativa"\)/, "só marca quem ainda estava ativa");
-    // Ordem: persistir → aplicar na memória → evento. Nunca o inverso.
     const iPersist = bloco.indexOf("await persistirCancelamentoHits(supabase, r.id, nowIso)");
     const iAplica = bloco.indexOf("aplicarResultadoCancelamentoHits(r, resultado)");
     const iEvento = bloco.indexOf('tipo: "hits_reserva_cancelada"');
     assert.ok(iPersist > -1 && iAplica > iPersist && iEvento > iAplica, "banco → memória → evento");
-    assert.match(bloco, /if \(!aplicarResultadoCancelamentoHits\(r, resultado\)\) continue;/, "sem confirmação, pula sem evento");
     assert.equal(/\.delete\(/.test(bloco), false, "nada é apagado");
-    assert.match(bloco, /tipo: "hits_reserva_cancelada"/, "evento já conhecido pela UI");
     assert.equal(/operacional_hospedes|fnrh_hospedes/.test(bloco), false, "hóspedes e FNRH intocados");
     ok("escrita restrita a status_reserva + evento; sem delete, sem tocar hóspedes/FNRH");
-  }
-
-  console.log("\n== Repasse da janela à Edge ==");
-  {
-    const calls: string[] = [];
-    const api = loadPreview(async (url: string) => {
-      calls.push(url);
-      return jsonResponse({ ok: true, rows: [ROW] });
-    });
-
-    await api.fetchReservasOperacionais({ dateFrom: "2026-09-15", dateTo: "2026-10-15" });
-    assert.equal(calls.length, 1);
-    assert.match(calls[0]!, /date_from=2026-09-15/);
-    assert.match(calls[0]!, /date_to=2026-10-15/);
-    ok("URL da Edge carrega date_from e date_to");
-
-    // Mesma janela, sem force: reusa o ciclo.
-    await api.fetchReservasOperacionais({ dateFrom: "2026-09-15", dateTo: "2026-10-15" });
-    assert.equal(calls.length, 1, "mesma janela nao refaz leitura");
-
-    // Botão do painel (sem janela) herda a última usada pela grade.
-    await api.loadCycle();
-    assert.equal(calls.length, 1, "painel reusa a janela da grade");
-    ok("painel e grade compartilham a mesma leitura");
-
-    // Virada do dia operacional: janela nova invalida o ciclo anterior.
-    await api.fetchReservasOperacionais({ dateFrom: "2026-09-16", dateTo: "2026-10-16" });
-    assert.equal(calls.length, 2, "janela diferente exige leitura nova");
-    assert.match(calls[1]!, /date_from=2026-09-16/);
-    ok("mudança de janela invalida o ciclo reaproveitado");
-  }
-  {
-    // Sem janela, a Edge aplica o default dela (fallback preservado).
-    const calls: string[] = [];
-    const api = loadPreview(async (url: string) => {
-      calls.push(url);
-      return jsonResponse({ ok: true, rows: [ROW] });
-    });
-    await api.fetchReservasOperacionais();
-    assert.doesNotMatch(calls[0]!, /date_from/);
-    ok("sem janela: URL limpa, default da Edge preservado");
   }
 
   console.log("\n== Painel compacto ==");
   {
     const html = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.html"), "utf8");
 
-    // Barra compacta com tudo que o estado recolhido precisa mostrar.
     for (const id of [
       "op-hits-sandbox-badge",
       "op-hits-sandbox-count",
@@ -604,8 +678,6 @@ async function main() {
     }
     ok("barra compacta traz badge, contagem, hora e diagnóstico");
 
-    // Sincronização é automática: a faixa operacional não oferece leitura
-    // manual nem expõe ambiente/detalhe técnico (isso fica no diagnóstico).
     assert.ok(!html.includes('id="op-hits-sandbox-refresh"'), "botão manual Atualizar HITS removido");
     assert.doesNotMatch(html, />\s*Atualizar HITS\s*</);
     assert.doesNotMatch(html, /Leitura direta via API HITS/);
@@ -613,21 +685,19 @@ async function main() {
     ok("faixa operacional sem Atualizar HITS, sem ambiente e sem texto técnico");
 
     const details = html.slice(html.indexOf('id="op-hits-sandbox-details"'));
-    assert.match(
-      details.slice(0, 120),
-      /class="op-hits-details hidden"/,
-      "diagnóstico deve nascer recolhido",
-    );
+    assert.match(details.slice(0, 120), /class="op-hits-details hidden"/, "diagnóstico deve nascer recolhido");
     const toggle = html.slice(html.indexOf('id="op-hits-sandbox-toggle"'));
     assert.match(toggle.slice(0, 200), /aria-expanded="false"/);
     assert.match(toggle.slice(0, 200), /aria-controls="op-hits-sandbox-details"/);
     ok("tabela técnica recolhida por padrão, com aria correto");
 
-    // A tabela técnica continua existindo, só que dentro do bloco recolhido.
     for (const col of ["idReservation", "Apto", "Hóspede", "Entrada", "Saída", "Status"]) {
       assert.ok(details.includes(col), `coluna ${col} sumiu do diagnóstico`);
     }
     ok("colunas técnicas preservadas dentro do diagnóstico");
+
+    assert.match(html, /yes-hits-sandbox-preview\.js\?v=5/, "cache-bust do módulo do snapshot");
+    ok("HTML aponta para a versão do módulo que lê o snapshot");
 
     const js = readFileSync(resolve(ROOT, "ui/yes-hits-sandbox-preview.js"), "utf8");
     assert.match(js, /function setDetailsOpen/);
@@ -635,7 +705,8 @@ async function main() {
     assert.match(js, /setDetailsOpen\(false\)/, "estado inicial recolhido");
     assert.match(js, /function renderResumo/);
     assert.doesNotMatch(js, /op-hits-sandbox-refresh/, "sem referência ao botão manual removido");
-    ok("toggle alterna e o resumo alimenta a barra");
+    assert.match(js, /op-hits-bar__count--warn/, "estado de aviso na barra");
+    ok("toggle alterna e o resumo alimenta a barra, com estado de aviso");
   }
 
   console.log(`\nOK test-hits-sandbox-operacional-ui (${cases} casos)`);

@@ -1058,6 +1058,12 @@ html {
   font-weight: 600;
 }
 
+.checkin-view .op-hits-bar__count--warn,
+.checkin-view .op-hits-bar__updated--warn {
+  color: #8a5a00;
+  font-weight: 600;
+}
+
 .checkin-view .op-hits-bar__hint {
   margin: 0;
   flex: 1 1 auto;
@@ -4027,6 +4033,11 @@ body.checkin-view .op-hits-bar__updated:not(:empty)::before {
 
 body.checkin-view .op-hits-bar__count--error {
   color: var(--ys-danger-fg);
+}
+
+body.checkin-view .op-hits-bar__count--warn,
+body.checkin-view .op-hits-bar__updated--warn {
+  color: var(--ys-warning-fg, #8a5a00);
 }
 
 /* Diagnóstico: técnico/administrativo, discreto, não compete com a operação */
