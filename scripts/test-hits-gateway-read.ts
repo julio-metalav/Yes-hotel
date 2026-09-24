@@ -60,6 +60,45 @@ function fakeFetch(
   };
 }
 
+/**
+ * Relógio falso: a cadência (1,1 s entre inícios) e o orçamento (110 s) usam
+ * nowMs/sleepImpl injetados — os testes continuam instantâneos e determinísticos.
+ * Cada chamada avança o relógio em `latencyMs` (default 0).
+ */
+function fakeClock(latencyMs = 0) {
+  let t = 0;
+  return {
+    nowMs: () => t,
+    sleepImpl: async (ms: number) => {
+      t += ms;
+    },
+    tick: (ms: number) => {
+      t += ms;
+    },
+    now: () => t,
+    latencyMs,
+  };
+}
+
+/** fetchHitsSandboxReservations com relógio falso (cadência e orçamento sem timers reais). */
+function read(input: Parameters<typeof fetchHitsSandboxReservations>[0]) {
+  const clock = fakeClock();
+  const baseFetch = input.fetchImpl;
+  const fetchImpl = baseFetch
+    ? async (url: string, init: Parameters<typeof baseFetch>[1]) => {
+        const res = await baseFetch(url, init);
+        clock.tick(clock.latencyMs);
+        return res;
+      }
+    : undefined;
+  return fetchHitsSandboxReservations({
+    nowMs: clock.nowMs,
+    sleepImpl: clock.sleepImpl,
+    ...input,
+    ...(fetchImpl ? { fetchImpl } : {}),
+  });
+}
+
 const DETAIL_17613 = {
   idReservation: 17613,
   contactName: "Hospede Sintetico",
@@ -206,7 +245,7 @@ async function main() {
   console.log("\n== Leitura pelo gateway ==");
   {
     const calls: Call[] = [];
-    const result = await fetchHitsSandboxReservations({
+    const result = await read({
       config: config(),
       fetchImpl: fakeFetch(
         {
@@ -255,7 +294,7 @@ async function main() {
     // Regressão do 400 real em HOMO:
     // {"errors":{"Status":["The field Status is invalid."]}}
     const calls: Call[] = [];
-    await fetchHitsSandboxReservations({
+    await read({
       config: config(),
       fetchImpl: fakeFetch({ "/v1/reservations": { body: { data: [] } } }, calls),
       status: 2,
@@ -268,7 +307,7 @@ async function main() {
     // Regressão do bad request em HOMO: sem datas, a query ia sem Type e com
     // Page=0 — combinação que o HITS recusa.
     const calls: Call[] = [];
-    await fetchHitsSandboxReservations({
+    await read({
       config: config(),
       fetchImpl: fakeFetch(
         {
@@ -291,7 +330,7 @@ async function main() {
   }
   {
     const calls: Call[] = [];
-    await fetchHitsSandboxReservations({
+    await read({
       config: config(),
       fetchImpl: fakeFetch({ "/v1/reservations": { body: { data: [] } } }, calls),
       page: 0,
@@ -302,7 +341,7 @@ async function main() {
   }
   {
     const calls: Call[] = [];
-    const result = await fetchHitsSandboxReservations({
+    const result = await read({
       config: config(),
       fetchImpl: fakeFetch({ "/v1/reservations/17613": { body: DETAIL_17613 } }, calls),
       reservationIds: ["17613", "17613", " "],
@@ -314,7 +353,7 @@ async function main() {
   }
   {
     const calls: Call[] = [];
-    const result = await fetchHitsSandboxReservations({
+    const result = await read({
       config: config(),
       fetchImpl: fakeFetch(
         {
@@ -383,7 +422,7 @@ async function main() {
       });
     };
 
-    const result = await fetchHitsSandboxReservations({
+    const result = await read({
       config: config(),
       fetchImpl,
       // Leitura única: estes casos são sobre paginação, não sobre ciclo.
@@ -409,7 +448,7 @@ async function main() {
   }
   {
     const calls: Call[] = [];
-    const result = await fetchHitsSandboxReservations({
+    const result = await read({
       config: config(),
       fetchImpl: fakeFetch(
         {
@@ -446,7 +485,7 @@ async function main() {
         headers: { "Content-Type": "application/json" },
       });
     };
-    const result = await fetchHitsSandboxReservations({
+    const result = await read({
       config: config(),
       fetchImpl,
       status: 1,
@@ -475,7 +514,7 @@ async function main() {
         headers: { "Content-Type": "application/json" },
       });
     };
-    const result = await fetchHitsSandboxReservations({
+    const result = await read({
       config: config(),
       fetchImpl,
       status: 1,
@@ -503,7 +542,7 @@ async function main() {
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     };
-    const result = await fetchHitsSandboxReservations({
+    const result = await read({
       config: config(),
       fetchImpl,
       status: 1,
@@ -536,7 +575,7 @@ async function main() {
         headers: { "Content-Type": "application/json" },
       });
     };
-    const result = await fetchHitsSandboxReservations({
+    const result = await read({
       config: config(),
       fetchImpl,
       status: 1,
@@ -571,7 +610,7 @@ async function main() {
     const janela = { dateFrom: "2026-09-15", dateTo: "2026-10-15" };
     {
       const calls: Call[] = [];
-      const result = await fetchHitsSandboxReservations({
+      const result = await read({
         config: config(),
         fetchImpl: byStatus({ "1": [17613], "3": [] }, calls),
         ...janela,
@@ -591,7 +630,7 @@ async function main() {
     }
     {
       // REGRESSÃO: depois do check-in a reserva sai do Status=1 e não pode sumir.
-      const result = await fetchHitsSandboxReservations({
+      const result = await read({
         config: config(),
         fetchImpl: byStatus({ "1": [], "3": [17656] }),
         ...janela,
@@ -604,7 +643,7 @@ async function main() {
     {
       // Transição: o HITS devolve a reserva nas duas listas.
       const calls: Call[] = [];
-      const result = await fetchHitsSandboxReservations({
+      const result = await read({
         config: config(),
         fetchImpl: byStatus({ "1": [17656], "3": [17656] }, calls),
         ...janela,
@@ -648,7 +687,7 @@ async function main() {
 
     {
       const calls: Call[] = [];
-      const r = await fetchHitsSandboxReservations({
+      const r = await read({
         config: config(),
         fetchImpl: byStatusSum(
           {
@@ -676,7 +715,7 @@ async function main() {
     }
     {
       const calls: Call[] = [];
-      const r = await fetchHitsSandboxReservations({
+      const r = await read({
         config: config(),
         fetchImpl: byStatusSum(
           {
@@ -701,7 +740,7 @@ async function main() {
     {
       // Status=3 continua funcionando e o filtro também poupa detalhe lá.
       const calls: Call[] = [];
-      const r = await fetchHitsSandboxReservations({
+      const r = await read({
         config: config(),
         fetchImpl: byStatusSum(
           {
@@ -724,7 +763,7 @@ async function main() {
     {
       // Dedupe entre as duas leituras segue: mesma id em 1 e 3 → 1 detalhe, hospedada.
       const calls: Call[] = [];
-      const r = await fetchHitsSandboxReservations({
+      const r = await read({
         config: config(),
         fetchImpl: byStatusSum(
           {

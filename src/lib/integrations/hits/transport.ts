@@ -17,6 +17,18 @@ export interface HitsTransportRequest {
   timeoutMs: number;
   /** Máximo de retries adicionais (0 = só 1 tentativa). Default 2. */
   maxRetries?: number;
+  /**
+   * Prazo absoluto (epoch ms) para retries: nenhum backoff dorme além dele.
+   * Se o backoff não cabe no prazo, o erro da tentativa atual é lançado sem
+   * nova tentativa. Sem prazo, comportamento anterior.
+   */
+  deadlineMs?: number;
+}
+
+/** Relógio e sleep injetáveis — testes determinísticos sem timers reais. */
+export interface HitsTransportOptions {
+  nowMs?: () => number;
+  sleepImpl?: (ms: number) => Promise<void>;
 }
 
 export interface HitsTransportResponse {
@@ -124,12 +136,31 @@ function networkError(networkCode: string, url: string): HitsError {
   });
 }
 
-export function createHitsTransport(fetchImpl: HitsFetch = fetch): HitsTransport {
+export function createHitsTransport(
+  fetchImpl: HitsFetch = fetch,
+  options: HitsTransportOptions = {},
+): HitsTransport {
+  const now = options.nowMs ?? (() => Date.now());
+  const doSleep = options.sleepImpl ?? sleep;
   return {
     async request(req: HitsTransportRequest): Promise<HitsTransportResponse> {
       const maxRetries = Math.max(0, Math.min(req.maxRetries ?? 2, 3));
       let attempt = 0;
       let lastError: unknown;
+
+      /**
+       * Dorme o backoff só se ele couber no prazo. Devolve false quando não
+       * cabe: o chamador lança o erro atual em vez de tentar de novo.
+       */
+      let gaveUp = false;
+      const backoffOrGiveUp = async (ms: number): Promise<boolean> => {
+        if (req.deadlineMs != null && now() + ms > req.deadlineMs) {
+          gaveUp = true;
+          return false;
+        }
+        await doSleep(ms);
+        return true;
+      };
 
       while (attempt <= maxRetries) {
         attempt += 1;
@@ -182,7 +213,7 @@ export function createHitsTransport(fetchImpl: HitsFetch = fetch): HitsTransport
             if (isRetryableStatus(res.status) && attempt <= maxRetries) {
               const retryAfter = parseRetryAfterMs(responseHeaders);
               const backoff = retryAfter ?? Math.min(250 * 2 ** (attempt - 1), 2_000);
-              await sleep(backoff);
+              if (!(await backoffOrGiveUp(backoff))) throw err;
               lastError = err;
               continue;
             }
@@ -196,6 +227,8 @@ export function createHitsTransport(fetchImpl: HitsFetch = fetch): HitsTransport
             rawText,
           };
         } catch (error) {
+          // Desistiu no backoff (não cabe no prazo): o erro já é o final.
+          if (gaveUp) throw error;
           if (error instanceof Error && error.name === "AbortError") {
             const timeoutErr = new HitsError({
               code: "timeout",
@@ -205,7 +238,9 @@ export function createHitsTransport(fetchImpl: HitsFetch = fetch): HitsTransport
               details: { pathHint: safeUrlHint(req.url) },
             });
             if (attempt <= maxRetries) {
-              await sleep(Math.min(250 * 2 ** (attempt - 1), 2_000));
+              if (!(await backoffOrGiveUp(Math.min(250 * 2 ** (attempt - 1), 2_000)))) {
+                throw timeoutErr;
+              }
               lastError = timeoutErr;
               continue;
             }
@@ -218,16 +253,20 @@ export function createHitsTransport(fetchImpl: HitsFetch = fetch): HitsTransport
           if (networkCode) {
             const netErr = networkError(networkCode, req.url);
             if (attempt <= maxRetries) {
+              if (!(await backoffOrGiveUp(Math.min(250 * 2 ** (attempt - 1), 2_000)))) {
+                throw netErr;
+              }
               lastError = netErr;
-              await sleep(Math.min(250 * 2 ** (attempt - 1), 2_000));
               continue;
             }
             throw netErr;
           }
 
           if (shouldRetryError(error) && attempt <= maxRetries) {
+            if (!(await backoffOrGiveUp(Math.min(250 * 2 ** (attempt - 1), 2_000)))) {
+              throw error;
+            }
             lastError = error;
-            await sleep(Math.min(250 * 2 ** (attempt - 1), 2_000));
             continue;
           }
 

@@ -294,6 +294,8 @@ export type HitsHttpErrorCode =
   | "rate_limited"
   | "server_error"
   | "timeout"
+  /** Orçamento de tempo do ciclo de leitura esgotado (nunca retentável). */
+  | "time_budget"
   | "invalid_json"
   | "empty_response"
   | "network"
