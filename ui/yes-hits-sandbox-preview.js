@@ -1,10 +1,14 @@
 /**
- * Painel somente leitura: reservas reais do HITS Sandbox.
+ * Painel somente leitura: reservas HITS a partir do SNAPSHOT local.
  *
  * Isolado de checkin-operacional-mvp.js de propósito — não altera estado
  * operacional, não persiste nada e não toca no fluxo de chegadas.
- * Chama apenas GET /functions/v1/hits-reservations-preview; o token do
- * gateway fica no backend.
+ *
+ * A tela NÃO consulta mais o HITS ao vivo: quem lê o HITS é o scheduler (Edge
+ * hits-reservations-preview a cada 10 min), que grava a projeção
+ * public.hits_reservas_snapshot. Aqui só há dois SELECTs locais (snapshot +
+ * estado do último sync), sob RLS por perfil. Abrir a tela N vezes não gera
+ * nenhuma requisição ao gateway HITS.
  */
 (function (global) {
   "use strict";
@@ -23,6 +27,18 @@
   var updatedEl = doc.querySelector("#op-hits-sandbox-updated");
   var toggleEl = doc.querySelector("#op-hits-sandbox-toggle");
   var detailsEl = doc.querySelector("#op-hits-sandbox-details");
+
+  /** Tabelas/colunas lidas. Só o que a tela exibe; nada de contato/financeiro. */
+  var SNAPSHOT_TABLE = "hits_reservas_snapshot";
+  var SNAPSHOT_COLUMNS =
+    "external_reservation_id, apartamento, hospede_principal, check_in, check_out, status_reserva, ciclo_hits, total_hospedes";
+  var SYNC_STATE_TABLE = "hits_snapshot_sync_state";
+  var SYNC_STATE_COLUMNS =
+    "last_started_at, last_finished_at, last_status, last_error, last_rows_count, last_failed_count, last_success_at";
+  /** Teto defensivo de linhas lidas (o scheduler grava no máximo ~100 por ciclo). */
+  var SNAPSHOT_MAX_ROWS = 500;
+  /** O scheduler roda a cada 10 min; acima disto o snapshot é tratado como desatualizado. */
+  var SNAPSHOT_STALE_MINUTES = 30;
 
   /** Diagnóstico nasce recolhido: a barra compacta é o estado normal. */
   function setDetailsOpen(open) {
@@ -43,22 +59,94 @@
     );
   }
 
-  /** Resumo da barra compacta: conectado, quantidade e hora da leitura. */
+  function parseIso(value) {
+    if (!value) return null;
+    var d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  /**
+   * Saúde do snapshot, derivada só do estado do último sync.
+   *   sem_snapshot   → nunca houve sync bem-sucedido (nada válido para mostrar)
+   *   falhou         → último ciclo falhou, mas existe fotografia anterior válida
+   *   desatualizado  → última fotografia válida é mais antiga que o esperado
+   *   parcial        → último ciclo ok, com reserva(s) sem detalhe
+   *   ok             → recente e completo
+   */
+  function describeSync(state, now) {
+    var s = state || {};
+    var ref = now || new Date();
+    var lastSuccess = parseIso(s.last_success_at);
+    var base = {
+      lastStatus: s.last_status || null,
+      lastError: s.last_error || null,
+      lastSuccessAt: lastSuccess,
+      failedCount: Math.max(0, Number(s.last_failed_count) || 0),
+      ageMinutes: null,
+    };
+    if (!lastSuccess) {
+      return assign(base, {
+        status: "sem_snapshot",
+        level: "error",
+        message: "dados ainda não sincronizados",
+      });
+    }
+    var age = Math.max(0, Math.round((ref.getTime() - lastSuccess.getTime()) / 60000));
+    base.ageMinutes = age;
+    var quando = hhmm(lastSuccess);
+    if (s.last_status === "error") {
+      return assign(base, {
+        status: "falhou",
+        level: "warn",
+        message: "última sincronização com HITS falhou — exibindo dados de " + quando,
+      });
+    }
+    if (age > SNAPSHOT_STALE_MINUTES) {
+      return assign(base, {
+        status: "desatualizado",
+        level: "warn",
+        message: "dados desatualizados — última sincronização " + quando,
+      });
+    }
+    if (s.last_status === "partial") {
+      return assign(base, {
+        status: "parcial",
+        level: "ok",
+        message:
+          "sincronizado " + quando + " · " + base.failedCount +
+          (base.failedCount === 1 ? " reserva sem detalhe" : " reservas sem detalhe"),
+      });
+    }
+    return assign(base, { status: "ok", level: "ok", message: "sincronizado " + quando });
+  }
+
+  function assign(target, extra) {
+    for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) target[k] = extra[k];
+    return target;
+  }
+
+  /** Resumo da barra compacta: saúde do snapshot, quantidade e hora do sync. */
   function renderResumo(result) {
-    var conectado = !!(result && result.ok);
+    var ok = !!(result && result.ok);
+    var sync = ok && result.sync ? result.sync : null;
+    var semSnapshot = ok && sync && sync.status === "sem_snapshot";
+    var level = !ok || semSnapshot ? "error" : sync ? sync.level : "ok";
     if (badgeEl) {
-      badgeEl.classList.toggle("hidden", !conectado);
+      badgeEl.classList.toggle("hidden", level === "error");
     }
     if (count) {
-      // Conta o que o HITS devolveu, não o que sobrou após a transformação.
-      var n = conectado ? (result.raw || []).length : 0;
-      count.textContent = conectado
-        ? n + (n === 1 ? " reserva lida" : " reservas lidas")
-        : "leitura indisponível";
-      count.classList.toggle("op-hits-bar__count--error", !conectado);
+      var n = ok ? (result.raw || []).length : 0;
+      count.textContent = !ok
+        ? "leitura indisponível"
+        : semSnapshot
+          ? "HITS — dados ainda não sincronizados"
+          : n + (n === 1 ? " reserva" : " reservas");
+      count.classList.toggle("op-hits-bar__count--error", level === "error");
+      count.classList.toggle("op-hits-bar__count--warn", level === "warn");
     }
     if (updatedEl) {
-      updatedEl.textContent = conectado ? "atualizado " + hhmm() : "";
+      updatedEl.textContent = ok && sync && !semSnapshot ? sync.message : "";
+      updatedEl.classList.toggle("op-hits-bar__updated--warn", level === "warn");
     }
   }
 
@@ -74,24 +162,14 @@
     return s || "—";
   }
 
-  /**
-   * A janela vem pronta de quem calcula o dia operacional do hotel
-   * (checkin-operacional-mvp.js). Aqui só é repassada — nada de timezone.
-   * Sem janela, a Edge aplica o default dela.
-   */
-  function functionsUrl(win) {
-    var cfg = global.YES_HOTEL_SUPABASE_CONFIG;
-    if (!cfg || !cfg.url) return "";
-    var url = String(cfg.url).replace(/\/+$/, "") + "/functions/v1/hits-reservations-preview";
-    if (win && win.from && win.to) {
-      url += "?date_from=" + encodeURIComponent(win.from) + "&date_to=" + encodeURIComponent(win.to);
+  function getSupabaseClient() {
+    var auth = global.YesHotelAuthApp;
+    if (!auth || typeof auth.getSupabaseClient !== "function") return null;
+    try {
+      return auth.getSupabaseClient() || null;
+    } catch (_e) {
+      return null;
     }
-    return url;
-  }
-
-  /** Assinatura da janela — entra na memoização do ciclo. */
-  function windowKey(win) {
-    return win && win.from && win.to ? win.from + ".." + win.to : "default";
   }
 
   function renderRows(rows) {
@@ -119,18 +197,12 @@
   }
 
   /**
-   * Ciclo de leitura compartilhado.
-   *
-   * Painel técnico e grade operacional consomem a MESMA resposta: duas leituras
-   * concorrentes somavam ~66 requisições ao gateway (1 listagem + 1 detalhe por
-   * reserva, duas vezes) e estouravam o limite de 60/min, derrubando uma delas.
+   * Ciclo de leitura compartilhado: painel técnico e grade operacional
+   * consomem a MESMA leitura do snapshot (dois SELECTs locais, nada mais).
    */
   var inflight = null;
   var cycleResult = null;
   var cycleListeners = [];
-  /** Janela do último ciclo: o botão do painel reusa a mesma da grade. */
-  var lastWindow = null;
-  var cycleKey = null;
 
   function notifyCycle(payload) {
     cycleListeners.forEach(function (fn) {
@@ -149,72 +221,86 @@
     if (cycleResult) fn(cycleResult);
   }
 
-  async function requestCycle(win) {
-    var auth = global.YesHotelAuthApp;
-    var url = functionsUrl(win);
-    if (!auth || !auth.getEdgeFunctionFetchHeaders || !url) {
-      return { ok: false, raw: [], rows: [], error: "supabase_nao_configurado" };
-    }
+  /** Linha do banco → shape "raw" (o mesmo que a Edge devolvia) p/ o painel. */
+  function toRawRow(row) {
+    var r = row || {};
+    return {
+      external_reservation_id: String(r.external_reservation_id || "").trim(),
+      apartamento: String(r.apartamento || "").trim(),
+      hospede_principal: String(r.hospede_principal || "").trim(),
+      check_in: String(r.check_in || "").slice(0, 10),
+      check_out: String(r.check_out || "").slice(0, 10),
+      status_reserva: r.status_reserva === "cancelada" ? "cancelada" : "ativa",
+      ciclo_hits: r.ciclo_hits === "hospedada" ? "hospedada" : "confirmada",
+      total_hospedes: Math.max(1, Number(r.total_hospedes) || 1),
+    };
+  }
+
+  function failure(error) {
+    return { ok: false, raw: [], rows: [], failed: [], sync: null, error: error };
+  }
+
+  async function requestCycle() {
+    var client = getSupabaseClient();
+    if (!client) return failure("supabase_nao_configurado");
     try {
-      var headers = await auth.getEdgeFunctionFetchHeaders();
-      var res = await global.fetch(url, { method: "GET", headers: headers });
-      var data = await res.json().catch(function () {
-        return null;
-      });
-      if (!res.ok || !data || data.ok !== true) {
-        return {
-          ok: false,
-          raw: [],
-          rows: [],
-          error: (data && (data.error || data.message)) || "HTTP " + res.status,
-        };
+      var results = await Promise.all([
+        client
+          .from(SNAPSHOT_TABLE)
+          .select(SNAPSHOT_COLUMNS)
+          .order("check_in", { ascending: true })
+          .order("apartamento", { ascending: true })
+          .limit(SNAPSHOT_MAX_ROWS),
+        client.from(SYNC_STATE_TABLE).select(SYNC_STATE_COLUMNS).eq("id", true).maybeSingle(),
+      ]);
+      var rowsRes = results[0] || {};
+      var stateRes = results[1] || {};
+      if (rowsRes.error) {
+        return failure(
+          String((rowsRes.error && (rowsRes.error.code || rowsRes.error.message)) || "snapshot_indisponivel"),
+        );
       }
+      // Estado ausente (linha ainda não criada / sem permissão) conta como "sem snapshot":
+      // a UI nunca converte isso em "0 reservas" silenciosamente.
+      var state = stateRes && !stateRes.error ? stateRes.data : null;
+      var raw = (Array.isArray(rowsRes.data) ? rowsRes.data : []).map(toRawRow).filter(function (r) {
+        return r.external_reservation_id;
+      });
       // Duas representações da MESMA leitura:
       //   raw  → shape da Edge (external_reservation_id, check_in, ...) p/ o painel
       //   rows → shape da listagem operacional (externalReservationId, ...) p/ a grade
-      var raw = data.rows || [];
       return {
         ok: true,
         raw: raw,
-        rows: raw.map(toReservaOperacional).filter(function (r) {
-          return r.externalReservationId;
-        }),
-        failed: data.failed || [],
+        rows: raw.map(toReservaOperacional),
+        failed: [],
+        sync: describeSync(state),
       };
     } catch (err) {
-      return { ok: false, raw: [], rows: [], error: "falha_de_rede" };
+      return failure("falha_de_rede");
     }
   }
 
   /**
    * Uma leitura por ciclo. Chamadas concorrentes compartilham a mesma promise;
-   * `force` inicia um ciclo novo (botão Atualizar / Consultar).
+   * `force` relê o snapshot (botão do painel / troca de período). Ler o
+   * snapshot é barato (SELECT local) e nunca toca o HITS.
    */
   function loadCycle(options) {
     var opts = options || {};
     var force = opts.force === true;
-    // Janela da chamada; sem janela explícita, herda a última usada pela grade.
-    var win =
-      opts.dateFrom && opts.dateTo
-        ? { from: opts.dateFrom, to: opts.dateTo }
-        : lastWindow;
-    var key = windowKey(win);
 
-    // Reaproveita a última leitura (boot/ciclo em andamento) e nunca abre GET novo:
-    // o botão Atualizar da listagem não é uma atualização manual do HITS.
+    // Reaproveita a última leitura (boot/ciclo em andamento) e nunca abre SELECT novo.
     if (opts.reuseOnly === true) {
       if (inflight) return inflight;
-      return Promise.resolve(cycleResult || { ok: false, raw: [], rows: [], error: "sem_leitura" });
+      return Promise.resolve(cycleResult || failure("sem_leitura"));
     }
-    if (inflight && key === cycleKey) return inflight;
-    // Virada do dia operacional muda a janela: o ciclo anterior não serve mais.
-    if (!force && cycleResult && key === cycleKey) return Promise.resolve(cycleResult);
+    if (inflight) return inflight;
+    if (!force && cycleResult) return Promise.resolve(cycleResult);
 
-    setStatus("Consultando HITS Sandbox…", false);
+    setStatus("Lendo snapshot HITS…", false);
 
-    lastWindow = win;
-    cycleKey = key;
-    inflight = requestCycle(win).then(function (result) {
+    inflight = requestCycle().then(function (result) {
       cycleResult = result;
       inflight = null;
       renderCycle(result);
@@ -228,19 +314,32 @@
     renderResumo(result);
     if (!result.ok) {
       renderRows([]);
-      setStatus("Não foi possível ler o HITS Sandbox (" + result.error + ").", true);
+      setStatus("Não foi possível ler o snapshot HITS (" + result.error + ").", true);
       return;
     }
-    // Painel técnico lê o shape bruto da Edge, não o transformado.
+    // Painel técnico lê o shape bruto, não o transformado.
     renderRows(result.raw || []);
-    var note = "Leitura direta do HITS Sandbox pelo gateway. Nada foi gravado.";
-    if (result.failed && result.failed.length) {
-      note += " " + result.failed.length + " reserva(s) sem detalhe.";
+    var sync = result.sync || {};
+    if (sync.status === "sem_snapshot") {
+      setStatus("HITS — dados ainda não sincronizados. O scheduler grava o snapshot a cada 10 min.", true);
+      return;
     }
-    setStatus(note, false);
+    var note =
+      "Snapshot local das reservas HITS, gravado pelo scheduler. " +
+      "Nenhuma consulta ao vivo e nada gravado no HITS.";
+    if (sync.status === "falhou") {
+      note = "Última sincronização com HITS falhou" +
+        (sync.lastError ? " (" + sync.lastError + ")" : "") +
+        " — exibindo dados de " + hhmm(sync.lastSuccessAt) + ".";
+    } else if (sync.status === "desatualizado") {
+      note = "Dados desatualizados — última sincronização " + hhmm(sync.lastSuccessAt) + ".";
+    } else if (sync.status === "parcial") {
+      note += " " + sync.failedCount + " reserva(s) sem detalhe no último ciclo.";
+    }
+    setStatus(note, sync.level === "warn");
   }
 
-  /** O painel exibe o que já veio da grade; não dispara leitura própria. */
+  /** Botão do painel: relê o snapshot local (nunca o HITS). */
   function load() {
     return loadCycle({ force: true });
   }
@@ -260,7 +359,7 @@
   }
 
   /**
-   * Linha da Edge → objeto no formato que a listagem operacional consome.
+   * Linha do snapshot → objeto no formato que a listagem operacional consome.
    * Somente leitura: sem id de banco, sem hóspedes, sem eventos, sem FNRH.
    * O id sintético carrega o idReservation para a busca continuar achando.
    */
@@ -293,7 +392,7 @@
   }
 
   /**
-   * Reservas do Sandbox no formato da listagem, pelo ciclo compartilhado.
+   * Reservas do snapshot no formato da listagem, pelo ciclo compartilhado.
    * Nunca lança: a tela operacional não pode quebrar por causa do HITS.
    */
   function fetchReservasOperacionais(options) {
@@ -308,7 +407,9 @@
     onCycle: onCycle,
     fetchReservasOperacionais: fetchReservasOperacionais,
     toReservaOperacional: toReservaOperacional,
+    describeSync: describeSync,
     isReadOnlyId: isReadOnlyId,
     READ_ONLY_ID_PREFIX: READ_ONLY_ID_PREFIX,
+    SNAPSHOT_STALE_MINUTES: SNAPSHOT_STALE_MINUTES,
   };
 })(typeof window !== "undefined" ? window : globalThis);

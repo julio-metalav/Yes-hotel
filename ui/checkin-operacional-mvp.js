@@ -3762,9 +3762,12 @@ function refresh() {
 }
 
 /**
- * Reservas do HITS Sandbox, somente leitura, mescladas em memória.
+ * Reservas HITS do SNAPSHOT local, somente leitura, mescladas em memória.
  * Nada é gravado. Reserva já espelhada no banco (mesmo external_reservation_id)
  * não é duplicada — o registro real tem precedência.
+ *
+ * A tela não consulta mais o HITS ao vivo: o scheduler grava
+ * public.hits_reservas_snapshot e yes-hits-sandbox-preview.js lê de lá.
  */
 /** Horizonte de leitura HITS — mantém os 30 dias já praticados. */
 const HITS_READ_WINDOW_DAYS = 30;
@@ -3772,9 +3775,8 @@ const HITS_READ_WINDOW_DAYS = 30;
 /**
  * Janela de leitura HITS no dia operacional do hotel.
  *
- * A Edge calcula o default em UTC. Depois das 20h em Campo Grande o UTC já
- * virou, a janela começava em "amanhã" e o filtro Hoje da grade zerava mesmo
- * com o HITS conectado. Aqui a origem da data é a mesma dos filtros da tela.
+ * Mantida para o rollback da leitura ao vivo (e para os testes de virada do
+ * dia). No modo snapshot a janela é a do scheduler; a grade filtra por período.
  */
 function resolveHitsReadWindow(now) {
   const from = resolveOperationalTodayYmd(now || new Date());
@@ -3783,6 +3785,15 @@ function resolveHitsReadWindow(now) {
 
 /** Teto de detalhes por ciclo: cada id custa um GET no gateway. */
 const HITS_CANCEL_CHECK_MAX_IDS = 20;
+
+/**
+ * Reconciliação de canceladas pelo DETALHE HITS ao vivo, disparada pela tela.
+ * DESLIGADA no modo snapshot: abria GETs no gateway a partir do navegador (o
+ * que o snapshot existe para eliminar) e o snapshot não carrega status 2.
+ * Quando voltar, deve rodar no scheduler, não na tela. `reconciliarCanceladasHits`
+ * fica no código para o rollback.
+ */
+const HITS_RECONCILIAR_CANCELADAS_AO_VIVO = false;
 
 /** A grade operacional só lista reservas ativas; cancelada fica no banco, com histórico. */
 function filtrarReservasOperacionaisAtivas(lista) {
@@ -3918,17 +3929,17 @@ async function loadReservasSomenteLeituraHits(jaCarregadas, options) {
   if (PAINEL_DATA_SOURCE !== PAINEL_DATA_SOURCE_BACKEND) return [];
   const api = typeof window !== "undefined" ? window.YesHotelHitsSandboxPreview : null;
   if (!api || typeof api.fetchReservasOperacionais !== "function") return [];
-  const janela = resolveHitsReadWindow();
-  const externas = await api.fetchReservasOperacionais({
-    ...(options || {}),
-    dateFrom: janela.from,
-    dateTo: janela.to,
-  });
+  // Snapshot local (gravado pelo scheduler): sem janela e sem consulta ao vivo.
+  const externas = await api.fetchReservasOperacionais({ ...(options || {}) });
   if (!Array.isArray(externas) || externas.length === 0) return [];
-  // Feed lido com sucesso: quem está no banco e sumiu dele é confirmado no detalhe.
-  // Reaproveitando a última leitura, a reconciliação já rodou naquele ciclo.
+  // Feed lido com sucesso: quem está no banco e sumiu dele seria confirmado no
+  // detalhe — só com a leitura ao vivo (ver HITS_RECONCILIAR_CANCELADAS_AO_VIVO).
   // hits_consulta nunca reconcilia: a reconciliação grava no banco.
-  if (!modoConsultaHits && !(options && options.reuseOnly === true)) {
+  if (
+    HITS_RECONCILIAR_CANCELADAS_AO_VIVO &&
+    !modoConsultaHits &&
+    !(options && options.reuseOnly === true)
+  ) {
     await reconciliarCanceladasHits(jaCarregadas, externas);
   }
   const jaNoBanco = new Set(
@@ -3957,8 +3968,8 @@ async function loadReservasOperacionaisComLeituraHits(options) {
 /**
  * Aplica a leitura HITS sem bloquear quem chamou.
  *
- * O boot não pode esperar por ela: com cache frio são dezenas de GETs de
- * detalhe, e enquanto o await não resolvia o init parava antes de registrar os
+ * O boot não pode esperar por ela: mesmo com o snapshot (dois SELECTs locais),
+ * enquanto o await não resolvia o init parava antes de registrar os
  * listeners — a grade ficava vazia e o botão Atualizar, inerte.
  */
 function aplicarLeituraHitsQuandoPronta(options) {
@@ -3992,8 +4003,9 @@ async function refreshFromSource() {
 }
 
 /**
- * Botão Atualizar da listagem: relê o banco e reaplica a última leitura HITS já
- * disponível. Não abre consulta nova ao HITS — a sincronização é automática.
+ * Botão Atualizar da listagem: relê o banco e reaplica a última leitura do
+ * snapshot HITS já disponível. Nunca consulta o HITS — a sincronização é do
+ * scheduler.
  */
 async function refreshListagem() {
   invalidateArrivalsCache();
