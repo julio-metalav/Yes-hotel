@@ -55,6 +55,7 @@ function denoEnv(): Record<string, string | undefined> {
     "HITS_GATEWAY_URL",
     "HITS_GATEWAY_TOKEN",
     "HITS_GATEWAY_READ_ENABLED",
+    "HITS_GATEWAY_PROD_READ_ENABLED",
     "HITS_GATEWAY_TIMEOUT_MS",
   ];
   const env: Record<string, string | undefined> = {};
