@@ -174,6 +174,26 @@ Impacto esperado: piso de N × 1,1 s (≈ 83 s para 75 requisições); custo adi
 
 Teste: `npm run test:hits-read-cadence` (15 casos) + suítes existentes.
 
+## 8c. Sincronização incremental — Type=2 (branch `feat/hits-incremental-sync`)
+
+Por quê: a leitura completa custa ~75 requisições a cada 10 min mesmo sem nada ter mudado. O endpoint de listagem aceita `Type=2` = *Search for Reservation Update Date* (contrato §6.1), encaminhado pelo gateway com `Status`, `InitialDate`, `FinalDate`, `Page`, `Size` (`services/hits-gateway/src/query.ts` — allowlist; datas **só** `YYYY-MM-DD`).
+
+Fluxo por ciclo (`runHitsSnapshotSync` com `readState` + `readIncremental`, só quando `HITS_SNAPSHOT_INCREMENTAL_ENABLED=true`):
+
+1. lê `last_cursor_at` (linha única de `hits_snapshot_sync_state`, service_role, só leitura);
+2. **modo**: sem cursor, cursor inválido ou mais velho que `HITS_INCREMENTAL_FULL_SCAN_HOURS` (24 h) → **completa** (Type=0, igual ao anterior; ao terminar `ok`, `hits_snapshot_sync_set_cursor` fixa o cursor no início do ciclo). Senão → **incremental**;
+3. **janela**: `InitialDate = (cursor − 1 dia)`, `FinalDate = (agora + 1 dia)` — a sobreposição mínima que o gateway permite é 1 dia (só aceita dia); cobre a duração do ciclo (≤ 110 s) e o fuso do HITS;
+4. **listagem**: `Type=2` para Status 1, 2 e 3 (3 requisições mínimas; Blocked fora), paginação e teto iguais; sumário com check-out anterior ao dia operacional não custa detalhe;
+5. **detalhes** só dos ids devolvidos (dedupe entre status/páginas). 0 alterações → 0 detalhes;
+6. **apply incremental** (`hits_snapshot_sync_apply_incremental`, transação): upsert só das alteradas; **remove só canceladas explícitas** (status 2 no detalhe → `p_cancelled_ids`); **nunca remove por ausência**; detalhe falho → `p_failed_ids` (fotografia anterior preservada, `partial`); **cursor avança só em `ok`** (em `partial` a próxima janela recobre os ids falhos); listagem incompleta por orçamento → só `fail`, nada aplicado, cursor parado.
+7. Cadência 1 100 ms, orçamento 110 s, retries, zero escrita no HITS: os mesmos do núcleo de leitura (`runGatewayRead`).
+
+Limitações conhecidas: granularidade de **dia** (dentro do mesmo dia, cada ciclo relê os detalhes de tudo o que foi atualizado hoje — bem menos que o universo inteiro); a listagem **não traz `dateUp`** (só o detalhe), então não há como cortar por hora sem o detalhe; reservas que saem da janela sem mudar (check-out natural) só saem do snapshot na completa diária.
+
+Migration `20260925090000_hits_snapshot_incremental.sql`: coluna `last_cursor_at`/`last_mode`, bootstrap do cursor a partir de `last_success_at` quando já há snapshot, RPCs `hits_snapshot_sync_set_cursor` e `hits_snapshot_sync_apply_incremental` (service_role). A RPC completa fica intocada. Sem a env, o comportamento é o anterior (rollback = `secrets unset HITS_SNAPSHOT_INCREMENTAL_ENABLED`).
+
+Teste: `npm run test:hits-incremental-sync` (19 casos).
+
 ## 9. Riscos restantes / follow-ups
 
 - Reconciliação de canceladas (banco × HITS) fica desligada na tela; em PROD não havia reservas

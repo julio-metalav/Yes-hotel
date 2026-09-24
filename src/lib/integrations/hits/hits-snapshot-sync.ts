@@ -18,6 +18,7 @@
 
 import type {
   FetchHitsSandboxReservationsResult,
+  FetchHitsUpdatedReservationsResult,
   HitsSandboxReservationRow,
 } from "./hits-gateway-read.ts";
 
@@ -27,6 +28,62 @@ export const HITS_SNAPSHOT_WRITE_ENV = "HITS_SNAPSHOT_WRITE_ENABLED";
 export const HITS_SNAPSHOT_RPC_START = "hits_snapshot_sync_start";
 export const HITS_SNAPSHOT_RPC_APPLY = "hits_snapshot_sync_apply";
 export const HITS_SNAPSHOT_RPC_FAIL = "hits_snapshot_sync_fail";
+/** Incremental (Type=2): upsert só do que mudou + remoção só de canceladas explícitas. */
+export const HITS_SNAPSHOT_RPC_APPLY_INCREMENTAL = "hits_snapshot_sync_apply_incremental";
+/** Após uma leitura completa bem-sucedida: fixa o cursor da incremental. */
+export const HITS_SNAPSHOT_RPC_SET_CURSOR = "hits_snapshot_sync_set_cursor";
+
+/**
+ * Leitura completa de segurança: sem cursor, ou cursor mais velho que isto, o
+ * ciclo volta a ser completo (Type=0). A completa também é o que retira do
+ * snapshot as reservas que saíram da janela sem mudar (`dateUp` não muda no
+ * check-out natural).
+ */
+export const HITS_INCREMENTAL_FULL_SCAN_HOURS = 24;
+/**
+ * Sobreposição da janela incremental. O gateway só aceita `YYYY-MM-DD` em
+ * InitialDate/FinalDate (allowlist do gateway), então a menor sobreposição
+ * possível é de 1 dia: cobre a duração do ciclo (≤ 110 s) e o fuso do HITS.
+ */
+export const HITS_INCREMENTAL_OVERLAP_DAYS = 1;
+
+export type SyncMode = "full" | "incremental";
+
+/** Sem cursor, ou cursor velho demais → completa; senão incremental. */
+export function decideSyncMode(input: {
+  cursorAt: string | null | undefined;
+  nowMs: number;
+  fullScanHours?: number;
+}): SyncMode {
+  const raw = String(input.cursorAt ?? "").trim();
+  if (!raw) return "full";
+  const t = Date.parse(raw);
+  if (!Number.isFinite(t)) return "full";
+  const maxAgeMs = (input.fullScanHours ?? HITS_INCREMENTAL_FULL_SCAN_HOURS) * 3_600_000;
+  if (input.nowMs - t > maxAgeMs) return "full";
+  return "incremental";
+}
+
+function ymdUtc(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * Janela incremental (dias, inclusiva): de (cursor − overlap dias) até
+ * (agora + 1 dia). O +1 no fim cobre o fuso do HITS já estar no dia seguinte.
+ */
+export function incrementalWindow(input: {
+  cursorAt: string;
+  nowMs: number;
+  overlapDays?: number;
+}): { from: string; to: string } {
+  const overlap = input.overlapDays ?? HITS_INCREMENTAL_OVERLAP_DAYS;
+  const cursorMs = Date.parse(input.cursorAt);
+  return {
+    from: ymdUtc(cursorMs - overlap * 86_400_000),
+    to: ymdUtc(input.nowMs + 86_400_000),
+  };
+}
 
 /** Mesmo teto de mensagem da RPC de falha. */
 export const HITS_SNAPSHOT_ERROR_MAX_CHARS = 300;
@@ -132,8 +189,21 @@ export type SnapshotRpc = (
   args: Record<string, unknown>,
 ) => Promise<{ data: unknown; error: { message?: string } | null }>;
 
+/** Presente só quando o ciclo rodou com cursor (readState/readIncremental informados). */
+export type SyncModeInfo = {
+  mode: SyncMode;
+  /** Janela da incremental (dias, inclusiva); null na completa. */
+  window: { from: string; to: string } | null;
+  /** Canceladas explícitas (status 2 no detalhe) removidas do snapshot. */
+  cancelled_count: number;
+  /** Cursor avançou para o início deste ciclo (só em ciclo `ok` completo). */
+  cursor_advanced: boolean;
+  /** Início do ciclo (ISO) — candidato a cursor. */
+  cycle_started_at: string;
+};
+
 export type SnapshotOutcome =
-  | {
+  | ({
       persisted: true;
       batch_id: string;
       status: "ok" | "partial";
@@ -141,20 +211,25 @@ export type SnapshotOutcome =
       rows_removed: number;
       failed_count: number;
       start_error: string | null;
-    }
-  | {
+    } & Partial<SyncModeInfo>)
+  | ({
       persisted: false;
       batch_id: string;
       stage: "start" | "read" | "apply" | "listing_incomplete";
       error: string;
-    };
+    } & Partial<SyncModeInfo>);
 
 export type RunHitsSnapshotSyncResult = {
   /** Resultado da leitura, quando ela funcionou (a resposta da Edge continua igual). */
-  result: FetchHitsSandboxReservationsResult | null;
+  result: FetchHitsSandboxReservationsResult | FetchHitsUpdatedReservationsResult | null;
   /** Erro da leitura, quando ela falhou (a Edge devolve 502 como antes). */
   readError: unknown;
   snapshot: SnapshotOutcome;
+};
+
+/** Estado mínimo lido antes do ciclo (service_role, só leitura). */
+export type SnapshotSyncState = {
+  last_cursor_at?: string | null;
 };
 
 function errorMessage(e: unknown): string {
@@ -179,10 +254,50 @@ function firstRow(data: unknown): Record<string, unknown> {
 export async function runHitsSnapshotSync(input: {
   rpc: SnapshotRpc;
   batchId: string;
+  /** Leitura completa (Type=0). Sempre exigida: é o fallback da incremental. */
   read: () => Promise<FetchHitsSandboxReservationsResult>;
+  /**
+   * Modo incremental (opcional; sem estes dois, o ciclo é sempre completo e o
+   * comportamento é idêntico ao anterior):
+   *  - readState: lê `last_cursor_at` do estado (service_role, só leitura);
+   *  - readIncremental: Type=2 na janela → detalhes só dos ids devolvidos.
+   */
+  readState?: () => Promise<SnapshotSyncState | null>;
+  readIncremental?: (
+    window: { from: string; to: string },
+    todayYmd: string,
+  ) => Promise<FetchHitsUpdatedReservationsResult>;
+  nowMs?: () => number;
+  fullScanHours?: number;
+  overlapDays?: number;
 }): Promise<RunHitsSnapshotSyncResult> {
   const batchId = String(input.batchId || "").trim();
+  const now = input.nowMs ?? (() => Date.now());
+  const cycleStartMs = now();
+  const cycleStartIso = new Date(cycleStartMs).toISOString();
   let startError: string | null = null;
+
+  // Modo: só quando o chamador dá acesso ao estado e à leitura incremental.
+  let mode: SyncMode = "full";
+  let window: { from: string; to: string } | null = null;
+  const withCursor = typeof input.readState === "function" && typeof input.readIncremental === "function";
+  if (withCursor) {
+    let cursorAt: string | null = null;
+    try {
+      const state = await input.readState!();
+      cursorAt = state?.last_cursor_at ?? null;
+    } catch {
+      cursorAt = null; // estado ilegível → completa (fail-safe)
+    }
+    mode = decideSyncMode({ cursorAt, nowMs: cycleStartMs, fullScanHours: input.fullScanHours });
+    if (mode === "incremental") {
+      window = incrementalWindow({ cursorAt: cursorAt!, nowMs: cycleStartMs, overlapDays: input.overlapDays });
+    }
+  }
+  const info = (extra: Partial<SyncModeInfo> = {}): Partial<SyncModeInfo> =>
+    withCursor
+      ? { mode, window, cancelled_count: 0, cursor_advanced: false, cycle_started_at: cycleStartIso, ...extra }
+      : {};
 
   try {
     const started = await input.rpc(HITS_SNAPSHOT_RPC_START, { p_batch_id: batchId });
@@ -191,9 +306,12 @@ export async function runHitsSnapshotSync(input: {
     startError = errorMessage(e);
   }
 
-  let result: FetchHitsSandboxReservationsResult;
+  let result: FetchHitsSandboxReservationsResult | FetchHitsUpdatedReservationsResult;
   try {
-    result = await input.read();
+    result =
+      mode === "incremental"
+        ? await input.readIncremental!(window!, ymdUtc(cycleStartMs))
+        : await input.read();
   } catch (e) {
     const error = errorMessage(e);
     try {
@@ -204,13 +322,14 @@ export async function runHitsSnapshotSync(input: {
     return {
       result: null,
       readError: e,
-      snapshot: { persisted: false, batch_id: batchId, stage: "read", error },
+      snapshot: { persisted: false, batch_id: batchId, stage: "read", error, ...info() },
     };
   }
 
   // Orçamento esgotado ANTES de a listagem terminar: o conjunto de ids é
   // desconhecido, então o `apply` removeria reservas válidas que só não foram
-  // listadas. Registra como falha e preserva o snapshot inteiro.
+  // listadas (completa) ou perderia alterações (incremental). Registra como
+  // falha e preserva o snapshot inteiro; o cursor não avança.
   if (result.listing_complete === false) {
     const error = "time_budget: listagem incompleta; snapshot anterior preservado";
     try {
@@ -221,7 +340,7 @@ export async function runHitsSnapshotSync(input: {
     return {
       result,
       readError: null,
-      snapshot: { persisted: false, batch_id: batchId, stage: "listing_incomplete", error },
+      snapshot: { persisted: false, batch_id: batchId, stage: "listing_incomplete", error, ...info() },
     };
   }
 
@@ -231,15 +350,37 @@ export async function runHitsSnapshotSync(input: {
     .map((f) => String(f?.external_reservation_id ?? "").trim())
     .filter(Boolean);
   const status: "ok" | "partial" = failedIds.length > 0 ? "partial" : "ok";
+  const cancelledIds =
+    mode === "incremental"
+      ? ((result as FetchHitsUpdatedReservationsResult).cancelled_ids ?? [])
+          .map((id) => String(id ?? "").trim())
+          .filter(Boolean)
+      : [];
 
   try {
-    const applied = await input.rpc(HITS_SNAPSHOT_RPC_APPLY, {
-      p_batch_id: batchId,
-      p_rows: toSnapshotRows(result.rows),
-      p_failed_ids: failedIds,
-      p_status: status,
-      p_stopped_reason: result.stopped_reason,
-    });
+    let applied: { data: unknown; error: { message?: string } | null };
+    if (mode === "incremental") {
+      // Upsert só do que mudou; remove só canceladas explícitas; NUNCA remove
+      // por ausência. Cursor avança apenas em ciclo `ok` (sem detalhe falho):
+      // em `partial`, a janela seguinte recobre os ids que falharam.
+      applied = await input.rpc(HITS_SNAPSHOT_RPC_APPLY_INCREMENTAL, {
+        p_batch_id: batchId,
+        p_rows: toSnapshotRows(result.rows),
+        p_failed_ids: failedIds,
+        p_cancelled_ids: cancelledIds,
+        p_status: status,
+        p_stopped_reason: result.stopped_reason,
+        p_cursor_at: status === "ok" ? cycleStartIso : null,
+      });
+    } else {
+      applied = await input.rpc(HITS_SNAPSHOT_RPC_APPLY, {
+        p_batch_id: batchId,
+        p_rows: toSnapshotRows(result.rows),
+        p_failed_ids: failedIds,
+        p_status: status,
+        p_stopped_reason: result.stopped_reason,
+      });
+    }
     if (applied.error) {
       return {
         result,
@@ -249,10 +390,29 @@ export async function runHitsSnapshotSync(input: {
           batch_id: batchId,
           stage: "apply",
           error: errorMessage(applied.error),
+          ...info(),
         },
       };
     }
     const row = firstRow(applied.data);
+
+    // Completa bem-sucedida (`ok`) com cursor habilitado: fixa o cursor no
+    // início deste ciclo. Em `partial` o cursor não avança (próximo ciclo
+    // ainda é completo, pelo fullScanHours, ou incremental a partir do antigo).
+    let cursorAdvanced = mode === "incremental" && status === "ok";
+    if (withCursor && mode === "full" && status === "ok") {
+      try {
+        const set = await input.rpc(HITS_SNAPSHOT_RPC_SET_CURSOR, {
+          p_batch_id: batchId,
+          p_cursor_at: cycleStartIso,
+          p_mode: "full",
+        });
+        cursorAdvanced = !set.error;
+      } catch {
+        cursorAdvanced = false;
+      }
+    }
+
     return {
       result,
       readError: null,
@@ -264,13 +424,14 @@ export async function runHitsSnapshotSync(input: {
         rows_removed: Number(row.rows_removed) || 0,
         failed_count: failedIds.length,
         start_error: startError,
+        ...info({ cancelled_count: cancelledIds.length, cursor_advanced: cursorAdvanced }),
       },
     };
   } catch (e) {
     return {
       result,
       readError: null,
-      snapshot: { persisted: false, batch_id: batchId, stage: "apply", error: errorMessage(e) },
+      snapshot: { persisted: false, batch_id: batchId, stage: "apply", error: errorMessage(e), ...info() },
     };
   }
 }
