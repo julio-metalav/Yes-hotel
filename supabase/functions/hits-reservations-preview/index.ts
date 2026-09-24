@@ -17,7 +17,8 @@
  * Incremental (HOMO primeiro): com HITS_SNAPSHOT_INCREMENTAL_ENABLED=true e a
  * migration 20260925090000 aplicada, o ciclo lê só o que mudou desde o cursor
  * (Type=2 = data de atualização) e busca detalhe só desses ids; zero alterações
- * → zero detalhes. Sem cursor ou cursor > 24 h → leitura completa (Type=0).
+ * → zero detalhes. Sem cursor → carga completa inicial (Type=0), que fixa o
+ * cursor; com cursor → sempre incremental (não há completa periódica).
  * Canceladas (status 2) saem do snapshot; ausência nunca remove.
  *
  * Env: HITS_GATEWAY_URL, HITS_GATEWAY_TOKEN, HITS_GATEWAY_READ_ENABLED,

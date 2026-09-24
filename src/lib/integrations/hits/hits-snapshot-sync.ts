@@ -33,55 +33,60 @@ export const HITS_SNAPSHOT_RPC_APPLY_INCREMENTAL = "hits_snapshot_sync_apply_inc
 /** Após uma leitura completa bem-sucedida: fixa o cursor da incremental. */
 export const HITS_SNAPSHOT_RPC_SET_CURSOR = "hits_snapshot_sync_set_cursor";
 
-/**
- * Leitura completa de segurança: sem cursor, ou cursor mais velho que isto, o
- * ciclo volta a ser completo (Type=0). A completa também é o que retira do
- * snapshot as reservas que saíram da janela sem mudar (`dateUp` não muda no
- * check-out natural).
- */
-export const HITS_INCREMENTAL_FULL_SCAN_HOURS = 24;
-/**
- * Sobreposição da janela incremental. O gateway só aceita `YYYY-MM-DD` em
- * InitialDate/FinalDate (allowlist do gateway), então a menor sobreposição
- * possível é de 1 dia: cobre a duração do ciclo (≤ 110 s) e o fuso do HITS.
- */
-export const HITS_INCREMENTAL_OVERLAP_DAYS = 1;
-
 export type SyncMode = "full" | "incremental";
 
-/** Sem cursor, ou cursor velho demais → completa; senão incremental. */
-export function decideSyncMode(input: {
-  cursorAt: string | null | undefined;
-  nowMs: number;
-  fullScanHours?: number;
-}): SyncMode {
+/**
+ * Sem cursor (ou cursor ilegível) → carga completa inicial (bootstrap), que ao
+ * terminar `ok` fixa o cursor. Com cursor válido → incremental, sempre. Não há
+ * leitura completa periódica automática; a completa continua disponível como
+ * fallback (cursor nulo) e pela chamada sem a trava incremental.
+ */
+export function decideSyncMode(input: { cursorAt: string | null | undefined }): SyncMode {
   const raw = String(input.cursorAt ?? "").trim();
   if (!raw) return "full";
-  const t = Date.parse(raw);
-  if (!Number.isFinite(t)) return "full";
-  const maxAgeMs = (input.fullScanHours ?? HITS_INCREMENTAL_FULL_SCAN_HOURS) * 3_600_000;
-  if (input.nowMs - t > maxAgeMs) return "full";
-  return "incremental";
-}
-
-function ymdUtc(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
+  return Number.isFinite(Date.parse(raw)) ? "incremental" : "full";
 }
 
 /**
- * Janela incremental (dias, inclusiva): de (cursor − overlap dias) até
- * (agora + 1 dia). O +1 no fim cobre o fuso do HITS já estar no dia seguinte.
+ * Fuso do hotel (America/Campo_Grande = UTC−04:00, sem horário de verão) —
+ * mesma premissa do scheduler (migration 20260922100000). As datas
+ * InitialDate/FinalDate são dias no calendário do HITS; o dia local do hotel é
+ * a melhor aproximação disponível.
  */
-export function incrementalWindow(input: {
-  cursorAt: string;
-  nowMs: number;
-  overlapDays?: number;
-}): { from: string; to: string } {
-  const overlap = input.overlapDays ?? HITS_INCREMENTAL_OVERLAP_DAYS;
+export const HITS_HOTEL_UTC_OFFSET_MINUTES = -240;
+/**
+ * Margem antes do cursor, em minutos, só para a virada do dia: cobre a duração
+ * do ciclo (≤ 110 s) e uma diferença de fuso do HITS de até 1 h a oeste.
+ */
+export const HITS_INCREMENTAL_CURSOR_MARGIN_MINUTES = 60;
+
+/** `YYYY-MM-DD` no dia local do hotel. */
+export function hotelLocalYmd(ms: number): string {
+  return new Date(ms + HITS_HOTEL_UTC_OFFSET_MINUTES * 60_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Janela Type=2 (dias no calendário, inclusiva). O gateway/HITS só aceitam
+ * `YYYY-MM-DD`, então a menor janela segura é:
+ *   InitialDate = dia local de (cursor − 60 min): na maior parte do dia é o
+ *                 próprio dia do cursor; só na 1ª hora após a meia-noite local
+ *                 inclui o dia anterior (virada do dia + margem de fuso).
+ *   FinalDate   = dia local de agora + 1 dia: os carimbos do HITS observados
+ *                 vêm em −03:00 (fixture real), 1 h à frente de Campo Grande;
+ *                 à noite o HITS já está no dia seguinte — sem o +1, alterações
+ *                 entre 23:00 e 24:00 locais só apareceriam após a virada.
+ * Custo da granularidade diária: a cada ciclo o HITS devolve TODAS as reservas
+ * atualizadas nesses dias, e cada uma custa 1 detalhe — repetido a cada 10 min
+ * enquanto o dia não vira. É o teto de detalhes por ciclo.
+ */
+export function incrementalWindow(input: { cursorAt: string; nowMs: number }): {
+  from: string;
+  to: string;
+} {
   const cursorMs = Date.parse(input.cursorAt);
   return {
-    from: ymdUtc(cursorMs - overlap * 86_400_000),
-    to: ymdUtc(input.nowMs + 86_400_000),
+    from: hotelLocalYmd(cursorMs - HITS_INCREMENTAL_CURSOR_MARGIN_MINUTES * 60_000),
+    to: hotelLocalYmd(input.nowMs + 86_400_000),
   };
 }
 
@@ -268,8 +273,6 @@ export async function runHitsSnapshotSync(input: {
     todayYmd: string,
   ) => Promise<FetchHitsUpdatedReservationsResult>;
   nowMs?: () => number;
-  fullScanHours?: number;
-  overlapDays?: number;
 }): Promise<RunHitsSnapshotSyncResult> {
   const batchId = String(input.batchId || "").trim();
   const now = input.nowMs ?? (() => Date.now());
@@ -289,9 +292,9 @@ export async function runHitsSnapshotSync(input: {
     } catch {
       cursorAt = null; // estado ilegível → completa (fail-safe)
     }
-    mode = decideSyncMode({ cursorAt, nowMs: cycleStartMs, fullScanHours: input.fullScanHours });
+    mode = decideSyncMode({ cursorAt });
     if (mode === "incremental") {
-      window = incrementalWindow({ cursorAt: cursorAt!, nowMs: cycleStartMs, overlapDays: input.overlapDays });
+      window = incrementalWindow({ cursorAt: cursorAt!, nowMs: cycleStartMs });
     }
   }
   const info = (extra: Partial<SyncModeInfo> = {}): Partial<SyncModeInfo> =>
@@ -310,7 +313,7 @@ export async function runHitsSnapshotSync(input: {
   try {
     result =
       mode === "incremental"
-        ? await input.readIncremental!(window!, ymdUtc(cycleStartMs))
+        ? await input.readIncremental!(window!, hotelLocalYmd(cycleStartMs))
         : await input.read();
   } catch (e) {
     const error = errorMessage(e);
@@ -397,15 +400,14 @@ export async function runHitsSnapshotSync(input: {
     const row = firstRow(applied.data);
 
     // Completa bem-sucedida (`ok`) com cursor habilitado: fixa o cursor no
-    // início deste ciclo. Em `partial` o cursor não avança (próximo ciclo
-    // ainda é completo, pelo fullScanHours, ou incremental a partir do antigo).
+    // início deste ciclo. Em `partial` o cursor não avança: sem cursor o
+    // próximo ciclo repete a completa; com cursor antigo segue incremental.
     let cursorAdvanced = mode === "incremental" && status === "ok";
     if (withCursor && mode === "full" && status === "ok") {
       try {
         const set = await input.rpc(HITS_SNAPSHOT_RPC_SET_CURSOR, {
           p_batch_id: batchId,
           p_cursor_at: cycleStartIso,
-          p_mode: "full",
         });
         cursorAdvanced = !set.error;
       } catch {

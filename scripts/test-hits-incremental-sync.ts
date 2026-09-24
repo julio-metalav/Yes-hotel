@@ -18,8 +18,9 @@ import {
   type HitsGatewayReadConfig,
 } from "../src/lib/integrations/hits/hits-gateway-read";
 import {
-  HITS_INCREMENTAL_FULL_SCAN_HOURS,
-  HITS_INCREMENTAL_OVERLAP_DAYS,
+  HITS_HOTEL_UTC_OFFSET_MINUTES,
+  HITS_INCREMENTAL_CURSOR_MARGIN_MINUTES,
+  hotelLocalYmd,
   HITS_SNAPSHOT_RPC_APPLY,
   HITS_SNAPSHOT_RPC_APPLY_INCREMENTAL,
   HITS_SNAPSHOT_RPC_FAIL,
@@ -118,22 +119,35 @@ const NOW = Date.parse("2026-09-25T15:00:00Z");
 async function main() {
   console.log("\n== Modo e janela ==");
   {
-    assert.equal(decideSyncMode({ cursorAt: null, nowMs: NOW }), "full");
-    assert.equal(decideSyncMode({ cursorAt: "", nowMs: NOW }), "full");
-    assert.equal(decideSyncMode({ cursorAt: "lixo", nowMs: NOW }), "full");
-    assert.equal(decideSyncMode({ cursorAt: "2026-09-25T14:50:00Z", nowMs: NOW }), "incremental");
-    assert.equal(decideSyncMode({ cursorAt: "2026-09-24T14:00:00Z", nowMs: NOW }), "full", "> 24 h → completa de segurança");
-    assert.equal(decideSyncMode({ cursorAt: "2026-09-24T16:00:00Z", nowMs: NOW }), "incremental");
-    assert.equal(HITS_INCREMENTAL_FULL_SCAN_HOURS, 24);
-    ok("sem cursor / cursor inválido / cursor > 24 h → completa; senão incremental");
+    assert.equal(decideSyncMode({ cursorAt: null }), "full");
+    assert.equal(decideSyncMode({ cursorAt: "" }), "full");
+    assert.equal(decideSyncMode({ cursorAt: "lixo" }), "full");
+    assert.equal(decideSyncMode({ cursorAt: "2026-09-25T14:50:00Z" }), "incremental");
+    assert.equal(decideSyncMode({ cursorAt: "2026-09-01T14:00:00Z" }), "incremental", "cursor antigo continua incremental — sem completa automática");
+    assert.equal(decideSyncMode({ cursorAt: "2025-01-01T00:00:00Z" }), "incremental");
+    ok("sem cursor / cursor inválido → carga completa inicial; com cursor (mesmo antigo) → incremental, nunca completa automática");
   }
   {
+    // Fuso do hotel: UTC−4 fixo (mesma premissa do scheduler). Cursor 14:50Z = 10:50 local.
+    assert.equal(HITS_HOTEL_UTC_OFFSET_MINUTES, -240);
+    assert.equal(HITS_INCREMENTAL_CURSOR_MARGIN_MINUTES, 60);
+    assert.equal(hotelLocalYmd(Date.parse("2026-09-25T03:59:00Z")), "2026-09-24", "23:59 local ainda é dia 24");
+    assert.equal(hotelLocalYmd(Date.parse("2026-09-25T04:00:00Z")), "2026-09-25", "00:00 local vira dia 25");
+
+    // Meio do dia: InitialDate = dia local do cursor; FinalDate = dia local de agora + 1.
     const w = incrementalWindow({ cursorAt: "2026-09-25T14:50:00Z", nowMs: NOW });
-    assert.deepEqual(w, { from: "2026-09-24", to: "2026-09-26" });
-    assert.equal(HITS_INCREMENTAL_OVERLAP_DAYS, 1);
-    const w2 = incrementalWindow({ cursorAt: "2026-09-25T00:10:00Z", nowMs: NOW, overlapDays: 2 });
-    assert.equal(w2.from, "2026-09-23");
-    ok("janela = (cursor − 1 dia) .. (agora + 1 dia), em YYYY-MM-DD (o gateway só aceita dia)");
+    assert.deepEqual(w, { from: "2026-09-25", to: "2026-09-26" });
+    // Primeira hora após a meia-noite local (00:30 local = 04:30Z): a margem de
+    // 60 min leva o InitialDate ao dia anterior — cobre a virada + fuso do HITS.
+    const w2 = incrementalWindow({ cursorAt: "2026-09-25T04:30:00Z", nowMs: Date.parse("2026-09-25T04:40:00Z") });
+    assert.deepEqual(w2, { from: "2026-09-24", to: "2026-09-26" });
+    // 01:30 local (05:30Z): margem já não cruza a meia-noite → só o dia atual.
+    const w3 = incrementalWindow({ cursorAt: "2026-09-25T05:30:00Z", nowMs: Date.parse("2026-09-25T05:40:00Z") });
+    assert.equal(w3.from, "2026-09-25");
+    // Noite (23:30 local = 03:30Z do dia 26 em UTC): dias locais, não UTC.
+    const w4 = incrementalWindow({ cursorAt: "2026-09-26T03:30:00Z", nowMs: Date.parse("2026-09-26T03:40:00Z") });
+    assert.deepEqual(w4, { from: "2026-09-25", to: "2026-09-26" });
+    ok("janela = dia local de (cursor − 60 min) .. dia local de agora + 1 (YYYY-MM-DD, UTC−4; o gateway só aceita dia)");
   }
   {
     assert.deepEqual([...HITS_INCREMENTAL_STATUSES], [1, 2, 3]);
@@ -227,7 +241,7 @@ async function main() {
     assert.equal(fullReads, 1);
     assert.deepEqual(calls.map((c) => c.fn), [HITS_SNAPSHOT_RPC_START, HITS_SNAPSHOT_RPC_APPLY, HITS_SNAPSHOT_RPC_SET_CURSOR]);
     assert.equal(calls[2]!.args.p_cursor_at, "2026-09-25T15:00:00.000Z");
-    assert.equal(calls[2]!.args.p_mode, "full");
+    assert.deepEqual(Object.keys(calls[2]!.args).sort(), ["p_batch_id", "p_cursor_at"]);
     assert.equal(out.snapshot.persisted, true);
     assert.equal(out.snapshot.mode, "full");
     assert.equal(out.snapshot.cursor_advanced, true);
@@ -253,7 +267,7 @@ async function main() {
     assert.equal(a.p_status, "ok");
     assert.equal(a.p_cursor_at, "2026-09-25T15:00:00.000Z");
     assert.equal(out.snapshot.mode, "incremental");
-    assert.deepEqual(out.snapshot.window, { from: "2026-09-24", to: "2026-09-26" });
+    assert.deepEqual(out.snapshot.window, { from: "2026-09-25", to: "2026-09-26" });
     assert.equal(out.snapshot.cursor_advanced, true);
     ok("nenhuma alteração: só listagem incremental, 0 detalhes, cursor avança");
   }
@@ -370,14 +384,19 @@ async function main() {
     assert.doesNotMatch(inc, /truncate/i);
     assert.match(inc, /when p_status = 'ok' and p_cursor_at is not null then p_cursor_at/, "cursor só em ok");
     assert.match(inc, /and status_reserva <> 'cancelada'/, "cancelada nunca vira linha");
-    for (const fn of ["hits_snapshot_sync_set_cursor(uuid, timestamptz, text)", "hits_snapshot_sync_apply_incremental(uuid, jsonb, text[], text[], text, text, timestamptz)"]) {
+    for (const fn of ["hits_snapshot_sync_set_cursor(uuid, timestamptz)", "hits_snapshot_sync_apply_incremental(uuid, jsonb, text[], text[], text, text, timestamptz)"]) {
       assert.ok(sql.includes(`revoke all on function public.${fn}\n  from public, anon, authenticated;`), `${fn}: revoke`);
       assert.ok(sql.includes(`grant execute on function public.${fn}\n  to service_role;`), `${fn}: grant service_role`);
     }
     const sqlCode = sql.replace(/^\s*--.*$/gm, "");
-    assert.doesNotMatch(sqlCode, /operacional_reservas|operacional_hospedes/, "não toca tabelas operacionais");
+    assert.doesNotMatch(sqlCode, /operacional_reservas|operacional_hospedes|\bfnrh_|\bui_/i, "não toca tabelas operacionais/FNRH/UI");
     assert.doesNotMatch(sqlCode, /drop function|alter function public\.hits_snapshot_sync_apply\(/, "RPC completa intocada");
-    ok("migration: cursor + 2 RPCs service_role; incremental remove só canceladas explícitas; RPC completa intocada");
+    assert.doesNotMatch(sqlCode, /last_mode|full_scan/, "sem coluna/lógica além do cursor");
+    assert.equal((sqlCode.match(/create or replace function/g) ?? []).length, 2, "exatamente 2 RPCs novas");
+    assert.equal((sqlCode.match(/add column if not exists/g) ?? []).length, 1, "exatamente 1 coluna nova");
+    const linhas = sql.split("\n").length;
+    assert.ok(linhas <= 150, `migration deve ficar enxuta (${linhas} linhas; antes 221)`);
+    ok(`migration mínima: 1 coluna (cursor) + 2 RPCs service_role, ${linhas} linhas; incremental remove só canceladas explícitas; RPC completa intocada`);
   }
 
   console.log(`\nOK test-hits-incremental-sync (${cases} casos)`);

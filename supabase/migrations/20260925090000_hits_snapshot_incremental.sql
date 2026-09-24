@@ -1,54 +1,21 @@
--- Snapshot HITS — sincronização incremental (Type=2, data de atualização).
---
--- Por quê: o ciclo completo relê ~75 requisições a cada 10 min. Com Type=2 a
--- Edge lista só o que mudou desde o último cursor e busca detalhe só desses ids.
--- Zero alterações → zero detalhes.
---
--- Por que precisa de migration (justificativa):
---   * cursor: hits_snapshot_sync_state não tinha onde guardar "até quando o HITS
---     já foi lido" (last_success_at é o FIM do ciclo e é sobrescrito por ciclos
---     parciais; o cursor precisa avançar só em ciclo completo/ok). Coluna nova.
---   * apply incremental: hits_snapshot_sync_apply REMOVE tudo que não veio no
---     lote (semântica de leitura completa). Na incremental nada pode ser
---     removido por ausência — só canceladas explícitas (status 2). RPC nova;
---     a RPC existente fica intocada.
---
--- Escopo: só estado/RPCs do snapshot. Não toca operacional_reservas, UI,
--- gateway, scheduler, secrets. Escrita só por service_role. Idempotente.
--- Aplicar em HOMO (kzprrnbafamuozhyikgb) primeiro; PROD só após validação.
+-- Snapshot HITS — sincronização incremental (Type=2). Mínimo necessário:
+--   * cursor: hits_snapshot_sync_state não tinha onde guardar até quando o HITS
+--     já foi lido (last_success_at é o FIM do ciclo e é sobrescrito por ciclos
+--     parciais; o cursor só pode avançar em ciclo ok).
+--   * apply incremental: hits_snapshot_sync_apply remove tudo que não veio no
+--     lote (semântica de leitura completa); na incremental nada é removido por
+--     ausência — só canceladas explícitas (status 2). A RPC completa fica intocada.
+--   * set_cursor: a carga completa inicial (sem cursor) precisa fixar o cursor.
+-- Só estado/RPCs do snapshot. Escrita só por service_role. Idempotente.
 
--- -----------------------------------------------------------------------
--- 1) Cursor e modo do último ciclo
--- -----------------------------------------------------------------------
 alter table public.hits_snapshot_sync_state
-  add column if not exists last_cursor_at timestamptz,
-  add column if not exists last_mode text
-    check (last_mode is null or last_mode in ('full', 'incremental'));
+  add column if not exists last_cursor_at timestamptz;
 
 comment on column public.hits_snapshot_sync_state.last_cursor_at is
-  'Início (UTC) do último ciclo que leu o HITS por completo e sem falhas '
-  '(ou incremental ok). A próxima incremental lista Type=2 a partir de '
-  '(cursor − 1 dia). NULL → próximo ciclo é completo.';
+  'Início (UTC) do último ciclo aplicado com status ok. NULL → próximo ciclo é a carga completa inicial.';
 
--- Bootstrap: onde já existe snapshot válido, o próximo ciclo pode ser
--- incremental a partir do último sucesso (a janela de 1 dia cobre a diferença).
-update public.hits_snapshot_sync_state
-set last_cursor_at = last_success_at,
-    last_mode = 'full'
-where id = true
-  and last_cursor_at is null
-  and last_success_at is not null
-  and exists (select 1 from public.hits_reservas_snapshot);
-
--- -----------------------------------------------------------------------
--- 2) RPC: fixar o cursor após uma leitura COMPLETA bem-sucedida
---    (a RPC hits_snapshot_sync_apply existente continua igual)
--- -----------------------------------------------------------------------
-create or replace function public.hits_snapshot_sync_set_cursor(
-  p_batch_id uuid,
-  p_cursor_at timestamptz,
-  p_mode text default 'full'
-)
+-- Fixa o cursor após um apply bem-sucedido do MESMO batch (carga completa inicial).
+create or replace function public.hits_snapshot_sync_set_cursor(p_batch_id uuid, p_cursor_at timestamptz)
 returns void
 language plpgsql
 security definer
@@ -58,32 +25,15 @@ begin
   if p_batch_id is null or p_cursor_at is null then
     raise exception 'hits_snapshot_cursor_required' using errcode = '22023';
   end if;
-  if p_mode not in ('full', 'incremental') then
-    raise exception 'hits_snapshot_mode_invalid' using errcode = '22023';
-  end if;
-  -- Só o lote que acabou de ser aplicado com sucesso pode fixar o cursor.
   update public.hits_snapshot_sync_state
-  set last_cursor_at = p_cursor_at,
-      last_mode = p_mode,
-      updated_at = now()
-  where id = true
-    and last_success_batch_id = p_batch_id;
+  set last_cursor_at = p_cursor_at, updated_at = now()
+  where id = true and last_success_batch_id = p_batch_id;
 end;
 $$;
 
-comment on function public.hits_snapshot_sync_set_cursor(uuid, timestamptz, text) is
-  'Fixa last_cursor_at/last_mode após um apply bem-sucedido do mesmo batch. '
-  'Não altera linhas do snapshot. Só service_role.';
-
--- -----------------------------------------------------------------------
--- 3) RPC: aplicação INCREMENTAL, atômica
---    p_rows: reservas alteradas (allowlist de campos, igual à completa)
---    p_failed_ids: detalhes que falharam (fotografia anterior preservada)
---    p_cancelled_ids: status 2 no detalhe → removidas do snapshot (sinal
---                     explícito do HITS; nunca por ausência)
---    p_status: 'ok' | 'partial'
---    p_cursor_at: novo cursor; NULL = não avançar (ciclo partial)
--- -----------------------------------------------------------------------
+-- Lote incremental, atômico: upsert das alteradas; remove SÓ p_cancelled_ids
+-- (status 2 confirmado no detalhe); nunca remove por ausência; p_failed_ids
+-- preservados; cursor avança só em p_status = 'ok'.
 create or replace function public.hits_snapshot_sync_apply_incremental(
   p_batch_id uuid,
   p_rows jsonb,
@@ -120,23 +70,11 @@ begin
       nullif(btrim(r ->> 'external_reservation_id'), '') as external_reservation_id,
       left(btrim(coalesce(r ->> 'apartamento', '')), 32) as apartamento,
       left(btrim(coalesce(r ->> 'hospede_principal', '')), 160) as hospede_principal,
-      case
-        when (r ->> 'check_in') ~ '^\d{4}-\d{2}-\d{2}'
-          then left(r ->> 'check_in', 10)::date
-      end as check_in,
-      case
-        when (r ->> 'check_out') ~ '^\d{4}-\d{2}-\d{2}'
-          then left(r ->> 'check_out', 10)::date
-      end as check_out,
-      case when (r ->> 'status_reserva') = 'cancelada' then 'cancelada' else 'ativa' end
-        as status_reserva,
-      case when (r ->> 'ciclo_hits') = 'hospedada' then 'hospedada' else 'confirmada' end
-        as ciclo_hits,
-      case
-        when (r ->> 'total_hospedes') ~ '^\d{1,4}$'
-          then greatest(1, (r ->> 'total_hospedes')::integer)
-        else 1
-      end as total_hospedes
+      case when (r ->> 'check_in') ~ '^\d{4}-\d{2}-\d{2}' then left(r ->> 'check_in', 10)::date end as check_in,
+      case when (r ->> 'check_out') ~ '^\d{4}-\d{2}-\d{2}' then left(r ->> 'check_out', 10)::date end as check_out,
+      case when (r ->> 'status_reserva') = 'cancelada' then 'cancelada' else 'ativa' end as status_reserva,
+      case when (r ->> 'ciclo_hits') = 'hospedada' then 'hospedada' else 'confirmada' end as ciclo_hits,
+      case when (r ->> 'total_hospedes') ~ '^\d{1,4}$' then greatest(1, (r ->> 'total_hospedes')::integer) else 1 end as total_hospedes
     from jsonb_array_elements(p_rows) as r
   ),
   dedup as (
@@ -144,7 +82,6 @@ begin
     from src
     where external_reservation_id is not null
       and external_reservation_id ~ '^[A-Za-z0-9._-]{1,128}$'
-      -- cancelada nunca entra/permanece como linha do snapshot
       and status_reserva <> 'cancelada'
     order by external_reservation_id
   ),
@@ -154,10 +91,8 @@ begin
       status_reserva, ciclo_hits, total_hospedes, source, batch_id,
       first_seen_at, last_seen_at, updated_at
     )
-    select
-      d.external_reservation_id, d.apartamento, d.hospede_principal, d.check_in, d.check_out,
-      d.status_reserva, d.ciclo_hits, d.total_hospedes, 'hits', p_batch_id,
-      v_now, v_now, v_now
+    select d.external_reservation_id, d.apartamento, d.hospede_principal, d.check_in, d.check_out,
+           d.status_reserva, d.ciclo_hits, d.total_hospedes, 'hits', p_batch_id, v_now, v_now, v_now
     from dedup d
     on conflict (external_reservation_id) do update
       set apartamento = excluded.apartamento,
@@ -174,8 +109,6 @@ begin
   )
   select count(*) into v_upserted from ins;
 
-  -- Remoção SÓ de canceladas explícitas (status 2 confirmado no detalhe).
-  -- Ausência no incremental nunca remove.
   delete from public.hits_reservas_snapshot s
   where s.external_reservation_id = any (v_cancelled_ids);
   get diagnostics v_removed = row_count;
@@ -190,12 +123,7 @@ begin
       last_success_at = v_now,
       last_success_batch_id = p_batch_id,
       last_success_rows_count = v_upserted,
-      last_mode = 'incremental',
-      -- cursor só avança em ciclo ok (sem detalhe falho); partial mantém o anterior
-      last_cursor_at = case
-        when p_status = 'ok' and p_cursor_at is not null then p_cursor_at
-        else last_cursor_at
-      end,
+      last_cursor_at = case when p_status = 'ok' and p_cursor_at is not null then p_cursor_at else last_cursor_at end,
       updated_at = v_now
   where id = true;
 
@@ -205,17 +133,11 @@ begin
 end;
 $$;
 
-comment on function public.hits_snapshot_sync_apply_incremental(uuid, jsonb, text[], text[], text, text, timestamptz) is
-  'Aplica atomicamente um lote INCREMENTAL (Type=2): upsert das alteradas, remoção '
-  'apenas de canceladas explícitas, nunca por ausência; cursor avança só em ok. '
-  'Só service_role. Nunca escreve no HITS.';
-
--- Grants mínimos: nada para PUBLIC/anon/authenticated; EXECUTE só service_role.
-revoke all on function public.hits_snapshot_sync_set_cursor(uuid, timestamptz, text)
+revoke all on function public.hits_snapshot_sync_set_cursor(uuid, timestamptz)
   from public, anon, authenticated;
 revoke all on function public.hits_snapshot_sync_apply_incremental(uuid, jsonb, text[], text[], text, text, timestamptz)
   from public, anon, authenticated;
-grant execute on function public.hits_snapshot_sync_set_cursor(uuid, timestamptz, text)
+grant execute on function public.hits_snapshot_sync_set_cursor(uuid, timestamptz)
   to service_role;
 grant execute on function public.hits_snapshot_sync_apply_incremental(uuid, jsonb, text[], text[], text, text, timestamptz)
   to service_role;
