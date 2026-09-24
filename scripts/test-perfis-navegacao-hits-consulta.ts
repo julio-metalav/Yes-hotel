@@ -156,11 +156,18 @@ function main() {
       fnBody("loadReservasOperacionaisFromProvider"),
       /if \(modoConsultaHits\) return loadReservasConsultaHits\(\)\.then\(filtrarReservasOperacionaisAtivas\);/,
     );
-    assert.match(fnBody("ensureArrivalsDataset"), /if \(modoConsultaHits\) \{\s*\/\/[^\n]*\n\s*arrivalsDatasetCache = consultaHitsTodas\.map/);
-    const leituraHits = fnBody("loadReservasSomenteLeituraHits");
-    assert.match(leituraHits, /if \(!modoConsultaHits && !\(options && options\.reuseOnly === true\)\) \{\s*await reconciliarCanceladasHits/);
-    assert.match(leituraHits, /modoConsultaHits \? novas\.map\(paraConsultaSomenteNoHits\) : novas/);
-    ok("banco só pela RPC operacional_hits_checkin_consulta(); leitura HITS igual à Recepção, sem reconciliação");
+    // Chegadas da consulta: mesma base (RPC) sob o mesmo universo HITS da Recepção.
+    assert.match(
+      fnBody("ensureArrivalsDataset"),
+      /if \(modoConsultaHits\) \{\s*\/\/[^\n]*\n\s*arrivalsDatasetCache = aplicarUniversoHitsChegadas\(\s*consultaHitsTodas\.map\(buildArrivalsInputFromInternal\),\s*universo,\s*\);/,
+    );
+    const leituraHits = fnBody("carregarUniversoHits");
+    assert.match(
+      leituraHits,
+      /HITS_RECONCILIAR_CANCELADAS_AO_VIVO &&\s*!modoConsultaHits &&\s*!\(options && options\.reuseOnly === true\)\s*\) \{\s*await reconciliarCanceladasHits/,
+    );
+    assert.match(fnBody("aplicarUniversoHits"), /modoConsultaHits \? novas\.map\(paraConsultaSomenteNoHits\) : novas/);
+    ok("banco só pela RPC operacional_hits_checkin_consulta(); universo HITS igual ao da Recepção, sem reconciliação");
 
     // Nenhum comando de escrita para reservas de consulta.
     for (const fn of [

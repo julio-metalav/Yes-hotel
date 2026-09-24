@@ -462,6 +462,101 @@ async function main() {
     ok("snapshot vazio e nunca sincronizado é distinguível de '0 reservas'");
   }
 
+  console.log("\n== Universo operacional = snapshot HITS (o Yes só enriquece) ==");
+  {
+    type Reserva = Record<string, unknown>;
+    const sb = loadPainelSandbox() as {
+      aplicarUniversoHits: (base: Reserva[], universo: unknown) => Reserva[];
+      aplicarUniversoHitsChegadas: (items: Reserva[], universo: unknown) => Reserva[];
+      universoHitsVazio: () => { gate: boolean; ids: Set<string>; rows: Reserva[]; raw: unknown[] };
+      getResumoFunil: (lista: Reserva[]) => { chegadasHoje: number };
+      filtrarReservas: (lista: Reserva[], filtro: string) => Reserva[];
+      buildArrivalsInputFromInternal: (r: Reserva) => Reserva;
+      todayStr: () => string;
+    };
+    const hoje = sb.todayStr();
+    const { api: preview } = loadPreview();
+    const hitsRow = (ext: string, apto: string, checkIn = hoje) =>
+      preview.toReservaOperacional({
+        external_reservation_id: ext, apartamento: apto, hospede_principal: "H " + ext,
+        check_in: checkIn, check_out: "2026-12-31", status_reserva: "ativa", ciclo_hits: "confirmada", total_hospedes: 2,
+      });
+    const local = (ext: string | null, apto: string, checkIn = hoje, extra: Reserva = {}) => ({
+      id: "uuid-" + (ext || "manual-" + apto), externalReservationId: ext, origemExterna: ext ? "hits" : "manual",
+      apartamento: apto, hospedePrincipal: "Local " + apto, checkInPrevisto: checkIn, checkOutPrevisto: "2026-12-31",
+      statusReserva: "ativa", pagamento: "pendente", acessoLiberado: false, entrouNoApto: false,
+      hospedes: [{ nome: "A" }, { nome: "B" }], historicoOperacional: [], fnrhStatusAgregado: "fnrh_pendente", ...extra,
+    });
+    // Snapshot PROD (universo ativo): 3407 (apto 02), 3316 (07) e 3427 (09) chegam hoje.
+    const snap = [hitsRow("3407", "02"), hitsRow("3316", "07"), hitsRow("3427", "09")];
+    const universo = { gate: true, ids: new Set(snap.map((r) => String(r.externalReservationId))), rows: snap, raw: [] };
+    // Banco: 3407 e 3316 materializadas (enriquecidas); fantasmas HOMO 17656/17820; manual sem id.
+    const l3407 = local("3407", "2", hoje, { pagamento: "pago" });          // apto local desatualizado: "2"
+    const l3316 = local("3316", "07");
+    const fantasma1 = local("17656", "102");
+    const fantasma2 = local("17820", "107");
+    const manual = local(null, "05");
+    const base = [l3407, l3316, fantasma1, fantasma2, manual];
+
+    const universoOp = sb.aplicarUniversoHits(base, universo);
+    const ids = universoOp.map((r) => String(r.externalReservationId));
+    assert.deepEqual([...ids].sort(), ["3316", "3407", "3427"]);
+    ok("linha local fora do snapshot (fantasmas 17656/17820) e manual sem id NÃO entram na operação");
+
+    const r3407 = universoOp.find((r) => r.externalReservationId === "3407")!;
+    assert.equal(r3407.id, "uuid-3407", "linha local (enriquecida) permanece, não a só-HITS");
+    assert.equal(r3407.pagamento, "pago", "enriquecimento local preservado");
+    assert.equal((r3407.hospedes as unknown[]).length, 2);
+    assert.equal(r3407.apartamento, "02", "apartamento vem do HITS (fonte da verdade)");
+    assert.equal(r3407.checkInPrevisto, hoje);
+    ok("linha local + snapshot: aparece enriquecida, com apto/datas do HITS");
+
+    const r3427 = universoOp.find((r) => r.externalReservationId === "3427")!;
+    assert.equal(r3427.somenteLeituraHits, true);
+    assert.equal(r3427.apartamento, "09");
+    ok("reserva só no snapshot (apto 09) entra como HITS · leitura");
+
+    // KPI "Chegadas hoje" e chip "Chegando hoje": 3, não 5 (fantasmas fora).
+    assert.equal(sb.getResumoFunil(universoOp).chegadasHoje, 3);
+    assert.equal(sb.filtrarReservas(universoOp, "chegando_hoje").length, 3);
+    assert.equal(sb.getResumoFunil(base).chegadasHoje, 5, "sem o gate, o banco contava fantasmas");
+    ok("KPIs e contadores calculam sobre o universo (3), sem fantasmas");
+
+    // Exceções percorrem `reservas`: fantasma não está lá → não gera exceção nem ação.
+    assert.equal(universoOp.some((r) => String(r.externalReservationId).startsWith("17")), false);
+    ok("Exceções não podem ver o fantasma: ele não existe em `reservas`");
+
+    // Chegadas: mesmo universo — 3/3 (02 e 07 locais enriquecidos, 09 só-HITS).
+    const itensBanco = base.map((r) => sb.buildArrivalsInputFromInternal(r));
+    const chegadas = sb.aplicarUniversoHitsChegadas(itensBanco, universo);
+    assert.deepEqual(chegadas.map((c) => String(c.apartamento)).sort(), ["02", "07", "09"]);
+    assert.equal(chegadas.filter((c) => String(c.check_in_previsto) === hoje).length, 3);
+    assert.equal(chegadas.find((c) => c.external_reservation_id === "3407")!.pagamento_status, "pago", "chegada local enriquecida");
+    assert.equal(chegadas.find((c) => c.external_reservation_id === "3427")!.total_hospedes, 2, "só-HITS usa total do HITS");
+    ok("Chegadas: 3 reservas do snapshot com check_in hoje → 3 na lista (02/07/09), fantasmas fora");
+
+    // Cancelada no HITS: a incremental a remove do snapshot → some da operação.
+    const semCancelada = { ...universo, ids: new Set(["3316", "3427"]), rows: snap.filter((r) => r.externalReservationId !== "3407") };
+    const depois = sb.aplicarUniversoHits(base, semCancelada);
+    assert.equal(depois.some((r) => r.externalReservationId === "3407"), false);
+    assert.equal(sb.getResumoFunil(depois).chegadasHoje, 2);
+    ok("reserva removida do snapshot (cancelada) desaparece da operação e dos contadores");
+
+    // Snapshot indisponível/nunca sincronizado: sem gate → banco mantido (a barra avisa).
+    const semGate = sb.aplicarUniversoHits(base, sb.universoHitsVazio());
+    assert.equal(semGate.length, 5);
+    ok("sem universo válido (gate=false) a tela não apaga o banco: fail-open com aviso");
+
+    // Fonte do universo: só snapshot ok e já sincronizado dá gate.
+    const src = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.js"), "utf8");
+    assert.match(src, /ciclo\.sync\.status === "sem_snapshot"\) return universoHitsVazio\(\)/);
+    assert.match(src, /if \(!ciclo \|\| ciclo\.ok !== true\) return universoHitsVazio\(\)/);
+    assert.match(src, /arrivalsDatasetCache = aplicarUniversoHitsChegadas\(loaded\.items \|\| \[\], universo\)/);
+    assert.match(src, /reservas = aplicarUniversoHits\(reservas, universo\)/);
+    assert.match(src, /return aplicarUniversoHits\(base, universo\)/);
+    ok("Reservas, Chegadas, Exceções e KPIs partem do mesmo universo mesclado");
+  }
+
   console.log("\n== Guards na tela operacional ==");
   {
     const src = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.js"), "utf8");
@@ -486,9 +581,10 @@ async function main() {
     }
     ok("PPD, CTA, badge, fluxo, detalhe, fila e exceções respeitam o guard");
 
-    assert.match(src, /loadReservasSomenteLeituraHits/);
+    assert.match(src, /async function carregarUniversoHits/);
+    assert.match(src, /function aplicarUniversoHits/);
     assert.match(src, /jaNoBanco/);
-    ok("merge em memória com dedupe por external_reservation_id");
+    ok("universo HITS + merge em memória com dedupe por external_reservation_id");
 
     // Regressão: o init travava no await da leitura HITS e nunca chegava a
     // registrar os listeners — grade vazia e botão Atualizar inerte.
@@ -512,10 +608,11 @@ async function main() {
     // Reconciliação de canceladas pelo detalhe ao vivo fica desligada no modo snapshot.
     assert.match(src, /const HITS_RECONCILIAR_CANCELADAS_AO_VIVO = false;/);
     assert.match(src, /HITS_RECONCILIAR_CANCELADAS_AO_VIVO &&[\s\S]{0,160}await reconciliarCanceladasHits/);
-    const carga = src.slice(src.indexOf("async function loadReservasSomenteLeituraHits"));
+    const carga = src.slice(src.indexOf("async function carregarUniversoHits"));
     const cargaBody = carga.slice(0, carga.search(/\r?\n\}\r?\n/) + 3);
-    assert.doesNotMatch(cargaBody, /dateFrom|resolveHitsReadWindow/, "sem janela: o snapshot é do scheduler");
-    ok("tela não dispara GET de reconciliação ao gateway; carga sem janela");
+    assert.doesNotMatch(cargaBody, /dateFrom|resolveHitsReadWindow|fetch\(|functions\/v1/, "sem janela e sem Edge: o snapshot é do scheduler");
+    assert.match(cargaBody, /api\.loadCycle\(/, "universo vem do ciclo compartilhado do snapshot");
+    ok("tela não dispara GET de reconciliação ao gateway; universo sem janela/Edge");
 
     // Nenhuma escrita a partir das reservas HITS.
     assert.doesNotMatch(src, /somenteLeituraHits[\s\S]{0,200}\.insert\(/);
@@ -650,7 +747,7 @@ async function main() {
     const src = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.js"), "utf8");
     const bloco = src.slice(
       src.indexOf("function selecionarCanceladasConfirmadasHits"),
-      src.indexOf("async function loadReservasSomenteLeituraHits"),
+      src.indexOf("function universoHitsVazio"),
     );
     assert.match(bloco, /\.update\(\{ status_reserva: "cancelada", updated_at: nowIso \}\)/);
     assert.match(bloco, /\.eq\("status_reserva", "ativa"\)/, "só marca quem ainda estava ativa");

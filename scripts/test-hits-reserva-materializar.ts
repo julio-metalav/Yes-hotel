@@ -132,10 +132,16 @@ function main() {
 
   console.log("\n== 4. Não sobrescreve FNRH nem cadastro existente ==");
   {
-    assert.equal(/\.update\(/.test(edgeCode), false, "nenhum update em lugar nenhum");
+    // Único update permitido: backfill FINANCEIRO de reserva materializada antes
+    // desta versão, guardado por reservation_balance_due IS NULL (uma vez só).
+    const updates = [...edgeCode.matchAll(/\.update\(([^)]*)\)/g)];
+    assert.equal(updates.length, 1, "exatamente um update, o backfill financeiro");
+    assert.equal(updates[0]![1]!.trim(), "financeiroHits", "update só com o objeto financeiro");
+    assert.match(edgeCode, /\.update\(financeiroHits\)\s*\.eq\("id", reserva\.id\)\s*\.is\("reservation_balance_due", null\)/);
+    assert.match(edgeCode, /if \(!reservaCriada\) \{[\s\S]*?\.update\(financeiroHits\)/, "backfill só para reserva já existente");
     assert.equal(/\.upsert\(/.test(edgeCode), false, "nenhum upsert que sobrescreva");
     assert.equal(/\.delete\(/.test(edgeCode), false, "nenhum delete");
-    ok("só insert de registro ausente — ficha preenchida permanece intacta");
+    ok("só insert de registro ausente + backfill financeiro guardado por saldo nulo — ficha e cadastro intactos");
   }
 
   console.log("\n== 5. Datas vêm do HITS ==");
@@ -154,6 +160,33 @@ function main() {
       );
     }
     ok("nenhum relógio local ou current_date entra nas datas");
+  }
+
+  console.log("\n== 6. Financeiro do HITS na materialização ==");
+  {
+    // Regra do domínio (mapPaymentStatusFromBalanceDue): saldo <= 0 → pago;
+    // > 0 → pendente; ausente → desconhecido. A materialização persiste o que o
+    // normalizador já calculou — antes a coluna nascia com o default 'pendente'.
+    assert.match(edgeCode, /pagamento_status: synced\.paymentStatus/);
+    assert.match(edgeCode, /reservation_balance_due: synced\.reservationBalanceDue/);
+    assert.match(edgeCode, /reservation_total_amount: synced\.reservationTotalAmount/);
+    assert.match(edgeCode, /classificacao_comissionamento: synced\.classificacaoComissionamento/);
+    assert.match(edgeCode, /classificacao_comissionamento_origem: "hits_campo"/);
+    ok("insert grava pagamento_status/saldo/total/classificação do detalhe normalizado");
+
+    assert.match(
+      edgeCode,
+      /\.from\("operacional_reservas"\)\s*\.insert\(\{[\s\S]{0,400}?\.\.\.financeiroHits,\s*\}\)/,
+      "insert usa o mesmo objeto financeiro",
+    );
+    // Só saldo/total/classificação: nada de cartão, contato ou payload bruto.
+    const fin = edgeCode.slice(edgeCode.indexOf("const financeiroHits = {"), edgeCode.indexOf("};", edgeCode.indexOf("const financeiroHits = {")));
+    assert.doesNotMatch(fin, /card|cart|contact|contato|email|phone|telefone|raw|payload|credit/i);
+    ok("nenhum dado de cartão, contato ou payload bruto no financeiro persistido");
+
+    assert.match(edgeCode, /financeiro: \{ pagamento_status: synced\.paymentStatus, backfilled: financeiroBackfilled \}/);
+    assert.doesNotMatch(edgeCode, /reservation_balance_due: synced\.reservationBalanceDue[\s\S]{0,400}return json\(\{\s*ok: true/, "resposta não devolve valores");
+    ok("resposta informa só o status derivado e se houve backfill (sem valores)");
 
     assert.match(edgeCode, /reserva_sem_datas_no_hits/);
     ok("sem datas no HITS a materialização falha, em vez de chutar");
@@ -173,10 +206,11 @@ function main() {
 
   console.log("\n== 7. Nada de operacional é alterado ==");
   {
+    // pagamento_status passou a ser gravado a partir do HITS (seção 6) — só
+    // via `financeiroHits`; acesso, check-in, senha, TTLock e quarto continuam fora.
     for (const proibido of [
       "acesso_liberado",
       "entrou_no_apto",
-      "pagamento_status",
       "ttlock",
       "senha",
       "credencial",
@@ -190,7 +224,8 @@ function main() {
         `${proibido} não pode aparecer na materialização`,
       );
     }
-    ok("sem acesso, check-in, pagamento, senha, TTLock ou quarto");
+    assert.equal((edgeCode.match(/pagamento_status/g) || []).length, 2, "pagamento_status só no objeto financeiro e na resposta");
+    ok("sem acesso, check-in, senha, TTLock ou quarto; pagamento só via financeiro do HITS");
 
     // Leitura no HITS, escrita só no Yes: existe um único fetch, e ele é GET.
     const fetches = (edgeCode.match(/await fetch\(/g) || []).length;

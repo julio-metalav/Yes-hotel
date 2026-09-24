@@ -228,7 +228,7 @@ function main() {
       painel,
       /HITS_RECONCILIAR_CANCELADAS_AO_VIVO &&[\s\S]{0,120}await reconciliarCanceladasHits/,
     );
-    const carga = painel.slice(painel.indexOf("async function loadReservasSomenteLeituraHits"));
+    const carga = painel.slice(painel.indexOf("async function carregarUniversoHits"));
     const cargaBody = carga.slice(0, carga.indexOf("\n}\n"));
     assert.doesNotMatch(cargaBody, /dateFrom|resolveHitsReadWindow/, "sem janela: o snapshot é do scheduler");
     ok("painel: reconciliação ao vivo desligada; carga sem janela/Edge");

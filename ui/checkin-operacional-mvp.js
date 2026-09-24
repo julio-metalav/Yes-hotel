@@ -3399,7 +3399,7 @@ function buildArrivalsInputFromInternal(r) {
     acesso_liberado: !!r.acessoLiberado,
     total_hospedes: isReservaConsultaHits(r)
       ? Math.max(Number(r.totalHospedesAtivos) || 0, 1)
-      : Math.max(guests.length, 1),
+      : Math.max(guests.length, Number(r.totalHospedesHits) || 0, 1),
     // Consulta: mesma regra da aba Chegadas da Recepção (agregado do banco).
     fnrh_pendente: isReservaConsultaHits(r)
       ? isFnrhAggregatePending(r.fnrhStatusAgregado)
@@ -3546,15 +3546,59 @@ function getArrivalsPolicy() {
 
 let arrivalsTruncatedWarning = false;
 
+/**
+ * Chegadas sob o MESMO universo da grade: item local só se o id está no
+ * snapshot (apto e datas do HITS); reserva só no snapshot entra como
+ * "HITS · leitura"; item local fora do snapshot fica só no banco. Sem gate,
+ * mantém o comportamento anterior.
+ */
+function aplicarUniversoHitsChegadas(items, universo) {
+  const u = universo || universoHitsVazio();
+  const lista = Array.isArray(items) ? items : [];
+  const hitsPorId = new Map();
+  (u.rows || []).forEach((r) => {
+    const ext = externalIdDe(r);
+    if (ext) hitsPorId.set(ext, r);
+  });
+  const extDe = (it) => String((it && it.external_reservation_id) || "").trim();
+  let locais = lista;
+  if (u.gate) {
+    locais = lista.filter((it) => {
+      const ext = extDe(it);
+      return ext !== "" && u.ids.has(ext);
+    });
+    locais.forEach((it) => {
+      const h = hitsPorId.get(extDe(it));
+      if (!h) return;
+      if (h.apartamento) it.apartamento = h.apartamento;
+      if (h.checkInPrevisto) it.check_in_previsto = h.checkInPrevisto;
+      if (h.checkOutPrevisto) it.check_out_previsto = h.checkOutPrevisto;
+    });
+  }
+  const jaNoBanco = new Set(locais.map(extDe).filter(Boolean));
+  const novas = (u.rows || [])
+    .filter((r) => {
+      const ext = externalIdDe(r);
+      return ext !== "" && !jaNoBanco.has(ext);
+    })
+    .map((r) => buildArrivalsInputFromInternal(modoConsultaHits ? paraConsultaSomenteNoHits(r) : r));
+  return novas.length > 0 ? locais.concat(novas) : locais;
+}
+
 async function ensureArrivalsDataset() {
   if (arrivalsDatasetCache) return arrivalsDatasetCache;
+  // Reaproveita o último ciclo do snapshot: nunca abre leitura nova aqui.
+  const universo = await carregarUniversoHits(reservas, { reuseOnly: true }).catch(universoHitsVazio);
   if (modoConsultaHits) {
-    // Mesma base da Recepção (todas as reservas do banco), pela projeção da RPC.
-    arrivalsDatasetCache = consultaHitsTodas.map(buildArrivalsInputFromInternal);
+    // Mesma base da Recepção (banco pela projeção da RPC), sob o universo HITS.
+    arrivalsDatasetCache = aplicarUniversoHitsChegadas(
+      consultaHitsTodas.map(buildArrivalsInputFromInternal),
+      universo,
+    );
     arrivalsTruncatedWarning = false;
   } else if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND && getSupabase()) {
     const loaded = await loadArrivalsDatasetFromBackend();
-    arrivalsDatasetCache = loaded.items || [];
+    arrivalsDatasetCache = aplicarUniversoHitsChegadas(loaded.items || [], universo);
     arrivalsTruncatedWarning = !!loaded.truncated;
   } else {
     arrivalsDatasetCache = (reservas || []).map(buildArrivalsInputFromInternal);
@@ -3925,13 +3969,29 @@ async function reconciliarCanceladasHits(base, feed) {
   }
 }
 
-async function loadReservasSomenteLeituraHits(jaCarregadas, options) {
-  if (PAINEL_DATA_SOURCE !== PAINEL_DATA_SOURCE_BACKEND) return [];
+/** Universo vazio e sem gate: a tela mantém o banco (fail-open) e a barra HITS avisa. */
+function universoHitsVazio() {
+  return { gate: false, ids: new Set(), rows: [], raw: [] };
+}
+
+/**
+ * Universo operacional = snapshot HITS ativo (lido pelo ciclo compartilhado de
+ * yes-hits-sandbox-preview.js; nunca o HITS ao vivo).
+ *   gate=true  → snapshot válido (ciclo ok e já sincronizado): linha local cujo
+ *                external_reservation_id NÃO está nele sai da operação
+ *                (Reservas, Chegadas, Exceções, KPIs, contadores).
+ *   gate=false → snapshot indisponível ou nunca sincronizado: não há universo
+ *                para comparar; a tela mantém o banco e a barra HITS avisa.
+ * `rows` = reservas do snapshot já no formato da listagem (só leitura).
+ */
+async function carregarUniversoHits(jaCarregadas, options) {
+  if (PAINEL_DATA_SOURCE !== PAINEL_DATA_SOURCE_BACKEND) return universoHitsVazio();
   const api = typeof window !== "undefined" ? window.YesHotelHitsSandboxPreview : null;
-  if (!api || typeof api.fetchReservasOperacionais !== "function") return [];
-  // Snapshot local (gravado pelo scheduler): sem janela e sem consulta ao vivo.
-  const externas = await api.fetchReservasOperacionais({ ...(options || {}) });
-  if (!Array.isArray(externas) || externas.length === 0) return [];
+  if (!api || typeof api.loadCycle !== "function") return universoHitsVazio();
+  const ciclo = await api.loadCycle({ ...(options || {}) });
+  if (!ciclo || ciclo.ok !== true) return universoHitsVazio();
+  if (ciclo.sync && ciclo.sync.status === "sem_snapshot") return universoHitsVazio();
+  const rows = Array.isArray(ciclo.rows) ? ciclo.rows : [];
   // Feed lido com sucesso: quem está no banco e sumiu dele seria confirmado no
   // detalhe — só com a leitura ao vivo (ver HITS_RECONCILIAR_CANCELADAS_AO_VIVO).
   // hits_consulta nunca reconcilia: a reconciliação grava no banco.
@@ -3940,54 +4000,84 @@ async function loadReservasSomenteLeituraHits(jaCarregadas, options) {
     !modoConsultaHits &&
     !(options && options.reuseOnly === true)
   ) {
-    await reconciliarCanceladasHits(jaCarregadas, externas);
+    await reconciliarCanceladasHits(jaCarregadas, rows);
   }
-  const jaNoBanco = new Set(
-    (jaCarregadas || [])
-      .map((r) => String((r && r.externalReservationId) || "").trim())
-      .filter(Boolean),
+  const ids = new Set(
+    rows.map((r) => String((r && r.externalReservationId) || "").trim()).filter(Boolean),
   );
-  const novas = externas.filter((r) => !jaNoBanco.has(String(r.externalReservationId)));
-  // Consulta: mesmas reservas, apresentadas como consulta (sem CTA de preparo).
-  return modoConsultaHits ? novas.map(paraConsultaSomenteNoHits) : novas;
+  return { gate: true, ids, rows, raw: Array.isArray(ciclo.raw) ? ciclo.raw : [] };
+}
+
+function externalIdDe(r) {
+  return String((r && r.externalReservationId) || "").trim();
 }
 
 /**
- * Ponto único de carga da grade: provider do banco + leitura HITS mesclada.
+ * Mescla banco + snapshot sob a regra "o HITS decide quais reservas existem;
+ * o Yes só enriquece":
+ *  - linha local cujo id está no snapshot → entra com o enriquecimento local
+ *    (FNRH, pagamento, senha, histórico); apto e datas vêm do HITS;
+ *  - linha local fora do snapshot (ou sem id externo) → fica só no banco:
+ *    não entra na operação, não conta, não gera exceção nem ação;
+ *  - reserva só no snapshot → entra como "HITS · leitura".
+ * Sem gate (snapshot indisponível) mantém o comportamento anterior.
+ */
+function aplicarUniversoHits(base, universo) {
+  const u = universo || universoHitsVazio();
+  const ativas = filtrarReservasOperacionaisAtivas(base);
+  const hitsPorId = new Map();
+  (u.rows || []).forEach((r) => {
+    const ext = externalIdDe(r);
+    if (ext) hitsPorId.set(ext, r);
+  });
+  let locais = ativas;
+  if (u.gate) {
+    locais = ativas.filter((r) => {
+      const ext = externalIdDe(r);
+      return ext !== "" && u.ids.has(ext);
+    });
+    // HITS é a verdade sobre apartamento e datas; o local só enriquece.
+    locais.forEach((r) => {
+      const h = hitsPorId.get(externalIdDe(r));
+      if (!h) return;
+      if (h.apartamento) r.apartamento = h.apartamento;
+      if (h.checkInPrevisto) r.checkInPrevisto = h.checkInPrevisto;
+      if (h.checkOutPrevisto) r.checkOutPrevisto = h.checkOutPrevisto;
+    });
+  }
+  const jaNoBanco = new Set(locais.map(externalIdDe).filter(Boolean));
+  const novas = (u.rows || []).filter((r) => {
+    const ext = externalIdDe(r);
+    return ext !== "" && !jaNoBanco.has(ext);
+  });
+  // Consulta: mesmas reservas, apresentadas como consulta (sem CTA de preparo).
+  const hits = modoConsultaHits ? novas.map(paraConsultaSomenteNoHits) : novas;
+  return hits.length > 0 ? locais.concat(hits) : locais;
+}
+
+/**
+ * Ponto único de carga da grade: provider do banco + universo HITS.
  * Usado tanto no init quanto no refresh — se só um deles mesclasse, a grade
  * abriria vazia e só populasse depois de uma ação do operador.
  */
 async function loadReservasOperacionaisComLeituraHits(options) {
   const base = (await loadReservasOperacionaisFromProvider()) || [];
-  const hits = await loadReservasSomenteLeituraHits(base, options);
-  // A reconciliação pode ter marcado canceladas em `base`: elas saem da grade.
-  const ativas = filtrarReservasOperacionaisAtivas(base);
-  return hits.length > 0 ? ativas.concat(hits) : ativas;
+  const universo = await carregarUniversoHits(base, options);
+  return aplicarUniversoHits(base, universo);
 }
 
 /**
- * Aplica a leitura HITS sem bloquear quem chamou.
+ * Aplica o universo HITS sem bloquear quem chamou.
  *
- * O boot não pode esperar por ela: mesmo com o snapshot (dois SELECTs locais),
- * enquanto o await não resolvia o init parava antes de registrar os
- * listeners — a grade ficava vazia e o botão Atualizar, inerte.
+ * O boot não pode esperar por ele: enquanto o await não resolvia o init parava
+ * antes de registrar os listeners — a grade ficava vazia e o botão Atualizar,
+ * inerte. Só re-renderiza quando há universo válido ou reservas só-HITS.
  */
 function aplicarLeituraHitsQuandoPronta(options) {
-  loadReservasSomenteLeituraHits(reservas, options)
-    .then((hits) => {
-      // Canceladas confirmadas na reconciliação saem da grade mesmo sem linha nova.
-      const ativas = filtrarReservasOperacionaisAtivas(reservas);
-      const houveCancelamento = ativas.length !== (reservas || []).length;
-      const jaNaLista = new Set(
-        ativas
-          .map((r) => String((r && r.externalReservationId) || "").trim())
-          .filter(Boolean),
-      );
-      const novas = (Array.isArray(hits) ? hits : []).filter(
-        (r) => !jaNaLista.has(String(r.externalReservationId)),
-      );
-      if (novas.length === 0 && !houveCancelamento) return;
-      reservas = ativas.concat(novas);
+  carregarUniversoHits(reservas, options)
+    .then((universo) => {
+      if (!universo.gate && universo.rows.length === 0) return;
+      reservas = aplicarUniversoHits(reservas, universo);
       invalidateArrivalsCache();
       refresh();
     })

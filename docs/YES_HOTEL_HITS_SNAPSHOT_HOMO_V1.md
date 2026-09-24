@@ -196,6 +196,16 @@ Migration `20260925090000_hits_snapshot_incremental.sql` (mínima): coluna `last
 
 Teste: `npm run test:hits-incremental-sync` (19 casos).
 
+## 8d. Universo operacional = snapshot HITS (branch `fix/hits-universo-operacional`)
+
+Regra: **o HITS decide quais reservas existem operacionalmente; o Yes só enriquece.** Implementada na UI (`ui/checkin-operacional-mvp.js`), sem migration:
+
+- `carregarUniversoHits(base, options)`: lê o último ciclo do snapshot (nunca o HITS ao vivo). `gate=true` quando o ciclo está `ok` e já houve sincronização; `gate=false` (snapshot indisponível / nunca sincronizado) → fail-open: a tela mantém o banco e a barra HITS avisa.
+- `aplicarUniversoHits(base, universo)`: com gate, linha local só entra se `external_reservation_id` está no snapshot (fantasmas HOMO e linhas sem id ficam só no banco); apto e datas vêm do HITS; reserva só no snapshot entra como "HITS · leitura". É o único merge — Reservas, Exceções, KPIs e contadores derivam de `reservas`.
+- `aplicarUniversoHitsChegadas(items, universo)`: a aba Chegadas passa a usar o mesmo universo (antes lia só `operacional_reservas`), inclusive no perfil `hits_consulta`.
+- Canceladas: a incremental remove a linha do snapshot → some da operação sem reconciliação nova. Nada é apagado do banco.
+- Financeiro (`hits-reserva-materializar`): `pagamento_status`, `reservation_balance_due`, `reservation_total_amount` e `classificacao_comissionamento` passam a ser gravados a partir do detalhe HITS normalizado (regra do domínio: saldo ≤ 0 → pago). Reserva materializada antes disso recebe o financeiro **uma vez** (backfill guardado por saldo nulo) na próxima chamada da Edge para o seu id.
+
 ## 9. Riscos restantes / follow-ups
 
 - Reconciliação de canceladas (banco × HITS) fica desligada na tela; em PROD não havia reservas
