@@ -174,6 +174,28 @@ Impacto esperado: piso de N × 1,1 s (≈ 83 s para 75 requisições); custo adi
 
 Teste: `npm run test:hits-read-cadence` (15 casos) + suítes existentes.
 
+## 8c. Sincronização incremental — Type=2 (branch `feat/hits-incremental-sync`)
+
+Por quê: a leitura completa custa ~75 requisições a cada 10 min mesmo sem nada ter mudado. O endpoint de listagem aceita `Type=2` = *Search for Reservation Update Date* (contrato §6.1), encaminhado pelo gateway com `Status`, `InitialDate`, `FinalDate`, `Page`, `Size` (`services/hits-gateway/src/query.ts` — allowlist; datas **só** `YYYY-MM-DD`).
+
+Fluxo por ciclo (`runHitsSnapshotSync` com `readState` + `readIncremental`, só quando `HITS_SNAPSHOT_INCREMENTAL_ENABLED=true`):
+
+1. lê `last_cursor_at` (linha única de `hits_snapshot_sync_state`, service_role, só leitura);
+2. **modo**: sem cursor (ou ilegível) → **carga completa inicial** (Type=0, igual ao anterior; ao terminar `ok`, `hits_snapshot_sync_set_cursor` fixa o cursor no início do ciclo). Com cursor válido → **incremental, sempre**. **Não há completa periódica automática**; a completa continua disponível como fallback (cursor nulo) ou pela chamada sem a trava;
+3. **janela** (dias no calendário; o gateway/HITS só aceitam `YYYY-MM-DD`), no fuso do hotel (UTC−4 fixo, mesma premissa do scheduler): `InitialDate = dia local de (cursor − 60 min)` — na maior parte do dia é o próprio dia do cursor; só na primeira hora após a meia-noite local inclui o dia anterior (virada + margem de fuso). `FinalDate = dia local de agora + 1` — os carimbos do HITS observados vêm em −03:00 (fixture real), 1 h à frente de Campo Grande: à noite o HITS já está no dia seguinte e, sem o +1, alterações entre 23:00 e 24:00 locais só apareceriam após a virada;
+4. **listagem**: `Type=2` para Status 1, 2 e 3 (3 requisições mínimas; Blocked fora), paginação e teto iguais; sumário com check-out anterior ao dia operacional não custa detalhe;
+5. **detalhes** só dos ids devolvidos (dedupe entre status/páginas). 0 alterações → 0 detalhes;
+6. **apply incremental** (`hits_snapshot_sync_apply_incremental`, transação): upsert só das alteradas; **remove só canceladas explícitas** (status 2 no detalhe → `p_cancelled_ids`); **nunca remove por ausência**; detalhe falho → `p_failed_ids` (fotografia anterior preservada, `partial`); **cursor avança só em `ok`** (em `partial` a próxima janela recobre os ids falhos); listagem incompleta por orçamento → só `fail`, nada aplicado, cursor parado.
+7. Cadência 1 100 ms, orçamento 110 s, retries, zero escrita no HITS: os mesmos do núcleo de leitura (`runGatewayRead`).
+
+**Custo da granularidade diária (documentado):** a cada ciclo o HITS devolve **todas** as reservas atualizadas nos dias da janela (normalmente só o dia corrente) e cada uma custa 1 detalhe — repetido a cada 10 min enquanto o dia não vira. Teto de detalhes por ciclo = nº de reservas tocadas no dia (na 1ª hora após a meia-noite, também as de ontem). A listagem **não traz `dateUp`** (só o detalhe), então não há como cortar por hora sem o detalhe. Se um processo do HITS tocar todas as reservas de uma vez (ex.: rotina noturna), a incremental relê o mesmo volume da completa naquele dia — observar `calls_detalhe` no journal.
+
+Limitação aceita: reservas que saem da janela sem mudar (check-out natural, `dateUp` inalterado) não são removidas do snapshot pela incremental; a UI já as filtra por período. Uma limpeza dessas linhas fica para uma rodada própria (não há completa automática).
+
+Migration `20260925090000_hits_snapshot_incremental.sql` (mínima): coluna `last_cursor_at`; RPCs `hits_snapshot_sync_set_cursor(batch, cursor)` e `hits_snapshot_sync_apply_incremental(...)` (service_role). A RPC completa fica intocada. Sem a env, o comportamento é o anterior (rollback = `secrets unset HITS_SNAPSHOT_INCREMENTAL_ENABLED`).
+
+Teste: `npm run test:hits-incremental-sync` (19 casos).
+
 ## 9. Riscos restantes / follow-ups
 
 - Reconciliação de canceladas (banco × HITS) fica desligada na tela; em PROD não havia reservas

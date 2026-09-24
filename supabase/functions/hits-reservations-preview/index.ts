@@ -14,14 +14,23 @@
  * snapshot em vez de chamar esta Edge ao vivo. Sem a trava, o comportamento é
  * idêntico ao anterior (rollback = unset da env).
  *
+ * Incremental (HOMO primeiro): com HITS_SNAPSHOT_INCREMENTAL_ENABLED=true e a
+ * migration 20260925090000 aplicada, o ciclo lê só o que mudou desde o cursor
+ * (Type=2 = data de atualização) e busca detalhe só desses ids; zero alterações
+ * → zero detalhes. Sem cursor → carga completa inicial (Type=0), que fixa o
+ * cursor; com cursor → sempre incremental (não há completa periódica).
+ * Canceladas (status 2) saem do snapshot; ausência nunca remove.
+ *
  * Env: HITS_GATEWAY_URL, HITS_GATEWAY_TOKEN, HITS_GATEWAY_READ_ENABLED,
  *      HITS_GATEWAY_PROD_READ_ENABLED (exigida =true só quando a URL é o gateway
  *      de produção; libera apenas esta leitura), HITS_GATEWAY_TIMEOUT_MS (opcional),
- *      HITS_SNAPSHOT_WRITE_ENABLED (opcional; grava o snapshot no Supabase).
+ *      HITS_SNAPSHOT_WRITE_ENABLED (opcional; grava o snapshot no Supabase),
+ *      HITS_SNAPSHOT_INCREMENTAL_ENABLED (opcional; modo incremental Type=2).
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
   fetchHitsSandboxReservations,
+  fetchHitsUpdatedReservations,
   getHitsGatewayReadConfig,
   assertHitsGatewayReadReady,
   hitsGatewayReadStatus,
@@ -31,7 +40,15 @@ import {
   runHitsSnapshotSync,
   shouldPersistSnapshot,
   type SnapshotRpc,
+  type SnapshotSyncState,
 } from "../../../src/lib/integrations/hits/hits-snapshot-sync.ts";
+
+/**
+ * Trava do modo incremental (Type=2 + cursor). Exige a migration
+ * 20260925090000_hits_snapshot_incremental.sql aplicada no projeto: sem a env,
+ * o ciclo é sempre completo (Type=0), idêntico ao anterior.
+ */
+const HITS_SNAPSHOT_INCREMENTAL_ENV = "HITS_SNAPSHOT_INCREMENTAL_ENABLED";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -75,14 +92,29 @@ function denoEnv(): Record<string, string | undefined> {
  * Cliente service_role só para as RPCs do snapshot, criado apenas quando a
  * chamada vai persistir. O caminho sem snapshot não toca o banco.
  */
-function snapshotRpc(): SnapshotRpc | null {
+function snapshotAdmin(): {
+  rpc: SnapshotRpc;
+  readState: () => Promise<SnapshotSyncState | null>;
+} | null {
   const url = Deno.env.get("SUPABASE_URL") ?? "";
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!url || !key) return null;
   const admin = createClient(url, key, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  return (fn, args) => admin.rpc(fn, args);
+  return {
+    rpc: (fn, args) => admin.rpc(fn, args),
+    // Só leitura do cursor (linha única). service_role bypassa RLS.
+    readState: async () => {
+      const { data, error } = await admin
+        .from("hits_snapshot_sync_state")
+        .select("last_cursor_at")
+        .eq("id", true)
+        .maybeSingle();
+      if (error) return null;
+      return (data as SnapshotSyncState | null) ?? null;
+    },
+  };
 }
 
 Deno.serve(async (req: Request) => {
@@ -128,15 +160,31 @@ Deno.serve(async (req: Request) => {
     searchParams: url.searchParams,
     authorization: req.headers.get("authorization"),
   });
-  const rpc = decision.persist ? snapshotRpc() : null;
+  const admin = decision.persist ? snapshotAdmin() : null;
+  const incrementalEnabled = (Deno.env.get(HITS_SNAPSHOT_INCREMENTAL_ENV) ?? "").trim() === "true";
+
+  // Incremental (Type=2): só os ids alterados na janela, detalhe só deles.
+  // Mesma cadência/orçamento/retries da leitura completa.
+  const readIncremental = (window: { from: string; to: string }, todayYmd: string) =>
+    fetchHitsUpdatedReservations({
+      config: gate.config,
+      updatedFrom: window.from,
+      updatedTo: window.to,
+      todayYmd,
+    });
 
   const startedAt = Date.now();
   let result: Awaited<ReturnType<typeof read>>;
   let snapshot: Record<string, unknown>;
 
-  if (decision.persist && rpc) {
+  if (decision.persist && admin) {
     // Uma leitura só: a mesma rodada alimenta a resposta e o snapshot.
-    const run = await runHitsSnapshotSync({ rpc, batchId: crypto.randomUUID(), read });
+    const run = await runHitsSnapshotSync({
+      rpc: admin.rpc,
+      batchId: crypto.randomUUID(),
+      read,
+      ...(incrementalEnabled ? { readState: admin.readState, readIncremental } : {}),
+    });
     snapshot = run.snapshot;
     if (run.readError || !run.result) {
       const msg =

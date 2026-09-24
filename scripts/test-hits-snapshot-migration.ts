@@ -169,7 +169,11 @@ function main() {
     assert.match(edge, /HITS_SNAPSHOT_WRITE_ENV/);
     assert.match(edge, /SUPABASE_SERVICE_ROLE_KEY/);
     assert.match(edge, /if \(req\.method !== "GET"\)/, "continua GET-only");
-    assert.doesNotMatch(edge, /\.from\(/, "Edge não escreve em tabela direto: só RPC");
+    // Única leitura direta permitida: o cursor da incremental (select em
+    // hits_snapshot_sync_state). Escrita continua só por RPC.
+    const froms = edge.match(/\.from\("([^"]+)"\)/g) ?? [];
+    assert.deepEqual([...new Set(froms)], ['.from("hits_snapshot_sync_state")'], "Edge só lê o estado do snapshot direto");
+    assert.doesNotMatch(edge, /\.insert\(|\.update\(|\.delete\(|\.upsert\(/, "Edge não escreve em tabela direto: só RPC");
     assert.doesNotMatch(edge, /operacional_reservas|operacional_hospedes/);
     assert.match(edge, /fetchHitsSandboxReservations\(/);
     ok("Edge importa o módulo, decide por forma da chamada e grava só por RPC");

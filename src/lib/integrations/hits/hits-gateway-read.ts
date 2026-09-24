@@ -372,13 +372,44 @@ function gatewayHeaders(config: HitsGatewayReadConfig): Record<string, string> {
   };
 }
 
+/** Como percorrer `/v1/reservations`: Type, status e janela por status. */
+type ListingPlan = {
+  type: 0 | 1 | 2;
+  statuses: ReadonlyArray<1 | 2 | 3 | 4>;
+  windowFor: (status: number) => { from: string; to: string };
+  /** Sumário com check-out estritamente anterior a esta data não custa detalhe. */
+  skipCheckOutBefore: string | null;
+};
+
+type GatewayReadCommonInput = {
+  config: HitsGatewayReadConfig;
+  fetchImpl?: HitsFetch;
+  transport?: HitsTransport;
+  page?: number;
+  size?: number;
+  nowMs?: () => number;
+  sleepImpl?: (ms: number) => Promise<void>;
+  minIntervalMs?: number;
+  timeBudgetMs?: number;
+};
+
+type GatewayReadOutcome = FetchHitsSandboxReservationsResult & {
+  /** Detalhes cujo status HITS é 2 (cancelada) — desviados de `rows` quando pedido. */
+  cancelled_ids: string[];
+};
+
 /**
- * GET /v1/reservations (ou ids explícitos) + GET /v1/reservations/:id por item.
- * O detalhe é necessário: a lista não traz apartamento nem hóspedes.
+ * Núcleo compartilhado das leituras pelo gateway: cadência, orçamento,
+ * listagem paginada (por plano) e um GET de detalhe por id. Usado pela leitura
+ * completa (Type=0, janela operacional) e pela incremental (Type=2, data de
+ * atualização). Nunca escreve no HITS.
  */
-export async function fetchHitsSandboxReservations(
-  input: FetchHitsSandboxReservationsInput,
-): Promise<FetchHitsSandboxReservationsResult> {
+async function runGatewayRead(
+  input: GatewayReadCommonInput,
+  plan: ListingPlan | null,
+  explicitIds: string[] | undefined,
+  divertCancelled: boolean,
+): Promise<GatewayReadOutcome> {
   const gate = assertHitsGatewayReadReady(input.config);
   if (!gate.ok) {
     throw new HitsError({
@@ -440,41 +471,21 @@ export async function fetchHitsSandboxReservations(
   let stoppedReason: FetchHitsSandboxReservationsResult["stopped_reason"] = "last_page";
   let listingComplete = true;
 
-  if (input.reservationIds && input.reservationIds.length > 0) {
+  if (explicitIds && explicitIds.length > 0) {
     stoppedReason = "explicit_ids";
-    for (const raw of input.reservationIds) {
+    for (const raw of explicitIds) {
       const id = String(raw).trim();
       if (!id || seenIds.has(id)) continue;
       seenIds.add(id);
       ids.push(id);
       if (ids.length >= size) break;
     }
-  } else {
-    // Type + janela são obrigatórios na prática: sem eles o HITS devolve 400.
-    const window = defaultListWindow(input.nowIso);
-    const initialDate = input.dateFrom || window.from;
-    const finalDate = input.dateTo || window.to;
-
-    // Ciclo de vida: confirmadas e, em seguida, quem já entrou. `status`
-    // explícito continua valendo como leitura única.
-    const statuses =
-      input.status != null
-        ? [input.status]
-        : [HITS_LIST_STATUS_CONFIRMED, HITS_LIST_STATUS_PROCESSED];
-
+  } else if (plan) {
     // Sequencial de propósito, entre status e entre páginas: o gateway limita a
     // 60 req/min e cada reserva ainda custa um GET de detalhe. Paralelizar
     // aqui produz 429.
-    statusLoop: for (const status of statuses) {
-      // As duas leituras olham para trás: hospedados só podem ter entrado no
-      // passado, e confirmadas com check-in passado e check-out futuro são
-      // estadias em curso sem check-in registrado no HITS (caso 17792). O que
-      // já terminou é cortado pelo check-out do sumário, abaixo, sem detalhe.
-      const from = addDaysYmd(initialDate, -IN_HOUSE_LOOKBACK_DAYS);
-      const to =
-        status === HITS_LIST_STATUS_PROCESSED
-          ? addDaysYmd(initialDate, IN_HOUSE_FORWARD_DAYS)
-          : finalDate;
+    statusLoop: for (const status of plan.statuses) {
+      const { from, to } = plan.windowFor(status);
       // O teto de reservas é por leitura: a cobertura de cada status é a mesma
       // de quando existia apenas a leitura de confirmadas.
       let addedThisRead = 0;
@@ -482,7 +493,7 @@ export async function fetchHitsSandboxReservations(
       for (let offset = 0; offset < HITS_LIST_MAX_PAGES; offset += 1) {
         const currentPage = page + offset;
         const qs = new URLSearchParams();
-        qs.set("Type", String(HITS_LIST_TYPE_CHECKIN_DATE));
+        qs.set("Type", String(plan.type));
         qs.set("Status", String(status));
         qs.set("InitialDate", from);
         qs.set("FinalDate", to);
@@ -525,10 +536,10 @@ export async function fetchHitsSandboxReservations(
           // operacional) não custa detalhe. Check-out igual a hoje entra;
           // ausente ou inválido também entra — não se descarta no escuro.
           const checkOut = ymdOrNull((summary as { checkOut?: unknown } | null)?.checkOut);
-          if (checkOut && checkOut < initialDate) continue;
+          if (plan.skipCheckOutBefore && checkOut && checkOut < plan.skipCheckOutBefore) continue;
           // Status=3 prevalece: apareceu como processada, já entrou.
           if (status === HITS_LIST_STATUS_PROCESSED) hospedadas.add(id);
-          // Dedupe entre páginas e entre as duas leituras: o detalhe da mesma
+          // Dedupe entre páginas e entre as leituras: o detalhe da mesma
           // reserva nunca é buscado duas vezes.
           if (seenIds.has(id)) continue;
           seenIds.add(id);
@@ -562,6 +573,7 @@ export async function fetchHitsSandboxReservations(
 
   const rows: HitsSandboxReservationRow[] = [];
   const failed: FetchHitsSandboxReservationsResult["failed"] = [];
+  const cancelledIds: string[] = [];
 
   /**
    * Orçamento acabou no meio dos detalhes: os ids ainda não lidos entram em
@@ -594,7 +606,14 @@ export async function fetchHitsSandboxReservations(
         (detailRes.body ?? {}) as HitsReservationDetails as Record<string, unknown>,
         null,
       );
-      rows.push(toHitsSandboxRow(synced, hospedadas.has(id) ? "hospedada" : "confirmada"));
+      const row = toHitsSandboxRow(synced, hospedadas.has(id) ? "hospedada" : "confirmada");
+      // Incremental: cancelada (status 2 no detalhe) sai do universo operacional —
+      // é sinal explícito do HITS, não ausência. Vai para cancelled_ids, não para rows.
+      if (divertCancelled && row.status_reserva === "cancelada") {
+        cancelledIds.push(row.external_reservation_id);
+        continue;
+      }
+      rows.push(row);
     } catch (e) {
       if (isBudgetError(e)) {
         markRemainingAsTimeBudget(i);
@@ -622,5 +641,93 @@ export async function fetchHitsSandboxReservations(
     failed,
     listing_complete: listingComplete,
     elapsed_ms: now() - startedAt,
+    cancelled_ids: cancelledIds,
   };
+}
+
+/**
+ * Leitura COMPLETA: GET /v1/reservations por data de check-in (Type=0), Status
+ * 1 e 3, janela operacional (ou ids explícitos) + GET /v1/reservations/:id por
+ * item. O detalhe é necessário: a lista não traz apartamento nem hóspedes.
+ */
+export async function fetchHitsSandboxReservations(
+  input: FetchHitsSandboxReservationsInput,
+): Promise<FetchHitsSandboxReservationsResult> {
+  // Type + janela são obrigatórios na prática: sem eles o HITS devolve 400.
+  const window = defaultListWindow(input.nowIso);
+  const initialDate = input.dateFrom || window.from;
+  const finalDate = input.dateTo || window.to;
+  // Ciclo de vida: confirmadas e, em seguida, quem já entrou. `status`
+  // explícito continua valendo como leitura única.
+  const statuses: ReadonlyArray<1 | 2 | 3 | 4> =
+    input.status != null
+      ? [input.status]
+      : [HITS_LIST_STATUS_CONFIRMED as 1, HITS_LIST_STATUS_PROCESSED as 3];
+  const plan: ListingPlan = {
+    type: HITS_LIST_TYPE_CHECKIN_DATE as 0,
+    statuses,
+    // As duas leituras olham para trás: hospedados só podem ter entrado no
+    // passado, e confirmadas com check-in passado e check-out futuro são
+    // estadias em curso sem check-in registrado no HITS (caso 17792). O que
+    // já terminou é cortado pelo check-out do sumário, sem detalhe.
+    windowFor: (status) => ({
+      from: addDaysYmd(initialDate, -IN_HOUSE_LOOKBACK_DAYS),
+      to:
+        status === HITS_LIST_STATUS_PROCESSED
+          ? addDaysYmd(initialDate, IN_HOUSE_FORWARD_DAYS)
+          : finalDate,
+    }),
+    skipCheckOutBefore: initialDate,
+  };
+  const { cancelled_ids: _ignored, ...result } = await runGatewayRead(
+    input,
+    plan,
+    input.reservationIds,
+    false,
+  );
+  return result;
+}
+
+/** Statuses lidos na incremental: confirmadas, canceladas e hospedadas. Blocked (4) fica fora. */
+export const HITS_INCREMENTAL_STATUSES: ReadonlyArray<1 | 2 | 3> = [
+  HITS_LIST_STATUS_CONFIRMED as 1,
+  2,
+  HITS_LIST_STATUS_PROCESSED as 3,
+];
+
+/** `Type=2` = Search for Reservation Update Date (contrato §6.1). */
+export const HITS_LIST_TYPE_UPDATE_DATE = 2;
+
+export type FetchHitsUpdatedReservationsInput = GatewayReadCommonInput & {
+  /** Janela de data de ATUALIZAÇÃO (`YYYY-MM-DD`, inclusiva). O gateway só aceita dia. */
+  updatedFrom: string;
+  updatedTo: string;
+  /** Dia operacional (`YYYY-MM-DD`) — sumário com check-out anterior não custa detalhe. */
+  todayYmd: string;
+  statuses?: ReadonlyArray<1 | 2 | 3 | 4>;
+};
+
+export type FetchHitsUpdatedReservationsResult = FetchHitsSandboxReservationsResult & {
+  cancelled_ids: string[];
+  window: { from: string; to: string };
+};
+
+/**
+ * Leitura INCREMENTAL: GET /v1/reservations por data de atualização (Type=2),
+ * Status 1, 2 e 3, na janela informada, + detalhe só dos ids devolvidos. Zero
+ * alterações → zero detalhes. Canceladas (status 2 no detalhe) saem em
+ * `cancelled_ids`, nunca em `rows`.
+ */
+export async function fetchHitsUpdatedReservations(
+  input: FetchHitsUpdatedReservationsInput,
+): Promise<FetchHitsUpdatedReservationsResult> {
+  const window = { from: input.updatedFrom, to: input.updatedTo };
+  const plan: ListingPlan = {
+    type: HITS_LIST_TYPE_UPDATE_DATE as 2,
+    statuses: input.statuses ?? HITS_INCREMENTAL_STATUSES,
+    windowFor: () => window,
+    skipCheckOutBefore: input.todayYmd || null,
+  };
+  const result = await runGatewayRead(input, plan, undefined, true);
+  return { ...result, window };
 }
