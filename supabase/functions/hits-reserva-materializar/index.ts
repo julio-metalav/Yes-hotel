@@ -12,7 +12,10 @@
  * Escopo estrito — grava apenas em `operacional_reservas` e
  * `operacional_hospedes`. Não escreve no HITS, não cria ficha à mão, não
  * sobrescreve registro existente, e não toca status de reserva, quarto,
- * check-in, pagamento, credencial ou TTLock.
+ * check-in, credencial ou TTLock. O financeiro (saldo/total/classificação/
+ * pagamento_status) vem do detalhe HITS já normalizado: gravado no insert e,
+ * para reserva materializada antes disso, preenchido uma única vez
+ * (backfill guardado por saldo nulo).
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
@@ -148,6 +151,20 @@ Deno.serve(async (req: Request) => {
     return (data as { id: string } | null) ?? null;
   }
 
+  // Financeiro da reserva HITS, já classificado pelo normalizador (regra do
+  // domínio: reservationBalanceDue <= 0 → pago; > 0 → pendente; ausente →
+  // desconhecido; comissionamento por canal). Sem isso a coluna nascia com o
+  // default 'pendente' e a UI mostrava "Pendente pagamento" para reserva
+  // quitada/com crédito no HITS. Nenhum valor de cartão/contato: só saldo,
+  // total e classificação.
+  const financeiroHits = {
+    pagamento_status: synced.paymentStatus,
+    reservation_balance_due: synced.reservationBalanceDue,
+    reservation_total_amount: synced.reservationTotalAmount,
+    classificacao_comissionamento: synced.classificacaoComissionamento,
+    classificacao_comissionamento_origem: "hits_campo",
+  };
+
   let reserva = await findReserva();
   let reservaCriada = false;
   if (!reserva) {
@@ -160,6 +177,7 @@ Deno.serve(async (req: Request) => {
         check_out_previsto: checkOut,
         origem_externa: ORIGEM_HITS,
         external_reservation_id: externalId,
+        ...financeiroHits,
       })
       .select("id")
       .single();
@@ -177,6 +195,22 @@ Deno.serve(async (req: Request) => {
   }
   if (!reserva) {
     return json({ ok: false, error: "falha_ao_criar_reserva" }, 500);
+  }
+
+  // 2b. Reserva materializada ANTES desta versão (sem financeiro): aplica o
+  //     financeiro do HITS uma única vez. Guardado por reservation_balance_due
+  //     IS NULL — nunca sobrescreve saldo/status já sincronizado ou já
+  //     decrementado por cobrança Pagar.me. Só colunas financeiras: nada de
+  //     FNRH, hóspedes, datas ou apartamento.
+  let financeiroBackfilled = false;
+  if (!reservaCriada) {
+    const { data: fin } = await admin
+      .from("operacional_reservas")
+      .update(financeiroHits)
+      .eq("id", reserva.id)
+      .is("reservation_balance_due", null)
+      .select("id");
+    financeiroBackfilled = Array.isArray(fin) && fin.length > 0;
   }
 
   // 3. Um operacional_hospedes por PAX com idEntity — o trigger existente cria
@@ -257,6 +291,8 @@ Deno.serve(async (req: Request) => {
     reserva_id: reserva.id,
     external_reservation_id: externalId,
     reserva_criada: reservaCriada,
+    // Sem valores: só o status derivado e se o backfill financeiro ocorreu.
+    financeiro: { pagamento_status: synced.paymentStatus, backfilled: financeiroBackfilled },
     hospedes,
     hospedes_total: hospedes.length,
     ocupacao: {

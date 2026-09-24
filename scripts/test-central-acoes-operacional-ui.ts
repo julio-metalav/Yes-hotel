@@ -415,7 +415,7 @@ function main() {
     ok("duas colunas no desktop, uma coluna até 767px, botões em largura total");
 
     assert.match(htmlSrc, /checkin-operacional-mvp\.css\?v=63/);
-    assert.match(htmlSrc, /checkin-operacional-mvp\.js\?v=60/);
+    assert.match(htmlSrc, /checkin-operacional-mvp\.js\?v=62/);
     ok("cache-buster do CSS/JS atualizado");
   }
 
