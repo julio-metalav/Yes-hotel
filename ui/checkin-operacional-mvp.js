@@ -2551,6 +2551,39 @@ let periodoCustomTo = "";
 let buscaLista = "";
 let detailReservaId = null;
 
+/**
+ * Período customizado: o valor que vale é o que está nos campos AGORA.
+ *
+ * Antes, `periodoCustomFrom/To` só eram lidos do DOM no botão "Aplicar". Quem
+ * digitasse a data e clicasse em "Atualizar" reconsultava com o estado antigo
+ * -- normalmente o dia de hoje, gravado quando "Período" foi selecionado -- e
+ * a data escolhida era silenciosamente ignorada.
+ *
+ * Um campo só preenchido é uma data específica: o outro espelha, para a
+ * consulta virar exatamente aquele dia em vez de esticar um intervalo até hoje.
+ * Os dois vazios continuam caindo para hoje, como antes.
+ *
+ * Não altera a semântica do filtro: segue sendo check-in dentro de [de, até].
+ */
+function sincronizarPeriodoCustomDoDom() {
+  if (periodoAtivo !== "periodo") return;
+  const fromEl = document.querySelector("#op-period-from");
+  const toEl = document.querySelector("#op-period-to");
+  const from = fromEl instanceof HTMLInputElement ? String(fromEl.value || "").slice(0, 10) : "";
+  const to = toEl instanceof HTMLInputElement ? String(toEl.value || "").slice(0, 10) : "";
+
+  if (from && to) {
+    periodoCustomFrom = from;
+    periodoCustomTo = to;
+    return;
+  }
+  const escolhido = from || to || todayStr();
+  periodoCustomFrom = escolhido;
+  periodoCustomTo = escolhido;
+  if (fromEl instanceof HTMLInputElement && !fromEl.value) fromEl.value = escolhido;
+  if (toEl instanceof HTMLInputElement && !toEl.value) toEl.value = escolhido;
+}
+
 const OP_TAB_DEFS = [
   [FILTER_ALL, "Todos"],
   [FILTER_CHEGANDO_HOJE, "Chegando hoje"],
@@ -8248,27 +8281,14 @@ async function initCheckinOperacional() {
         custom.hidden = !show;
       }
     }
-    function readCustomDatesIntoState() {
-      const fromEl = document.querySelector("#op-period-from");
-      const toEl = document.querySelector("#op-period-to");
-      periodoCustomFrom =
-        fromEl instanceof HTMLInputElement ? String(fromEl.value || "").slice(0, 10) : "";
-      periodoCustomTo =
-        toEl instanceof HTMLInputElement ? String(toEl.value || "").slice(0, 10) : "";
-      if (periodoAtivo === "periodo" && (!periodoCustomFrom || !periodoCustomTo)) {
-        const today = todayStr();
-        periodoCustomFrom = periodoCustomFrom || today;
-        periodoCustomTo = periodoCustomTo || today;
-        if (fromEl instanceof HTMLInputElement && !fromEl.value) fromEl.value = periodoCustomFrom;
-        if (toEl instanceof HTMLInputElement && !toEl.value) toEl.value = periodoCustomTo;
-      }
-    }
     function applyPresetPeriodAndReload() {
       periodoAtivo = opPeriodSelect.value || "hoje";
       syncPeriodCustomVisibility();
       if (periodoAtivo === "periodo") {
-        // Datas customizadas só disparam consulta no botão Aplicar.
-        readCustomDatesIntoState();
+        // Trocar para "Período" só revela os campos e re-renderiza o que já
+        // está em memória. A consulta sai em "Aplicar" ou em "Atualizar",
+        // e ambos leem a data direto dos campos.
+        sincronizarPeriodoCustomDoDom();
         renderStatusTabs();
         renderOperacionalLista();
         return;
@@ -8280,7 +8300,7 @@ async function initCheckinOperacional() {
     function applyCustomPeriodAndReload() {
       periodoAtivo = "periodo";
       if (opPeriodSelect.value !== "periodo") opPeriodSelect.value = "periodo";
-      readCustomDatesIntoState();
+      sincronizarPeriodoCustomDoDom();
       syncPeriodCustomVisibility();
       refreshFromSource().catch(function () {
         refresh();
@@ -8300,6 +8320,8 @@ async function initCheckinOperacional() {
     });
   }
   opRefreshBtn?.addEventListener("click", () => {
+    // "Atualizar" consulta com o que está na tela, não com o último "Aplicar".
+    sincronizarPeriodoCustomDoDom();
     refreshListagem().catch(() => refresh());
   });
 

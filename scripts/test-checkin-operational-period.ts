@@ -90,7 +90,10 @@ assert.match(src, /\.gte\("check_in_previsto", range\.from\)/);
 assert.match(src, /\.lte\("check_in_previsto", range\.to\)/);
 assert.match(src, /op-period-apply/);
 assert.match(src, /applyCustomPeriodAndReload/);
-assert.match(src, /Datas customizadas só disparam consulta no botão Aplicar/);
+// A consulta do período custom sai em "Aplicar" OU em "Atualizar", e os dois
+// leem a data direto dos campos (regressão: "Atualizar" ignorava a data).
+assert.match(src, /A consulta sai em "Aplicar" ou em "Atualizar"/);
+assert.match(src, /function sincronizarPeriodoCustomDoDom\(\)/);
 assert.doesNotMatch(src, /#op-period-from"\)\?\.addEventListener\("change"/);
 // Não truncar este_mês / 7dias em "hoje"
 assert.match(src, /to: endOfMonthYmd\(today\)/);
