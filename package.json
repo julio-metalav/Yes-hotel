@@ -110,6 +110,7 @@
     "test:checkin-panel-presentation": "tsx scripts/test-checkin-panel-presentation.ts",
     "test:checkin-operational-period": "tsx scripts/test-checkin-operational-period.ts",
     "test:checkin-comissionado-status": "tsx scripts/test-checkin-comissionado-status.ts",
+    "test:yes:cafe-fechamento-dia": "tsx scripts/test-cafe-fechamento-dia.ts",
     "test:yes:cafe-operacional": "tsx scripts/test-cafe-operacional.ts",
     "test:hits-real:json": "tsx scripts/test-hits-real-json-to-yes.ts",
     "debug:provisioning": "tsx scripts/debug-provisioning-plan.ts",

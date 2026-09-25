@@ -147,6 +147,81 @@
   font-weight: 500;
 }
 
+/* Fechamento do serviço do dia: um card só, colado nos KPIs.
+   Mesma linguagem visual do bloco da data — nada de redesenho da tela. */
+.cafe-view .cafe-day-closure {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--op-border);
+  border-radius: var(--op-radius-lg);
+  background: var(--op-surface);
+  box-shadow: var(--op-shadow);
+}
+
+.cafe-view .cafe-day-closure.is-closed {
+  border-color: rgba(30, 92, 103, 0.45);
+  background: rgba(30, 92, 103, 0.06);
+}
+
+.cafe-view .cafe-day-closure__main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cafe-view .cafe-day-closure__title {
+  color: var(--op-text);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cafe-view .cafe-day-closure__status {
+  color: var(--op-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.cafe-view .cafe-day-closure__counts {
+  color: var(--op-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.cafe-view .cafe-day-closure__signature {
+  color: var(--op-blue);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cafe-view .cafe-day-closure__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cafe-view .cafe-day-closure__actions .op-btn {
+  height: 40px;
+  min-height: 40px;
+}
+
+/* Reabrir é ação de exceção, e de admin: fica discreta de propósito. */
+.cafe-view .cafe-day-closure__reopen {
+  font-size: 12px;
+}
+
+.cafe-view .cafe-day-closure .hidden {
+  display: none !important;
+}
+
 .cafe-view .cafe-operation-panel {
   flex-shrink: 0;
 }
@@ -295,36 +370,6 @@
   height: 100%;
   border-radius: inherit;
   background: var(--op-blue);
-}
-
-/* Conclusão por apartamento: discreto, dentro do bloco de atendimento. */
-.cafe-view .cafe-concluir {
-  align-self: flex-start;
-  margin-top: 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--op-border);
-  border-radius: 8px;
-  background: #fff;
-  color: var(--op-blue);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.2;
-  cursor: pointer;
-}
-
-.cafe-view .cafe-concluir:hover:not(:disabled) {
-  background: var(--op-muted);
-  border-color: var(--op-border-strong);
-}
-
-.cafe-view .cafe-concluir:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.cafe-view .cafe-concluir:focus-visible {
-  outline: 3px solid rgba(184, 148, 46, 0.45);
-  outline-offset: 2px;
 }
 
 .cafe-view .breakfast-card.has-ppd-alert {
@@ -504,6 +549,22 @@
 
   .cafe-view .cafe-service-date {
     padding: 8px 12px;
+  }
+
+  /* No celular o botão de fechar o dia ocupa a linha inteira: é a ação
+     principal da tela e precisa de alvo de toque confortável. */
+  .cafe-view .cafe-day-closure {
+    padding: 10px 12px;
+  }
+
+  .cafe-view .cafe-day-closure__actions {
+    width: 100%;
+  }
+
+  .cafe-view .cafe-day-closure__actions .op-btn {
+    flex: 1 1 100%;
+    justify-content: center;
+    min-height: 42px;
   }
 
   .cafe-view .cafe-kpis,
@@ -704,14 +765,6 @@
 
   .cafe-view .progress-track {
     display: none;
-  }
-
-  .cafe-view .cafe-concluir {
-    align-self: stretch;
-    width: 100%;
-    margin-top: 6px;
-    min-height: 36px;
-    text-align: center;
   }
 
   .cafe-view .badges-cell {

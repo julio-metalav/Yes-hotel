@@ -269,9 +269,81 @@
     if (!canRegisterCafeAttendanceForDate(input.cafeDateYmd, input.now)) {
       return { ok: false, error: "cafe_write_forbidden_future_date" };
     }
+    if (input.dayStatus === "concluido") {
+      return { ok: false, error: "cafe_write_forbidden_dia_concluido" };
+    }
     // O direito NÃO barra mais o + / −: registrar quem tomou café é contagem
     // operacional, não cobrança. Espelha a RPC.
     return { ok: true };
+  }
+
+  // -------------------------------------------------------------------------
+  // Fechamento do serviço do dia (espelha cafe-day-closure.ts e as RPCs
+  // operacional_cafe_fechar_dia / operacional_cafe_reabrir_dia).
+  // O fechamento é um fato registrado, nunca inferido de atendidos = previstos.
+  // -------------------------------------------------------------------------
+  function buildOpenCafeDay(dateYmd) {
+    return {
+      dateYmd: dateYmd,
+      status: "aberto",
+      closedAt: null,
+      closedByName: null,
+      reopenedAt: null,
+    };
+  }
+
+  function parseCafeDayClosure(dateYmd, row) {
+    var status = String((row && row.status) || "aberto").trim().toLowerCase();
+    if (status !== "concluido") return buildOpenCafeDay(dateYmd);
+    var nome = String((row && row.concluido_por_nome) || "").trim();
+    return {
+      dateYmd: dateYmd,
+      status: "concluido",
+      closedAt: (row && row.concluido_em) || null,
+      closedByName: nome || null,
+      reopenedAt: (row && row.reaberto_em) || null,
+    };
+  }
+
+  function isCafeDayClosed(closure) {
+    return !!closure && closure.status === "concluido";
+  }
+
+  function canCloseCafeDay(input) {
+    if (!canRoleWriteCafeAttendance(input.role)) return false;
+    if (!canRegisterCafeAttendanceForDate(input.cafeDateYmd, input.now)) return false;
+    return !isCafeDayClosed(input.closure);
+  }
+
+  function canReopenCafeDay(input) {
+    if (String((input && input.role) || "").trim().toLowerCase() !== "admin") return false;
+    return isCafeDayClosed(input && input.closure);
+  }
+
+  function cafeDayStatusLabel(closure) {
+    return isCafeDayClosed(closure) ? "Concluído" : "Em andamento";
+  }
+
+  function formatCafeClosureTime(isoTimestamp) {
+    if (!isoTimestamp) return "";
+    var date = new Date(isoTimestamp);
+    if (isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat("pt-BR", {
+      timeZone: TZ,
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(date);
+  }
+
+  function cafeClosureSummaryLine(closure) {
+    if (!isCafeDayClosed(closure)) return "";
+    var hora = formatCafeClosureTime(closure.closedAt);
+    var nome = String(closure.closedByName || "").trim();
+    if (hora && nome) return "Concluído às " + hora + " por " + nome;
+    if (hora) return "Concluído às " + hora;
+    if (nome) return "Concluído por " + nome;
+    return "Serviço concluído";
   }
 
   function summarizeCafeKpis(cards) {
@@ -467,6 +539,14 @@
     canRoleWriteCafeAttendance: canRoleWriteCafeAttendance,
     canMarkAllCafeAttendance: canMarkAllCafeAttendance,
     assertCanWriteCafeAttendance: assertCanWriteCafeAttendance,
+    buildOpenCafeDay: buildOpenCafeDay,
+    parseCafeDayClosure: parseCafeDayClosure,
+    isCafeDayClosed: isCafeDayClosed,
+    canCloseCafeDay: canCloseCafeDay,
+    canReopenCafeDay: canReopenCafeDay,
+    cafeDayStatusLabel: cafeDayStatusLabel,
+    formatCafeClosureTime: formatCafeClosureTime,
+    cafeClosureSummaryLine: cafeClosureSummaryLine,
     summarizeCafeKpis: summarizeCafeKpis,
     planMarkAllCafeAttended: planMarkAllCafeAttended,
     cafeStatusLabel: cafeStatusLabel,

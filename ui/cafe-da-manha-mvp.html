@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=56" />
-    <link rel="stylesheet" href="./cafe-da-manha-mvp.css?v=11" />
+    <link rel="stylesheet" href="./cafe-da-manha-mvp.css?v=12" />
   </head>
   <body class="op-body checkin-view cafe-view">
     <div id="access-state" class="op-access hidden" aria-live="polite"></div>
@@ -171,6 +171,47 @@
             </article>
           </section>
 
+          <!-- Fechamento do serviço do dia: um card, logo abaixo dos KPIs.
+               O estado vem do banco; nada aqui é inferido dos contadores. -->
+          <section
+            class="cafe-day-closure"
+            id="cafe-day-closure"
+            aria-label="Serviço de café da manhã do dia"
+          >
+            <div class="cafe-day-closure__main">
+              <span class="cafe-day-closure__title" id="cafe-day-closure-title">
+                Café da manhã de hoje
+              </span>
+              <span class="cafe-day-closure__status" id="cafe-day-closure-status">
+                Status: Em andamento
+              </span>
+              <span class="cafe-day-closure__counts" id="cafe-day-closure-counts">
+                0 cafés previstos · 0 atendidos · 0 faltantes
+              </span>
+              <span
+                class="cafe-day-closure__signature hidden"
+                id="cafe-day-closure-signature"
+                aria-live="polite"
+              ></span>
+            </div>
+            <div class="cafe-day-closure__actions">
+              <button
+                class="op-btn op-btn--primary hidden"
+                id="cafe-day-close-button"
+                type="button"
+              >
+                Concluir café da manhã do dia
+              </button>
+              <button
+                class="op-btn op-btn--secondary cafe-day-closure__reopen hidden"
+                id="cafe-day-reopen-button"
+                type="button"
+              >
+                Reabrir atendimento
+              </button>
+            </div>
+          </section>
+
           <section class="op-controls-shell cafe-operation-panel" aria-label="Controle do café da manhã">
             <div class="op-toolbar cafe-toolbar" id="breakfast-toolbar">
               <label class="op-search-field" for="breakfast-search">
@@ -226,7 +267,7 @@
     <script defer src="./yes-supabase-config.js"></script>
     <script defer src="./yes-supabase-auth.js"></script>
     <script defer src="./yes-nav-policy.js?v=1"></script>
-    <script defer src="./yes-cafe-policy.js?v=7"></script>
-    <script defer src="./cafe-da-manha-mvp.js?v=14"></script>
+    <script defer src="./yes-cafe-policy.js?v=8"></script>
+    <script defer src="./cafe-da-manha-mvp.js?v=15"></script>
   </body>
 </html>
