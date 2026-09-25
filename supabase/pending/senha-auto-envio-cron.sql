@@ -3,7 +3,7 @@
 -- =============================================================================
 -- O agendamento das 13h virou migration canonica:
 --
---   supabase/migrations/20260925182311_senha_auto_envio_13h_cron.sql
+--   supabase/migrations/20261002090000_senha_auto_envio_13h_cron.sql
 --
 -- Jobs criados la:
 --   yes-hotel-senha-auto-envio-13h     '5 17 * * *'        (13:05 Campo Grande)
@@ -13,4 +13,4 @@
 -- foi exatamente o motivo de a regra das 13h nunca ter rodado em producao.
 -- =============================================================================
 
-select 'APLICADO: ver supabase/migrations/20260925182311_senha_auto_envio_13h_cron.sql' as status;
+select 'APLICADO: ver supabase/migrations/20261002090000_senha_auto_envio_13h_cron.sql' as status;
