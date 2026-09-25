@@ -357,7 +357,11 @@ async function main() {
     const mod = read("src/lib/integrations/hits/hits-snapshot-sync.ts");
     assert.doesNotMatch(mod, /fetch\(|supabase-js|createClient/, "módulo continua sem rede");
     const edge = read("supabase/functions/hits-reservations-preview/index.ts");
-    assert.match(edge, /materializarNovasDoCiclo\(admin\.admin, result\.rows, detalhes\)/, "9. materialização automática inalterada (mesmo gancho, mesmas entradas)");
+    assert.match(
+      edge,
+      /if \(autoMaterializarEnabled && run\.snapshot\.persisted\) \{\s*materializacao = await executarCicloContatoEMaterializacao\(\{[\s\S]*?rows: result\.rows,/,
+      "9. materialização automática inalterada (mesmo gancho pós-snapshot, mesmas entradas)",
+    );
     assert.doesNotMatch(edge, /rows_changed|returned_count|detail_count/, "Edge não precisa mudar: repassa `snapshot` como está");
     const ui = read("ui/yes-hits-sandbox-preview.js");
     assert.match(ui, /last_rows_count, last_failed_count, last_success_at/, "UI: contrato de leitura preservado");

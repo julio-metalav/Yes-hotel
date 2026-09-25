@@ -143,6 +143,26 @@ export interface HitsGuest {
   [key: string]: unknown;
 }
 
+/**
+ * DTO externo — `GuestRevenueDto` de GET /Datashare/RevenueManagement/Guests
+ * (gateway: `GET /v1/guests?EntityId=…`). É o **cadastro do hóspede** (guest
+ * master) e o ÚNICO lugar do contrato que expõe o celular:
+ * `contactCellPhone`. Não confundir com `HitsGuest`, que é o
+ * `ReservationDetailGuestDto` do detalhe da reserva (sem celular).
+ * Fonte: https://api.hitspms.net/swagger/v1/swagger.json
+ */
+export interface HitsGuestRevenue {
+  entityId?: number | string;
+  /** Compatibilidade: respostas/fixtures antigas usam `idEntity`. */
+  idEntity?: number | string;
+  name?: string | null;
+  contactMail?: string | null;
+  contactPhone?: string | null;
+  /** Celular oficial — só existe neste DTO. */
+  contactCellPhone?: string | null;
+  [key: string]: unknown;
+}
+
 /** Parâmetros oficiais de GET /Datashare/RevenueManagement/Guests. */
 export interface HitsGuestSearchParams {
   entityId?: string;
@@ -155,12 +175,13 @@ export interface HitsGuestSearchParams {
   size?: number;
 }
 
+/** Resposta de GET /v1/guests — lista de `GuestRevenueDto`, crua ou envelopada. */
 export type HitsGuestListResponse =
-  | HitsGuest[]
+  | HitsGuestRevenue[]
   | {
-      data?: HitsGuest[];
-      items?: HitsGuest[];
-      results?: HitsGuest[];
+      data?: HitsGuestRevenue[];
+      items?: HitsGuestRevenue[];
+      results?: HitsGuestRevenue[];
       [key: string]: unknown;
     };
 

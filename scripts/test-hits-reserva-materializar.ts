@@ -21,9 +21,12 @@ function ok(name: string) {
 }
 
 const ROOT = resolve(process.cwd());
-const edge = readFileSync(
-  resolve(ROOT, "supabase/functions/hits-reserva-materializar/index.ts"),
-  "utf8",
+/** Working tree mistura CRLF e LF; as guardas são sobre o código, não sobre EOL. */
+function normalizarQuebras(src: string): string {
+  return src.replace(/\r\n/g, "\n");
+}
+const edge = normalizarQuebras(
+  readFileSync(resolve(ROOT, "supabase/functions/hits-reserva-materializar/index.ts"), "utf8"),
 );
 const mvp = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.js"), "utf8");
 
@@ -33,9 +36,8 @@ function stripComments(src: string): string {
 // A escrita vive no helper compartilhado com a materialização automática;
 // a Edge só faz gate + GET + normalização + resposta. As guardas valem para
 // o conjunto (Edge + helper).
-const helper = readFileSync(
-  resolve(ROOT, "src/lib/integrations/hits/hits-materializar.ts"),
-  "utf8",
+const helper = normalizarQuebras(
+  readFileSync(resolve(ROOT, "src/lib/integrations/hits/hits-materializar.ts"), "utf8"),
 );
 const edgeCode = stripComments(edge) + "\n" + stripComments(helper);
 
@@ -93,7 +95,11 @@ function main() {
 
   console.log("\n== Posição sem PAX: mesmo caminho do painel ==");
   {
-    const bloco = edgeCode.slice(edgeCode.indexOf("const { data: ativos }"));
+    // Recorte do passo 4 apenas: daqui até o `return` do resultado. Depois do
+    // helper vem a reconciliação de contato, que legitimamente cita
+    // pms_external_guest_id (hóspede JÁ vinculado) e não é "posição sem PAX".
+    const iniPasso4 = edgeCode.indexOf("const { data: ativos }");
+    const bloco = edgeCode.slice(iniPasso4, edgeCode.indexOf("posicoes_criadas: posicoesCriadas", iniPasso4));
     assert.match(bloco, /nome: "Novo hóspede"/);
     assert.match(bloco, /principal: false/);
     assert.match(bloco, /status_operacional: "nao_identificado"/);
@@ -144,13 +150,25 @@ function main() {
 
   console.log("\n== 4. Não sobrescreve FNRH nem cadastro existente ==");
   {
-    // Dois updates permitidos, ambos guardados: (1) backfill FINANCEIRO de
-    // reserva materializada antes desta versão, por reservation_balance_due IS
-    // NULL (uma vez só); (2) adoção da posição técnica intocada ("Novo hóspede"
-    // sem idEntity) pelo PAX HITS — só identificação, guardada no próprio
-    // UPDATE por pms_external_guest_id IS NULL + nome/status técnicos.
+    // Três updates permitidos, todos guardados: (1) contato de hóspede JÁ
+    // vinculado — só email/whatsapp, pelas regras de hits-contato (celular
+    // nunca é rebaixado; e-mail só preenche vazio) e só com ficha FNRH intocada;
+    // (2) backfill FINANCEIRO de reserva materializada antes desta versão, por
+    // reservation_balance_due IS NULL (uma vez só); (3) adoção da posição
+    // técnica intocada ("Novo hóspede" sem idEntity) pelo PAX HITS — só
+    // identificação, guardada no próprio UPDATE por pms_external_guest_id IS
+    // NULL + nome/status técnicos.
     const updates = [...edgeCode.matchAll(/\.update\(([^)]*)\)/g)].map((m) => m[1]!.trim());
-    assert.deepEqual(updates, ["financeiroHits", "identificacaoHits"], "só os dois updates guardados");
+    assert.deepEqual(updates, ["contatoHits", "financeiroHits", "identificacaoHits"], "só os três updates guardados");
+    const iniContato = edgeCode.indexOf("async function atualizarContatoExistente(");
+    const fimContato = edgeCode.indexOf("\n}\n", iniContato);
+    const contato = edgeCode.slice(iniContato, fimContato);
+    assert.match(contato, /const contatoHits: \{ whatsapp\?: string; email\?: string \} = \{\};/, "patch de contato só com whatsapp/email");
+    assert.match(contato, /if \(await fichaFnrhTocada\(admin, row\.id\)\) return false;/, "ficha tocada → não mexe no contato");
+    assert.match(contato, /\.update\(contatoHits\)\s*\.eq\("id", row\.id\)\s*\.select\("id"\)/);
+    for (const proibido of ["nome", "principal", "status_operacional", "fnrh_lifecycle_status", "link_token", "confirmation_source", "completed_at", "documento", "origem_cadastro"]) {
+      assert.equal(new RegExp("\\b" + proibido + "\\s*:").test(contato), false, "contato não toca " + proibido);
+    }
     assert.match(edgeCode, /\.update\(financeiroHits\)\s*\.eq\("id", reserva\.id\)\s*\.is\("reservation_balance_due", null\)/);
     assert.match(edgeCode, /if \(!reservaCriada\) \{[\s\S]*?\.update\(financeiroHits\)/, "backfill só para reserva já existente");
     assert.match(

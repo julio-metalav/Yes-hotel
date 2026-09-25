@@ -14,6 +14,12 @@ export type SyncedGuest = {
   isMinor: boolean | null;
   phone: string | null;
   email: string | null;
+  /**
+   * De onde veio `phone` quando o cadastro do hóspede (guest master HITS) foi
+   * consultado: `"cell"` = `contactCellPhone` (celular oficial), `"phone"` =
+   * `contactPhone`. Ausente = veio do detalhe da reserva (sem garantia de tipo).
+   */
+  phoneSource?: "cell" | "phone" | null;
   birthDate?: string | null;
   gender?: string | null;
   nationality?: string | null;

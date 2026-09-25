@@ -19,6 +19,7 @@
 
 import type { SyncedReservation } from "../../domain/yes-hotel/synced-reservation.ts";
 import { calcularPosicoesFaltantes } from "./hits-ocupacao.ts";
+import { decidirEmailExistente, decidirWhatsappExistente } from "./hits-contato.ts";
 
 /** Origem fixa: é o que o índice único de idempotência usa. */
 export const ORIGEM_HITS = "hits";
@@ -42,6 +43,15 @@ export function isUniqueViolation(error: unknown): boolean {
 // deno-lint-ignore no-explicit-any
 export type SupabaseAdminLike = { from: (table: string) => any };
 
+export type HospedeMaterializado = {
+  id_entity: string;
+  criado: boolean;
+  posicao_adotada: boolean;
+  ambiguo?: true;
+  /** hóspede já vinculado recebeu email/whatsapp do HITS (só esses campos). */
+  contato_atualizado?: true;
+};
+
 export type MaterializacaoResultado =
   | {
       ok: true;
@@ -49,8 +59,9 @@ export type MaterializacaoResultado =
       external_reservation_id: string;
       reserva_criada: boolean;
       financeiro: { pagamento_status: string; backfilled: boolean };
-      hospedes: Array<{ id_entity: string; criado: boolean; posicao_adotada: boolean; ambiguo?: true }>;
+      hospedes: HospedeMaterializado[];
       hospedes_total: number;
+      contatos_atualizados: number;
       ocupacao: {
         declarada_hits: number;
         hospedes_ativos: number;
@@ -118,21 +129,62 @@ export async function encontrarPosicaoTecnicaSegura(
     return { posicao: null, ambiguas: candidatas.length > 1 ? candidatas.length : 0 };
   }
   const unica = candidatas[0]!;
+  if (await fichaFnrhTocada(admin, unica.id)) return { posicao: null, ambiguas: 0 };
+  return { posicao: unica, ambiguas: 0 };
+}
 
-  // Ficha FNRH da posição: LEITURA apenas (a ficha continua sendo do trigger
-  // e do fnrh-submit). Ficha ausente = trigger ainda não rodou = intocada.
+/**
+ * Ficha FNRH do hóspede: LEITURA apenas (a ficha continua sendo do trigger e
+ * do fnrh-submit). Ficha ausente = trigger ainda não rodou = intocada. Qualquer
+ * rascunho/confirmação/lifecycle iniciado = tocada (dados do hóspede mandam).
+ */
+export async function fichaFnrhTocada(admin: SupabaseAdminLike, hospedeId: string): Promise<boolean> {
   const { data: fichas } = await admin
     .from("fnrh_hospedes")
     .select("status, fnrh_lifecycle_status")
-    .eq("hospede_id", unica.id);
-  const fichaTocada = ((fichas ?? []) as Array<{ status?: string | null; fnrh_lifecycle_status?: string | null }>)
-    .some(
-      (f) =>
-        String(f.status ?? "pendente") !== "pendente" ||
-        !FNRH_LIFECYCLE_INTOCADA.has(String(f.fnrh_lifecycle_status ?? "")),
-    );
-  if (fichaTocada) return { posicao: null, ambiguas: 0 };
-  return { posicao: unica, ambiguas: 0 };
+    .eq("hospede_id", hospedeId);
+  return ((fichas ?? []) as Array<{ status?: string | null; fnrh_lifecycle_status?: string | null }>).some(
+    (f) =>
+      String(f.status ?? "pendente") !== "pendente" ||
+      !FNRH_LIFECYCLE_INTOCADA.has(String(f.fnrh_lifecycle_status ?? "")),
+  );
+}
+
+/**
+ * Hóspede JÁ vinculado (reserva_id + pms_external_guest_id): o HITS pode ter
+ * ganhado celular/e-mail depois da materialização. Atualiza SOMENTE
+ * `whatsapp`/`email` de operacional_hospedes, pelas regras de
+ * decidirWhatsappExistente/decidirEmailExistente (nunca rebaixa celular para
+ * fixo; e-mail só preenche vazio), e só se a ficha FNRH ainda está intocada —
+ * ficha tocada = contato do hóspede é o que vale. Nome, principal, status,
+ * ficha, link_token, lifecycle e auditoria não são tocados. Sem envio.
+ * Devolve true se gravou.
+ */
+async function atualizarContatoExistente(
+  admin: SupabaseAdminLike,
+  row: { id: string; email?: string | null; whatsapp?: string | null },
+  guest: { phone: string | null; email: string | null; phoneSource?: "cell" | "phone" | null },
+  log: (msg: string, extra?: Record<string, unknown>) => void,
+): Promise<boolean> {
+  const contatoHits: { whatsapp?: string; email?: string } = {};
+  // `phoneSource === "cell"` = veio de GuestRevenueDto.contactCellPhone: é o
+  // único caso que autoriza trocar um fixo já gravado pelo celular.
+  const whatsapp = decidirWhatsappExistente(row.whatsapp, guest.phone, guest.phoneSource === "cell");
+  if (whatsapp) contatoHits.whatsapp = whatsapp;
+  const email = decidirEmailExistente(row.email, guest.email);
+  if (email) contatoHits.email = email;
+  if (!contatoHits.whatsapp && !contatoHits.email) return false;
+  if (await fichaFnrhTocada(admin, row.id)) return false;
+  const { data, error } = await admin
+    .from("operacional_hospedes")
+    .update(contatoHits)
+    .eq("id", row.id)
+    .select("id");
+  if (error) {
+    log("[HITS_MATERIALIZAR] atualização de contato falhou", { code: error.code });
+    return false;
+  }
+  return Array.isArray(data) && data.length === 1;
 }
 
 export async function materializarReservaSincronizada(input: {
@@ -233,21 +285,34 @@ export async function materializarReservaSincronizada(input: {
   //    o hóspede HITS (UPDATE de identificação em operacional_hospedes; a
   //    fnrh_hospedes e o link_token dela ficam como estão). Assim a ocupação
   //    não dobra: 1 PAX declarado + 1 PAX no HITS = 1 hóspede ativo.
-  const hospedes: Array<{ id_entity: string; criado: boolean; posicao_adotada: boolean; ambiguo?: true }> = [];
+  const hospedes: HospedeMaterializado[] = [];
   let posicoesAdotadas = 0;
   let posicoesAmbiguas = 0;
+  let contatosAtualizados = 0;
   for (const guest of synced.guests ?? []) {
     const idEntity = String(guest.externalGuestId ?? "").trim();
     if (!idEntity) continue;
 
     const { data: existente } = await admin
       .from("operacional_hospedes")
-      .select("id")
+      .select("id, email, whatsapp")
       .eq("reserva_id", reserva.id)
       .eq("pms_external_guest_id", idEntity)
       .maybeSingle();
     if (existente) {
-      hospedes.push({ id_entity: idEntity, criado: false, posicao_adotada: false });
+      const atualizado = await atualizarContatoExistente(
+        admin,
+        existente as { id: string; email?: string | null; whatsapp?: string | null },
+        guest,
+        log,
+      );
+      if (atualizado) contatosAtualizados += 1;
+      hospedes.push({
+        id_entity: idEntity,
+        criado: false,
+        posicao_adotada: false,
+        ...(atualizado ? { contato_atualizado: true as const } : {}),
+      });
       continue;
     }
 
@@ -352,6 +417,7 @@ export async function materializarReservaSincronizada(input: {
     financeiro: { pagamento_status: synced.paymentStatus, backfilled: financeiroBackfilled },
     hospedes,
     hospedes_total: hospedes.length,
+    contatos_atualizados: contatosAtualizados,
     ocupacao: {
       declarada_hits: Number(synced.totalGuests) || 1,
       hospedes_ativos: hospedesAtivos,
@@ -360,5 +426,83 @@ export async function materializarReservaSincronizada(input: {
       posicoes_ambiguas: posicoesAmbiguas,
     },
     intervencao_manual: posicoesAmbiguas > 0,
+  };
+}
+
+/**
+ * RECONCILIAÇÃO DE CONTATO — reserva HITS **já materializada**.
+ *
+ * Caminho dedicado e deliberadamente estreito: não cria reserva, não cria
+ * hóspede, não cria posição, não toca financeiro, ocupação, ficha FNRH,
+ * link_token, lifecycle, nome, documento, `principal`, status operacional nem
+ * auditoria. A ÚNICA escrita possível é `operacional_hospedes.whatsapp` e
+ * `operacional_hospedes.email`, pelas regras de `hits-contato` (celular oficial
+ * substitui fixo; celular nunca é rebaixado; e-mail só preenche vazio) e
+ * somente enquanto a ficha FNRH do hóspede continuar intocada.
+ *
+ * Sem rede: o `synced` já chega enriquecido pelo guest master. Sem envio.
+ */
+export type ReconciliacaoContatoResultado = {
+  ok: boolean;
+  reserva_id: string | null;
+  hospedes_avaliados: number;
+  contatos_atualizados: number;
+};
+
+export async function reconciliarContatosDaReserva(input: {
+  admin: SupabaseAdminLike;
+  externalId: string;
+  synced: SyncedReservation;
+  log?: (msg: string, extra?: Record<string, unknown>) => void;
+}): Promise<ReconciliacaoContatoResultado> {
+  const { admin, externalId, synced } = input;
+  const log = input.log ?? (() => {});
+  const vazio: ReconciliacaoContatoResultado = {
+    ok: true,
+    reserva_id: null,
+    hospedes_avaliados: 0,
+    contatos_atualizados: 0,
+  };
+
+  const { data: reserva } = await admin
+    .from("operacional_reservas")
+    .select("id")
+    .eq("origem_externa", ORIGEM_HITS)
+    .eq("external_reservation_id", externalId)
+    .maybeSingle();
+  const reservaId = (reserva as { id?: string } | null)?.id;
+  // Reserva ainda não materializada não é assunto desta função: quem cria é a
+  // materialização, com o fluxo completo.
+  if (!reservaId) return vazio;
+
+  let avaliados = 0;
+  let atualizados = 0;
+  for (const guest of synced.guests ?? []) {
+    const idEntity = String(guest.externalGuestId ?? "").trim();
+    if (!idEntity) continue;
+    if (!String(guest.phone ?? "").trim() && !String(guest.email ?? "").trim()) continue;
+
+    const { data: existente } = await admin
+      .from("operacional_hospedes")
+      .select("id, email, whatsapp")
+      .eq("reserva_id", reservaId)
+      .eq("pms_external_guest_id", idEntity)
+      .maybeSingle();
+    if (!existente) continue;
+    avaliados += 1;
+    const mudou = await atualizarContatoExistente(
+      admin,
+      existente as { id: string; email?: string | null; whatsapp?: string | null },
+      guest,
+      log,
+    );
+    if (mudou) atualizados += 1;
+  }
+
+  return {
+    ok: true,
+    reserva_id: reservaId,
+    hospedes_avaliados: avaliados,
+    contatos_atualizados: atualizados,
   };
 }

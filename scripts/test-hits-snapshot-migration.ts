@@ -169,15 +169,14 @@ function main() {
     assert.match(edge, /HITS_SNAPSHOT_WRITE_ENV/);
     assert.match(edge, /SUPABASE_SERVICE_ROLE_KEY/);
     assert.match(edge, /if \(req\.method !== "GET"\)/, "continua GET-only");
-    // Única leitura direta permitida: o cursor da incremental (select em
-    // hits_snapshot_sync_state). Escrita continua só por RPC.
-    // Leituras diretas permitidas: cursor da incremental e existência local
-    // (materialização automática). Escrita continua só por RPC/helper.
+    // Única leitura direta da Edge: o cursor da incremental (select em
+    // hits_snapshot_sync_state). A existência local e a escrita operacional
+    // vivem no módulo de ciclo/helper compartilhado. Snapshot: só por RPC.
     const froms = edge.match(/\.from\("([^"]+)"\)/g) ?? [];
     assert.deepEqual(
       [...new Set(froms)].sort(),
-      ['.from("hits_snapshot_sync_state")', '.from("operacional_reservas")'],
-      "Edge só lê estado do snapshot e existência em operacional_reservas",
+      ['.from("hits_snapshot_sync_state")'],
+      "Edge só lê o estado do snapshot; o resto é pelo módulo compartilhado",
     );
     assert.doesNotMatch(edge, /\.insert\(|\.update\(|\.delete\(|\.upsert\(/, "Edge não escreve em tabela direto: só RPC");
     // A Edge só CONSULTA existência em operacional_reservas (materialização

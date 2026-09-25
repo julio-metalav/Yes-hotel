@@ -321,6 +321,34 @@ Uso tecnico esperado:
 - identificar disponibilidade de contato para FNRH e mensagens
 - sustentar consolidacao de hospedes e documentos no Yes
 
+#### 8.4.1 Celular: so existe no cadastro do hospede (guest master)
+
+Fonte oficial: Swagger publico HITS (https://api.hitspms.net/swagger/v1/swagger.json).
+
+- `ReservationDetailGuestDto` — hospede dentro do detalhe da reserva
+  (`guests[]`): tem `idEntity`, `contactMail` e `contactPhone`, e **nao tem**
+  `contactCellPhone`.
+- `GuestRevenueDto` — retorno de `GET /Datashare/RevenueManagement/Guests`
+  (parametro `EntityId`; no gateway, `GET /v1/guests?EntityId=…`): tem
+  `entityId`, `contactMail`, `contactPhone` e **`contactCellPhone`**.
+
+Consequencia para o Yes: o celular do hospede **nao pode** ser deduzido do
+detalhe da reserva. Quando ha `idEntity`, o contato operacional
+(WhatsApp/e-mail) e enriquecido pelo guest master:
+
+1. `GuestRevenueDto.contactCellPhone`;
+2. `GuestRevenueDto.contactPhone` (fallback);
+3. `ReservationDetailGuestDto.contactPhone` (fallback quando o guest master
+   nao esta disponivel). E-mail: `contactMail` do guest master, senao o do
+   detalhe.
+
+A consulta e **direcionada** (so reserva nova a materializar e hospede local
+que pode melhorar), deduplicada por `entityId` e limitada por teto e cadencia —
+nunca um GET de hospede para cada reserva do universo. Implementacao:
+`src/lib/integrations/hits/hits-contato.ts`,
+`hits-contato-sync.ts` e `fetchHitsGuestRevenues` em `hits-gateway-read.ts`;
+testes em `scripts/test-hits-contato-preferencia.ts`.
+
 ### 8.5 Contexto adicional
 
 - `notes[]`

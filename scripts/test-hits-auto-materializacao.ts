@@ -198,16 +198,22 @@ async function main() {
 
     const edge = stripComments(read("supabase/functions/hits-reservations-preview/index.ts"));
     assert.match(edge, /HITS_AUTO_MATERIALIZAR_ENABLED/);
-    assert.match(edge, /HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO = 20/);
+    // O teto e a escrita moraram na Edge; agora vivem no módulo de ciclo
+    // compartilhado (hits-contato-sync), usado também pela Edge sob demanda.
+    const ciclo = stripComments(read("src/lib/integrations/hits/hits-contato-sync.ts"));
+    assert.match(ciclo, /HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO = 20/);
+    assert.match(edge, /maxMaterializacoes: HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO/);
     assert.match(edge, /if \(autoMaterializarEnabled && run\.snapshot\.persisted\)/, "só após snapshot gravado e só com a trava");
-    assert.match(edge, /materializarNovasDoCiclo\(admin\.admin, result\.rows, detalhes\)/);
-    assert.match(edge, /\.filter\(\(r\) => r\.status_reserva !== "cancelada"\)/, "só ativas");
-    assert.match(edge, /\.from\("operacional_reservas"\)\s*\.select\("external_reservation_id"\)/, "existência por SELECT");
-    assert.doesNotMatch(edge, /\.from\("operacional_reservas"\)\s*\.(insert|update|delete|upsert)\(/, "Edge não escreve direto");
+    assert.match(edge, /executarCicloContatoEMaterializacao\(\{[\s\S]*?admin: admin\.admin,[\s\S]*?rows: result\.rows,[\s\S]*?detalhes,/, "mesmas entradas do ciclo");
+    assert.match(ciclo, /\.filter\(\(r\) => r\.status_reserva !== "cancelada"\)/, "só ativas");
+    assert.match(ciclo, /\.from\("operacional_reservas"\)\s*\.select\("id, external_reservation_id"\)/, "existência por SELECT");
+    assert.doesNotMatch(edge, /\.from\("[a-z_]+"\)\s*\.(insert|update|delete|upsert)\(/, "Edge não escreve direto");
+    assert.doesNotMatch(ciclo, /\.from\("operacional_reservas"\)\s*\.(insert|update|delete|upsert)\(/, "ciclo escreve só pelo helper");
     assert.match(edge, /onDetail/);
     assert.doesNotMatch(edge, /send-fnrh-links|send-senha|digisac|resend|notify-fnrh/i);
     const fetches = edge.match(/await fetch\(/g) ?? [];
     assert.equal(fetches.length, 0, "a Edge de preview não faz fetch direto (a leitura é o leitor cadenciado)");
+    assert.doesNotMatch(ciclo, /fetch\(/, "o ciclo recebe o leitor injetado: nenhuma rede própria");
     ok("Edge preview: gancho só com trava, só ativas, detalhe reaproveitado (zero GET extra), sem envio");
 
     const leitor = stripComments(read("src/lib/integrations/hits/hits-gateway-read.ts"));
@@ -375,6 +381,97 @@ async function main() {
     assert.equal(ativos(dbP).length, 2, "2 PAX + posição adotada = 2 ativos, não 3");
     assert.equal(dbP.hospedes.filter((h) => h.pms_external_guest_id === "4245")[0]!.principal, false);
     ok("2º PAX que aparece depois adota a única posição restante: ocupação fecha em 2, não 3");
+  }
+
+  console.log("\n== E. Contato de hóspede JÁ vinculado: celular > fixo, e-mail só preenche vazio ==");
+  {
+    const FIXO = "+55 (67) 3321-4567";
+    const CEL = "+55 (67) 99123-4567";
+    const CEL_LOCAL = "(67) 98888-0000";
+    const EMAIL = "camila.exemplo@example.com";
+    const g4300 = (phone: string | null, email: string | null) =>
+      ({ externalGuestId: "4300", name: "Camila Exemplo", isPrincipal: true, isMinor: null, phone, email });
+    const s3490 = (phone: string | null, email: string | null) =>
+      synced({ externalReservationId: "3490", apartmentCode: "12", totalGuests: 1, guests: [g4300(phone, email)], phone, email });
+    const escritasFicha = (db: ReturnType<typeof fakeDb>) => db.writes.filter((w) => w.table === "fnrh_hospedes").length;
+    function dbCom(hospede: Record<string, unknown>, ficha: Record<string, unknown> = {}) {
+      const db = fakeDb();
+      db.reservas.push({ id: "res-3490", origem_externa: "hits", external_reservation_id: "3490", reservation_balance_due: 0, pagamento_status: "pago" });
+      db.hospedes.push({ id: "h-4300", reserva_id: "res-3490", nome: "Camila Exemplo", principal: true, status_operacional: "aguardando_contato", origem_cadastro: "existente_incompleto", pms_external_guest_id: "4300", email: "", whatsapp: "", ...hospede });
+      db.fichas.push({ id: "f-4300", reserva_id: "res-3490", hospede_id: "h-4300", status: "pendente", fnrh_lifecycle_status: null, link_token: "tok-4300", ...ficha });
+      return db;
+    }
+    const updatesHospede = (db: ReturnType<typeof fakeDb>) => db.writes.filter((w) => w.table === "operacional_hospedes" && w.op === "update");
+    const inserts = (db: ReturnType<typeof fakeDb>) => db.writes.filter((w) => w.op === "insert").length;
+
+    // 6. local vazio, HITS celular → preenche whatsapp
+    {
+      const db = dbCom({ whatsapp: "" });
+      const r = await materializarReservaSincronizada({ admin: db.admin, externalId: "3490", synced: s3490(CEL, null) });
+      assert.equal(r.ok, true);
+      if (r.ok) { assert.deepEqual(r.hospedes, [{ id_entity: "4300", criado: false, posicao_adotada: false, contato_atualizado: true }]); assert.equal(r.contatos_atualizados, 1); }
+      assert.equal(db.hospedes[0]!.whatsapp, CEL);
+      assert.deepEqual(Object.keys(updatesHospede(db)[0]!.payload as object), ["whatsapp"], "update só com whatsapp");
+      assert.equal(inserts(db), 0);
+      ok("6. local vazio + HITS celular → whatsapp preenchido (update só de whatsapp)");
+    }
+    // 7. local fixo, HITS celular → troca pelo celular (caso Camila)
+    {
+      const db = dbCom({ whatsapp: FIXO });
+      const r = await materializarReservaSincronizada({ admin: db.admin, externalId: "3490", synced: s3490(CEL, null) });
+      assert.equal(r.ok && r.contatos_atualizados, 1);
+      assert.equal(db.hospedes[0]!.whatsapp, CEL);
+      assert.equal(db.hospedes[0]!.nome, "Camila Exemplo");
+      assert.equal(db.hospedes[0]!.status_operacional, "aguardando_contato", "status não é tocado pela atualização de contato");
+      ok("7. local fixo + HITS celular → whatsapp trocado pelo celular; nome/status intocados");
+    }
+    // 8. local celular, HITS só fixo → NÃO rebaixa
+    {
+      const db = dbCom({ whatsapp: CEL_LOCAL });
+      const r = await materializarReservaSincronizada({ admin: db.admin, externalId: "3490", synced: s3490(FIXO, null) });
+      assert.equal(r.ok && r.contatos_atualizados, 0);
+      assert.equal(db.hospedes[0]!.whatsapp, CEL_LOCAL);
+      assert.equal(updatesHospede(db).length, 0);
+      ok("8. local celular + HITS fixo → não rebaixa (nenhum update)");
+    }
+    // 9. iguais → nenhum update
+    {
+      const db = dbCom({ whatsapp: "67991234567", email: EMAIL });
+      const r = await materializarReservaSincronizada({ admin: db.admin, externalId: "3490", synced: s3490(CEL, EMAIL) });
+      assert.equal(r.ok && r.contatos_atualizados, 0);
+      assert.equal(updatesHospede(db).length, 0, "mesmo número (formatos diferentes) e mesmo e-mail → no-op");
+      assert.equal(db.hospedes[0]!.whatsapp, "67991234567");
+      ok("9. local == HITS (celular em outro formato, mesmo e-mail) → nenhum update");
+    }
+    // 10. e-mail novo no HITS com local vazio → atualiza; e-mail local diferente → não troca
+    {
+      const db = dbCom({ whatsapp: CEL_LOCAL, email: "" });
+      const r = await materializarReservaSincronizada({ admin: db.admin, externalId: "3490", synced: s3490(CEL, EMAIL) });
+      assert.equal(r.ok && r.contatos_atualizados, 1);
+      assert.equal(db.hospedes[0]!.email, EMAIL);
+      assert.deepEqual(Object.keys(updatesHospede(db)[0]!.payload as object), ["email"]);
+      const db2 = dbCom({ whatsapp: CEL_LOCAL, email: "outro@example.com" });
+      await materializarReservaSincronizada({ admin: db2.admin, externalId: "3490", synced: s3490(CEL, EMAIL) });
+      assert.equal(db2.hospedes[0]!.email, "outro@example.com");
+      assert.equal(updatesHospede(db2).length, 0);
+      ok("10. e-mail HITS com local vazio → preenchido; e-mail local diferente → mantido");
+    }
+    // 11. não toca FNRH nem lifecycle; ficha tocada → não mexe no contato
+    {
+      const db = dbCom({ whatsapp: FIXO, email: "" });
+      const antesFicha = JSON.stringify(db.fichas[0]);
+      await materializarReservaSincronizada({ admin: db.admin, externalId: "3490", synced: s3490(CEL, EMAIL) });
+      assert.equal(JSON.stringify(db.fichas[0]), antesFicha);
+      assert.equal(escritasFicha(db), 0);
+      for (const [motivo, patchFicha] of [["rascunho", { status: "rascunho" }], ["confirmada", { status: "confirmado_hospede" }], ["lifecycle completed", { fnrh_lifecycle_status: "completed" }]] as const) {
+        const d = dbCom({ whatsapp: FIXO, email: "" }, patchFicha);
+        const r = await materializarReservaSincronizada({ admin: d.admin, externalId: "3490", synced: s3490(CEL, EMAIL) });
+        assert.equal(r.ok && r.contatos_atualizados, 0, motivo);
+        assert.equal(d.hospedes[0]!.whatsapp, FIXO, motivo + ": contato do hóspede (ficha tocada) prevalece");
+        assert.equal(updatesHospede(d).length, 0, motivo);
+      }
+      ok("11. ficha/link_token/lifecycle intocados; ficha tocada (rascunho/confirmada/completed) → contato não é sobrescrito");
+    }
   }
 
   console.log("\n== D. FNRH concluída: nenhum sinal HITS inventado ==");

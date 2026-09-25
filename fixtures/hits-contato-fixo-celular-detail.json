@@ -1,0 +1,63 @@
+{
+  "_comentario": "FICTÍCIA. Forma de ReservationDetailDto (contrato oficial HITS): guests[] é ReservationDetailGuestDto e NÃO tem contactCellPhone — só contactPhone (aqui, um FIXO) e contactMail. O celular desta mesma pessoa está em fixtures/hits-contato-guest-revenue.json (GuestRevenueDto, GET /v1/guests?EntityId=4272). Nome, números e e-mail inventados; nenhum dado real.",
+  "idReservation": 3490,
+  "contactName": "Hóspede Exemplo",
+  "contact1": "hospede.exemplo@example.com",
+  "contact2": "+55 (67) 3321-4567",
+  "dateAdd": "2026-09-20T10:00:00",
+  "dateUp": "2026-09-25T09:30:00",
+  "notes": [],
+  "rooms": [
+    {
+      "idRoom": 12,
+      "code": "12",
+      "checkIn": "2026-09-26",
+      "checkOut": "2026-09-28",
+      "idRoomType": 1,
+      "roomTypeName": "Standard",
+      "amount": 800,
+      "status": 1,
+      "pax": 1,
+      "chd1": 0,
+      "chd2": 0,
+      "chd3": 0,
+      "ratePlanId": 1,
+      "ratePlanName": "Tarifa Balcão",
+      "mealPlanDesc": "Café da Manhã",
+      "requirementReservation": [],
+      "reservationRoomId": 1
+    }
+  ],
+  "guests": [
+    {
+      "idEntity": 4272,
+      "name": "Hóspede Exemplo",
+      "idRoom": 12,
+      "contactMail": "",
+      "contactPhone": "+55 (67) 3321-4567",
+      "main": true,
+      "federalRegistrationNumber": "00000000000",
+      "documentType": "CPF",
+      "notes": [],
+      "gender": "F",
+      "birthDate": "1990-01-01",
+      "mainDocType": "CPF",
+      "docCpfCnpjPassport": "00000000000",
+      "addressZipCode": "79000000",
+      "addressCountry": "BR",
+      "addressStateCode": "MS",
+      "addressStateName": "Mato Grosso do Sul",
+      "addressCity": "Campo Grande",
+      "addressNeighborhood": "Centro",
+      "addressAddress": "Rua Exemplo",
+      "addressDetails": "",
+      "addressNumber": "100"
+    }
+  ],
+  "commissions": [],
+  "revenueManagement": null,
+  "creditState": null,
+  "reservationTotalAmount": 800,
+  "reservationBalanceDue": 0,
+  "chargeTags": []
+}

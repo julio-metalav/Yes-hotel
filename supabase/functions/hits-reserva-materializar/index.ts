@@ -23,8 +23,11 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
   assertHitsGatewayReadReady,
+  fetchHitsGuestRevenues,
   getHitsGatewayReadConfig,
+  HITS_GUEST_LOOKUP_MAX_POR_CICLO,
 } from "../../../src/lib/integrations/hits/hits-gateway-read.ts";
+import { aplicarContatoOficialNaReserva } from "../../../src/lib/integrations/hits/hits-contato.ts";
 import { normalizeHitsDetailToSynced } from "../../../src/lib/integrations/hits/normalize-hits-detail-to-synced.ts";
 import { materializarReservaSincronizada } from "../../../src/lib/integrations/hits/hits-materializar.ts";
 
@@ -122,6 +125,33 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "detalhe_hits_invalido" }, 502);
   }
 
+  // 1b. Contato oficial: o detalhe da reserva (ReservationDetailGuestDto) não
+  //     tem celular — ele só existe em GuestRevenueDto. Um GET por hóspede COM
+  //     idEntity desta reserva (sequencial, cadenciado, com teto), para que a
+  //     materialização sob demanda também não grave o fixo havendo celular.
+  //     Falha aqui não derruba nada: cai no fallback contactPhone/contactMail.
+  const entityIds = (synced.guests ?? [])
+    .map((g) => String(g.externalGuestId ?? "").trim())
+    .filter(Boolean);
+  let enriquecimento = { solicitados: entityIds.length, lidos: 0, falhas: 0 };
+  if (entityIds.length > 0) {
+    try {
+      const guests = await fetchHitsGuestRevenues({
+        config: gate.config,
+        entityIds,
+        maxLookups: HITS_GUEST_LOOKUP_MAX_POR_CICLO,
+      });
+      enriquecimento = {
+        solicitados: entityIds.length,
+        lidos: guests.lidos,
+        falhas: guests.falhas,
+      };
+      synced = aplicarContatoOficialNaReserva(synced, guests.porEntityId);
+    } catch (_e) {
+      enriquecimento = { solicitados: entityIds.length, lidos: 0, falhas: entityIds.length };
+    }
+  }
+
   // 2–4. Mesma escrita da materialização automática (helper compartilhado).
   const out = await materializarReservaSincronizada({
     admin,
@@ -142,6 +172,7 @@ Deno.serve(async (req: Request) => {
     financeiro: out.financeiro,
     hospedes: out.hospedes,
     hospedes_total: out.hospedes_total,
+    enriquecimento,
     ocupacao: out.ocupacao,
   });
 });
