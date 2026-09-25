@@ -144,13 +144,25 @@ function main() {
 
   console.log("\n== 4. Não sobrescreve FNRH nem cadastro existente ==");
   {
-    // Dois updates permitidos, ambos guardados: (1) backfill FINANCEIRO de
-    // reserva materializada antes desta versão, por reservation_balance_due IS
-    // NULL (uma vez só); (2) adoção da posição técnica intocada ("Novo hóspede"
-    // sem idEntity) pelo PAX HITS — só identificação, guardada no próprio
-    // UPDATE por pms_external_guest_id IS NULL + nome/status técnicos.
+    // Três updates permitidos, todos guardados: (1) contato de hóspede JÁ
+    // vinculado — só email/whatsapp, pelas regras de hits-contato (celular
+    // nunca é rebaixado; e-mail só preenche vazio) e só com ficha FNRH intocada;
+    // (2) backfill FINANCEIRO de reserva materializada antes desta versão, por
+    // reservation_balance_due IS NULL (uma vez só); (3) adoção da posição
+    // técnica intocada ("Novo hóspede" sem idEntity) pelo PAX HITS — só
+    // identificação, guardada no próprio UPDATE por pms_external_guest_id IS
+    // NULL + nome/status técnicos.
     const updates = [...edgeCode.matchAll(/\.update\(([^)]*)\)/g)].map((m) => m[1]!.trim());
-    assert.deepEqual(updates, ["financeiroHits", "identificacaoHits"], "só os dois updates guardados");
+    assert.deepEqual(updates, ["contatoHits", "financeiroHits", "identificacaoHits"], "só os três updates guardados");
+    const iniContato = edgeCode.indexOf("async function atualizarContatoExistente(");
+    const fimContato = edgeCode.indexOf("\n}\n", iniContato);
+    const contato = edgeCode.slice(iniContato, fimContato);
+    assert.match(contato, /const contatoHits: \{ whatsapp\?: string; email\?: string \} = \{\};/, "patch de contato só com whatsapp/email");
+    assert.match(contato, /if \(await fichaFnrhTocada\(admin, row\.id\)\) return false;/, "ficha tocada → não mexe no contato");
+    assert.match(contato, /\.update\(contatoHits\)\s*\.eq\("id", row\.id\)\s*\.select\("id"\)/);
+    for (const proibido of ["nome", "principal", "status_operacional", "fnrh_lifecycle_status", "link_token", "confirmation_source", "completed_at", "documento", "origem_cadastro"]) {
+      assert.equal(new RegExp("\\b" + proibido + "\\s*:").test(contato), false, "contato não toca " + proibido);
+    }
     assert.match(edgeCode, /\.update\(financeiroHits\)\s*\.eq\("id", reserva\.id\)\s*\.is\("reservation_balance_due", null\)/);
     assert.match(edgeCode, /if \(!reservaCriada\) \{[\s\S]*?\.update\(financeiroHits\)/, "backfill só para reserva já existente");
     assert.match(

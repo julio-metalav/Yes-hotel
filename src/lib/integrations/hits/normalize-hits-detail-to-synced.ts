@@ -4,6 +4,7 @@
  * Classificação financeira via reservation-financial-classification (única fonte).
  */
 
+import { classificarTelefoneBr, escolherTelefonePreferido } from "./hits-contato.ts";
 import type {
   SyncedGuest,
   SyncedPaymentStatus,
@@ -107,7 +108,8 @@ export function normalizeHitsDetailToSynced(
         g.main === true ||
         (idx === 0 && !guestsRaw.some((x) => (x as Record<string, unknown>)?.main === true)),
       isMinor: null,
-      phone: trimOrNull(g.contactPhone),
+      // Um campo pode trazer mais de um número; entre eles, celular primeiro.
+      phone: escolherTelefonePreferido([g.contactPhone]),
       email: trimOrNull(g.contactMail),
       birthDate: trimOrNull(g.birthDate),
       gender: trimOrNull(g.gender),
@@ -128,6 +130,18 @@ export function normalizeHitsDetailToSynced(
       phone: trimOrNull(detail.contact2),
       email: trimOrNull(detail.contact1),
     } satisfies SyncedGuest);
+
+  // Celular antes de fixo para o PAX principal: quando o telefone do hóspede
+  // não é celular e o contato da reserva (contact2) É um celular brasileiro,
+  // o celular vence. Fixo em contact2 não substitui nada (regra só sobe, nunca
+  // rebaixa); telefone único continua como veio.
+  if (
+    principal.externalGuestId != null &&
+    classificarTelefoneBr(principal.phone) !== "celular" &&
+    classificarTelefoneBr(detail.contact2) === "celular"
+  ) {
+    principal.phone = escolherTelefonePreferido([principal.phone, detail.contact2]);
+  }
 
   const totalFromPax =
     room.pax != null && Number.isFinite(Number(room.pax)) ? Number(room.pax) : null;
