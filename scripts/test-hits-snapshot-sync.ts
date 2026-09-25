@@ -215,11 +215,16 @@ async function main() {
       persisted: true,
       batch_id: "b-1",
       status: "ok",
+      returned_count: 2,
+      detail_count: 2,
       rows_upserted: 2,
+      rows_changed: 0,
       rows_removed: 1,
       failed_count: 0,
       start_error: null,
     });
+    assert.equal(apply.p_returned_count, 2, "telemetria: ids devolvidos");
+    assert.equal(apply.p_detail_count, 2, "telemetria: detalhes lidos");
     ok("sucesso: start, uma leitura, apply com o lote completo e status ok");
   }
   {

@@ -66,7 +66,25 @@ A resposta da Edge ganha o campo `snapshot` (`persisted`, `batch_id`, `status`,
 
 `last_started_at`, `last_started_batch_id`, `last_finished_at`, `last_status`
 (`running|ok|partial|error`), `last_error`, `last_stopped_reason`, `last_rows_count`,
-`last_failed_count`, `last_success_at`, `last_success_batch_id`, `last_success_rows_count`.
+`last_failed_count`, `last_success_at`, `last_success_batch_id`, `last_success_rows_count`,
+`last_cursor_at` e, desde `20260927090000_hits_snapshot_telemetria.sql`, os contadores por etapa.
+
+**Telemetria do ciclo (semântica inequívoca).** `last_rows_count` **não** é "reservas alteradas": na
+incremental a mesma reserva volta em vários ciclos e a linha é reenviada mesmo idêntica.
+
+| campo | significado |
+|---|---|
+| `last_rows_count` | COMPATIBILIDADE: linhas processadas/submetidas (upsertadas) no ciclo, idênticas incluídas (= `last_upserted_count`) |
+| `last_success_rows_count` | COMPATIBILIDADE: mesmo valor no último ciclo ok/partial |
+| `last_returned_count` | ids únicos devolvidos pela listagem HITS (após dedupe) = detalhes lidos + falhas |
+| `last_detail_count` | detalhes HITS lidos com sucesso (linhas candidatas + canceladas explícitas) |
+| `last_upserted_count` | linhas enviadas/upsertadas no snapshot |
+| `last_changed_count` | linhas cujo **conteúdo funcional realmente mudou**: nova, ou `apartamento`/`hospede_principal`/`check_in`/`check_out`/`status_reserva`/`ciclo_hits`/`total_hospedes` diferentes do armazenado (comparação feita pela RPC antes do upsert; `batch_id`/`last_seen_at`/`updated_at` não contam) |
+| `last_removed_count` | removidas do snapshot (completa: ausentes do lote e não falhas; incremental: canceladas explícitas) |
+| `last_failed_count` | detalhes que falharam no ciclo |
+
+A resposta/log da Edge expõe o mesmo em `snapshot.returned_count`, `detail_count`, `rows_upserted`,
+`rows_changed`, `rows_removed`, `failed_count`.
 
 ### RPCs (SECURITY DEFINER, `search_path=''`, EXECUTE **só** `service_role`)
 
