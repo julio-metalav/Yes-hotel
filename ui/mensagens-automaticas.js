@@ -315,6 +315,61 @@
     });
   }
 
+  // O casco da página nasce com `hidden` no HTML, como em todas as telas
+  // operacionais: quem o revela é o guard de acesso. Esta tela não tinha guard
+  // nenhum, então o `hidden` nunca saía e a página ficava em branco -- sem
+  // erro no console, porque nada falhava; só não havia nada visível.
+  var accessEl = document.querySelector("#access-state");
+  var panelEl = document.querySelector("#content-panel");
+
+  function mostrarAcesso(titulo, mensagem) {
+    if (!accessEl) return;
+    if (panelEl) panelEl.classList.add("hidden");
+    accessEl.classList.remove("hidden");
+    accessEl.replaceChildren();
+    var h = document.createElement("h2");
+    h.textContent = titulo;
+    var p = document.createElement("p");
+    p.textContent = mensagem;
+    var a = document.createElement("a");
+    a.className = "primary-link";
+    a.setAttribute("href", "./usuarios-login-mvp.html");
+    a.textContent = "Ir para a tela inicial";
+    accessEl.append(h, p, a);
+  }
+
+  async function requireAcesso() {
+    var auth = getAuth();
+    if (!auth || !auth.isConfigured()) {
+      mostrarAcesso(
+        "Autenticação indisponível",
+        (auth && auth.getConfigError && auth.getConfigError()) || "Configure o Supabase."
+      );
+      return false;
+    }
+    var user = await auth.getCurrentUser();
+    if (!user) {
+      mostrarAcesso("Login necessário", "Entre com um usuário interno.");
+      return false;
+    }
+    var navPolicy = window.YesHotelNavPolicy;
+    if (!navPolicy || !navPolicy.isRouteAuthorized(user.role, "mensagens")) {
+      mostrarAcesso("Acesso negado", "Seu perfil não acessa as mensagens automáticas.");
+      return false;
+    }
+
+    if (accessEl) accessEl.classList.add("hidden");
+    if (panelEl) panelEl.classList.remove("hidden");
+
+    var sidebarNavElement = document.querySelector(
+      '.yes-sidebar nav[aria-label="Navegação principal"]'
+    );
+    if (navPolicy.renderSidebarNav) {
+      navPolicy.renderSidebarNav(sidebarNavElement, user.role, "mensagens");
+    }
+    return true;
+  }
+
   async function carregar() {
     var auth = getAuth();
     var supabase = auth && auth.getSupabaseClient();
@@ -361,5 +416,12 @@
     render();
   }
 
-  void carregar();
+  (async function boot() {
+    var liberado = await requireAcesso();
+    if (!liberado) return;
+    // Estrutura primeiro, dados depois: a lista de mensagens aparece mesmo que
+    // a leitura do banco demore ou falhe.
+    render();
+    await carregar();
+  })();
 })();
