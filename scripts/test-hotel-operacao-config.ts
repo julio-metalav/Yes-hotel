@@ -50,6 +50,7 @@ const telaJs = ler("ui/dados-do-hotel.js");
 const telaHtml = ler("ui/dados-do-hotel.html");
 const navPolicy = ler("ui/yes-nav-policy.js");
 const indexHtml = ler("ui/index.html");
+const loginHtml = ler("ui/usuarios-login-mvp.html");
 const mensagensJs = ler("ui/mensagens-automaticas.js");
 const mensagensPolicy = ler("ui/yes-mensagens-policy.js");
 const mensagensSql = ler("supabase/migrations/20261003090000_mensagens_automaticas_templates.sql");
@@ -200,6 +201,31 @@ console.log("\n== Entrada em Configurações, com a mesma matriz de perfis ==");
   assert.match(telaHtml, /editar uma mensagem n(ã|a)o altera/i);
   assert.match(ler("ui/mensagens-automaticas.html"), /dados-do-hotel\.html/);
   ok("card, rota, guard e aviso cruzado entre as duas telas");
+}
+
+console.log("\n== As duas paginas de entrada mostram os mesmos cards ==");
+{
+  // index.html e usuarios-login-mvp.html sao paginas de entrada duplicadas e a
+  // servida em producao e a segunda. O PR #140 adicionou os cards so na
+  // primeira: em PROD, Configuracoes continuou com os tres cards antigos.
+  // Divergir aqui nao quebra teste nenhum -- quebra a tela do usuario.
+  const bloco = (html: string) => {
+    const ini = html.indexOf('id="view-configuracoes"');
+    assert.ok(ini > 0, "secao de Configuracoes ausente");
+    return html.slice(ini, html.indexOf("</nav>", ini));
+  };
+  assert.equal(
+    bloco(loginHtml),
+    bloco(indexHtml),
+    "Configuracoes divergiu entre index.html e usuarios-login-mvp.html",
+  );
+  for (const html of [indexHtml, loginHtml]) {
+    assert.match(html, /data-nav="hotel"/);
+    assert.match(html, /data-nav="mensagens"/);
+    assert.match(html, /href="\.\/dados-do-hotel\.html"/);
+    assert.match(html, /href="\.\/mensagens-automaticas\.html"/);
+  }
+  ok("Configuracoes identica nas duas paginas de entrada");
 }
 
 async function testeContexto() {
