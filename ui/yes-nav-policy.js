@@ -50,8 +50,8 @@
   // Rotas (routeKey) que cada perfil pode abrir diretamente por URL — usada
   // pelo guard de cada página, não só para esconder itens de menu.
   const ROUTE_ACCESS = {
-    admin: ["inicio", "checkin", "cafe", "gestao", "financeiro", "demandas", "wifi", "geo", "usuarios"],
-    recepcao: ["inicio", "checkin", "cafe", "gestao", "financeiro", "demandas", "wifi", "geo"],
+    admin: ["inicio", "checkin", "cafe", "gestao", "financeiro", "demandas", "wifi", "geo", "hotel", "usuarios"],
+    recepcao: ["inicio", "checkin", "cafe", "gestao", "financeiro", "demandas", "wifi", "geo", "hotel"],
     cafe: ["cafe", "demandas"],
     hits_consulta: ["checkin"],
   };

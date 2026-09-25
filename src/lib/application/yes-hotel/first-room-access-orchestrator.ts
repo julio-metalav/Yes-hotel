@@ -110,6 +110,10 @@ async function resolveDisplayContext(
   parking_spot?: string | null;
   wifi_ssid?: string | null;
   wifi_password?: string | null;
+  checkout_horario?: string | null;
+  telefone_recepcao?: string | null;
+  data_entrada?: string | null;
+  data_saida?: string | null;
 }> {
   if (ports.reservationDisplay) {
     return ports.reservationDisplay.getContext(reservationId);
@@ -190,6 +194,13 @@ export async function processFirstRoomAccessEvent(
           parking_spot: ctx.parking_spot,
           wifi_ssid: ctx.wifi_ssid,
           wifi_password: ctx.wifi_password,
+          checkout_horario: ctx.checkout_horario,
+          telefone_recepcao: ctx.telefone_recepcao,
+          data_entrada: ctx.data_entrada,
+          data_saida: ctx.data_saida,
+          carregarTemplate: ports.mensagensTemplates
+            ? (chave) => ports.mensagensTemplates!.carregar(chave)
+            : undefined,
           nowIso,
         });
         if (tol.pending_payment_at_start || tol.pending_fnrh_at_start) {
@@ -283,6 +294,13 @@ export async function processFirstRoomAccessEvent(
           parking_spot: ctx.parking_spot,
           wifi_ssid: ctx.wifi_ssid,
           wifi_password: ctx.wifi_password,
+          checkout_horario: ctx.checkout_horario,
+          telefone_recepcao: ctx.telefone_recepcao,
+          data_entrada: ctx.data_entrada,
+          data_saida: ctx.data_saida,
+          carregarTemplate: ports.mensagensTemplates
+            ? (chave) => ports.mensagensTemplates!.carregar(chave)
+            : undefined,
           nowIso,
         });
       }
@@ -462,8 +480,17 @@ export async function processFirstRoomAccessEvent(
         event: eventWrite,
         correlation: correlationWrite,
       });
+      // A RPC devolve `already_started` quando `entrou_no_apto` ja estava true,
+      // mesmo sendo este o primeiro acesso processado. O guard antigo exigia
+      // `processed_no_pending` e, nesse caso, pulava a boas-vindas em silencio
+      // -- foi assim que o hospede abria a porta e nao recebia nada.
+      //
+      // Enfileirar tambem em `already_started` e seguro: a chave de
+      // idempotencia da boas-vindas e por RESERVA e o outbox faz upsert com
+      // ignoreDuplicates, entao reprocessamento nunca gera segunda mensagem.
       if (
-        noPending.status === "processed_no_pending" &&
+        (noPending.status === "processed_no_pending" ||
+          noPending.status === "already_started") &&
         ports.accessOutboxQueue &&
         correlation.reservation_id
       ) {
@@ -493,6 +520,13 @@ export async function processFirstRoomAccessEvent(
           parking_spot: ctx.parking_spot,
           wifi_ssid: ctx.wifi_ssid,
           wifi_password: ctx.wifi_password,
+          checkout_horario: ctx.checkout_horario,
+          telefone_recepcao: ctx.telefone_recepcao,
+          data_entrada: ctx.data_entrada,
+          data_saida: ctx.data_saida,
+          carregarTemplate: ports.mensagensTemplates
+            ? (chave) => ports.mensagensTemplates!.carregar(chave)
+            : undefined,
           nowIso,
         });
       }
@@ -624,8 +658,11 @@ export async function processFirstRoomAccessEvent(
         apartment_number: ctxApt.apartment_number ?? null,
       });
     }
+    // Mesmo motivo do ramo sem pendencia: `already_started` tambem e primeiro
+    // acesso do ponto de vista do hospede. A idempotencia do outbox garante
+    // uma unica mensagem por reserva.
     if (
-      result.status === "grace_started" &&
+      (result.status === "grace_started" || result.status === "already_started") &&
       ports.accessOutboxQueue &&
       correlation.reservation_id
     ) {
@@ -660,6 +697,13 @@ export async function processFirstRoomAccessEvent(
         parking_spot: ctx.parking_spot,
         wifi_ssid: ctx.wifi_ssid,
         wifi_password: ctx.wifi_password,
+        checkout_horario: ctx.checkout_horario,
+        telefone_recepcao: ctx.telefone_recepcao,
+        data_entrada: ctx.data_entrada,
+        data_saida: ctx.data_saida,
+        carregarTemplate: ports.mensagensTemplates
+          ? (chave) => ports.mensagensTemplates!.carregar(chave)
+          : undefined,
         nowIso,
       });
       if (ppdEfetivado) {

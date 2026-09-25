@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yes Hotel — Dados do hotel</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=56" />
+    <style>
+      .hotel-page { max-width: 640px; margin: 0 auto; padding: 1.25rem; }
+      .hotel-page h1 { font-size: 1.35rem; margin: 0 0 0.35rem; }
+      .hotel-page .lead { color: #555; margin: 0 0 1rem; font-size: 0.95rem; }
+      .hotel-aviso { border: 1px solid #e0d5a8; background: #fdf8e6; color: #6b5a12;
+        border-radius: 8px; padding: 0.6rem 0.8rem; font-size: 0.88rem; margin: 0 0 1rem; }
+      .hotel-form { display: grid; gap: 0.9rem; background: #fff; border: 1px solid #dce4e4;
+        border-radius: 14px; padding: 1.1rem; }
+      .hotel-form label { display: grid; gap: 0.3rem; font-size: 0.85rem; min-width: 0; }
+      .hotel-form input { width: 100%; max-width: 100%; min-height: 2.4rem;
+        border: 1px solid #dce4e4; border-radius: 8px; padding: 0.4rem 0.55rem; }
+      .hotel-dica { color: #6b7280; font-size: 0.8rem; }
+      .hotel-form .form-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.25rem; }
+      .hotel-msg { margin-top: 0.75rem; font-size: 0.9rem; }
+      .hotel-msg.ok { color: #0a7a32; }
+      .hotel-msg.err { color: #b42318; }
+      .hotel-rodape { color: #6b7280; font-size: 0.82rem; margin-top: 0.6rem; }
+    </style>
+  </head>
+  <body class="op-body checkin-view">
+    <div id="access-state" class="op-access hidden" aria-live="polite"></div>
+    <div id="content-panel" class="op-app hidden">
+      <aside class="yes-sidebar" aria-label="Áreas operacionais">
+        <div class="yes-sidebar-brand">
+          <img src="./assets/yes-hotel-logo.png" alt="Yes Hotel" width="153" height="89" />
+        </div>
+        <nav aria-label="Navegação principal">
+          <span class="yes-sidebar-label">Áreas operacionais</span>
+          <a href="./usuarios-login-mvp.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 11l9-8 9 8M5 10v10h14V10M10 20v-6h4v6" />
+            </svg>
+            <span>Início</span>
+          </a>
+          <a href="./checkin-operacional-mvp.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
+            </svg>
+            <span>Operação</span>
+          </a>
+          <a href="./cafe-da-manha-mvp.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17 8h1a3 3 0 1 1 0 6h-1M3 8h14v7a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Zm3-6v3M10 2v3M14 2v3" />
+            </svg>
+            <span>Café da manhã</span>
+          </a>
+          <a href="./demandas-mvp.html?escopo=minhas" data-nav="minhas-demandas">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM22 11h-6M22 16h-6" />
+            </svg>
+            <span>Minhas demandas</span>
+          </a>
+          <a href="./demandas-mvp.html" data-nav="demandas">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 2h6v4H9zM8 12h8M8 16h5" />
+            </svg>
+            <span>Demandas</span>
+          </a>
+          <a href="./gestao-saude-hotel.html" data-nav="gestao">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 3v18h18M7 16v-5M12 16V8M17 16v-9" />
+            </svg>
+            <span>Gestão</span>
+          </a>
+          <a href="./financeiro-conciliacao.html" data-nav="financeiro">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v18M4 8h6l-2.5 5H4Zm10 0h6l-2.5 5H14Z" />
+            </svg>
+            <span>Conciliação</span>
+          </a>
+        </nav>
+      </aside>
+      <div class="yes-workspace">
+        <main class="hotel-page">
+          <h1>Dados do hotel</h1>
+          <p class="lead">
+            Valores que o hóspede recebe nas mensagens automáticas. Alterar aqui muda
+            o que é enviado, sem precisar mexer no texto de nenhuma mensagem.
+          </p>
+          <p class="hotel-aviso" role="note">
+            O texto das mensagens usa <code>{{checkout_horario}}</code> e
+            <code>{{telefone_recepcao}}</code>. O valor vem <strong>desta tela</strong>:
+            editar uma mensagem não altera o horário nem o telefone.
+          </p>
+          <form id="hotel-form" class="hotel-form">
+            <label>
+              Horário de check-out
+              <input name="checkout_horario" type="text" inputmode="text" maxlength="8"
+                placeholder="11h" required />
+              <span class="hotel-dica">Como aparece no texto: <code>11h</code>, <code>11h30</code> ou <code>11:00</code>.</span>
+            </label>
+            <label>
+              Telefone da recepção
+              <input name="telefone_recepcao" type="text" inputmode="tel" maxlength="24"
+                placeholder="(67) 99668-8886" required />
+              <span class="hotel-dica">Telefone divulgado ao hóspede. Não é o número interno da equipe.</span>
+            </label>
+            <div class="form-actions">
+              <button type="submit" class="op-btn op-btn--primary">Salvar</button>
+            </div>
+          </form>
+          <p id="hotel-msg" class="hotel-msg" role="status"></p>
+          <p id="hotel-rodape" class="hotel-rodape"></p>
+          <p class="hotel-rodape">
+            O horário aqui é informativo para o hóspede. A validade da senha da
+            fechadura continua definida pela regra de operação e não muda nesta tela.
+          </p>
+        </main>
+      </div>
+    </div>
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script defer src="./yes-supabase-config.js"></script>
+    <script defer src="./yes-supabase-auth.js"></script>
+    <script defer src="./yes-nav-policy.js?v=1"></script>
+    <script defer src="./dados-do-hotel.js?v=1"></script>
+  </body>
+</html>
