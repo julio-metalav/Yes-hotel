@@ -297,6 +297,36 @@
   background: var(--op-blue);
 }
 
+/* Conclusão por apartamento: discreto, dentro do bloco de atendimento. */
+.cafe-view .cafe-concluir {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--op-border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--op-blue);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.cafe-view .cafe-concluir:hover:not(:disabled) {
+  background: var(--op-muted);
+  border-color: var(--op-border-strong);
+}
+
+.cafe-view .cafe-concluir:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cafe-view .cafe-concluir:focus-visible {
+  outline: 3px solid rgba(184, 148, 46, 0.45);
+  outline-offset: 2px;
+}
+
 .cafe-view .breakfast-card.has-ppd-alert {
   border-color: rgba(174, 40, 40, 0.45);
   box-shadow: 0 0 0 1px rgba(174, 40, 40, 0.1);
@@ -674,6 +704,14 @@
 
   .cafe-view .progress-track {
     display: none;
+  }
+
+  .cafe-view .cafe-concluir {
+    align-self: stretch;
+    width: 100%;
+    margin-top: 6px;
+    min-height: 36px;
+    text-align: center;
   }
 
   .cafe-view .badges-cell {

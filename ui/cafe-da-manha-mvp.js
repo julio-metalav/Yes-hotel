@@ -267,6 +267,26 @@ function createCard(card) {
   progress.appendChild(bar);
   attendanceCell.append(metrics, progress);
 
+  // Conclusão por apartamento: mesma ação server-side do botão global
+  // ("marcar_todos"), aplicada a ESTA reserva. Só aparece com direito real e
+  // enquanto falta alguém — sem café / não identificado / direito 0 nunca
+  // mostram, e completo também não. Nenhuma regra nova: quem decide o valor
+  // final continua sendo a RPC.
+  const podeConcluir =
+    writable &&
+    policy.canMarkAllCafeAttendance(card.entitlement) &&
+    card.attendedQty < card.entitlement.entitledQty;
+  if (podeConcluir) {
+    const concluir = document.createElement("button");
+    concluir.className = "cafe-concluir";
+    concluir.type = "button";
+    concluir.textContent = "Concluir café da manhã";
+    concluir.dataset.action = "concluir";
+    concluir.dataset.reservationId = card.reservationId;
+    concluir.disabled = writeInFlight;
+    attendanceCell.appendChild(concluir);
+  }
+
   const badgesCell = document.createElement("div");
   badgesCell.className = "badges-cell";
   const paymentCell = document.createElement("div");
@@ -472,6 +492,11 @@ function renderCards() {
       const action = button.dataset.action;
       const card = cafeCards.find((c) => c.reservationId === reservationId);
       if (!card) return;
+      if (action === "concluir") {
+        // Mesma ação do botão global, só que para esta reserva.
+        void persistAttendance(card, null, "marcar_todos");
+        return;
+      }
       const delta = action === "increase" ? 1 : -1;
       // Envia só a ação; o servidor calcula o novo valor e o teto oficial.
       void persistAttendance(card, null, delta > 0 ? "increment" : "decrement");
