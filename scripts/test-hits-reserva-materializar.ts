@@ -46,12 +46,17 @@ function main() {
     assert.match(edgeCode, /\.from\("operacional_hospedes"\)\.insert/);
     ok("insere reserva operacional e hóspedes");
 
-    assert.equal(
-      /\.from\("fnrh_hospedes"\)/.test(edgeCode),
-      false,
+    // fnrh_hospedes: nunca escrita (a ficha é do trigger e do fnrh-submit).
+    // A única leitura permitida é o status da ficha da posição técnica, para
+    // NÃO adotar posição cuja ficha já foi tocada.
+    assert.doesNotMatch(
+      edgeCode,
+      /\.from\("fnrh_hospedes"\)\s*\n?\s*\.(insert|update|upsert|delete)/,
       "a ficha é do trigger, não da Edge",
     );
-    ok("não cria fnrh_hospedes à mão — trigger continua responsável");
+    const leiturasFicha = [...edgeCode.matchAll(/\.from\("fnrh_hospedes"\)\s*\n?\s*\.select\("([^"]*)"\)/g)].map((m) => m[1]);
+    assert.deepEqual(leiturasFicha, ["status, fnrh_lifecycle_status"], "única leitura da ficha: status (guarda da adoção)");
+    ok("não cria nem altera fnrh_hospedes — trigger continua responsável; ficha só é lida como guarda");
 
     const escritas = [
       ...edgeCode.matchAll(/\.from\("([a-z_]+)"\)\s*\n?\s*\.(insert|update|upsert|delete)/g),
@@ -139,16 +144,29 @@ function main() {
 
   console.log("\n== 4. Não sobrescreve FNRH nem cadastro existente ==");
   {
-    // Único update permitido: backfill FINANCEIRO de reserva materializada antes
-    // desta versão, guardado por reservation_balance_due IS NULL (uma vez só).
-    const updates = [...edgeCode.matchAll(/\.update\(([^)]*)\)/g)];
-    assert.equal(updates.length, 1, "exatamente um update, o backfill financeiro");
-    assert.equal(updates[0]![1]!.trim(), "financeiroHits", "update só com o objeto financeiro");
+    // Dois updates permitidos, ambos guardados: (1) backfill FINANCEIRO de
+    // reserva materializada antes desta versão, por reservation_balance_due IS
+    // NULL (uma vez só); (2) adoção da posição técnica intocada ("Novo hóspede"
+    // sem idEntity) pelo PAX HITS — só identificação, guardada no próprio
+    // UPDATE por pms_external_guest_id IS NULL + nome/status técnicos.
+    const updates = [...edgeCode.matchAll(/\.update\(([^)]*)\)/g)].map((m) => m[1]!.trim());
+    assert.deepEqual(updates, ["financeiroHits", "identificacaoHits"], "só os dois updates guardados");
     assert.match(edgeCode, /\.update\(financeiroHits\)\s*\.eq\("id", reserva\.id\)\s*\.is\("reservation_balance_due", null\)/);
     assert.match(edgeCode, /if \(!reservaCriada\) \{[\s\S]*?\.update\(financeiroHits\)/, "backfill só para reserva já existente");
+    assert.match(
+      edgeCode,
+      /\.update\(identificacaoHits\)\s*\.eq\("id", posicao\.id\)\s*\.eq\("reserva_id", reserva\.id\)\s*\.is\("pms_external_guest_id", null\)\s*\.eq\("nome", POSICAO_TECNICA\.nome\)\s*\.eq\("status_operacional", POSICAO_TECNICA\.status_operacional\)/,
+      "adoção guardada: só linha técnica sem idEntity",
+    );
+    const iniIdent = edgeCode.indexOf("const identificacaoHits = {");
+    const identificacao = edgeCode.slice(iniIdent, edgeCode.indexOf("};", iniIdent));
+    for (const proibido of ["fnrh_lifecycle_status", "link_token", "removed_from_reservation", "guest_role", "responsible_guest_id", "fnrh_required", "modo_coleta_fnrh", "tentativas_envio", "ultimo_envio", "created_at", "updated_at"]) {
+      assert.equal(identificacao.includes(proibido), false, "adoção não toca " + proibido);
+    }
+    assert.match(edgeCode, /if \(candidatas\.length !== 1\) \{/, "adota só com EXATAMENTE uma candidata");
     assert.equal(/\.upsert\(/.test(edgeCode), false, "nenhum upsert que sobrescreva");
     assert.equal(/\.delete\(/.test(edgeCode), false, "nenhum delete");
-    ok("só insert de registro ausente + backfill financeiro guardado por saldo nulo — ficha e cadastro intactos");
+    ok("só insert de registro ausente + 2 updates guardados (backfill financeiro; adoção de posição técnica) — ficha e cadastro intactos");
   }
 
   console.log("\n== 5. Datas vêm do HITS ==");
