@@ -82,6 +82,7 @@
     "test:hits-read-cadence": "tsx scripts/test-hits-read-cadence.ts",
     "test:hits-incremental-sync": "tsx scripts/test-hits-incremental-sync.ts",
     "test:hits-auto-materializacao": "tsx scripts/test-hits-auto-materializacao.ts",
+    "test:cafe-meal-plan-hits": "tsx scripts/test-cafe-meal-plan-hits.ts",
     "test:hits-contato-preferencia": "tsx scripts/test-hits-contato-preferencia.ts",
     "test:cafe-universo-hits": "tsx scripts/test-cafe-universo-hits.ts",
     "test:hits-edge:deno-imports": "tsx scripts/test-hits-edge-deno-imports.ts",

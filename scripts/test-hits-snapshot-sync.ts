@@ -40,6 +40,7 @@ const ROW: HitsSandboxReservationRow = {
   status_reserva: "ativa",
   total_hospedes: 2,
   ciclo_hits: "confirmada",
+  meal_plan_desc: "Café da Manhã",
 };
 
 function readResult(
@@ -163,10 +164,11 @@ async function main() {
       "ciclo_hits",
       "external_reservation_id",
       "hospede_principal",
+      "meal_plan_desc",
       "status_reserva",
       "total_hospedes",
     ]);
-    ok("só os 8 campos da tela; contato, documento, financeiro e raw nunca passam");
+    ok("só os 9 campos da tela (com o plano de refeição); contato, documento, financeiro e raw nunca passam");
 
     assert.equal(toSnapshotRows([{ ...ROW, external_reservation_id: " " }]).length, 0);
     assert.equal(toSnapshotRows([{ ...ROW, total_hospedes: 0 }])[0]!.total_hospedes, 1);

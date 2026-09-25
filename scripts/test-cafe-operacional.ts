@@ -158,13 +158,26 @@ console.log("\n== Estadias do café ==");
 
 console.log("\n== Entitlement / KPIs / mark-all ==");
 {
+  // Homologado: "Café da Manhã" (com ou sem acento/caixa) → incluído, direito =
+  // população do HITS. Valor fora da lista → NÃO IDENTIFICADO com direito 0.
   const hits = resolveCafeBreakfastEntitlementFromHits({
     guestCount: 3,
     mealPlanDesc: "Cafe da manha",
   });
-  assert.equal(hits.kind, "nao_mapeado");
-  assert.equal(hits.entitledQty, 0);
-  ok("mapper HITS atual retorna nao_mapeado (sem inventar)");
+  assert.equal(hits.kind, "incluido");
+  assert.equal(hits.entitledQty, 3);
+  const semPlano = resolveCafeBreakfastEntitlementFromHits({
+    guestCount: 3,
+    mealPlanDesc: "Nenhum",
+  });
+  assert.equal(semPlano.kind, "sem_cafe");
+  assert.equal(semPlano.entitledQty, 0);
+  for (const desconhecido of [null, "", "   ", "Meia pensão", "Café + almoço", "cafe"]) {
+    const r = resolveCafeBreakfastEntitlementFromHits({ guestCount: 3, mealPlanDesc: desconhecido });
+    assert.equal(r.kind, "nao_mapeado", "não homologado: " + JSON.stringify(desconhecido));
+    assert.equal(r.entitledQty, 0);
+  }
+  ok("mapper HITS homologado: Café da Manhã → incluido; Nenhum → sem_cafe; resto → nao_mapeado");
 
   const incluido = buildCafeBreakfastEntitlement({
     kind: "incluido",
@@ -311,13 +324,23 @@ console.log("\n== Fronteira RPC: adulteração por perfil cafe ==");
   const persisted = {
     statusReserva: "ativa",
     totalHospedesHits: 3,
-    mealPlanDesc: "Cafe da manha",
+    // Plano fora da lista homologada: é o caso que precisa continuar
+    // nao_mapeado mesmo com o navegador forjando kind/direito.
+    mealPlanDesc: "Plano promocional X",
     cafeAvulsoPagoQtd: 0,
   };
 
   const serverEntitlement = resolveCafeEntitlementFromPersistedReservation(persisted);
   assert.equal(serverEntitlement.kind, "nao_mapeado");
   assert.equal(serverEntitlement.entitledQty, 0);
+
+  // E o plano homologado resolve server-side, sem depender do navegador.
+  const homologado = resolveCafeEntitlementFromPersistedReservation({
+    ...persisted,
+    mealPlanDesc: "Café da Manhã",
+  });
+  assert.equal(homologado.kind, "incluido");
+  assert.equal(homologado.entitledQty, 3, "direito = total_hospedes_hits");
 
   // Perfil cafe autenticado tenta forjar kind + direito + avulso + qty.
   const forged = applyCafeAttendanceWrite({
@@ -456,7 +479,8 @@ console.log("\n== Controle operacional: + e − com direito 0 ==");
   const semDireito = {
     statusReserva: "ativa",
     totalHospedesHits: 2,
-    mealPlanDesc: "Cafe da manha",
+    // Não homologado de propósito: direito 0 e, ainda assim, + / − funcionam.
+    mealPlanDesc: "Plano promocional X",
     cafeAvulsoPagoQtd: 0,
   };
   const req = (acao: string, qty?: number) => ({

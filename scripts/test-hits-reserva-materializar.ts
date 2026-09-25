@@ -159,7 +159,19 @@ function main() {
     // identificação, guardada no próprio UPDATE por pms_external_guest_id IS
     // NULL + nome/status técnicos.
     const updates = [...edgeCode.matchAll(/\.update\(([^)]*)\)/g)].map((m) => m[1]!.trim());
-    assert.deepEqual(updates, ["contatoHits", "financeiroHits", "identificacaoHits"], "só os três updates guardados");
+    assert.deepEqual(
+      updates,
+      ["contatoHits", "financeiroHits", "identificacaoHits", "patch"],
+      "os três updates guardados + o plano de refeição (patch: meal_plan_desc/total_hospedes_hits)",
+    );
+    // O quarto update é o plano de refeição: campo de ORIGEM HITS, e só ele.
+    const iniPlano = edgeCode.indexOf("export async function reconciliarPlanoRefeicaoDaReserva");
+    const plano = edgeCode.slice(iniPlano, edgeCode.indexOf("\n}\n", iniPlano));
+    assert.match(plano, /const patch: \{ meal_plan_desc\?: string \| null; total_hospedes_hits\?: number \} = \{\};/);
+    assert.match(plano, /\.update\(patch\)\s*\.eq\("id", reserva\.id\)/);
+    for (const proibido of ["pagamento", "fnrh", "status_operacional", "whatsapp", "email", "senha"]) {
+      assert.equal(plano.includes(proibido), false, "plano não toca " + proibido);
+    }
     const iniContato = edgeCode.indexOf("async function atualizarContatoExistente(");
     const fimContato = edgeCode.indexOf("\n}\n", iniContato);
     const contato = edgeCode.slice(iniContato, fimContato);

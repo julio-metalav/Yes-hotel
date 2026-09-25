@@ -137,10 +137,68 @@
       });
   }
 
+  /**
+   * Espelho de src/lib/domain/yes-hotel/cafe-meal-plan.ts.
+   * Lista FECHADA observada no HITS: "Café da Manhã" e "Nenhum". Nada de
+   * heurística por substring; desconhecido/nulo/vazio é NÃO IDENTIFICADO.
+   */
+  function normalizeMealPlanDesc(raw) {
+    return String(raw == null ? "" : raw)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  var CAFE_MEAL_PLAN_HOMOLOGADO = {
+    "cafe da manha": "incluido",
+    nenhum: "sem_cafe",
+  };
+
+  function classifyMealPlanDesc(raw) {
+    var chave = normalizeMealPlanDesc(raw);
+    if (!chave) return "nao_mapeado";
+    return CAFE_MEAL_PLAN_HOMOLOGADO[chave] || "nao_mapeado";
+  }
+
   function resolveCafeBreakfastEntitlementFromHits(input) {
     var guestCount = Math.max(0, Number(input.guestCount) || 0);
     var mealPlanDesc =
       input.mealPlanDesc == null ? null : String(input.mealPlanDesc).trim() || null;
+    var paidExtraQty = Math.max(0, Number(input.paidExtraQtyFromHits) || 0);
+    var plano = classifyMealPlanDesc(mealPlanDesc);
+
+    if (plano === "incluido") {
+      return {
+        kind: "incluido",
+        entitledQty: guestCount,
+        guestCount: guestCount,
+        paidExtraQty: 0,
+        mealPlanDesc: mealPlanDesc,
+        mappingGapReason: null,
+      };
+    }
+    if (paidExtraQty > 0) {
+      return {
+        kind: "avulso_pago",
+        entitledQty: paidExtraQty,
+        guestCount: guestCount,
+        paidExtraQty: paidExtraQty,
+        mealPlanDesc: mealPlanDesc,
+        mappingGapReason: null,
+      };
+    }
+    if (plano === "sem_cafe") {
+      return {
+        kind: "sem_cafe",
+        entitledQty: 0,
+        guestCount: guestCount,
+        paidExtraQty: 0,
+        mealPlanDesc: mealPlanDesc,
+        mappingGapReason: null,
+      };
+    }
     return {
       kind: "nao_mapeado",
       entitledQty: 0,
@@ -220,9 +278,19 @@
     var expectedGuests = 0;
     var attendedGuests = 0;
     var completeApartments = 0;
+    var withBreakfast = 0;
+    var withoutBreakfast = 0;
+    var unknownPlan = 0;
     for (var i = 0; i < cards.length; i++) {
       var card = cards[i];
       var entitled = Math.max(0, card.entitlement.entitledQty);
+      if (card.entitlement.kind === "incluido" || card.entitlement.kind === "avulso_pago") {
+        withBreakfast += 1;
+      } else if (card.entitlement.kind === "sem_cafe") {
+        withoutBreakfast += 1;
+      } else {
+        unknownPlan += 1;
+      }
       var attended = clampCafeAttendedQty(card.attendedQty, entitled);
       // Atendidos é contagem real do operador: vale mesmo sem direito apurado.
       attendedGuests += attended;
@@ -238,6 +306,9 @@
       attendedGuests: attendedGuests,
       missingGuests: Math.max(0, expectedGuests - attendedGuests),
       completeApartments: completeApartments,
+      withBreakfast: withBreakfast,
+      withoutBreakfast: withoutBreakfast,
+      unknownPlan: unknownPlan,
     };
   }
 
@@ -272,13 +343,18 @@
       var n = entitlement.paidExtraQty;
       return n === 1 ? "1 café avulso pago" : n + " cafés avulsos pagos";
     }
-    return "";
+    if (entitlement.kind === "incluido") return "Café incluso";
+    if (entitlement.kind === "sem_cafe") return "Sem café";
+    return "Não identificado";
   }
 
   function cafeGuestLine(entitlement) {
     var n = entitlement.guestCount;
     var base = n === 1 ? "1 hóspede" : n + " hóspedes";
-    if (entitlement.kind === "avulso_pago") return base + " · " + cafeStatusLabel(entitlement);
+    if (entitlement.kind === "avulso_pago") {
+      var n2 = entitlement.paidExtraQty;
+      return base + " · " + (n2 === 1 ? "1 café avulso pago" : n2 + " cafés avulsos pagos");
+    }
     return base;
   }
 
@@ -386,6 +462,8 @@
     buildCafeBreakfastEntitlement: buildCafeBreakfastEntitlement,
     clampCafeAttendedQty: clampCafeAttendedQty,
     cafeMissingQty: cafeMissingQty,
+    normalizeMealPlanDesc: normalizeMealPlanDesc,
+    classifyMealPlanDesc: classifyMealPlanDesc,
     canRoleWriteCafeAttendance: canRoleWriteCafeAttendance,
     canMarkAllCafeAttendance: canMarkAllCafeAttendance,
     assertCanWriteCafeAttendance: assertCanWriteCafeAttendance,

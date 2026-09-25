@@ -48,16 +48,23 @@ const avulso = buildCafeBreakfastEntitlement({
   guestCount: 2,
   paidExtraQty: 1,
 });
-const naoMapeado = resolveCafeBreakfastEntitlementFromHits({
+// "Cafe da manha" é homologado → incluído; só valor fora da lista é nao_mapeado.
+const doHits = resolveCafeBreakfastEntitlementFromHits({
   guestCount: 1,
   mealPlanDesc: "Cafe da manha",
+});
+const naoMapeado = resolveCafeBreakfastEntitlementFromHits({
+  guestCount: 1,
+  mealPlanDesc: "Plano desconhecido",
 });
 assert.equal(incluido.entitledQty, 2);
 assert.equal(semCafe.entitledQty, 0);
 assert.equal(avulso.entitledQty, 1);
+assert.equal(doHits.kind, "incluido");
+assert.equal(doHits.entitledQty, 1);
 assert.equal(naoMapeado.kind, "nao_mapeado");
 assert.equal(naoMapeado.entitledQty, 0);
-ok("incluido=guestCount; sem_cafe=0; avulso=qtd paga; nao_mapeado=0");
+ok("incluido=guestCount; sem_cafe=0; avulso=qtd paga; plano fora da lista=nao_mapeado=0");
 
 console.log("\n== E–H) Estados PPD ==");
 const basePpd = {
@@ -177,10 +184,10 @@ const cards = rows.map((row) => {
 });
 const byApartment = new Map(cards.map((card) => [card.apartmentCode, card]));
 assert.equal(policy.cafeGuestLine(byApartment.get("34")!.entitlement), "1 hóspede");
-assert.equal(policy.cafeStatusLabel(byApartment.get("34")!.entitlement), "");
+assert.equal(policy.cafeStatusLabel(byApartment.get("34")!.entitlement), "Café incluso");
 assert.equal(policy.cafeAlertLabel(byApartment.get("34")!.entitlement), null);
 assert.equal(policy.cafeGuestLine(byApartment.get("33")!.entitlement), "2 hóspedes");
-assert.equal(policy.cafeStatusLabel(byApartment.get("33")!.entitlement), "");
+assert.equal(policy.cafeStatusLabel(byApartment.get("33")!.entitlement), "Sem café");
 assert.equal(policy.cafeAlertLabel(byApartment.get("33")!.entitlement), "SEM CAFÉ");
 assert.equal(policy.cafeOperationalStatusLabel(byApartment.get("33")!.entitlement, 0), "");
 assert.equal(byApartment.get("32")!.entitlement.entitledQty, 1);
@@ -226,6 +233,10 @@ assert.deepEqual(kpis, {
   attendedGuests: 0,
   missingGuests: 8,
   completeApartments: 0,
+  // Composição do universo por situação (subtítulo do card de apartamentos).
+  withBreakfast: 6,
+  withoutBreakfast: 1,
+  unknownPlan: 1,
 });
 ok("8 cards; Cafés previstos=8; atendidos=0; faltantes=8; apartamentos=8");
 
@@ -252,7 +263,11 @@ assert.match(uiSource, /if \(demoMode\) \{[\s\S]*card\.attendedQty = localNext;[
 assert.match(html, /MODO DEMONSTRAÇÃO/);
 assert.match(html, /Cafés previstos/);
 assert.match(html, />Com café</);
-assert.match(html, />Sem café \/ não identificado</);
+// "Sem café" (declarado pelo HITS) e "Não identificado" (desconhecido) são
+// situações operacionalmente diferentes e têm filtros separados.
+assert.match(html, />Sem café</);
+assert.match(html, />Não identificado</);
+assert.doesNotMatch(html, />Sem café \/ não identificado</);
 assert.doesNotMatch(html, />Não pagos</);
 assert.doesNotMatch(html, /src="\.\/cafe-demo-data\.js/);
 assert.ok(
@@ -260,8 +275,8 @@ assert.ok(
     uiSource.indexOf("await ensureDemoModuleLoaded()"),
 );
 assert.match(uiSource, /script\.src = "\.\/cafe-demo-data\.js\?v=2"/);
-assert.match(html, /cafe-da-manha-mvp\.js\?v=12/);
-assert.match(html, /yes-cafe-policy\.js\?v=6/);
+assert.match(html, /cafe-da-manha-mvp\.js\?v=13/);
+assert.match(html, /yes-cafe-policy\.js\?v=7/);
 assert.match(html, /cafe-da-manha-mvp\.css\?v=10/);
 assert.match(uiSource, /createSimpleAlert\("cafe-no-breakfast-alert", cafeAlert\)/);
 assert.match(uiSource, /createSimpleAlert\("ppd-cafe-alert", card\.ppdAlert\.badgeLabel\)/);

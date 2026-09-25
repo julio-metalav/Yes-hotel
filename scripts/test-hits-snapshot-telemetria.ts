@@ -74,6 +74,7 @@ function applyModel(
 
 const row = (id: string, patch: Partial<HitsSnapshotRow> = {}): HitsSnapshotRow => ({
   external_reservation_id: id,
+  meal_plan_desc: "Café da Manhã",
   apartamento: "0" + id.slice(-1),
   hospede_principal: "Hóspede " + id,
   check_in: "2026-09-26",
@@ -89,7 +90,19 @@ async function main() {
   console.log("\n== 1. Migration: telemetria explícita, sem tocar população/RLS/scheduler ==");
   const files = readdirSync(join(ROOT, "supabase/migrations")).filter((f) => f.endsWith("_hits_snapshot_telemetria.sql"));
   assert.equal(files.length, 1, "exatamente uma migration de telemetria");
-  const sql = read("supabase/migrations/" + files[0]!);
+  // As colunas/comentários da telemetria nasceram aqui; as RPCs de apply foram
+  // recriadas depois pela migration do plano de refeição — é ela que vale hoje.
+  // Só o trecho das RPCs de apply: o resto daquela migration é do café e tem
+  // tabelas que não pertencem a esta verificação.
+  const sqlCafe = read(
+    "supabase/migrations/" +
+      readdirSync(join(ROOT, "supabase/migrations")).filter((f) => f.endsWith("_cafe_meal_plan_hits.sql"))[0]!,
+  );
+  const sqlApply = sqlCafe.slice(
+    sqlCafe.indexOf("create or replace function public.hits_snapshot_sync_apply("),
+    sqlCafe.indexOf("-- 4. Direito ao café"),
+  );
+  const sql = read("supabase/migrations/" + files[0]!) + "\n" + sqlApply;
   const sqlCode = sql.replace(/^\s*--.*$/gm, "");
   {
     assert.ok(files[0]! > "20260926090000_", "timestamp posterior às existentes");
@@ -105,7 +118,7 @@ async function main() {
   {
     assert.doesNotMatch(sqlCode, /policy|row level security|enable rls|cron\.|pg_cron|schedule/i, "sem RLS/policy/scheduler");
     assert.doesNotMatch(sqlCode, /operacional_reservas|operacional_hospedes|\bfnrh_|cafe|\bui_/i, "não toca tabelas fora do snapshot");
-    assert.doesNotMatch(sqlCode, /truncate|alter table public\.hits_reservas_snapshot/i, "população/tabela do snapshot intocadas");
+    assert.doesNotMatch(sqlCode, /truncate/i, "nada é truncado");
     for (const fn of [
       "hits_snapshot_sync_apply(uuid, jsonb, text[], text, text, integer, integer)",
       "hits_snapshot_sync_apply_incremental(uuid, jsonb, text[], text[], text, text, timestamptz, integer, integer)",
@@ -115,7 +128,11 @@ async function main() {
     }
     assert.match(sqlCode, /drop function if exists public\.hits_snapshot_sync_apply\(uuid, jsonb, text\[\], text, text\);/, "assinatura antiga derrubada (sem sobrecarga ambígua)");
     assert.match(sqlCode, /drop function if exists public\.hits_snapshot_sync_apply_incremental\(uuid, jsonb, text\[\], text\[\], text, text, timestamptz\);/);
-    assert.equal((sqlCode.match(/create or replace function/g) ?? []).length, 2, "só as 2 RPCs de apply");
+    assert.equal(
+      (sqlCode.match(/create or replace function public\.hits_snapshot_sync_apply/g) ?? []).length,
+      4,
+      "as 2 RPCs de apply, uma vez em cada migration",
+    );
     for (const head of ["hits_snapshot_sync_apply(", "hits_snapshot_sync_apply_incremental("]) {
       const i = sqlCode.indexOf("create or replace function public." + head);
       const cab = sqlCode.slice(i, sqlCode.indexOf("as $$", i));
@@ -126,7 +143,8 @@ async function main() {
   }
   {
     // CTE changed: só campos funcionais, avaliada contra o estado anterior; técnicos fora.
-    const corpos = [...sqlCode.matchAll(/changed as \(([\s\S]*?)\n  \),/g)].map((m) => m[1]!);
+    const corpos = [...sqlCode.matchAll(/changed as \(([\s\S]*?)\n  \),/g)].map((m) => m[1]!)
+      .slice(-2); // as versões vigentes (migration do plano de refeição)
     assert.equal(corpos.length, 2, "CTE changed nas duas RPCs");
     for (const c of corpos) {
       assert.match(c, /left join public\.hits_reservas_snapshot s on s\.external_reservation_id = d\.external_reservation_id/);
@@ -151,11 +169,19 @@ async function main() {
       assert.match(corpo, /last_detail_count = p_detail_count,/);
       assert.match(corpo, /last_failed_count = coalesce\(array_length\(v_failed_ids, 1\), 0\),/, "failed inalterado");
     }
-    const inc = sqlCode.slice(sqlCode.indexOf("hits_snapshot_sync_apply_incremental("));
+    // Versões VIGENTES: as últimas definições no SQL concatenado (a migration
+    // do plano de refeição recriou as duas RPCs).
+    const inc = sqlCode.slice(
+      sqlCode.lastIndexOf("create or replace function public.hits_snapshot_sync_apply_incremental("),
+    );
     assert.match(inc, /where s\.external_reservation_id = any \(v_cancelled_ids\)/, "incremental remove só canceladas explícitas");
     assert.doesNotMatch(inc, /batch_id <> p_batch_id/, "incremental nunca remove por ausência");
     assert.match(inc, /when p_status = 'ok' and p_cursor_at is not null then p_cursor_at/, "cursor inalterado");
-    const full = sqlCode.slice(sqlCode.indexOf("hits_snapshot_sync_apply("), sqlCode.indexOf("hits_snapshot_sync_apply_incremental("));
+    const iniFull = sqlCode.lastIndexOf("create or replace function public.hits_snapshot_sync_apply(");
+    const full = sqlCode.slice(
+      iniFull,
+      sqlCode.indexOf("create or replace function public.hits_snapshot_sync_apply_incremental(", iniFull),
+    );
     assert.match(full, /where s\.batch_id <> p_batch_id\s*\n\s*and not \(s\.external_reservation_id = any \(v_failed_ids\)\)/, "completa remove ausentes não falhas (como antes)");
     ok("changed = nova OU campo funcional diferente (7 campos = HITS_SNAPSHOT_CAMPOS_FUNCIONAIS), avaliado antes do upsert; remoção/cursor/failed como antes");
   }

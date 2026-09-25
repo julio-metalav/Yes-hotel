@@ -228,6 +228,13 @@ export async function materializarReservaSincronizada(input: {
     classificacao_comissionamento_origem: "hits_campo",
   };
 
+  // Plano de refeição e população: vêm do HITS e alimentam o direito ao café.
+  // Texto bruto preservado; a classificação é feita na leitura do café.
+  const planoHits = {
+    meal_plan_desc: (synced.mealPlanDesc ?? "").trim() || null,
+    total_hospedes_hits: Math.max(1, Number(synced.totalGuests) || 1),
+  };
+
   let reserva = await findReserva();
   let reservaCriada = false;
   if (!reserva) {
@@ -240,6 +247,7 @@ export async function materializarReservaSincronizada(input: {
         check_out_previsto: checkOut,
         origem_externa: ORIGEM_HITS,
         external_reservation_id: externalId,
+        ...planoHits,
         ...financeiroHits,
       })
       .select("id")
@@ -505,4 +513,55 @@ export async function reconciliarContatosDaReserva(input: {
     hospedes_avaliados: avaliados,
     contatos_atualizados: atualizados,
   };
+}
+
+/**
+ * RECONCILIAÇÃO DO PLANO DE REFEIÇÃO — reserva HITS **já materializada**.
+ *
+ * `meal_plan_desc` é campo de ORIGEM HITS: quando o HITS muda o plano do
+ * quarto (ex.: "Nenhum" → "Café da Manhã"), o local precisa acompanhar, senão o
+ * direito ao café fica errado. Escreve SOMENTE `meal_plan_desc` e
+ * `total_hospedes_hits`, e só quando o valor difere do que já está gravado.
+ *
+ * Não toca FNRH, pagamento, status, senha, contato, hóspedes nem ocupação.
+ * Sem rede, sem envio. Devolve true quando gravou.
+ */
+export async function reconciliarPlanoRefeicaoDaReserva(input: {
+  admin: SupabaseAdminLike;
+  externalId: string;
+  synced: SyncedReservation;
+  log?: (msg: string, extra?: Record<string, unknown>) => void;
+}): Promise<{ ok: boolean; atualizado: boolean }> {
+  const { admin, externalId, synced } = input;
+  const log = input.log ?? (() => {});
+  const mealPlanDesc = (synced.mealPlanDesc ?? "").trim() || null;
+  const totalHits = Math.max(1, Number(synced.totalGuests) || 1);
+
+  const { data } = await admin
+    .from("operacional_reservas")
+    .select("id, meal_plan_desc, total_hospedes_hits")
+    .eq("origem_externa", ORIGEM_HITS)
+    .eq("external_reservation_id", externalId)
+    .maybeSingle();
+  const reserva = data as
+    | { id: string; meal_plan_desc?: string | null; total_hospedes_hits?: number | null }
+    | null;
+  if (!reserva) return { ok: true, atualizado: false };
+
+  const patch: { meal_plan_desc?: string | null; total_hospedes_hits?: number } = {};
+  const atual = (reserva.meal_plan_desc ?? "").trim() || null;
+  if (atual !== mealPlanDesc) patch.meal_plan_desc = mealPlanDesc;
+  if (Number(reserva.total_hospedes_hits ?? 0) !== totalHits) patch.total_hospedes_hits = totalHits;
+  if (Object.keys(patch).length === 0) return { ok: true, atualizado: false };
+
+  const { data: out, error } = await admin
+    .from("operacional_reservas")
+    .update(patch)
+    .eq("id", reserva.id)
+    .select("id");
+  if (error) {
+    log("[HITS_MATERIALIZAR] reconciliação de plano falhou", { code: error.code });
+    return { ok: false, atualizado: false };
+  }
+  return { ok: true, atualizado: Array.isArray(out) && out.length === 1 };
 }
