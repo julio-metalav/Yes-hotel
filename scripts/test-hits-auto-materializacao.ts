@@ -204,16 +204,18 @@ async function main() {
   console.log("\n== B. UI (Check-in Operacional) ==");
   {
     const src = read("ui/checkin-operacional-mvp.js");
-    assert.match(src, /const HITS_MATERIALIZACAO_AUTOMATICA_ATIVA = (true|false);/);
-    assert.match(src, /if \(HITS_MATERIALIZACAO_AUTOMATICA_ATIVA\) \{\s*return \{ texto: "Sincronizando com o HITS", destaque: false, cta: null \};/);
-    assert.match(src, /HITS_MATERIALIZACAO_AUTOMATICA_ATIVA \? "Sincronizando com o HITS" : "Preparar FNRH"/);
+    // Sem feature flag na UI: só-snapshot é SEMPRE estado transitório.
+    assert.doesNotMatch(src, /HITS_MATERIALIZACAO_AUTOMATICA_ATIVA/);
+    assert.match(src, /if \(isReservaSomenteLeituraHits\(reserva\)\) \{\s*return \{ texto: "Sincronizando com o HITS", destaque: false, cta: null \};/);
+    assert.match(src, /if \(isConsultaSomenteNoHits\(reserva\)\) return "Sincronizando com o HITS";/);
+    assert.doesNotMatch(src, /cta: \{ kind: "preparar_fnrh"/, "'Preparar FNRH' não é mais CTA da linha");
     // 9: reserva materializada = linha local normal → "Ver" abre (openDetail não é bloqueado para local).
     const openDetail = src.slice(src.indexOf("function openDetail("), src.indexOf("function openDetail(") + 600);
     assert.match(openDetail, /isReservaSomenteLeituraHits/, "só a só-HITS é bloqueada no detalhe");
     // 10–11: com o automático ativo, a só-HITS vira estado transitório sem CTA — sem quebrar (texto neutro).
     assert.match(src, /async function acaoPrepararFnrhHits/, "contingência manual permanece no código");
     assert.doesNotMatch(src, /backendEnviarLinks\([^)]*\)\s*;?\s*\/\/\s*auto/i, "nenhum envio automático introduzido");
-    ok("UI: com o automático ativo, 'Preparar FNRH' deixa de ser o caminho normal; 'Ver' segue para a materializada");
+    ok("UI: só-snapshot é transitório ('Sincronizando com o HITS', sem CTA); contingência manual só interna; 'Ver' segue para a materializada");
   }
 
   console.log(`\nOK test-hits-auto-materializacao (${cases} casos)`);

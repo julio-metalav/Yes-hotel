@@ -248,9 +248,13 @@ function main() {
   console.log("\n== 8. UI: ação na lista e retorno ao fluxo normal ==");
   {
     // O detalhe não abre para reserva somente leitura: a ação vive na lista.
-    assert.match(mvp, /kind: "preparar_fnrh", label: "Preparar FNRH"/);
+    // Só-snapshot é estado transitório (materialização automática): sem CTA na
+    // linha; o roteador mantém 'preparar_fnrh' → acaoPrepararFnrhHits como
+    // contingência interna, ainda tratado antes de openDetail.
+    assert.doesNotMatch(mvp, /cta: \{ kind: "preparar_fnrh"/);
+    assert.match(mvp, /texto: "Sincronizando com o HITS", destaque: false, cta: null/);
     assert.match(mvp, /if \(kind === "preparar_fnrh"\) \{\s*\n\s*acaoPrepararFnrhHits/);
-    ok("CTA 'Preparar FNRH' aparece na linha e é tratado antes de openDetail");
+    ok("linha só-snapshot sem CTA ('Sincronizando com o HITS'); contingência manual roteada antes de openDetail");
 
     assert.match(mvp, /hits-reserva-materializar/);
     assert.match(mvp, /external_reservation_id: String\(externalReservationId/);
