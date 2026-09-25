@@ -49,15 +49,18 @@ export type MaterializacaoResultado =
       external_reservation_id: string;
       reserva_criada: boolean;
       financeiro: { pagamento_status: string; backfilled: boolean };
-      hospedes: Array<{ id_entity: string; criado: boolean; posicao_adotada: boolean }>;
+      hospedes: Array<{ id_entity: string; criado: boolean; posicao_adotada: boolean; ambiguo?: true }>;
       hospedes_total: number;
       ocupacao: {
         declarada_hits: number;
         hospedes_ativos: number;
         posicoes_criadas: number;
         posicoes_adotadas: number;
+        /** >0 = mais de uma posição técnica elegível: nada foi adotado NEM criado; exige intervenção manual. */
         posicoes_ambiguas: number;
       };
+      /** true quando algum PAX ficou sem vínculo por ambiguidade (ver ocupacao.posicoes_ambiguas). */
+      intervencao_manual: boolean;
     }
   | {
       ok: false;
@@ -230,7 +233,7 @@ export async function materializarReservaSincronizada(input: {
   //    o hóspede HITS (UPDATE de identificação em operacional_hospedes; a
   //    fnrh_hospedes e o link_token dela ficam como estão). Assim a ocupação
   //    não dobra: 1 PAX declarado + 1 PAX no HITS = 1 hóspede ativo.
-  const hospedes: Array<{ id_entity: string; criado: boolean; posicao_adotada: boolean }> = [];
+  const hospedes: Array<{ id_entity: string; criado: boolean; posicao_adotada: boolean; ambiguo?: true }> = [];
   let posicoesAdotadas = 0;
   let posicoesAmbiguas = 0;
   for (const guest of synced.guests ?? []) {
@@ -264,8 +267,16 @@ export async function materializarReservaSincronizada(input: {
 
     const { posicao, ambiguas } = await encontrarPosicaoTecnicaSegura(admin, reserva.id);
     if (ambiguas > 0) {
+      // Mais de uma posição técnica elegível: a reserva JÁ está inconsistente.
+      // Saída conservadora: não escolhe, não adota, não insere (inserir só
+      // pioraria: 2 posições + PAX = 3 ativos), não altera nada. Reporta e
+      // segue — exige intervenção manual; o ciclo não cai.
       posicoesAmbiguas = Math.max(posicoesAmbiguas, ambiguas);
-      log("[HITS_MATERIALIZAR] posições técnicas ambíguas: não adota, cria", { ambiguas });
+      log("[HITS_MATERIALIZAR] posições técnicas ambíguas: PAX não vinculado, nada escrito — intervenção manual", {
+        ambiguas,
+      });
+      hospedes.push({ id_entity: idEntity, criado: false, posicao_adotada: false, ambiguo: true });
+      continue;
     }
     if (posicao) {
       // Guardas repetidas no UPDATE: se outro processo já vinculou/tocou a
@@ -311,7 +322,9 @@ export async function materializarReservaSincronizada(input: {
     .eq("reserva_id", reserva.id)
     .or("removed_from_reservation.is.null,removed_from_reservation.eq.false");
   const hospedesAtivos = (ativos ?? []).length;
-  const faltam = calcularPosicoesFaltantes(synced.totalGuests, hospedesAtivos);
+  // Com ambiguidade pendente não se cria posição nova: seria mais uma linha
+  // técnica numa reserva que já tem posições demais.
+  const faltam = posicoesAmbiguas > 0 ? 0 : calcularPosicoesFaltantes(synced.totalGuests, hospedesAtivos);
 
   let posicoesCriadas = 0;
   for (let i = 0; i < faltam; i += 1) {
@@ -346,5 +359,6 @@ export async function materializarReservaSincronizada(input: {
       posicoes_adotadas: posicoesAdotadas,
       posicoes_ambiguas: posicoesAmbiguas,
     },
+    intervencao_manual: posicoesAmbiguas > 0,
   };
 }

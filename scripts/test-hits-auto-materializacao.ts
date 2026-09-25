@@ -332,22 +332,35 @@ async function main() {
     }
     ok("posição desqualificada (contato, principal, origem, removida, ficha rascunho/confirmada/lifecycle) nunca é adotada");
 
-    // Duas posições técnicas → ambíguo: nenhuma é escolhida.
+    // Duas posições técnicas seguras → ambíguo: saída conservadora. Nenhuma
+    // é escolhida, o PAX NÃO é inserido (inserir faria 3 ativos), nada é
+    // alterado; o resultado sinaliza intervenção manual e o ciclo segue.
     const dbAmb = fakeDb();
     dbAmb.reservas.push({ id: "res-c", origem_externa: "hits", external_reservation_id: "3407", reservation_balance_due: 0 });
     for (const id of ["h-p1", "h-p2"]) {
       dbAmb.hospedes.push({ id, reserva_id: "res-c", nome: "Novo hóspede", principal: false, status_operacional: "nao_identificado", origem_cadastro: "novo", email: "", whatsapp: "" });
+      dbAmb.fichas.push({ id: "f-" + id, reserva_id: "res-c", hospede_id: id, status: "pendente", fnrh_lifecycle_status: null, link_token: "tok-" + id });
     }
+    const antesAmb = JSON.stringify([dbAmb.hospedes, dbAmb.fichas]);
+    const wAmb = dbAmb.writes.length;
     const ra = await materializarReservaSincronizada({ admin: dbAmb.admin, externalId: "3407", synced: s3407([guest4244]) });
-    assert.equal(ra.ok, true);
+    assert.equal(ra.ok, true, "não derruba o ciclo");
     if (ra.ok) {
-      assert.deepEqual(ra.hospedes, [{ id_entity: "4244", criado: true, posicao_adotada: false }]);
-      assert.equal(ra.ocupacao.posicoes_ambiguas, 2);
-      assert.equal(ra.ocupacao.posicoes_adotadas, 0);
+      assert.deepEqual(ra.hospedes, [{ id_entity: "4244", criado: false, posicao_adotada: false, ambiguo: true }]);
+      assert.deepEqual(ra.ocupacao, { declarada_hits: 1, hospedes_ativos: 2, posicoes_criadas: 0, posicoes_adotadas: 0, posicoes_ambiguas: 2 });
+      assert.equal(ra.intervencao_manual, true);
     }
-    assert.equal(dbAmb.hospedes.filter((h) => h.nome === "Novo hóspede" && h.pms_external_guest_id === undefined).length, 2, "as duas posições continuam como estavam");
-    assert.equal(dbAmb.writes.filter((w) => w.table === "operacional_hospedes" && w.op === "update").length, 0);
-    ok("duas posições técnicas = ambíguo: nenhuma adotada, PAX inserido, diagnóstico posicoes_ambiguas=2");
+    assert.equal(ativos(dbAmb).length, 2, "ativos continuam 2, não viram 3");
+    assert.equal(dbAmb.hospedes.filter((h) => h.pms_external_guest_id === "4244").length, 0, "nenhuma posição recebe 4244; nenhum hóspede novo");
+    assert.equal(dbAmb.writes.slice(wAmb).filter((w) => w.table === "operacional_hospedes").length, 0, "zero insert/update em hóspedes");
+    assert.equal(escritasFicha(dbAmb), 0, "zero escrita em fnrh_hospedes");
+    assert.equal(JSON.stringify([dbAmb.hospedes, dbAmb.fichas]), antesAmb, "posições, fichas e link_tokens byte a byte iguais");
+    assert.equal(dbAmb.writes.slice(wAmb).filter((w) => w.op === "delete").length, 0, "nenhum delete");
+    // Ambiguidade com ocupação declarada maior: também não cria posição nova.
+    const rb = await materializarReservaSincronizada({ admin: dbAmb.admin, externalId: "3407", synced: synced({ externalReservationId: "3407", totalGuests: 3, guests: [guest4244] }) });
+    if (rb.ok) assert.equal(rb.ocupacao.posicoes_criadas, 0, "com ambiguidade pendente o passo 4 não cria posição");
+    assert.equal(ativos(dbAmb).length, 2);
+    ok("duas posições técnicas = ambíguo: nada adotado, nada inserido, nada alterado; posicoes_ambiguas=2 + intervencao_manual=true; ciclo segue");
 
     // 2 PAX HITS chegando sobre 1 posição: o 1º adota, o 2º é inserido → 2 ativos (não 3).
     const dbDois = fakeDb();
