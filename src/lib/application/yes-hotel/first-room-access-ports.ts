@@ -264,7 +264,20 @@ export type FirstRoomAccessPorts = {
       parking_spot?: string | null;
       wifi_ssid?: string | null;
       wifi_password?: string | null;
+      checkout_horario?: string | null;
+      telefone_recepcao?: string | null;
+      data_entrada?: string | null;
+      data_saida?: string | null;
     }>;
+  };
+  /**
+   * Texto editavel das mensagens automaticas. OPCIONAL de proposito: se a
+   * porta faltar, ou a leitura falhar, o envio cai no texto do codigo. O
+   * primeiro acesso nunca pode quebrar por causa de um template.
+   */
+  mensagensTemplates?: {
+    /** Corpo do template, ou null quando ausente/ilegivel. */
+    carregar(chave: string): Promise<string | null>;
   };
   /** Auditoria pagamento presencial diferido (opcional; fail-soft se ausente). */
   presencialDiferidoAudit?: import("./presencial-diferido-audit-port").PresencialDiferidoAuditPort;

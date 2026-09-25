@@ -14,6 +14,19 @@ import { SupabaseReservationPendingStatePort } from "./reservation-pending-state
 import { SupabasePresencialDiferidoAuditPort } from "./presencial-diferido-audit.ts";
 import { isPagamentoPresencialDiferidoServerEnabled } from "../../../domain/yes-hotel/pagamento-presencial-diferido.ts";
 
+/** Horario de saida praticado pelo hotel, o mesmo ja usado nos textos atuais. */
+const CHECKOUT_HORARIO = "11h";
+/** Telefone da recepcao exibido ao hospede. */
+const TELEFONE_RECEPCAO = "(67) 99668-8886";
+
+/** `2026-08-11` -> `11/08/2026`. Vazio quando a data nao vier. */
+function formatarDataBr(valor: unknown): string | null {
+  const ymd = String(valor ?? "").slice(0, 10);
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
 export function createSupabaseFirstRoomAccessPorts(
   client: SupabaseClient,
   env?: Record<string, string | undefined> | null,
@@ -32,7 +45,7 @@ export function createSupabaseFirstRoomAccessPorts(
       async getContext(reservationId: string) {
         const { data: r } = await client
           .from("operacional_reservas")
-          .select("apartamento, hospede_principal, external_reservation_id")
+          .select("apartamento, hospede_principal, external_reservation_id, check_in_previsto, check_out_previsto")
           .eq("id", reservationId)
           .maybeSingle();
         const external = String(r?.external_reservation_id ?? "").trim();
@@ -57,7 +70,28 @@ export function createSupabaseFirstRoomAccessPorts(
           parking_spot: aptNum && aptNum !== "—" ? aptNum : null,
           wifi_ssid,
           wifi_password,
+          // Constantes operacionais do hotel, iguais as ja usadas nos textos
+          // atuais. Ficam aqui, e nao no template, para que editar o texto nao
+          // possa alterar horario de check-out nem telefone de recepcao.
+          checkout_horario: CHECKOUT_HORARIO,
+          telefone_recepcao: TELEFONE_RECEPCAO,
+          data_entrada: formatarDataBr(r?.check_in_previsto),
+          data_saida: formatarDataBr(r?.check_out_previsto),
         };
+      },
+    },
+    mensagensTemplates: {
+      async carregar(chave: string) {
+        // Fail-soft: qualquer problema devolve null e o envio usa o texto do
+        // codigo. Um template nao pode derrubar o primeiro acesso.
+        const { data, error } = await client
+          .from("operacional_mensagens_templates")
+          .select("corpo")
+          .eq("chave", chave)
+          .maybeSingle();
+        if (error || !data) return null;
+        const corpo = String((data as { corpo?: unknown }).corpo ?? "").trim();
+        return corpo || null;
       },
     },
     presencialDiferidoAudit: new SupabasePresencialDiferidoAuditPort(client),

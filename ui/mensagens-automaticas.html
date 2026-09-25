@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yes Hotel — Mensagens automáticas</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./checkin-operacional-mvp.css?v=56" />
+    <style>
+      .msg-page { max-width: 980px; margin: 0 auto; padding: 1.25rem; }
+      .msg-page h1 { font-size: 1.35rem; margin: 0 0 0.35rem; }
+      .msg-page .lead { color: #555; margin: 0 0 1rem; font-size: 0.95rem; }
+      .msg-aviso { border: 1px solid #e0d5a8; background: #fdf8e6; color: #6b5a12;
+        border-radius: 8px; padding: 0.6rem 0.8rem; font-size: 0.88rem; margin: 0 0 1rem; }
+      .msg-lista { display: flex; flex-direction: column; gap: 0.6rem; }
+      .msg-item { border: 1px solid #e5e5e5; border-radius: 10px; background: #fff; overflow: hidden; }
+      .msg-cabecalho { display: flex; align-items: center; gap: 0.6rem; width: 100%;
+        padding: 0.75rem 0.9rem; background: none; border: 0; cursor: pointer; text-align: left; font: inherit; }
+      .msg-cabecalho:hover { background: #fafafa; }
+      .msg-nome { font-weight: 700; color: #1f2937; }
+      .msg-quando { display: block; color: #6b7280; font-size: 0.85rem; margin-top: 0.15rem; }
+      .msg-tag { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+        border-radius: 999px; padding: 0.15rem 0.5rem; white-space: nowrap; }
+      .msg-tag.ativa { background: #e6f4ea; color: #0a7a32; border: 1px solid #b7e0c4; }
+      .msg-tag.preparada { background: #f3f4f6; color: #4b5563; border: 1px solid #d8dbe0; }
+      .msg-seta { margin-left: auto; color: #9ca3af; }
+      .msg-editor { padding: 0 0.9rem 0.9rem; border-top: 1px solid #f0f0f0; }
+      .msg-editor.hidden { display: none; }
+      .msg-campo-rotulo { display: block; font-size: 0.85rem; font-weight: 600; color: #374151; margin: 0.8rem 0 0.3rem; }
+      .msg-texto { width: 100%; min-height: 240px; padding: 0.6rem; font: inherit; line-height: 1.45;
+        border: 1px solid #d1d5db; border-radius: 8px; resize: vertical; }
+      .msg-params { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.35rem 0 0; padding: 0; list-style: none; }
+      .msg-param { border: 1px solid #d1d5db; background: #f9fafb; border-radius: 6px;
+        padding: 0.2rem 0.45rem; font-family: ui-monospace, monospace; font-size: 0.8rem; cursor: pointer; }
+      .msg-param:hover { background: #eef2ff; border-color: #a5b4fc; }
+      .msg-preview { white-space: pre-wrap; background: #f9fafb; border: 1px dashed #d1d5db;
+        border-radius: 8px; padding: 0.6rem; font-size: 0.9rem; min-height: 3rem; color: #111827; }
+      .msg-acoes { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.8rem; flex-wrap: wrap; }
+      .msg-status { font-size: 0.88rem; }
+      .msg-status.ok { color: #0a7a32; }
+      .msg-status.err { color: #b42318; }
+      @media (max-width: 640px) {
+        .msg-acoes .op-btn { flex: 1 1 100%; justify-content: center; }
+      }
+    </style>
+  </head>
+  <body class="op-body checkin-view">
+    <div id="access-state" class="op-access hidden" aria-live="polite"></div>
+    <div id="content-panel" class="op-app hidden">
+      <aside class="yes-sidebar" aria-label="Áreas operacionais">
+        <div class="yes-sidebar-brand">
+          <img src="./assets/yes-hotel-logo.png" alt="Yes Hotel" width="153" height="89" />
+        </div>
+        <nav aria-label="Navegação principal">
+          <span class="yes-sidebar-label">Áreas operacionais</span>
+          <a href="./usuarios-login-mvp.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 11l9-8 9 8M5 10v10h14V10M10 20v-6h4v6" />
+            </svg>
+            <span>Início</span>
+          </a>
+          <a href="./checkin-operacional-mvp.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
+            </svg>
+            <span>Operação</span>
+          </a>
+          <a href="./cafe-da-manha-mvp.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17 8h1a3 3 0 1 1 0 6h-1M3 8h14v7a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Zm3-6v3M10 2v3M14 2v3" />
+            </svg>
+            <span>Café da manhã</span>
+          </a>
+          <a href="./demandas-mvp.html?escopo=minhas" data-nav="minhas-demandas">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM22 11h-6M22 16h-6" />
+            </svg>
+            <span>Minhas demandas</span>
+          </a>
+          <a href="./demandas-mvp.html" data-nav="demandas">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 2h6v4H9zM8 12h8M8 16h5" />
+            </svg>
+            <span>Demandas</span>
+          </a>
+          <a href="./gestao-saude-hotel.html" data-nav="gestao">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 3v18h18M7 16v-5M12 16V8M17 16v-9" />
+            </svg>
+            <span>Gestão</span>
+          </a>
+          <a href="./financeiro-conciliacao.html" data-nav="financeiro">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v18M4 8h6l-2.5 5H4Zm10 0h6l-2.5 5H14Z" />
+            </svg>
+            <span>Conciliação</span>
+          </a>
+        </nav>
+      </aside>
+      <div class="yes-workspace">
+        <main class="msg-page">
+          <h1>Mensagens automáticas</h1>
+          <p class="lead">
+            Edite o texto enviado ao hóspede. Cada mensagem é salva separadamente.
+          </p>
+          <p class="msg-aviso" role="note">
+            Esta tela altera <strong>somente o texto</strong>. Quando cada mensagem é
+            enviada continua definido no sistema e não pode ser mudado aqui.
+          </p>
+          <div id="msg-lista" class="msg-lista" aria-live="polite"></div>
+          <p id="msg-erro-geral" class="msg-status err" role="status"></p>
+        </main>
+      </div>
+    </div>
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script defer src="./yes-supabase-config.js"></script>
+    <script defer src="./yes-supabase-auth.js"></script>
+    <script defer src="./yes-nav-policy.js?v=1"></script>
+    <script defer src="./yes-mensagens-policy.js?v=1"></script>
+    <script defer src="./mensagens-automaticas.js?v=1"></script>
+  </body>
+</html>
