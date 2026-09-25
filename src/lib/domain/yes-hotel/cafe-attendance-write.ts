@@ -89,6 +89,11 @@ export function applyCafeAttendanceWrite(input: {
   previousQty?: number;
   now?: Date;
   /**
+   * Estado do serviço da data, lido no servidor.
+   * Concluído recusa qualquer lançamento — inclusive marcar_todos.
+   */
+  dayStatus?: "aberto" | "concluido" | null;
+  /**
    * Somente testes de regressão da máquina de estados quando o direito
    * já foi resolvido server-side (ex.: após futura homologação).
    * Em produção a RPC resolve sempre via resolveCafeEntitlementFromPersistedReservation.
@@ -106,6 +111,12 @@ export function applyCafeAttendanceWrite(input: {
 
   if (!canRegisterCafeAttendanceForDate(input.request.cafeDateYmd, input.now)) {
     return { ok: false, error: "cafe_write_forbidden_future_date" };
+  }
+
+  // Serviço encerrado não recebe mais lançamento. Só admin reabre, e a
+  // reabertura é uma RPC própria — nunca um efeito colateral de gravar.
+  if (input.dayStatus === "concluido") {
+    return { ok: false, error: "cafe_write_forbidden_dia_concluido" };
   }
 
   if (String(input.reservation.statusReserva || "").trim().toLowerCase() === "cancelada") {

@@ -58,12 +58,21 @@ export function assertCanWriteCafeAttendance(input: {
   cafeDateYmd: string;
   entitlement: CafeBreakfastEntitlement;
   now?: Date;
+  /**
+   * Fechamento do serviço daquela data. Ausente ou "aberto" não barra nada —
+   * o estado seguro é o dia continuar aceitando lançamento.
+   * Espelha a guarda `cafe_write_forbidden_dia_concluido` da RPC.
+   */
+  dayStatus?: "aberto" | "concluido" | null;
 }): { ok: true } | { ok: false; error: string } {
   if (!canRoleWriteCafeAttendance(input.role)) {
     return { ok: false, error: "cafe_write_forbidden_role" };
   }
   if (!canRegisterCafeAttendanceForDate(input.cafeDateYmd, input.now)) {
     return { ok: false, error: "cafe_write_forbidden_future_date" };
+  }
+  if (input.dayStatus === "concluido") {
+    return { ok: false, error: "cafe_write_forbidden_dia_concluido" };
   }
   // O direito NÃO barra mais o + / −: registrar quem tomou café é contagem
   // operacional, não cobrança. Espelha a RPC.

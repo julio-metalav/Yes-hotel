@@ -52,6 +52,13 @@ const markAllButtonElement = document.querySelector("#mark-all-button");
 const emptyStateElement = document.querySelector("#empty-state");
 const emptyStateTitleElement = document.querySelector("#empty-state-title");
 const emptyStateTextElement = document.querySelector("#empty-state-text");
+const dayClosureElement = document.querySelector("#cafe-day-closure");
+const dayClosureTitleElement = document.querySelector("#cafe-day-closure-title");
+const dayClosureStatusElement = document.querySelector("#cafe-day-closure-status");
+const dayClosureCountsElement = document.querySelector("#cafe-day-closure-counts");
+const dayClosureSignatureElement = document.querySelector("#cafe-day-closure-signature");
+const dayCloseButtonElement = document.querySelector("#cafe-day-close-button");
+const dayReopenButtonElement = document.querySelector("#cafe-day-reopen-button");
 const expectedKpiElement = document.querySelector("#kpi-expected");
 const arrivedKpiElement = document.querySelector("#kpi-arrived");
 const missingKpiElement = document.querySelector("#kpi-missing");
@@ -77,6 +84,9 @@ let isLoading = false;
 let realtimeChannel = null;
 let autoDateTimer = null;
 let writeInFlight = false;
+/** Estado do serviço da data selecionada. Vem do banco; nunca é inferido. */
+let dayClosure = policy.buildOpenCafeDay(selectedYmd);
+let closureInFlight = false;
 const demoMode = new URLSearchParams(window.location.search).get("demo") === "1";
 let demoDataset = null;
 let demoDatasetYmd = null;
@@ -120,6 +130,8 @@ function canWrite() {
   if (demoMode) return true;
   if (!policy.canRoleWriteCafeAttendance(currentUser.role)) return false;
   if (!policy.canRegisterCafeAttendanceForDate(selectedYmd)) return false;
+  // Serviço encerrado: a tela continua visível, mas em consulta.
+  if (policy.isCafeDayClosed(dayClosure)) return false;
   return true;
 }
 
@@ -130,6 +142,7 @@ function canWriteCard(card) {
     role: currentUser?.role,
     cafeDateYmd: selectedYmd,
     entitlement: card.entitlement,
+    dayStatus: dayClosure?.status,
   }).ok;
 }
 
@@ -266,26 +279,6 @@ function createCard(card) {
   bar.style.width = `${pct}%`;
   progress.appendChild(bar);
   attendanceCell.append(metrics, progress);
-
-  // Conclusão por apartamento: mesma ação server-side do botão global
-  // ("marcar_todos"), aplicada a ESTA reserva. Só aparece com direito real e
-  // enquanto falta alguém — sem café / não identificado / direito 0 nunca
-  // mostram, e completo também não. Nenhuma regra nova: quem decide o valor
-  // final continua sendo a RPC.
-  const podeConcluir =
-    writable &&
-    policy.canMarkAllCafeAttendance(card.entitlement) &&
-    card.attendedQty < card.entitlement.entitledQty;
-  if (podeConcluir) {
-    const concluir = document.createElement("button");
-    concluir.className = "cafe-concluir";
-    concluir.type = "button";
-    concluir.textContent = "Concluir café da manhã";
-    concluir.dataset.action = "concluir";
-    concluir.dataset.reservationId = card.reservationId;
-    concluir.disabled = writeInFlight;
-    attendanceCell.appendChild(concluir);
-  }
 
   const badgesCell = document.createElement("div");
   badgesCell.className = "badges-cell";
@@ -458,6 +451,59 @@ function renderIndicators() {
     const plans = policy.planMarkAllCafeAttended(cafeCards);
     markAllButtonElement.disabled = !canWrite() || plans.length === 0 || writeInFlight;
   }
+  renderDayClosure(kpis);
+}
+
+/**
+ * Card do serviço do dia. O status sai do banco; os números, dos KPIs já
+ * calculados. Atendidos = previstos NÃO conclui nada — quem conclui é o botão.
+ */
+function renderDayClosure(kpis) {
+  if (!(dayClosureElement instanceof HTMLElement)) return;
+  const fechado = policy.isCafeDayClosed(dayClosure);
+  const header = policy.resolveCafeDateHeader(selectedYmd);
+
+  dayClosureElement.classList.toggle("is-closed", fechado);
+
+  if (dayClosureTitleElement instanceof HTMLElement) {
+    dayClosureTitleElement.textContent = fechado
+      ? "Café da manhã concluído"
+      : `Café da manhã — ${header.label}`;
+  }
+  if (dayClosureStatusElement instanceof HTMLElement) {
+    dayClosureStatusElement.textContent =
+      `Status: ${policy.cafeDayStatusLabel(dayClosure)}`;
+  }
+  if (dayClosureCountsElement instanceof HTMLElement) {
+    dayClosureCountsElement.textContent =
+      `${kpis.expectedGuests} cafés previstos · ${kpis.attendedGuests} atendidos · ${kpis.missingGuests} faltantes`;
+  }
+  if (dayClosureSignatureElement instanceof HTMLElement) {
+    const assinatura = policy.cafeClosureSummaryLine(dayClosure);
+    dayClosureSignatureElement.textContent = assinatura;
+    dayClosureSignatureElement.classList.toggle("hidden", !assinatura);
+  }
+
+  const podeFechar =
+    !demoMode &&
+    policy.canCloseCafeDay({
+      role: currentUser?.role,
+      cafeDateYmd: selectedYmd,
+      closure: dayClosure,
+    });
+  if (dayCloseButtonElement instanceof HTMLButtonElement) {
+    dayCloseButtonElement.classList.toggle("hidden", !podeFechar);
+    dayCloseButtonElement.disabled = closureInFlight || writeInFlight;
+  }
+
+  // Reabrir é exceção de admin. Café e recepção não veem o botão.
+  const podeReabrir =
+    !demoMode &&
+    policy.canReopenCafeDay({ role: currentUser?.role, closure: dayClosure });
+  if (dayReopenButtonElement instanceof HTMLButtonElement) {
+    dayReopenButtonElement.classList.toggle("hidden", !podeReabrir);
+    dayReopenButtonElement.disabled = closureInFlight || writeInFlight;
+  }
 }
 
 function renderCards() {
@@ -492,11 +538,6 @@ function renderCards() {
       const action = button.dataset.action;
       const card = cafeCards.find((c) => c.reservationId === reservationId);
       if (!card) return;
-      if (action === "concluir") {
-        // Mesma ação do botão global, só que para esta reserva.
-        void persistAttendance(card, null, "marcar_todos");
-        return;
-      }
       const delta = action === "increase" ? 1 : -1;
       // Envia só a ação; o servidor calcula o novo valor e o teto oficial.
       void persistAttendance(card, null, delta > 0 ? "increment" : "decrement");
@@ -599,6 +640,10 @@ function mapRowsToCards(reservas, atendimentosByReserva) {
 }
 
 async function loadCafeDataset() {
+  // Estado do dia nunca sobrevive a uma troca de data: cada data tem o seu.
+  if (dayClosure?.dateYmd !== selectedYmd) {
+    dayClosure = policy.buildOpenCafeDay(selectedYmd);
+  }
   const testDataset = window.__YES_CAFE_TEST_DATASET__;
   if (demoMode) {
     if (!window.YesHotelCafeDemo?.createDataset) {
@@ -710,7 +755,29 @@ async function loadCafeDataset() {
   }
 
   cafeCards = mapRowsToCards(enriched, atendimentosByReserva);
+  await loadDayClosure(supabase);
   loadError = null;
+}
+
+/**
+ * Estado do serviço da data. Falha de leitura não pode inventar conclusão:
+ * qualquer erro deixa o dia aberto, que é o estado que preserva a operação.
+ */
+async function loadDayClosure(supabase) {
+  if (demoMode || !supabase) {
+    dayClosure = policy.buildOpenCafeDay(selectedYmd);
+    return;
+  }
+  const { data, error } = await supabase.rpc("operacional_cafe_status_dia", {
+    p_data_cafe: selectedYmd,
+  });
+  if (error) {
+    // Ambiente ainda sem a migration do fechamento: segue aberto.
+    dayClosure = policy.buildOpenCafeDay(selectedYmd);
+    return;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  dayClosure = policy.parseCafeDayClosure(selectedYmd, row);
 }
 
 async function refreshCafe(options = {}) {
@@ -870,6 +937,48 @@ async function markAllAttended() {
   }
 }
 
+/**
+ * Fecha ou reabre o serviço da data. Ambas as decisões são do servidor: aqui
+ * só se chama a RPC e se recarrega o estado real. Nada é assumido no cliente.
+ */
+async function persistDayClosure(action) {
+  if (demoMode || closureInFlight) return;
+  const supabase = getAuth()?.getSupabaseClient?.();
+  if (!supabase) return;
+
+  const rpc =
+    action === "reabrir"
+      ? "operacional_cafe_reabrir_dia"
+      : "operacional_cafe_fechar_dia";
+
+  closureInFlight = true;
+  renderIndicators();
+  try {
+    const { error } = await supabase.rpc(rpc, { p_data_cafe: selectedYmd });
+    if (error) throw error;
+    await refreshCafe({ silent: true });
+  } catch (error) {
+    setLoadState(
+      "error",
+      error?.message ||
+        (action === "reabrir"
+          ? "Não foi possível reabrir o atendimento."
+          : "Não foi possível concluir o café do dia."),
+    );
+  } finally {
+    closureInFlight = false;
+    renderCards();
+  }
+}
+
+dayCloseButtonElement?.addEventListener("click", () => {
+  void persistDayClosure("concluir");
+});
+
+dayReopenButtonElement?.addEventListener("click", () => {
+  void persistDayClosure("reabrir");
+});
+
 function syncSelectedDateFromMode() {
   selectedYmd = policy.resolveSelectedCafeDateYmd(dateMode, manualYmd);
 }
@@ -899,6 +1008,20 @@ function setupRealtime(supabase) {
         event: "*",
         schema: "public",
         table: "operacional_cafe_atendimentos",
+        filter: `data_cafe=eq.${selectedYmd}`,
+      },
+      () => {
+        void refreshCafe({ silent: true });
+      },
+    )
+    // Fechamento/reabertura do dia: sem isto, outra tela aberta continuaria
+    // aceitando cliques num serviço já encerrado até o próximo reload.
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "operacional_cafe_fechamentos",
         filter: `data_cafe=eq.${selectedYmd}`,
       },
       () => {
