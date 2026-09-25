@@ -168,6 +168,9 @@ export const HITS_SNAPSHOT_CAMPOS_FUNCIONAIS = [
   "status_reserva",
   "ciclo_hits",
   "total_hospedes",
+  // Plano de refeição: mudar só ele (ex.: "Nenhum" → "Café da Manhã") altera o
+  // direito ao café e, portanto, é alteração funcional da reserva.
+  "meal_plan_desc",
 ] as const;
 
 export type HitsSnapshotRow = {
@@ -179,6 +182,8 @@ export type HitsSnapshotRow = {
   status_reserva: "ativa" | "cancelada";
   ciclo_hits: "confirmada" | "hospedada";
   total_hospedes: number;
+  /** Texto bruto do HITS; null quando a reserva não declara plano. */
+  meal_plan_desc: string | null;
 };
 
 /**
@@ -199,6 +204,10 @@ export function toSnapshotRows(rows: ReadonlyArray<HitsSandboxReservationRow>): 
       status_reserva: r.status_reserva === "cancelada" ? "cancelada" : "ativa",
       ciclo_hits: r.ciclo_hits === "hospedada" ? "hospedada" : "confirmada",
       total_hospedes: Math.max(1, Number(r.total_hospedes) || 1),
+      meal_plan_desc: (() => {
+        const v = String(r.meal_plan_desc ?? "").trim();
+        return v ? v.slice(0, 160) : null;
+      })(),
     });
   }
   return out;

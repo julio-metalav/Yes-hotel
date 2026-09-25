@@ -155,12 +155,8 @@ function matchesActiveFilter(card) {
       card.entitlement.kind === "avulso_pago"
     );
   }
-  if (activeFilter === "unpaid") {
-    return (
-      card.entitlement.kind === "sem_cafe" ||
-      card.entitlement.kind === "nao_mapeado"
-    );
-  }
+  if (activeFilter === "no_breakfast") return card.entitlement.kind === "sem_cafe";
+  if (activeFilter === "unknown") return card.entitlement.kind === "nao_mapeado";
   return true;
 }
 
@@ -419,7 +415,24 @@ function renderIndicators() {
     completeApartmentsKpiElement.textContent = String(kpis.apartments);
   }
   if (apartmentsTotalKpiElement) {
-    apartmentsTotalKpiElement.textContent = `${kpis.completeApartments} com atendimento completo`;
+    apartmentsTotalKpiElement.textContent =
+      `${kpis.withBreakfast} com café · ${kpis.withoutBreakfast} sem café · ${kpis.unknownPlan} não identificados`;
+  }
+  // Contagem por situação nos próprios filtros (sem poluir o layout).
+  if (filtersElement) {
+    const contagem = {
+      paid: kpis.withBreakfast,
+      no_breakfast: kpis.withoutBreakfast,
+      unknown: kpis.unknownPlan,
+    };
+    filtersElement.querySelectorAll("[data-filter]").forEach((botao) => {
+      const chave = botao.getAttribute("data-filter");
+      const base = botao.getAttribute("data-label") || botao.textContent || "";
+      if (!botao.getAttribute("data-label")) botao.setAttribute("data-label", base.trim());
+      if (Object.prototype.hasOwnProperty.call(contagem, chave)) {
+        botao.textContent = `${botao.getAttribute("data-label")} (${contagem[chave]})`;
+      }
+    });
   }
   if (markAllButtonElement instanceof HTMLButtonElement) {
     const plans = policy.planMarkAllCafeAttended(cafeCards);

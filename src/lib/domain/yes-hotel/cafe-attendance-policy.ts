@@ -76,13 +76,26 @@ export function summarizeCafeKpis(cards: CafeCardModel[]): {
   attendedGuests: number;
   missingGuests: number;
   completeApartments: number;
+  withBreakfast: number;
+  withoutBreakfast: number;
+  unknownPlan: number;
 } {
   let expectedGuests = 0;
   let attendedGuests = 0;
   let completeApartments = 0;
+  let withBreakfast = 0;
+  let withoutBreakfast = 0;
+  let unknownPlan = 0;
 
   for (const card of cards) {
     const entitled = Math.max(0, card.entitlement.entitledQty);
+    if (card.entitlement.kind === "incluido" || card.entitlement.kind === "avulso_pago") {
+      withBreakfast += 1;
+    } else if (card.entitlement.kind === "sem_cafe") {
+      withoutBreakfast += 1;
+    } else {
+      unknownPlan += 1;
+    }
     // Atendidos é contagem real do operador: vale mesmo sem direito apurado.
     attendedGuests += clampCafeAttendedQty(card.attendedQty, entitled);
     // Previstos e "atendimento completo" continuam presos ao direito oficial:
@@ -98,6 +111,9 @@ export function summarizeCafeKpis(cards: CafeCardModel[]): {
     attendedGuests,
     missingGuests: Math.max(0, expectedGuests - attendedGuests),
     completeApartments,
+    withBreakfast,
+    withoutBreakfast,
+    unknownPlan,
   };
 }
 
@@ -123,12 +139,19 @@ export function planMarkAllCafeAttended(cards: CafeCardModel[]): Array<{
   return out;
 }
 
+/**
+ * Situação do café do apartamento, sempre explícita. "Não identificado" é
+ * deliberadamente diferente de "sem café": um é desconhecimento, o outro é
+ * declaração do HITS.
+ */
 export function cafeStatusLabel(entitlement: CafeBreakfastEntitlement): string {
   if (entitlement.kind === "avulso_pago") {
     const n = entitlement.paidExtraQty;
     return n === 1 ? "1 café avulso pago" : `${n} cafés avulsos pagos`;
   }
-  return "";
+  if (entitlement.kind === "incluido") return "Café incluso";
+  if (entitlement.kind === "sem_cafe") return "Sem café";
+  return "Não identificado";
 }
 
 export function cafeGuestLine(entitlement: CafeBreakfastEntitlement): string {

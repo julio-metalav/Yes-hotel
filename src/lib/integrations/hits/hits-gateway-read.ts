@@ -251,6 +251,8 @@ export type HitsSandboxReservationRow = {
   total_hospedes: number;
   /** Status=1 → confirmada; Status=3 → hospedada. Independe de status_reserva. */
   ciclo_hits: "confirmada" | "hospedada";
+  /** Texto bruto de `rooms[].mealPlanDesc` — classificado só na leitura do café. */
+  meal_plan_desc: string | null;
 };
 
 export function toHitsSandboxRow(
@@ -266,6 +268,7 @@ export function toHitsSandboxRow(
     status_reserva: reservation.reservationStatus,
     total_hospedes: Math.max(1, Number(reservation.totalGuests) || 1),
     ciclo_hits: ciclo,
+    meal_plan_desc: reservation.mealPlanDesc ?? null,
   };
 }
 

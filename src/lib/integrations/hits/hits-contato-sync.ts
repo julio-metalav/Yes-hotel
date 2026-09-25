@@ -26,6 +26,7 @@ import { aplicarContatoOficialNaReserva, precisaGuestMaster } from "./hits-conta
 import {
   materializarReservaSincronizada,
   reconciliarContatosDaReserva,
+  reconciliarPlanoRefeicaoDaReserva,
   ORIGEM_HITS,
   type SupabaseAdminLike,
 } from "./hits-materializar.ts";
@@ -49,6 +50,8 @@ type LocalHospede = {
 export type PlanoContato = {
   /** Externos ativos deste ciclo ainda sem linha em operacional_reservas. */
   novas: string[];
+  /** Externos ativos deste ciclo que JÁ têm linha local (plano é reconciliado). */
+  ja_locais: string[];
   /** Externos já locais com pelo menos um hóspede que pode melhorar. */
   existentes: string[];
   /** idEntity a consultar no guest master, sem repetição, já cortado pelo teto. */
@@ -92,6 +95,7 @@ export async function planejarEnriquecimentoContato(input: {
   const { admin, detalhes } = input;
   const vazio: PlanoContato = {
     novas: [],
+    ja_locais: [],
     existentes: [],
     entity_ids: [],
     entity_ids_ignorados: 0,
@@ -118,6 +122,7 @@ export async function planejarEnriquecimentoContato(input: {
   }
 
   const novas = ids.filter((id) => !jaLocal.has(id));
+  const jaLocais = ids.filter((id) => jaLocal.has(id));
   const entityIdsNovas: string[] = [];
   for (const id of novas) {
     for (const g of detalhes.get(id)?.guests ?? []) {
@@ -193,6 +198,7 @@ export async function planejarEnriquecimentoContato(input: {
   const teto = Math.max(0, input.maxLookups);
   return {
     novas,
+    ja_locais: jaLocais,
     existentes: [...existentes],
     entity_ids: ordenados.slice(0, teto),
     entity_ids_ignorados: Math.max(0, ordenados.length - teto),
@@ -215,6 +221,8 @@ export type CicloContatoResultado = {
     parou_por: string;
   };
   reconciliacao: { reservas: number; contatos_atualizados: number; erros: number };
+  /** Reservas já locais cujo meal_plan_desc/população foi trazido do HITS. */
+  plano_refeicao: { avaliadas: number; atualizadas: number; erros: number };
 };
 
 /**
@@ -244,6 +252,7 @@ export async function executarCicloContatoEMaterializacao(input: {
     ignoradas_teto: 0,
     enriquecimento: { solicitados: 0, lidos: 0, falhas: 0, ignorados_teto: 0, parou_por: "fim" },
     reconciliacao: { reservas: 0, contatos_atualizados: 0, erros: 0 },
+    plano_refeicao: { avaliadas: 0, atualizadas: 0, erros: 0 },
   };
 
   const plano = await planejarEnriquecimentoContato({
@@ -300,7 +309,23 @@ export async function executarCicloContatoEMaterializacao(input: {
     }
   }
 
-  // 2. Reservas já locais: SOMENTE contato (whatsapp/email), nada mais.
+  // 2. Plano de refeição das já locais: campo de origem HITS, sem rede e sem
+  //    tocar em mais nada. É o que mantém o direito ao café correto quando o
+  //    HITS muda o plano depois da materialização.
+  for (const id of plano.ja_locais) {
+    const synced = detalhes.get(id);
+    if (!synced) continue;
+    out.plano_refeicao.avaliadas += 1;
+    try {
+      const r = await reconciliarPlanoRefeicaoDaReserva({ admin, externalId: id, synced, log });
+      if (!r.ok) out.plano_refeicao.erros += 1;
+      else if (r.atualizado) out.plano_refeicao.atualizadas += 1;
+    } catch (_e) {
+      out.plano_refeicao.erros += 1;
+    }
+  }
+
+  // 3. Reservas já locais: SOMENTE contato (whatsapp/email), nada mais.
   let reconciliadas = 0;
   for (const id of plano.existentes) {
     if (reconciliadas >= HITS_RECONCILIAR_CONTATO_MAX_POR_CICLO) break;

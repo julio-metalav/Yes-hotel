@@ -377,7 +377,14 @@ async function main() {
       const base = syncedDoDetalhe();
       universo.set(ext, { ...base, externalReservationId: ext, guests: [{ ...base.guests[0]!, externalGuestId: idEnt }] });
       rowsUniverso.push({ external_reservation_id: ext, status_reserva: "ativa" });
-      dbUniverso.reservas.push({ id: "r-" + ext, origem_externa: "hits", external_reservation_id: ext });
+      // Plano/população já iguais aos do HITS: nada a reconciliar.
+      dbUniverso.reservas.push({
+        id: "r-" + ext,
+        origem_externa: "hits",
+        external_reservation_id: ext,
+        meal_plan_desc: base.mealPlanDesc ?? null,
+        total_hospedes_hits: Math.max(1, Number(base.totalGuests) || 1),
+      });
       dbUniverso.hospedes.push({ id: "h-" + ext, reserva_id: "r-" + ext, pms_external_guest_id: idEnt, whatsapp: CEL, email: EMAIL });
     }
     const chamadas: string[][] = [];
@@ -391,7 +398,7 @@ async function main() {
     assert.deepEqual(chamadas, [], "71 reservas já completas → ZERO GET de guest master");
     assert.equal(outUniverso.enriquecimento.solicitados, 0);
     assert.equal(outUniverso.reconciliacao.reservas, 0);
-    assert.equal(dbUniverso.writes.length, 0, "nenhuma escrita");
+    assert.equal(dbUniverso.writes.length, 0, "nenhuma escrita (plano já igual ao do HITS)");
     ok("16. ciclo com 71 reservas já materializadas e completas não consulta guest master nenhuma vez");
 
     // Leitor: GET-only, sequencial, cadenciado, teto e id exato.
@@ -471,7 +478,17 @@ async function main() {
       maxLookups: 10,
       buscarGuestRevenues: async () => ({ porEntityId: new Map([[ID_ENTITY, guestRevenue()]]), lidos: 1, falhas: 0, ignorados_teto: 0, parou_por: "fim" }),
     });
-    assert.equal(dbFin.writes.filter((w) => w.table === "operacional_reservas").length, 0, "reconciliação não toca a reserva");
+    // A reconciliação de CONTATO não toca a reserva; o único update possível em
+    // operacional_reservas neste caminho é o plano de refeição vindo do HITS.
+    const updatesReserva = dbFin.writes.filter((w) => w.table === "operacional_reservas");
+    for (const w of updatesReserva) {
+      assert.equal(w.op, "update", "nada é inserido");
+      assert.deepEqual(
+        Object.keys(w.payload as object).sort().filter((k) => k !== "total_hospedes_hits"),
+        ["meal_plan_desc"].filter((k) => Object.prototype.hasOwnProperty.call(w.payload as object, k)),
+        "só plano/população do HITS",
+      );
+    }
     assert.equal(dbFin.reservas[0]!.pagamento_status, "pago");
     assert.equal(dbFin.hospedes[0]!.whatsapp, CEL);
     ok("19. reconciliação de contato não escreve em operacional_reservas (financeiro intocado)");
