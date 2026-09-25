@@ -8,9 +8,9 @@ import {
   calculateCredentialWindow,
   getAccessTargetsForApartment,
   normalizeApartmentCode,
-} from "../../domain/yes-hotel.ts";
-import type { CredentialWindow } from "../../domain/yes-hotel.ts";
-import type { ReservationAdjustment } from "../../domain/yes-hotel.ts";
+} from "../../domain/yes-hotel/index.ts";
+import type { CredentialWindow } from "../../domain/yes-hotel/index.ts";
+import type { ReservationAdjustment } from "../../domain/yes-hotel/index.ts";
 import type {
   FechaduraRow,
   OperacionalMotivoOrigem,

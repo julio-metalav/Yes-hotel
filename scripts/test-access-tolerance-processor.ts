@@ -315,14 +315,76 @@ async function main() {
     ok("homolog filter todos skipped sem erro ao hospede");
   }
 
-  // real sem homolog → bloqueio
+  // Sem filtro de homologação, execução real processa TODAS as fechaduras da
+  // tolerância. Era aqui que o bloqueio de 1h ficava preso a um apartamento só.
   {
     const r = resolveHomologFilter(
       { ...FLAGS_REAL, homologLockIdFilter: null },
       true,
     );
-    assert.equal(r.ok, false);
-    ok("homolog ausente + real → bloqueio");
+    assert.equal(r.ok, true);
+    if (r.ok) assert.equal(r.filter, null, "sem filtro = todas as fechaduras");
+    ok("homolog ausente + real → processa todas as fechaduras elegíveis");
+  }
+
+  // O bloqueio alcança apartamento que NÃO é o de homologação.
+  {
+    const h = harness(pendingPay());
+    const tol = await seedActiveTolerance(h, {
+      reservation_id: RES_ID,
+      credential_id: CRED_ID + "todos",
+      suspension_due_at: DUE,
+      pending_payment: true,
+      pending_fnrh: false,
+      original_valid_from: VALID_FROM,
+      original_valid_until: VALID_UNTIL,
+      // Nenhum lock coincide com LOCK_APT: antes, tudo virava skipped.
+      items: threeItems().map((i, n) => ({ ...i, lock_id: 900 + n })),
+    });
+    const r = await processOneToleranceDue(
+      portsOf(h),
+      tol,
+      { flags: { ...FLAGS_REAL, homologLockIdFilter: null }, dryRun: false },
+    );
+    assert.equal(r.action, "suspended");
+    assert.equal(r.items_succeeded, 3, "as três fechaduras da reserva foram suspensas");
+    assert.equal((await h.tolerances.findById!(tol.id))!.grace_status, "suspended");
+    ok("bloqueio de 1h vale para qualquer apartamento elegível");
+  }
+
+  // Fail-closed: lock inválido nunca chega ao TTLock.
+  {
+    const h = harness(pendingPay());
+    const tol = await seedActiveTolerance(h, {
+      reservation_id: RES_ID,
+      credential_id: CRED_ID + "lockruim",
+      suspension_due_at: DUE,
+      pending_payment: true,
+      pending_fnrh: false,
+      original_valid_from: VALID_FROM,
+      original_valid_until: VALID_UNTIL,
+      items: threeItems().map((i) => ({ ...i, lock_id: 0 })),
+    });
+    const chamadas: number[] = [];
+    const ttlock = {
+      changeValidityOnly: async (req: { lockId: number }) => {
+        chamadas.push(req.lockId);
+        return { ok: true as const };
+      },
+    };
+    const r = await processOneToleranceDue(
+      portsOf(h, ttlock),
+      tol,
+      { flags: { ...FLAGS_REAL, homologLockIdFilter: null }, dryRun: false },
+    );
+    assert.deepEqual(chamadas, [], "nenhuma chamada ao TTLock com lock inválido");
+    assert.ok(r.action === "error" || r.action === "partial_failure");
+    const itens = await h.tolerances.listItems!(tol.id);
+    assert.ok(
+      itens.every((i) => i.last_error === "lock_id_invalido"),
+      "cada item registra o motivo",
+    );
+    ok("lock inválido é fail-closed: nada é enviado ao TTLock");
   }
 
   // falha parcial

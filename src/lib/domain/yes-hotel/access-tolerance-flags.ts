@@ -23,8 +23,13 @@ export type AccessToleranceFlags = {
   /** Envio real de e-mail (exige RESEND_API_KEY + from). */
   emailRealEnabled: boolean;
   /**
-   * Lock homologado. Execução TTLock real exige valor (fail-closed se ausente).
-   * Não hardcodar. Dry-run pode listar com ou sem filtro.
+   * Filtro OPCIONAL de rollback: quando definido, o efeito físico fica restrito
+   * a essa fechadura. Ausente (o normal) = todas as fechaduras da reserva.
+   *
+   * Era pré-requisito de execução real durante a homologação, o que na prática
+   * deixava o bloqueio de 1h valendo para um apartamento só. Deixou de ser
+   * exigido; continua funcionando para reduzir o alcance em caso de problema.
+   * Não hardcodar.
    */
   homologLockIdFilter: number | null;
   /** Número interno DigiSac (somente dígitos recomendados). Placeholder até secret. */
@@ -65,8 +70,15 @@ export function isAccessToleranceProcessorEnabled(
 
 /**
  * dry-run efetivo do Edge.
- * Cliente pode pedir dry_run=false; execução real só com flag TTLock + homolog lock.
- * Ausência / true → dry-run. Homolog ausente → dry-run (fail-closed).
+ *
+ * Execução real exige duas coisas: o cliente pedir `dry_run: false` E a flag
+ * `YES_HOTEL_TTLOCK_SUSPENSION_ENABLED` estar ligada. Ausência ou `true` no
+ * body continua significando dry-run — o default segue fechado.
+ *
+ * `homologLockIdFilter` NÃO entra mais aqui. Enquanto entrava, apagar a secret
+ * de homologação desligava o bloqueio inteiro em vez de ampliá-lo, e mantê-la
+ * restringia o efeito a uma fechadura. Agora ela só reduz o alcance quando
+ * presente; quem liga e desliga o efeito é a flag de suspensão.
  */
 export function resolveAccessToleranceEffectiveDryRun(
   bodyDryRun: unknown,
@@ -74,6 +86,5 @@ export function resolveAccessToleranceEffectiveDryRun(
 ): boolean {
   if (bodyDryRun !== false) return true;
   if (!flags.ttlockSuspensionEnabled) return true;
-  if (flags.homologLockIdFilter == null) return true;
   return false;
 }

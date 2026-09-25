@@ -1,11 +1,14 @@
+// O barrel do dominio e src/lib/domain/yes-hotel/index.ts. O caminho antigo,
+// "../../domain/yes-hotel.ts", nao existe: derrubava o modulo inteiro e com
+// ele a suite de retry das 13h, antes de qualquer asseracao rodar.
 import {
   buildCancellationPlan,
   buildProvisionPlan,
   buildRoomChangePlan,
   generateOperationalCredentialPreview,
   resolveBlockCode,
-} from "../../domain/yes-hotel.ts";
-import type { ReservationAdjustment } from "../../domain/yes-hotel.ts";
+} from "../../domain/yes-hotel/index.ts";
+import type { ReservationAdjustment } from "../../domain/yes-hotel/index.ts";
 import type {
   ReservationOperationalContext,
   ReservationOperationalPlan,
