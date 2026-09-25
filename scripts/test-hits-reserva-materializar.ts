@@ -158,12 +158,35 @@ function main() {
     // técnica intocada ("Novo hóspede" sem idEntity) pelo PAX HITS — só
     // identificação, guardada no próprio UPDATE por pms_external_guest_id IS
     // NULL + nome/status técnicos.
+    // (4) plano de refeição; (5) reconciliação FINANCEIRA contínua das já
+    // materializadas — o backfill acima só age com saldo nulo, então quitação
+    // posterior à materialização nunca chegava (caso 3281).
     const updates = [...edgeCode.matchAll(/\.update\(([^)]*)\)/g)].map((m) => m[1]!.trim());
     assert.deepEqual(
       updates,
-      ["contatoHits", "financeiroHits", "identificacaoHits", "patch"],
-      "os três updates guardados + o plano de refeição (patch: meal_plan_desc/total_hospedes_hits)",
+      ["contatoHits", "financeiroHits", "identificacaoHits", "patch", "decisao.patch"],
+      "os três updates guardados + plano de refeição + reconciliação financeira",
     );
+
+    // O quinto update é o financeiro contínuo: patch decidido por função pura,
+    // só colunas financeiras, e com trava otimista pelo saldo lido.
+    const iniFin = edgeCode.indexOf("export async function reconciliarFinanceiroDaReserva");
+    assert.ok(iniFin > 0, "helper de reconciliação financeira ausente");
+    const financeiro = edgeCode.slice(iniFin);
+    assert.match(financeiro, /decidirReconciliacaoFinanceiraHits\(\{/, "decisão vem do domínio puro");
+    assert.match(financeiro, /if \(!patchSomenteFinanceiro\(decisao\.patch\)\) \{/, "patch é validado antes de gravar");
+    assert.match(
+      financeiro,
+      /\.is\("reservation_balance_due", null\)\s*:\s*q\.eq\("reservation_balance_due", saldoLocalAntes\)/,
+      "trava otimista contra corrida com o Pagar.me",
+    );
+    for (const proibido of ["fnrh", "link_token", "senha", "whatsapp", "acesso_liberado", "operacional_hospedes"]) {
+      assert.equal(
+        financeiro.toLowerCase().includes(proibido),
+        false,
+        "reconciliação financeira não toca " + proibido,
+      );
+    }
     // O quarto update é o plano de refeição: campo de ORIGEM HITS, e só ele.
     const iniPlano = edgeCode.indexOf("export async function reconciliarPlanoRefeicaoDaReserva");
     const plano = edgeCode.slice(iniPlano, edgeCode.indexOf("\n}\n", iniPlano));
@@ -279,8 +302,15 @@ function main() {
         `${proibido} não pode aparecer na materialização`,
       );
     }
-    // 3 ocorrências: objeto financeiro (escrita), tipo do resultado e resposta.
-    assert.equal((edgeCode.match(/pagamento_status/g) || []).length, 3, "pagamento_status só no objeto financeiro, no tipo e na resposta");
+    // 6 ocorrências, todas contabilizadas: 3 da materialização (objeto
+    // financeiro que grava, tipo do resultado e resposta) e 3 da reconciliação
+    // contínua, que apenas LÊ o status para decidir (select, tipo da linha e
+    // montagem do estado local). Quem grava continua sendo só o patch validado.
+    assert.equal(
+      (edgeCode.match(/pagamento_status/g) || []).length,
+      6,
+      "pagamento_status só no financeiro, no tipo, na resposta e na leitura da reconciliação",
+    );
     ok("sem acesso, check-in, senha, TTLock ou quarto; pagamento só via financeiro do HITS");
 
     // Leitura no HITS, escrita só no Yes: existe um único fetch, e ele é GET.

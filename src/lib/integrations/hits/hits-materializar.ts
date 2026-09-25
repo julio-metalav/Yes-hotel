@@ -18,6 +18,11 @@
  */
 
 import type { SyncedReservation } from "../../domain/yes-hotel/synced-reservation.ts";
+import {
+  decidirReconciliacaoFinanceiraHits,
+  patchSomenteFinanceiro,
+  type DecisaoFinanceira,
+} from "../../domain/yes-hotel/reservation-financial-reconciliation.ts";
 import { calcularPosicoesFaltantes } from "./hits-ocupacao.ts";
 import { decidirEmailExistente, decidirWhatsappExistente } from "./hits-contato.ts";
 
@@ -564,4 +569,122 @@ export async function reconciliarPlanoRefeicaoDaReserva(input: {
     return { ok: false, atualizado: false };
   }
   return { ok: true, atualizado: Array.isArray(out) && out.length === 1 };
+}
+
+export type ReconciliacaoFinanceiraResultado = {
+  ok: boolean;
+  atualizado: boolean;
+  motivo: DecisaoFinanceira["motivo"] | "reserva_nao_materializada" | "corrida_saldo_mudou";
+};
+
+/**
+ * Reconciliação financeira contínua de uma reserva HITS JÁ materializada.
+ *
+ * Existe porque o backfill da materialização é one-shot: ele só age enquanto
+ * `reservation_balance_due` é nulo. Reserva criada pendente e quitada depois no
+ * HITS ficava congelada em "não pago" — exatamente o caso da 3281.
+ *
+ * Usa o detalhe HITS já lido no ciclo. NÃO faz rede. Escreve somente colunas
+ * financeiras, e só na direção segura: promove para pago, nunca rebaixa, nunca
+ * aumenta saldo que o Pagar.me já reduziu. A decisão inteira mora em
+ * `decidirReconciliacaoFinanceiraHits`, que é pura e testada isoladamente.
+ *
+ * Não toca FNRH, senha, TTLock, TAG, contato, mealPlanDesc nem hóspedes.
+ */
+export async function reconciliarFinanceiroDaReserva(input: {
+  admin: SupabaseAdminLike;
+  externalId: string;
+  synced: SyncedReservation;
+  log?: (msg: string, extra?: Record<string, unknown>) => void;
+}): Promise<ReconciliacaoFinanceiraResultado> {
+  const { admin, externalId, synced } = input;
+  const log = input.log ?? (() => {});
+
+  const { data } = await admin
+    .from("operacional_reservas")
+    .select(
+      "id, pagamento_status, reservation_balance_due, reservation_total_amount, classificacao_comissionamento, classificacao_comissionamento_origem",
+    )
+    .eq("origem_externa", ORIGEM_HITS)
+    .eq("external_reservation_id", externalId)
+    .maybeSingle();
+
+  const reserva = data as
+    | {
+        id: string;
+        pagamento_status?: string | null;
+        reservation_balance_due?: number | string | null;
+        reservation_total_amount?: number | string | null;
+        classificacao_comissionamento?: string | null;
+        classificacao_comissionamento_origem?: string | null;
+      }
+    | null;
+
+  // Reserva ainda não materializada não é assunto desta função: quem a criar
+  // já grava o financeiro correto no insert.
+  if (!reserva) {
+    return { ok: true, atualizado: false, motivo: "reserva_nao_materializada" };
+  }
+
+  const saldoLocalAntes = reserva.reservation_balance_due ?? null;
+
+  const decisao = decidirReconciliacaoFinanceiraHits({
+    local: {
+      pagamentoStatus: reserva.pagamento_status ?? null,
+      reservationBalanceDue:
+        saldoLocalAntes == null ? null : Number(saldoLocalAntes),
+      reservationTotalAmount:
+        reserva.reservation_total_amount == null
+          ? null
+          : Number(reserva.reservation_total_amount),
+      classificacaoComissionamento: reserva.classificacao_comissionamento ?? null,
+      classificacaoComissionamentoOrigem:
+        reserva.classificacao_comissionamento_origem ?? null,
+    },
+    hits: {
+      reservationBalanceDue: synced.reservationBalanceDue,
+      reservationTotalAmount: synced.reservationTotalAmount,
+      classificacaoComissionamento: synced.classificacaoComissionamento,
+    },
+  });
+
+  if (!decisao.atualiza) {
+    return { ok: true, atualizado: false, motivo: decisao.motivo };
+  }
+
+  // Cinto de segurança: nenhuma coluna fora do financeiro sai daqui, mesmo que
+  // alguém amplie o patch sem querer no futuro.
+  if (!patchSomenteFinanceiro(decisao.patch)) {
+    log("[HITS_MATERIALIZAR] patch financeiro fora do escopo — abortado", {
+      colunas: Object.keys(decisao.patch),
+    });
+    return { ok: false, atualizado: false, motivo: decisao.motivo };
+  }
+
+  // Trava otimista contra corrida com o Pagar.me: a escrita só vale se o saldo
+  // continuar exatamente como estava quando decidimos. Se uma cobrança local
+  // reduziu o saldo no meio do caminho, o update não casa e nada é sobrescrito.
+  let q = admin.from("operacional_reservas").update(decisao.patch).eq("id", reserva.id);
+  q = saldoLocalAntes == null
+    ? q.is("reservation_balance_due", null)
+    : q.eq("reservation_balance_due", saldoLocalAntes);
+
+  const { data: out, error } = await q.select("id");
+  if (error) {
+    log("[HITS_MATERIALIZAR] reconciliação financeira falhou", { code: error.code });
+    return { ok: false, atualizado: false, motivo: decisao.motivo };
+  }
+
+  const gravou = Array.isArray(out) && out.length === 1;
+  if (!gravou) {
+    // Não é erro: o saldo mudou sob nossos pés e a versão local vence.
+    return { ok: true, atualizado: false, motivo: "corrida_saldo_mudou" };
+  }
+
+  log("[HITS_MATERIALIZAR] financeiro reconciliado", {
+    external_reservation_id: externalId,
+    motivo: decisao.motivo,
+    colunas: Object.keys(decisao.patch),
+  });
+  return { ok: true, atualizado: true, motivo: decisao.motivo };
 }
