@@ -275,9 +275,9 @@ assert.ok(
     uiSource.indexOf("await ensureDemoModuleLoaded()"),
 );
 assert.match(uiSource, /script\.src = "\.\/cafe-demo-data\.js\?v=2"/);
-assert.match(html, /cafe-da-manha-mvp\.js\?v=13/);
+assert.match(html, /cafe-da-manha-mvp\.js\?v=14/);
 assert.match(html, /yes-cafe-policy\.js\?v=7/);
-assert.match(html, /cafe-da-manha-mvp\.css\?v=10/);
+assert.match(html, /cafe-da-manha-mvp\.css\?v=11/);
 assert.match(uiSource, /createSimpleAlert\("cafe-no-breakfast-alert", cafeAlert\)/);
 assert.match(uiSource, /createSimpleAlert\("ppd-cafe-alert", card\.ppdAlert\.badgeLabel\)/);
 assert.match(
