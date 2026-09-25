@@ -25,6 +25,9 @@ import {
   collectOccupiedPasscodesFromRows,
   shouldRollbackPartialPasscodeAttempt,
 } from "../../../src/lib/domain/yes-hotel/ttlock-passcode-uniqueness.ts";
+import { handleRoomChange } from "../../../src/lib/application/yes-hotel/credential-lifecycle.ts";
+import { createSupabaseProvisioningRepository } from "../../../src/lib/application/yes-hotel/supabase-provisioning-repo.ts";
+import type { TtlockClient } from "../../../src/lib/integrations/ttlock/client.ts";
 import {
   attemptProvisionLockWithSamePinRetry,
   encodeTransientRetryState,
@@ -224,7 +227,11 @@ async function ensureCallerAllowed(request: Request): Promise<void> {
   const internalCaller = String(request.headers.get("x-yes-internal-caller") ?? "")
     .trim()
     .toLowerCase();
-  const internalCallers = new Set(["send-senha", "ttlock-provision-retry"]);
+  const internalCallers = new Set([
+    "send-senha",
+    "ttlock-provision-retry",
+    "hits-reservations-preview",
+  ]);
   if (internalCallers.has(internalCaller) && isServiceRoleBearer(token, supabaseServiceKey)) {
     return;
   }
@@ -1984,6 +1991,277 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
   );
 }
 
+function normalizeRoomCode(value: unknown): string | null {
+  const raw = String(value ?? "").trim().replace(/\D/g, "");
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 40) return null;
+  return String(n).padStart(2, "0");
+}
+
+function createRoomChangeTtlockAdapter(): TtlockClient {
+  return {
+    isAvailable: () => isTtlockAvailable(),
+    deleteKeyboardPassword: async (params: {
+      lockId: string | number;
+      keyboardPwdId: number;
+    }) => {
+      await ttlockDeleteKeyboardPassword(params.lockId, params.keyboardPwdId);
+      return { errcode: 0 };
+    },
+    createKeyboardPassword: async (params: {
+      lockId: string | number;
+      keyboardPwd: string;
+      startDate: number;
+      endDate: number;
+      keyboardPwdName?: string;
+    }) => ({
+      keyboardPwdId: await ttlockAddKeyboardPassword(
+        params.lockId,
+        params.keyboardPwd,
+        params.startDate,
+        params.endDate,
+        params.keyboardPwdName,
+      ),
+    }),
+    listKeyboardPasswords: async (params: { lockId: string | number }) =>
+      ttlockListKeyboardPasswords(params.lockId),
+  } as unknown as TtlockClient;
+}
+
+/**
+ * Troca de apartamento disparada pelo snapshot HITS.
+ * HITS é a fonte de verdade. Com credencial existente, remove primeiro os
+ * destinos exclusivos do quarto/bloco antigo e só então provisiona o novo,
+ * preservando o mesmo PIN. Sem credencial, apenas converge o espelho local.
+ */
+async function handleLifecycleRoomChange(
+  request: Request,
+  payload: Record<string, unknown>,
+): Promise<Response> {
+  await ensureCallerAllowed(request);
+  const reservaId = requireReservaId(payload).trim().toLowerCase();
+  const novoApartamento = normalizeRoomCode(payload.novo_apartamento ?? payload.apartamento_novo);
+  const esperadoAnterior = normalizeRoomCode(
+    payload.apartamento_anterior ?? payload.previous_apartment,
+  );
+  const externalIdPayload = String(payload.external_reservation_id ?? "").trim() || null;
+
+  if (!novoApartamento) {
+    throw new HttpError("novo_apartamento inválido; esperado 01-40.", 400);
+  }
+
+  const { data: reserva, error: reservaError } = await adminClient
+    .from("operacional_reservas")
+    .select("id, apartamento, external_reservation_id")
+    .eq("id", reservaId)
+    .maybeSingle();
+  if (reservaError || !reserva) {
+    throw new HttpError("Reserva operacional não encontrada para room change.", 404);
+  }
+
+  const apartamentoAtualRaw = String(reserva.apartamento ?? "").trim();
+  const apartamentoAtual = normalizeRoomCode(apartamentoAtualRaw);
+  const externalId = String(reserva.external_reservation_id ?? "").trim() || externalIdPayload;
+  if (!apartamentoAtual) {
+    throw new HttpError("Apartamento atual da reserva é inválido.", 409);
+  }
+
+  if (apartamentoAtual === novoApartamento) {
+    return jsonResponse({
+      ok: true,
+      idempotente: true,
+      reservaId,
+      external_reservation_id: externalId,
+      apartamento_anterior: apartamentoAtual,
+      apartamento_novo: novoApartamento,
+      status: "convergente",
+      limpezaAntigaPendente: 0,
+    });
+  }
+
+  if (esperadoAnterior && apartamentoAtual !== esperadoAnterior) {
+    return jsonResponse(
+      {
+        ok: false,
+        error: "room_change_stale",
+        reservaId,
+        external_reservation_id: externalId,
+        apartamento_atual: apartamentoAtual,
+        apartamento_esperado: esperadoAnterior,
+        apartamento_novo: novoApartamento,
+      },
+      409,
+    );
+  }
+
+  const repo = createSupabaseProvisioningRepository(
+    adminClient as unknown as Parameters<typeof createSupabaseProvisioningRepository>[0],
+  );
+  const credencial = await repo.getCredencialPorReserva(reservaId);
+
+  if (!credencial) {
+    const { data: updated, error } = await adminClient
+      .from("operacional_reservas")
+      .update({ apartamento: novoApartamento, updated_at: new Date().toISOString() })
+      .eq("id", reservaId)
+      .eq("apartamento", apartamentoAtualRaw)
+      .select("id");
+    if (error) throw new HttpError("Falha ao atualizar apartamento local: " + error.message, 500);
+    if (!Array.isArray(updated) || updated.length !== 1) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "room_change_concurrent_update",
+          reservaId,
+          apartamento_anterior: apartamentoAtual,
+          apartamento_novo: novoApartamento,
+        },
+        409,
+      );
+    }
+
+    await insertReservaEvento(
+      reservaId,
+      "hits_apartamento_alterado",
+      "Apartamento alterado no HITS",
+      {
+        action: "lifecycle_room_change",
+        external_reservation_id: externalId,
+        apartamento_anterior: apartamentoAtual,
+        apartamento_novo: novoApartamento,
+        credencial_id: null,
+        ttlock: "nao_aplicavel_sem_credencial",
+      },
+    );
+    return jsonResponse({
+      ok: true,
+      reservaId,
+      external_reservation_id: externalId,
+      apartamento_anterior: apartamentoAtual,
+      apartamento_novo: novoApartamento,
+      credencialId: null,
+      status: "atualizado_sem_credencial",
+      limpezaAntigaPendente: 0,
+    });
+  }
+
+  const pinAntes = String(credencial.codigo_credencial ?? "").trim() || null;
+  const result = await handleRoomChange(
+    reservaId,
+    {
+      repository: repo,
+      ttlockClient: createRoomChangeTtlockAdapter(),
+    },
+    novoApartamento,
+  );
+
+  if (result.limpezaAntigaPendente > 0) {
+    await insertReservaEvento(
+      reservaId,
+      "hits_room_change_bloqueado_limpeza",
+      "Troca de apartamento bloqueada: acesso antigo ainda ativo ou incerto",
+      {
+        action: "lifecycle_room_change",
+        external_reservation_id: externalId,
+        apartamento_anterior: apartamentoAtual,
+        apartamento_novo: novoApartamento,
+        credencial_id: credencial.id,
+        pin_preservado: pinAntes != null && result.passcode === pinAntes,
+        limpeza_antiga_pendente: result.limpezaAntigaPendente,
+        erros: result.erros.slice(0, 3),
+      },
+    );
+    return jsonResponse(
+      {
+        ok: false,
+        error: "room_change_old_access_cleanup_pending",
+        reservaId,
+        credencialId: credencial.id,
+        apartamento_anterior: apartamentoAtual,
+        apartamento_novo: novoApartamento,
+        status: result.status,
+        limpezaAntigaPendente: result.limpezaAntigaPendente,
+      },
+      502,
+    );
+  }
+
+  const { data: updated, error: updateError } = await adminClient
+    .from("operacional_reservas")
+    .update({ apartamento: novoApartamento, updated_at: new Date().toISOString() })
+    .eq("id", reservaId)
+    .eq("apartamento", apartamentoAtualRaw)
+    .select("id");
+  if (updateError) {
+    throw new HttpError("TTLock processada, mas falhou atualização do apartamento local.", 500);
+  }
+  if (!Array.isArray(updated) || updated.length !== 1) {
+    await insertReservaEvento(
+      reservaId,
+      "hits_room_change_local_concorrente",
+      "Troca TTLock processada; espelho local mudou concorrentemente",
+      {
+        action: "lifecycle_room_change",
+        external_reservation_id: externalId,
+        apartamento_anterior: apartamentoAtual,
+        apartamento_novo: novoApartamento,
+        credencial_id: credencial.id,
+      },
+    );
+    return jsonResponse(
+      {
+        ok: false,
+        error: "room_change_concurrent_update_after_ttlock",
+        reservaId,
+        credencialId: credencial.id,
+        apartamento_anterior: apartamentoAtual,
+        apartamento_novo: novoApartamento,
+        status: result.status,
+        limpezaAntigaPendente: 0,
+      },
+      409,
+    );
+  }
+
+  const pinDepois = String(result.passcode ?? "").trim() || null;
+  const pinPreservado = pinAntes == null || pinDepois === pinAntes;
+  await insertReservaEvento(
+    reservaId,
+    "hits_apartamento_alterado",
+    "Apartamento alterado no HITS e acesso TTLock reconciliado",
+    {
+      action: "lifecycle_room_change",
+      external_reservation_id: externalId,
+      apartamento_anterior: apartamentoAtual,
+      apartamento_novo: novoApartamento,
+      credencial_id: credencial.id,
+      pin_preservado: pinPreservado,
+      itens_antigos_revogados: result.itensAntigosRevogados,
+      itens_novos_inseridos: result.itensNovosInseridos,
+      status_final: result.status,
+      falhas: result.falhas,
+      erros: result.erros.slice(0, 3),
+    },
+  );
+
+  return jsonResponse({
+    ok: true,
+    reservaId,
+    external_reservation_id: externalId,
+    credencialId: credencial.id,
+    apartamento_anterior: apartamentoAtual,
+    apartamento_novo: novoApartamento,
+    status: result.status,
+    passcode_preservado: pinPreservado,
+    itensAntigosRevogados: result.itensAntigosRevogados,
+    itensNovosInseridos: result.itensNovosInseridos,
+    provisionados: result.provisionados,
+    falhas: result.falhas,
+    limpezaAntigaPendente: 0,
+  });
+}
+
 async function handleCancelOrCheckout(
   request: Request,
   payload: Record<string, unknown>,
@@ -2725,6 +3003,9 @@ Deno.serve(async (request: Request) => {
     if (action === "lifecycle_provision") {
       return await handleLifecycleProvision(request, payload);
     }
+    if (action === "lifecycle_room_change") {
+      return await handleLifecycleRoomChange(request, payload);
+    }
     if (action === "lifecycle_gerar_nova_senha") {
       return await handleGerarNovaSenha(request, payload);
     }
@@ -2738,7 +3019,7 @@ Deno.serve(async (request: Request) => {
     return jsonResponse(
       {
         error:
-          "Ação não suportada. Use: lifecycle_cancel, lifecycle_checkout, lifecycle_provision, lifecycle_gerar_nova_senha, lifecycle_update_validity, sync_summary, retry_sync, list_pending_cleanup.",
+          "Ação não suportada. Use: lifecycle_cancel, lifecycle_checkout, lifecycle_provision, lifecycle_room_change, lifecycle_gerar_nova_senha, lifecycle_update_validity, sync_summary, retry_sync, list_pending_cleanup.",
       },
       400,
     );

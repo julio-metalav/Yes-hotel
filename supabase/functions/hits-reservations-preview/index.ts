@@ -1,8 +1,9 @@
 /**
  * Edge: leitura somente leitura das reservas do HITS pelo gateway.
  *
- * Só GET. Nenhuma escrita no HITS: não chama HITS direto, não dispara DigiSac,
- * e-mail, TTLock, senha nem cobrança.
+ * Só GET no HITS. Não chama HITS direto nem faz escrita no PMS.
+ * No ciclo persistido do scheduler, a fase pós-snapshot pode reconciliar
+ * mudança de apartamento no Yes/TTLock pela lifecycle interna.
  *
  * O Bearer do gateway vive apenas aqui (Deno.env). O chamador autentica com o
  * JWT do usuário ou com a anon key (verify_jwt default = true) e nunca vê o token.
@@ -50,6 +51,10 @@ import {
   HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO,
 } from "../../../src/lib/integrations/hits/hits-contato-sync.ts";
 import type { SyncedReservation } from "../../../src/lib/domain/yes-hotel/synced-reservation.ts";
+import {
+  detectarMudancasApartamentoNoCiclo,
+  type MudancaApartamentoHits,
+} from "../../../src/lib/integrations/hits/hits-room-change.ts";
 
 /**
  * Materialização automática (desligada por padrão). Com `=true`, ao fim de um
@@ -67,6 +72,9 @@ const HITS_AUTO_MATERIALIZAR_ENV = "HITS_AUTO_MATERIALIZAR_ENABLED";
  * fase para sozinha e o que faltou volta no próximo ciclo.
  */
 const HITS_POS_SNAPSHOT_DEADLINE_MS = 130_000;
+/** Trocas são raras; limita efeito físico por tick e deixa folga ao timeout da Edge. */
+const HITS_ROOM_CHANGE_MAX_POR_CICLO = 3;
+const HITS_ROOM_CHANGE_MIN_REMAINING_MS = 20_000;
 
 /**
  * Trava do modo incremental (Type=2 + cursor). Exige a migration
@@ -142,6 +150,58 @@ function snapshotAdmin(): {
       return (data as SnapshotSyncState | null) ?? null;
     },
   };
+}
+
+type RoomChangeLifecycleResultado = {
+  ok: boolean;
+  status?: string | null;
+  credencial_id?: string | null;
+  limpeza_antiga_pendente?: number;
+  error?: string | null;
+};
+
+async function processarMudancaApartamentoViaLifecycle(
+  mudanca: MudancaApartamentoHits,
+): Promise<RoomChangeLifecycleResultado> {
+  const url = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!url || !serviceKey) {
+    return { ok: false, error: "supabase_admin_unavailable" };
+  }
+
+  try {
+    const response = await fetch(`${url}/functions/v1/yes-hotel-lifecycle`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        apikey: serviceKey,
+        "Content-Type": "application/json",
+        "x-yes-internal-caller": "hits-reservations-preview",
+      },
+      body: JSON.stringify({
+        action: "lifecycle_room_change",
+        payload: {
+          reserva_id: mudanca.reserva_id,
+          external_reservation_id: mudanca.external_reservation_id,
+          apartamento_anterior: mudanca.apartamento_anterior,
+          novo_apartamento: mudanca.apartamento_novo,
+        },
+      }),
+    });
+    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    return {
+      ok: response.ok && body.ok === true,
+      status: body.status == null ? null : String(body.status),
+      credencial_id: body.credencialId == null ? null : String(body.credencialId),
+      limpeza_antiga_pendente: Number(body.limpezaAntigaPendente ?? 0) || 0,
+      error: response.ok ? (body.error == null ? null : String(body.error)) : String(body.error ?? `http_${response.status}`),
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message.slice(0, 160) : "lifecycle_room_change_failed",
+    };
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -261,6 +321,62 @@ Deno.serve(async (req: Request) => {
           }),
         log: (msg, extra) => console.error(msg, extra ?? {}),
       });
+
+      // O snapshot HITS é a fonte de verdade do apartamento. Detecta divergência
+      // contra a linha operacional e delega o efeito físico à lifecycle TTLock.
+      // A lifecycle é responsável por manter o mesmo PIN e falhar fechado se o
+      // acesso antigo não puder ser removido.
+      const roomChangeStats = {
+        avaliadas: 0,
+        detectadas: 0,
+        processadas: 0,
+        sucesso: 0,
+        erros: 0,
+        invalidas: 0,
+        ignoradas_teto_ou_prazo: 0,
+      };
+      try {
+        const deteccao = await detectarMudancasApartamentoNoCiclo({
+          admin: admin.admin,
+          rows: result.rows,
+          detalhes,
+        });
+        roomChangeStats.avaliadas = deteccao.avaliadas;
+        roomChangeStats.detectadas = deteccao.mudancas.length;
+        roomChangeStats.invalidas = deteccao.invalidas;
+        if (deteccao.erro) {
+          roomChangeStats.erros += 1;
+        } else {
+          for (const mudanca of deteccao.mudancas) {
+            if (
+              roomChangeStats.processadas >= HITS_ROOM_CHANGE_MAX_POR_CICLO ||
+              Date.now() > startedAt + HITS_POS_SNAPSHOT_DEADLINE_MS - HITS_ROOM_CHANGE_MIN_REMAINING_MS
+            ) {
+              roomChangeStats.ignoradas_teto_ou_prazo += 1;
+              continue;
+            }
+            roomChangeStats.processadas += 1;
+            const rc = await processarMudancaApartamentoViaLifecycle(mudanca);
+            if (rc.ok) roomChangeStats.sucesso += 1;
+            else {
+              roomChangeStats.erros += 1;
+              console.error("[HITS_ROOM_CHANGE] lifecycle falhou", {
+                external_reservation_id: mudanca.external_reservation_id,
+                apartamento_anterior: mudanca.apartamento_anterior,
+                apartamento_novo: mudanca.apartamento_novo,
+                error: rc.error ?? "unknown",
+              });
+            }
+          }
+        }
+      } catch (e) {
+        roomChangeStats.erros += 1;
+        console.error(
+          "[HITS_ROOM_CHANGE] deteccao falhou",
+          e instanceof Error ? e.message : String(e),
+        );
+      }
+      materializacao = { ...materializacao, troca_apartamento: roomChangeStats };
     }
   } else {
     snapshot = decision.persist

@@ -581,48 +581,106 @@ export async function handleRoomChange(
   reservaId: string,
   deps: LifecycleDeps,
   novoApartamento: string,
-): Promise<ReprovisionResult & { itensAntigosRevogados: number; itensNovosInseridos: number }> {
+): Promise<
+  ReprovisionResult & {
+    itensAntigosRevogados: number;
+    itensNovosInseridos: number;
+    limpezaAntigaPendente: number;
+  }
+> {
   const repo = deps.repository;
+  const client = deps.ttlockClient;
   const credencial = await repo.getCredencialPorReserva(reservaId);
   if (!credencial) throw new Error(`Nenhuma credencial encontrada para reserva: ${reservaId}`);
 
   const apartamentoAntigo = await repo.getReservaApartment(reservaId);
-  const numAntigo = apartamentoAntigo ? apartamentoAntigo.padStart(2, "0") : "";
-  const numNovo = novoApartamento.trim().replace(/\D/g, "");
-  const numNovoNorm = numNovo.length <= 2 ? numNovo.padStart(2, "0") : numNovo.slice(0, 2);
+  const numAntigoRaw = String(apartamentoAntigo ?? "").trim().replace(/\D/g, "");
+  const numNovoRaw = String(novoApartamento ?? "").trim().replace(/\D/g, "");
+  const numAntigo = numAntigoRaw ? String(Number(numAntigoRaw)).padStart(2, "0") : "";
+  const numNovoNorm = numNovoRaw ? String(Number(numNovoRaw)).padStart(2, "0") : "";
 
-  const itens = await repo.getItens(credencial.id);
-  const codigosAntigos = new Set<string>();
-  if (numAntigo) {
-    codigosAntigos.add(`APT-${numAntigo}`);
-    const gateCode = parseInt(numAntigo, 10) <= 20 ? "1947" : "1967";
-    codigosAntigos.add(`GATE-${gateCode}-EXTERNAL`);
-    codigosAntigos.add(`GATE-${gateCode}-INTERNAL`);
+  if (!numAntigo || !numNovoNorm || Number(numNovoNorm) < 1 || Number(numNovoNorm) > 40) {
+    throw new Error(
+      `Troca de apartamento inválida: origem=${apartamentoAntigo ?? "—"} destino=${novoApartamento || "—"}.`,
+    );
   }
 
+  if (numAntigo === numNovoNorm) {
+    const itens = await repo.getItens(credencial.id);
+    const ativos = itens.filter((i) => i.status_provisionamento !== "revogado");
+    const provisionados = ativos.filter(
+      (i) => i.status_provisionamento === "provisionado" && i.remote_keyboard_pwd_id != null,
+    ).length;
+    return {
+      credencialId: credencial.id,
+      status: credencial.status,
+      passcode: credencial.codigo_credencial,
+      revogados: 0,
+      provisionados,
+      falhas: 0,
+      erros: [],
+      itensAntigosRevogados: 0,
+      itensNovosInseridos: 0,
+      limpezaAntigaPendente: 0,
+    };
+  }
+
+  const destinosAntigos = await repo.getFechadurasForApartment(numAntigo);
+  const destinosNovos = await repo.getFechadurasForApartment(numNovoNorm);
+  if (destinosNovos.length === 0) {
+    throw new Error(
+      `Nenhuma fechadura encontrada para apartamento: ${novoApartamento}. Verifique se o numero e valido (01-40).`,
+    );
+  }
+
+  const idsNovos = new Set(destinosNovos.map((d) => d.fechadura_id));
+  const antigosExclusivos = destinosAntigos.filter((d) => !idsNovos.has(d.fechadura_id));
+  const idsAntigosExclusivos = new Set(antigosExclusivos.map((d) => d.fechadura_id));
+  const codigosAntigosExclusivos = new Set(antigosExclusivos.map((d) => d.codigo_logico_destino));
+
+  // Segurança: destinos compartilhados entre origem e destino (os dois portões
+  // quando a troca é dentro do mesmo bloco) permanecem ativos. Só o conjunto
+  // exclusivo do apartamento/bloco antigo é revogado.
+  const itensAntes = await repo.getItens(credencial.id);
   let itensAntigosRevogados = 0;
+  let limpezaAntigaPendente = 0;
+  const erros: string[] = [];
   const now = new Date().toISOString();
 
-  for (const item of itens) {
-    if (!codigosAntigos.has(item.codigo_logico_destino)) continue;
-    if (item.status_provisionamento !== "provisionado" && item.status_provisionamento !== "falhou") continue;
+  for (const item of itensAntes) {
+    const pertenceAoAntigo =
+      idsAntigosExclusivos.has(item.fechadura_id) ||
+      codigosAntigosExclusivos.has(item.codigo_logico_destino);
+    if (!pertenceAoAntigo || item.status_provisionamento === "revogado") continue;
 
-    if (item.remote_keyboard_pwd_id != null && deps.ttlockClient.isAvailable()) {
+    if (item.remote_keyboard_pwd_id != null) {
+      if (!client.isAvailable()) {
+        const msg = "TTLock indisponível para remover acesso do apartamento anterior.";
+        await repo.updateItem(item.id, {
+          status_provisionamento: "pendente_limpeza",
+          ultimo_erro: msg,
+        });
+        limpezaAntigaPendente++;
+        erros.push(`${item.codigo_logico_destino}: ${msg}`);
+        continue;
+      }
       try {
-        await deps.ttlockClient.deleteKeyboardPassword({
+        await client.deleteKeyboardPassword({
           lockId: item.lock_id_ttlock,
           keyboardPwdId: item.remote_keyboard_pwd_id,
         });
-      } catch {
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         await repo.updateItem(item.id, {
           status_provisionamento: "pendente_limpeza",
-          ultimo_erro: "Erro ao revogar remoto no room change",
+          ultimo_erro: `Room change: falha ao remover acesso antigo: ${msg}`,
         });
-        itensAntigosRevogados++;
+        limpezaAntigaPendente++;
+        erros.push(`${item.codigo_logico_destino}: ${msg}`);
         continue;
       }
     }
-    // Sucesso no delete ou item sem passcode remoto: revogado + revogado_em (local ou confirmado).
+
     await repo.updateItem(item.id, {
       status_provisionamento: "revogado",
       revogado_em: now,
@@ -631,22 +689,118 @@ export async function handleRoomChange(
     itensAntigosRevogados++;
   }
 
-  const destinos = await repo.getFechadurasForApartment(numNovoNorm);
-  if (destinos.length === 0) {
-    throw new Error(`Nenhuma fechadura encontrada para apartamento: ${novoApartamento}. Verifique se o numero e valido (01-40).`);
+  // Fail-closed: nunca provisiona o novo quarto enquanto houver possibilidade
+  // de a mesma senha continuar válida em um destino exclusivo do quarto antigo.
+  if (limpezaAntigaPendente > 0) {
+    await repo.updateCredencial(credencial.id, {
+      status: "parcial",
+      sync_status: "failed",
+      last_sync_attempt_at: now,
+      last_sync_error:
+        "Troca de apartamento bloqueada: acesso antigo ainda possui limpeza TTLock pendente.",
+    });
+    return {
+      credencialId: credencial.id,
+      status: "parcial",
+      passcode: credencial.codigo_credencial,
+      revogados: itensAntigosRevogados,
+      provisionados: 0,
+      falhas: limpezaAntigaPendente,
+      erros,
+      itensAntigosRevogados,
+      itensNovosInseridos: 0,
+      limpezaAntigaPendente,
+    };
   }
 
-  const itensExistentes = await repo.getItens(credencial.id);
-  const fechadurasJaNaCredencial = new Set(itensExistentes.map((i) => i.fechadura_id));
+  const idsAntigos = new Set(destinosAntigos.map((d) => d.fechadura_id));
+  const novosExclusivos = destinosNovos.filter((d) => !idsAntigos.has(d.fechadura_id));
+  let itensAtuais = await repo.getItens(credencial.id);
   let itensNovosInseridos = 0;
-  for (const d of destinos) {
-    if (fechadurasJaNaCredencial.has(d.fechadura_id)) continue;
-    await repo.insertItem(credencial.id, d);
-    fechadurasJaNaCredencial.add(d.fechadura_id);
-    itensNovosInseridos++;
+  let limpezaDestinoPendente = 0;
+
+  for (const destino of novosExclusivos) {
+    const existente = itensAtuais.find((i) => i.fechadura_id === destino.fechadura_id);
+    if (!existente) {
+      await repo.insertItem(credencial.id, destino);
+      itensNovosInseridos++;
+      itensAtuais = await repo.getItens(credencial.id);
+      continue;
+    }
+
+    if (
+      existente.status_provisionamento === "provisionado" &&
+      existente.remote_keyboard_pwd_id != null
+    ) {
+      continue;
+    }
+
+    if (
+      existente.status_provisionamento === "pendente_limpeza" ||
+      (existente.status_provisionamento === "falhou" &&
+        existente.remote_keyboard_pwd_id != null)
+    ) {
+      if (!client.isAvailable() || existente.remote_keyboard_pwd_id == null) {
+        limpezaDestinoPendente++;
+        erros.push(
+          `${existente.codigo_logico_destino}: limpeza prévia do destino novo pendente.`,
+        );
+        continue;
+      }
+      try {
+        await client.deleteKeyboardPassword({
+          lockId: existente.lock_id_ttlock,
+          keyboardPwdId: existente.remote_keyboard_pwd_id,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        await repo.updateItem(existente.id, {
+          status_provisionamento: "pendente_limpeza",
+          ultimo_erro: `Room change: limpeza prévia do destino novo falhou: ${msg}`,
+        });
+        limpezaDestinoPendente++;
+        erros.push(`${existente.codigo_logico_destino}: ${msg}`);
+        continue;
+      }
+    }
+
+    await repo.updateItem(existente.id, {
+      status_provisionamento: "pendente",
+      remote_keyboard_pwd_id: null,
+      codigo_enviado: null,
+      provisionado_em: null,
+      revogado_em: null,
+      ultimo_erro: null,
+    });
   }
 
-  const provisionResult = await processarCredencialDeAcesso(credencial.id, deps);
+  if (limpezaDestinoPendente > 0) {
+    await repo.updateCredencial(credencial.id, {
+      status: "parcial",
+      sync_status: "failed",
+      last_sync_attempt_at: now,
+      last_sync_error:
+        "Troca de apartamento bloqueada: destino novo possui limpeza TTLock pendente.",
+    });
+    return {
+      credencialId: credencial.id,
+      status: "parcial",
+      passcode: credencial.codigo_credencial,
+      revogados: itensAntigosRevogados,
+      provisionados: 0,
+      falhas: limpezaDestinoPendente,
+      erros,
+      itensAntigosRevogados,
+      itensNovosInseridos,
+      limpezaAntigaPendente: 0,
+    };
+  }
+
+  await repo.updateCredencial(credencial.id, { status: "pendente" });
+  const provisionResult = await processarCredencialDeAcesso(credencial.id, {
+    ...deps,
+    preserveExistingPasscode: true,
+  });
 
   return {
     credencialId: credencial.id,
@@ -655,9 +809,10 @@ export async function handleRoomChange(
     revogados: itensAntigosRevogados,
     provisionados: provisionResult.provisionados,
     falhas: provisionResult.falhas,
-    erros: provisionResult.erros,
+    erros: [...erros, ...provisionResult.erros],
     itensAntigosRevogados,
     itensNovosInseridos,
+    limpezaAntigaPendente: 0,
   };
 }
 

@@ -212,9 +212,12 @@ async function main() {
     assert.match(edge, /onDetail/);
     assert.doesNotMatch(edge, /send-fnrh-links|send-senha|digisac|resend|notify-fnrh/i);
     const fetches = edge.match(/await fetch\(/g) ?? [];
-    assert.equal(fetches.length, 0, "a Edge de preview não faz fetch direto (a leitura é o leitor cadenciado)");
-    assert.doesNotMatch(ciclo, /fetch\(/, "o ciclo recebe o leitor injetado: nenhuma rede própria");
-    ok("Edge preview: gancho só com trava, só ativas, detalhe reaproveitado (zero GET extra), sem envio");
+    assert.equal(fetches.length, 1, "único fetch direto é server-to-server para lifecycle_room_change");
+    assert.match(edge, /functions\/v1\/yes-hotel-lifecycle/);
+    assert.match(edge, /action:\s*"lifecycle_room_change"/);
+    assert.match(edge, /x-yes-internal-caller":\s*"hits-reservations-preview"/);
+    assert.doesNotMatch(ciclo, /fetch\(/, "o ciclo de materialização/contato recebe o leitor injetado: nenhuma rede própria");
+    ok("Edge preview: materialização continua sem envio; room change usa uma chamada interna explícita ao lifecycle");
 
     const leitor = stripComments(read("src/lib/integrations/hits/hits-gateway-read.ts"));
     assert.match(leitor, /input\.onDetail\(id, synced\)/);

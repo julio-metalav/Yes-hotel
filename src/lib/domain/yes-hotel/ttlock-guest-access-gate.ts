@@ -44,7 +44,9 @@ export function evaluateTtlockReadyForGuestAccess(
     };
   }
 
-  const list = Array.isArray(itens) ? itens : [];
+  const list = (Array.isArray(itens) ? itens : []).filter(
+    (item) => item.status_provisionamento !== "revogado",
+  );
   if (list.length === 0) {
     return { ready: false, passcode: passcodeStored, reason: "sem_itens_ttlock" };
   }
@@ -94,7 +96,11 @@ export function resolveProvisionCredentialStatus(itens: TtlockItemReadyRow[]): {
   allReady: boolean;
   inProgress: number;
 } {
-  const list = Array.isArray(itens) ? itens : [];
+  // Itens revogados são histórico (ex.: apartamento anterior após room change)
+  // e não pertencem mais ao conjunto obrigatório da credencial ativa.
+  const list = (Array.isArray(itens) ? itens : []).filter(
+    (item) => item.status_provisionamento !== "revogado",
+  );
   let provisionados = 0;
   let falhas = 0;
   let inProgress = 0;
