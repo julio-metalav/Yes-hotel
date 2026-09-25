@@ -42,6 +42,22 @@ import {
   type SnapshotRpc,
   type SnapshotSyncState,
 } from "../../../src/lib/integrations/hits/hits-snapshot-sync.ts";
+import {
+  materializarReservaSincronizada,
+  type SupabaseAdminLike,
+} from "../../../src/lib/integrations/hits/hits-materializar.ts";
+import type { SyncedReservation } from "../../../src/lib/domain/yes-hotel/synced-reservation.ts";
+
+/**
+ * Materialização automática (desligada por padrão). Com `=true`, ao fim de um
+ * ciclo que gravou o snapshot, cada reserva ATIVA lida neste ciclo e ainda sem
+ * linha em operacional_reservas é materializada com o MESMO detalhe já lido
+ * (zero chamadas extras ao HITS), pelo helper compartilhado com
+ * hits-reserva-materializar. MATERIALIZAR ≠ ENVIAR: nenhuma comunicação é
+ * disparada aqui. Teto por ciclo para não alongar o tick.
+ */
+const HITS_AUTO_MATERIALIZAR_ENV = "HITS_AUTO_MATERIALIZAR_ENABLED";
+const HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO = 20;
 
 /**
  * Trava do modo incremental (Type=2 + cursor). Exige a migration
@@ -95,6 +111,7 @@ function denoEnv(): Record<string, string | undefined> {
 function snapshotAdmin(): {
   rpc: SnapshotRpc;
   readState: () => Promise<SnapshotSyncState | null>;
+  admin: SupabaseAdminLike;
 } | null {
   const url = Deno.env.get("SUPABASE_URL") ?? "";
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -103,6 +120,7 @@ function snapshotAdmin(): {
     auth: { autoRefreshToken: false, persistSession: false },
   });
   return {
+    admin,
     rpc: (fn, args) => admin.rpc(fn, args),
     // Só leitura do cursor (linha única). service_role bypassa RLS.
     readState: async () => {
@@ -115,6 +133,66 @@ function snapshotAdmin(): {
       return (data as SnapshotSyncState | null) ?? null;
     },
   };
+}
+
+/**
+ * Materializa as reservas ativas deste ciclo que ainda não têm linha em
+ * operacional_reservas. Entrada: linhas do snapshot lidas agora + detalhes já
+ * normalizados (onDetail). Só banco: 1 SELECT de existência + escrita do helper.
+ * Sem HITS, sem envio, sem apagar. Teto por ciclo; erros são contados, não
+ * derrubam o tick.
+ */
+async function materializarNovasDoCiclo(
+  admin: SupabaseAdminLike,
+  rows: ReadonlyArray<{ external_reservation_id: string; status_reserva: string }>,
+  detalhes: Map<string, SyncedReservation>,
+): Promise<Record<string, unknown>> {
+  const ids = rows
+    .filter((r) => r.status_reserva !== "cancelada")
+    .map((r) => String(r.external_reservation_id || "").trim())
+    .filter((id) => id && detalhes.has(id));
+  const out = { habilitada: true, candidatas: 0, criadas: 0, reusadas: 0, erros: 0, ignoradas_teto: 0 };
+  if (ids.length === 0) return out;
+
+  const { data: existentes, error } = await admin
+    .from("operacional_reservas")
+    .select("external_reservation_id")
+    .eq("origem_externa", "hits")
+    .in("external_reservation_id", ids);
+  if (error) {
+    console.error("[HITS_AUTO_MATERIALIZAR] leitura de existentes falhou", { code: error.code });
+    return { ...out, erros: 1 };
+  }
+  const jaLocal = new Set(
+    ((existentes ?? []) as Array<{ external_reservation_id: string }>).map((r) =>
+      String(r.external_reservation_id),
+    ),
+  );
+  const novas = ids.filter((id) => !jaLocal.has(id));
+  out.candidatas = novas.length;
+
+  for (const id of novas) {
+    if (out.criadas + out.reusadas + out.erros >= HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO) {
+      out.ignoradas_teto += 1;
+      continue;
+    }
+    const synced = detalhes.get(id);
+    if (!synced) continue;
+    try {
+      const r = await materializarReservaSincronizada({
+        admin,
+        externalId: id,
+        synced,
+        log: (msg, extra) => console.error(msg, extra ?? {}),
+      });
+      if (!r.ok) out.erros += 1;
+      else if (r.reserva_criada) out.criadas += 1;
+      else out.reusadas += 1;
+    } catch (_e) {
+      out.erros += 1;
+    }
+  }
+  return out;
 }
 
 Deno.serve(async (req: Request) => {
@@ -145,6 +223,13 @@ Deno.serve(async (req: Request) => {
     ? idsRaw.split(",").map((s) => s.trim()).filter(Boolean)
     : undefined;
 
+  // Detalhes já normalizados deste ciclo (id → SyncedReservation), para a
+  // materialização automática reaproveitar sem nova leitura no HITS.
+  const detalhes = new Map<string, SyncedReservation>();
+  const onDetail = (id: string, synced: SyncedReservation) => {
+    detalhes.set(id, synced);
+  };
+
   const read = () =>
     fetchHitsSandboxReservations({
       config: gate.config,
@@ -153,6 +238,7 @@ Deno.serve(async (req: Request) => {
       page: parseInt0(url.searchParams.get("page")),
       size: parseInt0(url.searchParams.get("size")),
       reservationIds,
+      onDetail,
     });
 
   const decision = shouldPersistSnapshot({
@@ -162,6 +248,15 @@ Deno.serve(async (req: Request) => {
   });
   const admin = decision.persist ? snapshotAdmin() : null;
   const incrementalEnabled = (Deno.env.get(HITS_SNAPSHOT_INCREMENTAL_ENV) ?? "").trim() === "true";
+  const autoMaterializarEnabled =
+    (Deno.env.get(HITS_AUTO_MATERIALIZAR_ENV) ?? "").trim() === "true";
+  let materializacao: Record<string, unknown> = {
+    habilitada: autoMaterializarEnabled,
+    candidatas: 0,
+    criadas: 0,
+    reusadas: 0,
+    erros: 0,
+  };
 
   // Incremental (Type=2): só os ids alterados na janela, detalhe só deles.
   // Mesma cadência/orçamento/retries da leitura completa.
@@ -171,6 +266,7 @@ Deno.serve(async (req: Request) => {
       updatedFrom: window.from,
       updatedTo: window.to,
       todayYmd,
+      onDetail,
     });
 
   const startedAt = Date.now();
@@ -195,6 +291,13 @@ Deno.serve(async (req: Request) => {
       return json({ ok: false, error: "gateway_read_failed", message: msg, snapshot }, 502);
     }
     result = run.result;
+
+    // Materialização automática: só após snapshot gravado, só reservas ativas
+    // lidas neste ciclo (detalhe já em memória) e ainda sem linha local.
+    // Idempotente pelo helper; nenhuma chamada ao HITS; nenhum envio.
+    if (autoMaterializarEnabled && run.snapshot.persisted) {
+      materializacao = await materializarNovasDoCiclo(admin.admin, result.rows, detalhes);
+    }
   } else {
     snapshot = decision.persist
       ? { persisted: false, reason: "service_role_unavailable" }
@@ -219,6 +322,7 @@ Deno.serve(async (req: Request) => {
     elapsed_ms: result.elapsed_ms,
     duration_ms: Date.now() - startedAt,
     snapshot,
+    materializacao,
   });
 
   return json({
@@ -235,5 +339,6 @@ Deno.serve(async (req: Request) => {
     rows: result.rows,
     failed: result.failed,
     snapshot,
+    materializacao,
   });
 });

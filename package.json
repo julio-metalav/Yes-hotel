@@ -80,6 +80,8 @@
     "test:hits-snapshot-migration": "tsx scripts/test-hits-snapshot-migration.ts",
     "test:hits-read-cadence": "tsx scripts/test-hits-read-cadence.ts",
     "test:hits-incremental-sync": "tsx scripts/test-hits-incremental-sync.ts",
+    "test:hits-auto-materializacao": "tsx scripts/test-hits-auto-materializacao.ts",
+    "test:cafe-universo-hits": "tsx scripts/test-cafe-universo-hits.ts",
     "test:hits-edge:deno-imports": "tsx scripts/test-hits-edge-deno-imports.ts",
     "test:reservation-financial-classification": "tsx scripts/test-reservation-financial-classification.ts",
     "test:yes:management-foundation": "tsx scripts/test-management-foundation.ts",

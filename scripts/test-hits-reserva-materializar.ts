@@ -30,7 +30,14 @@ const mvp = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.js"), "utf8")
 function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 }
-const edgeCode = stripComments(edge);
+// A escrita vive no helper compartilhado com a materialização automática;
+// a Edge só faz gate + GET + normalização + resposta. As guardas valem para
+// o conjunto (Edge + helper).
+const helper = readFileSync(
+  resolve(ROOT, "src/lib/integrations/hits/hits-materializar.ts"),
+  "utf8",
+);
+const edgeCode = stripComments(edge) + "\n" + stripComments(helper);
 
 function main() {
   console.log("\n== 1. Cria o mínimo necessário ==");
@@ -39,12 +46,17 @@ function main() {
     assert.match(edgeCode, /\.from\("operacional_hospedes"\)\.insert/);
     ok("insere reserva operacional e hóspedes");
 
-    assert.equal(
-      /\.from\("fnrh_hospedes"\)/.test(edgeCode),
-      false,
+    // fnrh_hospedes: nunca escrita (a ficha é do trigger e do fnrh-submit).
+    // A única leitura permitida é o status da ficha da posição técnica, para
+    // NÃO adotar posição cuja ficha já foi tocada.
+    assert.doesNotMatch(
+      edgeCode,
+      /\.from\("fnrh_hospedes"\)\s*\n?\s*\.(insert|update|upsert|delete)/,
       "a ficha é do trigger, não da Edge",
     );
-    ok("não cria fnrh_hospedes à mão — trigger continua responsável");
+    const leiturasFicha = [...edgeCode.matchAll(/\.from\("fnrh_hospedes"\)\s*\n?\s*\.select\("([^"]*)"\)/g)].map((m) => m[1]);
+    assert.deepEqual(leiturasFicha, ["status, fnrh_lifecycle_status"], "única leitura da ficha: status (guarda da adoção)");
+    ok("não cria nem altera fnrh_hospedes — trigger continua responsável; ficha só é lida como guarda");
 
     const escritas = [
       ...edgeCode.matchAll(/\.from\("([a-z_]+)"\)\s*\n?\s*\.(insert|update|upsert|delete)/g),
@@ -132,16 +144,29 @@ function main() {
 
   console.log("\n== 4. Não sobrescreve FNRH nem cadastro existente ==");
   {
-    // Único update permitido: backfill FINANCEIRO de reserva materializada antes
-    // desta versão, guardado por reservation_balance_due IS NULL (uma vez só).
-    const updates = [...edgeCode.matchAll(/\.update\(([^)]*)\)/g)];
-    assert.equal(updates.length, 1, "exatamente um update, o backfill financeiro");
-    assert.equal(updates[0]![1]!.trim(), "financeiroHits", "update só com o objeto financeiro");
+    // Dois updates permitidos, ambos guardados: (1) backfill FINANCEIRO de
+    // reserva materializada antes desta versão, por reservation_balance_due IS
+    // NULL (uma vez só); (2) adoção da posição técnica intocada ("Novo hóspede"
+    // sem idEntity) pelo PAX HITS — só identificação, guardada no próprio
+    // UPDATE por pms_external_guest_id IS NULL + nome/status técnicos.
+    const updates = [...edgeCode.matchAll(/\.update\(([^)]*)\)/g)].map((m) => m[1]!.trim());
+    assert.deepEqual(updates, ["financeiroHits", "identificacaoHits"], "só os dois updates guardados");
     assert.match(edgeCode, /\.update\(financeiroHits\)\s*\.eq\("id", reserva\.id\)\s*\.is\("reservation_balance_due", null\)/);
     assert.match(edgeCode, /if \(!reservaCriada\) \{[\s\S]*?\.update\(financeiroHits\)/, "backfill só para reserva já existente");
+    assert.match(
+      edgeCode,
+      /\.update\(identificacaoHits\)\s*\.eq\("id", posicao\.id\)\s*\.eq\("reserva_id", reserva\.id\)\s*\.is\("pms_external_guest_id", null\)\s*\.eq\("nome", POSICAO_TECNICA\.nome\)\s*\.eq\("status_operacional", POSICAO_TECNICA\.status_operacional\)/,
+      "adoção guardada: só linha técnica sem idEntity",
+    );
+    const iniIdent = edgeCode.indexOf("const identificacaoHits = {");
+    const identificacao = edgeCode.slice(iniIdent, edgeCode.indexOf("};", iniIdent));
+    for (const proibido of ["fnrh_lifecycle_status", "link_token", "removed_from_reservation", "guest_role", "responsible_guest_id", "fnrh_required", "modo_coleta_fnrh", "tentativas_envio", "ultimo_envio", "created_at", "updated_at"]) {
+      assert.equal(identificacao.includes(proibido), false, "adoção não toca " + proibido);
+    }
+    assert.match(edgeCode, /if \(candidatas\.length !== 1\) \{/, "adota só com EXATAMENTE uma candidata");
     assert.equal(/\.upsert\(/.test(edgeCode), false, "nenhum upsert que sobrescreva");
     assert.equal(/\.delete\(/.test(edgeCode), false, "nenhum delete");
-    ok("só insert de registro ausente + backfill financeiro guardado por saldo nulo — ficha e cadastro intactos");
+    ok("só insert de registro ausente + 2 updates guardados (backfill financeiro; adoção de posição técnica) — ficha e cadastro intactos");
   }
 
   console.log("\n== 5. Datas vêm do HITS ==");
@@ -224,7 +249,8 @@ function main() {
         `${proibido} não pode aparecer na materialização`,
       );
     }
-    assert.equal((edgeCode.match(/pagamento_status/g) || []).length, 2, "pagamento_status só no objeto financeiro e na resposta");
+    // 3 ocorrências: objeto financeiro (escrita), tipo do resultado e resposta.
+    assert.equal((edgeCode.match(/pagamento_status/g) || []).length, 3, "pagamento_status só no objeto financeiro, no tipo e na resposta");
     ok("sem acesso, check-in, senha, TTLock ou quarto; pagamento só via financeiro do HITS");
 
     // Leitura no HITS, escrita só no Yes: existe um único fetch, e ele é GET.
@@ -240,9 +266,13 @@ function main() {
   console.log("\n== 8. UI: ação na lista e retorno ao fluxo normal ==");
   {
     // O detalhe não abre para reserva somente leitura: a ação vive na lista.
-    assert.match(mvp, /kind: "preparar_fnrh", label: "Preparar FNRH"/);
+    // Só-snapshot é estado transitório (materialização automática): sem CTA na
+    // linha; o roteador mantém 'preparar_fnrh' → acaoPrepararFnrhHits como
+    // contingência interna, ainda tratado antes de openDetail.
+    assert.doesNotMatch(mvp, /cta: \{ kind: "preparar_fnrh"/);
+    assert.match(mvp, /texto: "Sincronizando com o HITS", destaque: false, cta: null/);
     assert.match(mvp, /if \(kind === "preparar_fnrh"\) \{\s*\n\s*acaoPrepararFnrhHits/);
-    ok("CTA 'Preparar FNRH' aparece na linha e é tratado antes de openDetail");
+    ok("linha só-snapshot sem CTA ('Sincronizando com o HITS'); contingência manual roteada antes de openDetail");
 
     assert.match(mvp, /hits-reserva-materializar/);
     assert.match(mvp, /external_reservation_id: String\(externalReservationId/);

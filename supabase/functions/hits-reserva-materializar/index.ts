@@ -7,12 +7,15 @@
  * não há ficha nem link para oferecer. Aqui o vínculo passa a existir.
  *
  * Reaproveita tudo o que já existe: a leitura vai pelo gateway, a normalização é
- * a mesma do painel, e a ficha continua sendo criada pelo trigger.
+ * a mesma do painel, e a escrita é a mesma da materialização automática
+ * (src/lib/integrations/hits/hits-materializar.ts). A ficha continua sendo
+ * criada pelo trigger.
  *
  * Escopo estrito — grava apenas em `operacional_reservas` e
  * `operacional_hospedes`. Não escreve no HITS, não cria ficha à mão, não
  * sobrescreve registro existente, e não toca status de reserva, quarto,
- * check-in, credencial ou TTLock. O financeiro (saldo/total/classificação/
+ * check-in, credencial ou TTLock. Não envia nada (FNRH, senha, WhatsApp,
+ * e-mail): MATERIALIZAR ≠ ENVIAR. O financeiro (saldo/total/classificação/
  * pagamento_status) vem do detalhe HITS já normalizado: gravado no insert e,
  * para reserva materializada antes disso, preenchido uma única vez
  * (backfill guardado por saldo nulo).
@@ -23,7 +26,7 @@ import {
   getHitsGatewayReadConfig,
 } from "../../../src/lib/integrations/hits/hits-gateway-read.ts";
 import { normalizeHitsDetailToSynced } from "../../../src/lib/integrations/hits/normalize-hits-detail-to-synced.ts";
-import { calcularPosicoesFaltantes } from "../../../src/lib/integrations/hits/hits-ocupacao.ts";
+import { materializarReservaSincronizada } from "../../../src/lib/integrations/hits/hits-materializar.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -39,9 +42,6 @@ const admin = createClient(supabaseUrl, serviceRoleKey, {
 
 /** Mesma allowlist de id usada pelo gateway. */
 const RESERVATION_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
-const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
-/** Origem fixa: é o que o índice único de idempotência usa. */
-const ORIGEM_HITS = "hits";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -61,16 +61,6 @@ function denoEnv(): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {};
   for (const k of keys) env[k] = Deno.env.get(k) ?? undefined;
   return env;
-}
-
-function ymdOrNull(value: unknown): string | null {
-  const s = String(value ?? "").slice(0, 10);
-  return YMD_RE.test(s) ? s : null;
-}
-
-/** 23505 = unique_violation: outro clique simultâneo ganhou a corrida. */
-function isUniqueViolation(error: unknown): boolean {
-  return String((error as { code?: string } | null)?.code ?? "") === "23505";
 }
 
 Deno.serve(async (req: Request) => {
@@ -132,174 +122,26 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "detalhe_hits_invalido" }, 502);
   }
 
-  // Datas vêm do HITS. Sem elas não se inventa `current_date`: o painel filtra
-  // por dia operacional e uma data chutada esconderia a reserva da grade.
-  const checkIn = ymdOrNull(synced.checkIn);
-  const checkOut = ymdOrNull(synced.checkOut);
-  if (!checkIn || !checkOut) {
-    return json({ ok: false, error: "reserva_sem_datas_no_hits" }, 422);
+  // 2–4. Mesma escrita da materialização automática (helper compartilhado).
+  const out = await materializarReservaSincronizada({
+    admin,
+    externalId,
+    synced,
+    log: (msg, extra) => console.error(msg, extra ?? {}),
+  });
+  if (!out.ok) {
+    return json({ ok: false, error: out.error }, out.status);
   }
 
-  // 2. Reserva operacional: reusa se já existe (índice único parcial em
-  //    origem_externa + external_reservation_id garante unicidade).
-  async function findReserva(): Promise<{ id: string } | null> {
-    const { data } = await admin
-      .from("operacional_reservas")
-      .select("id")
-      .eq("origem_externa", ORIGEM_HITS)
-      .eq("external_reservation_id", externalId)
-      .maybeSingle();
-    return (data as { id: string } | null) ?? null;
-  }
-
-  // Financeiro da reserva HITS, já classificado pelo normalizador (regra do
-  // domínio: reservationBalanceDue <= 0 → pago; > 0 → pendente; ausente →
-  // desconhecido; comissionamento por canal). Sem isso a coluna nascia com o
-  // default 'pendente' e a UI mostrava "Pendente pagamento" para reserva
-  // quitada/com crédito no HITS. Nenhum valor de cartão/contato: só saldo,
-  // total e classificação.
-  const financeiroHits = {
-    pagamento_status: synced.paymentStatus,
-    reservation_balance_due: synced.reservationBalanceDue,
-    reservation_total_amount: synced.reservationTotalAmount,
-    classificacao_comissionamento: synced.classificacaoComissionamento,
-    classificacao_comissionamento_origem: "hits_campo",
-  };
-
-  let reserva = await findReserva();
-  let reservaCriada = false;
-  if (!reserva) {
-    const { data, error } = await admin
-      .from("operacional_reservas")
-      .insert({
-        apartamento: synced.apartmentCode || "",
-        hospede_principal: synced.mainGuestName || "",
-        check_in_previsto: checkIn,
-        check_out_previsto: checkOut,
-        origem_externa: ORIGEM_HITS,
-        external_reservation_id: externalId,
-        ...financeiroHits,
-      })
-      .select("id")
-      .single();
-    if (error) {
-      // Corrida com outro clique: o vencedor já criou — reusa.
-      if (!isUniqueViolation(error)) {
-        console.error("[HITS_MATERIALIZAR] insert reserva falhou", { code: error.code });
-        return json({ ok: false, error: "falha_ao_criar_reserva" }, 500);
-      }
-      reserva = await findReserva();
-    } else {
-      reserva = data as { id: string };
-      reservaCriada = true;
-    }
-  }
-  if (!reserva) {
-    return json({ ok: false, error: "falha_ao_criar_reserva" }, 500);
-  }
-
-  // 2b. Reserva materializada ANTES desta versão (sem financeiro): aplica o
-  //     financeiro do HITS uma única vez. Guardado por reservation_balance_due
-  //     IS NULL — nunca sobrescreve saldo/status já sincronizado ou já
-  //     decrementado por cobrança Pagar.me. Só colunas financeiras: nada de
-  //     FNRH, hóspedes, datas ou apartamento.
-  let financeiroBackfilled = false;
-  if (!reservaCriada) {
-    const { data: fin } = await admin
-      .from("operacional_reservas")
-      .update(financeiroHits)
-      .eq("id", reserva.id)
-      .is("reservation_balance_due", null)
-      .select("id");
-    financeiroBackfilled = Array.isArray(fin) && fin.length > 0;
-  }
-
-  // 3. Um operacional_hospedes por PAX com idEntity — o trigger existente cria
-  //    a fnrh_hospedes com link_token. Hóspede já vinculado é reusado como está:
-  //    nada é sobrescrito, e ficha preenchida permanece intacta.
-  const hospedes: Array<{ id_entity: string; criado: boolean }> = [];
-  for (const guest of synced.guests ?? []) {
-    const idEntity = String(guest.externalGuestId ?? "").trim();
-    if (!idEntity) continue;
-
-    const { data: existente } = await admin
-      .from("operacional_hospedes")
-      .select("id")
-      .eq("reserva_id", reserva.id)
-      .eq("pms_external_guest_id", idEntity)
-      .maybeSingle();
-    if (existente) {
-      hospedes.push({ id_entity: idEntity, criado: false });
-      continue;
-    }
-
-    const email = (guest.email ?? "").trim();
-    const telefone = (guest.phone ?? "").trim();
-    const { error } = await admin.from("operacional_hospedes").insert({
-      reserva_id: reserva.id,
-      nome: (guest.name ?? "").trim(),
-      principal: guest.isPrincipal === true,
-      email,
-      whatsapp: telefone,
-      // Só é "pronto para envio" quem tem como receber o link.
-      status_operacional: email || telefone ? "pronto_para_envio" : "aguardando_contato",
-      origem_cadastro: "existente_incompleto",
-      modo_coleta_fnrh: "preenchimento_completo",
-      pms_external_guest_id: idEntity,
-    });
-    if (error && !isUniqueViolation(error)) {
-      console.error("[HITS_MATERIALIZAR] insert hóspede falhou", { code: error.code });
-      return json({ ok: false, error: "falha_ao_criar_hospede" }, 500);
-    }
-    hospedes.push({ id_entity: idEntity, criado: !error });
-  }
-
-  // 4. Completa a ocupação declarada pelo HITS com posições sem PAX.
-  //    Reserva de 2 adultos com 1 idEntity cadastrado é o caso comum; sem isto
-  //    a segunda pessoa ficaria sem ficha. Mesmo payload do "Adicionar hóspede"
-  //    do painel (ui/checkin-operacional-mvp.js:1415) — e sem
-  //    pms_external_guest_id, porque não se inventa idEntity. A ficha e o
-  //    link_token continuam vindo do trigger operacional_hospedes_criar_fnrh.
-  const { data: ativos } = await admin
-    .from("operacional_hospedes")
-    .select("id")
-    .eq("reserva_id", reserva.id)
-    .or("removed_from_reservation.is.null,removed_from_reservation.eq.false");
-  const hospedesAtivos = (ativos ?? []).length;
-  const faltam = calcularPosicoesFaltantes(synced.totalGuests, hospedesAtivos);
-
-  let posicoesCriadas = 0;
-  for (let i = 0; i < faltam; i += 1) {
-    const { error } = await admin.from("operacional_hospedes").insert({
-      reserva_id: reserva.id,
-      nome: "Novo hóspede",
-      principal: false,
-      status_operacional: "nao_identificado",
-      origem_cadastro: "novo",
-      modo_coleta_fnrh: "preenchimento_completo",
-      tentativas_envio: 0,
-    });
-    if (error) {
-      console.error("[HITS_MATERIALIZAR] insert posição falhou", { code: error.code });
-      break;
-    }
-    posicoesCriadas += 1;
-  }
-
-  // Resposta sem PII: ids técnicos e contadores.
+  // Resposta sem PII: ids técnicos e contadores; sem valores financeiros.
   return json({
     ok: true,
-    reserva_id: reserva.id,
-    external_reservation_id: externalId,
-    reserva_criada: reservaCriada,
-    // Sem valores: só o status derivado e se o backfill financeiro ocorreu.
-    financeiro: { pagamento_status: synced.paymentStatus, backfilled: financeiroBackfilled },
-    hospedes,
-    hospedes_total: hospedes.length,
-    ocupacao: {
-      declarada_hits: Number(synced.totalGuests) || 1,
-      hospedes_ativos: hospedesAtivos,
-      posicoes_criadas: posicoesCriadas,
-    },
+    reserva_id: out.reserva_id,
+    external_reservation_id: out.external_reservation_id,
+    reserva_criada: out.reserva_criada,
+    financeiro: out.financeiro,
+    hospedes: out.hospedes,
+    hospedes_total: out.hospedes_total,
+    ocupacao: out.ocupacao,
   });
 });

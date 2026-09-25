@@ -206,6 +206,23 @@ Regra: **o HITS decide quais reservas existem operacionalmente; o Yes só enriqu
 - Canceladas: a incremental remove a linha do snapshot → some da operação sem reconciliação nova. Nada é apagado do banco.
 - Financeiro (`hits-reserva-materializar`): `pagamento_status`, `reservation_balance_due`, `reservation_total_amount` e `classificacao_comissionamento` passam a ser gravados a partir do detalhe HITS normalizado (regra do domínio: saldo ≤ 0 → pago). Reserva materializada antes disso recebe o financeiro **uma vez** (backfill guardado por saldo nulo) na próxima chamada da Edge para o seu id.
 
+## 8e. Materialização automática (sem envio) e Café sob o universo HITS (branch `fix/hits-auto-materializacao-cafe-universo`)
+
+**Materialização automática — MATERIALIZAR ≠ ENVIAR.**
+- Helper compartilhado `src/lib/integrations/hits/hits-materializar.ts` (`materializarReservaSincronizada`): a escrita que já existia em `hits-reserva-materializar` (reserva por `(origem_externa, external_reservation_id)`, hóspedes por `(reserva_id, pms_external_guest_id)`, posições sem PAX, financeiro no insert + backfill único). Sem rede, sem HITS, sem envio. A Edge sob demanda continua existindo e usa o mesmo helper.
+- Edge `hits-reservations-preview`, trava `HITS_AUTO_MATERIALIZAR_ENABLED=true` (**desligada por padrão**): ao fim de um ciclo que gravou o snapshot, para cada reserva **ativa** lida no ciclo cujo id **não** existe em `operacional_reservas`, chama o helper com o detalhe **já lido** (`onDetail` do leitor → zero GET extra ao HITS). Teto de 20 por ciclo; erros contados, não derrubam o tick; incremental/cadência/orçamento intactos.
+- UI: linha só-snapshot é **sempre** estado transitório — "Sincronizando com o HITS", sem CTA (o vínculo nasce no próximo ciclo). "Preparar FNRH" deixa de ser o caminho normal; `acaoPrepararFnrhHits` e o roteador `preparar_fnrh` permanecem só como contingência interna. Sem feature flag na UI.
+- **Preflight (ver `Claude outputs/hits-auto-materializacao-cafe-rodada1-entrega.md`)**: inserir reserva/hóspede não dispara comunicação por trigger, webhook do repo ou Edge; o único caminho automático de envio ligado a *existir uma reserva com check-in hoje* seria `senha-auto-envio` (modo 13h). **Confirmado em PROD (2026-09-26): `cron.job` não tem nenhum job de senha/`senha-auto`/`send-senha` (0 linhas)** — a trava pode ser ligada após merge/deploy/bootstrap.
+
+**Café da manhã — o HITS decide quem está hospedado** (migration `20260926090000_cafe_universo_hits.sql`, só `CREATE OR REPLACE` de `operacional_cafe_listar_hospedagens`):
+- população = `hits_reservas_snapshot` (ativas) com `check_in < D <= check_out` (datas e apartamento do HITS), `LEFT JOIN operacional_reservas` para enriquecer (id operacional, `meal_plan_desc`, pagamento/PPD). Fantasma local fora do snapshot não aparece; reserva HITS ainda não materializada aparece com `reservation_id` NULL (a UI usa id sintético `hits:<id>` e não grava atendimento até a materialização).
+- snapshot sem sucesso há mais de 6 h (ou nunca) → a RPC **erra** com mensagem explícita; a tela mostra o erro e nenhuma população antiga.
+- Direito ao café (`resolveCafeBreakfastEntitlementFromHits`, `mealPlanDesc`, `cafe_kind`, `quantidade_direito`, KPI "Cafés previstos") **intocado**.
+
+**Posição técnica adotada pelo PAX HITS (correção 3407).** Quando a reserva foi materializada antes de o HITS ter a entidade do hóspede, o passo 4 criou uma posição técnica ("Novo hóspede", sem `pms_external_guest_id`). Ao PAX aparecer no HITS, o passo 3 procura a **posição técnica segura** da reserva (`encontrarPosicaoTecnicaSegura`: sem idEntity, nome/origem/status técnicos, não principal, não removida, sem contato, ficha `fnrh_hospedes` — apenas **lida** — em `pendente` sem lifecycle iniciado). **Exatamente 1** candidata → `UPDATE` de identificação na **mesma** linha (ficha/`link_token` preservados); 0 → insere como antes; >1 → ambíguo: não escolhe, não adota, **não insere** hóspede novo, não altera as candidatas; reporta `ocupacao.posicoes_ambiguas` e `intervencao_manual = true` (exige intervenção manual; o ciclo segue). Pessoa real sem idEntity ou ficha tocada nunca é fundida. Não reconcilia retroativamente linhas já duplicadas (decisão do operador). **FNRH concluída no HITS: não existe no contrato atualmente disponível sinal confiável** — nenhuma heurística (`status=3`, `rooms[].status`, "check-in realizado") foi implementada (teste D). Relatório: `Claude outputs/hits-3407-posicao-tecnica-rodada2-entrega.md`.
+
+Testes: `npm run test:hits-auto-materializacao` (18) · `npm run test:cafe-universo-hits` (10).
+
 ## 9. Riscos restantes / follow-ups
 
 - Reconciliação de canceladas (banco × HITS) fica desligada na tela; em PROD não havia reservas

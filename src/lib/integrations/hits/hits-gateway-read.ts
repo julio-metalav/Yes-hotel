@@ -391,6 +391,12 @@ type GatewayReadCommonInput = {
   sleepImpl?: (ms: number) => Promise<void>;
   minIntervalMs?: number;
   timeBudgetMs?: number;
+  /**
+   * Chamado com cada detalhe normalizado, na ordem em que foi lido. Permite ao
+   * chamador (Edge) reaproveitar o detalhe — ex.: materialização automática —
+   * sem uma segunda leitura no HITS. Não muda o resultado nem a cadência.
+   */
+  onDetail?: (externalId: string, synced: SyncedReservation) => void;
 };
 
 type GatewayReadOutcome = FetchHitsSandboxReservationsResult & {
@@ -607,6 +613,13 @@ async function runGatewayRead(
         null,
       );
       const row = toHitsSandboxRow(synced, hospedadas.has(id) ? "hospedada" : "confirmada");
+      if (input.onDetail) {
+        try {
+          input.onDetail(id, synced);
+        } catch {
+          /* observador não pode derrubar a leitura */
+        }
+      }
       // Incremental: cancelada (status 2 no detalhe) sai do universo operacional —
       // é sinal explícito do HITS, não ausência. Vai para cancelled_ids, não para rows.
       if (divertCancelled && row.status_reserva === "cancelada") {

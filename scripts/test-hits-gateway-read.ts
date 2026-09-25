@@ -233,8 +233,12 @@ async function main() {
     assert.match(edge, /"Access-Control-Allow-Methods": "GET, OPTIONS"/);
     assert.match(edge, /"HITS_GATEWAY_PROD_READ_ENABLED"/);
     assert.doesNotMatch(edge, /method:\s*"(POST|PUT|PATCH|DELETE)"/);
+    // Materializar em PROD (PR #125/#126): passa pela MESMA trava de leitura
+    // (assertHitsGatewayReadReady) e continua sem qualquer escrita no HITS.
     const materializar = readRepo("supabase/functions/hits-reserva-materializar/index.ts");
-    assert.doesNotMatch(materializar, /HITS_GATEWAY_PROD_READ_ENABLED/);
+    assert.match(materializar, /assertHitsGatewayReadReady\(config\)/);
+    assert.doesNotMatch(materializar, /method:\s*"(POST|PUT|PATCH|DELETE)"/);
+    assert.doesNotMatch(materializar, /guestWriteEnabled|checkinEnabled|HITS_GUEST_WRITE_ENABLED|HITS_CHECKIN_ENABLED/);
     const leitor = readRepo("src/lib/integrations/hits/hits-gateway-read.ts");
     assert.doesNotMatch(leitor, /method:\s*"(POST|PUT|PATCH|DELETE)"/);
     // A trava é lida só pelo leitor GET: nenhuma flag de escrita/check-in mora aqui.
