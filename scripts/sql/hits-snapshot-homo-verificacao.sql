@@ -94,7 +94,9 @@ select public.hits_snapshot_sync_apply(
   '{HOMO-TESTE-B}'::text[], 'partial', 'last_page');
 select external_reservation_id, batch_id from public.hits_reservas_snapshot order by 1;
 -- Esperado: A (batch ...0003) e B (batch ...0002, mantida por estar em p_failed_ids).
-select last_status, last_failed_count, last_rows_count from public.hits_snapshot_sync_state;
+select last_status, last_failed_count, last_rows_count,
+       last_returned_count, last_detail_count, last_upserted_count, last_changed_count, last_removed_count
+from public.hits_snapshot_sync_state;   -- last_rows_count = processadas (não "alteradas"); alteradas reais = last_changed_count
 -- Esperado: partial, 1, 1.
 
 select public.hits_snapshot_sync_apply(

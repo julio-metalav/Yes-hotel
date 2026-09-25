@@ -154,6 +154,22 @@ export function shouldPersistSnapshot(input: {
 }
 
 /** Linha gravada no snapshot: exatamente o shape da Edge, por allowlist. */
+/**
+ * Campos FUNCIONAIS da projeção: são os únicos comparados para decidir se uma
+ * linha "mudou de verdade" (`last_changed_count`). batch_id/last_seen_at/
+ * updated_at são técnicos e NÃO contam. Espelha a CTE `changed` das RPCs de
+ * apply (migration 20260927090000); o teste cruza os dois.
+ */
+export const HITS_SNAPSHOT_CAMPOS_FUNCIONAIS = [
+  "apartamento",
+  "hospede_principal",
+  "check_in",
+  "check_out",
+  "status_reserva",
+  "ciclo_hits",
+  "total_hospedes",
+] as const;
+
 export type HitsSnapshotRow = {
   external_reservation_id: string;
   apartamento: string;
@@ -207,12 +223,30 @@ export type SyncModeInfo = {
   cycle_started_at: string;
 };
 
+/**
+ * Telemetria do ciclo — cada número mede UMA etapa; nenhum deles é "reservas
+ * alteradas" exceto `rows_changed`:
+ *  - returned_count: ids únicos devolvidos pela listagem (após dedupe do
+ *    leitor) = detail_count + failed_count;
+ *  - detail_count: GETs de detalhe concluídos com sucesso = linhas candidatas +
+ *    canceladas explícitas (o leitor confirma o status 2 NO detalhe: cada
+ *    cancelada custou um GET bem-sucedido; falhas nunca entram);
+ *  - rows_upserted: linhas submetidas/upsertadas no snapshot, idênticas
+ *    incluídas (= `last_rows_count`, mantido por compatibilidade);
+ *  - rows_changed: linhas cujo conteúdo funcional mudou (nova ou diferente),
+ *    calculado pela RPC contra o que já estava armazenado;
+ *  - rows_removed: removidas (completa: ausentes; incremental: canceladas);
+ *  - failed_count: detalhes que falharam.
+ */
 export type SnapshotOutcome =
   | ({
       persisted: true;
       batch_id: string;
       status: "ok" | "partial";
+      returned_count: number;
+      detail_count: number;
       rows_upserted: number;
+      rows_changed: number;
       rows_removed: number;
       failed_count: number;
       start_error: string | null;
@@ -359,6 +393,12 @@ export async function runHitsSnapshotSync(input: {
           .map((id) => String(id ?? "").trim())
           .filter(Boolean)
       : [];
+  // Telemetria da leitura (o leitor já deduplica ids da listagem). Toda
+  // cancelada explícita passou por um GET de detalhe bem-sucedido (o status 2
+  // é confirmado no detalhe, não na listagem), então: detalhes concluídos =
+  // linhas + canceladas; devolvidos = detalhes + falhas. Contagens, nunca ids.
+  const detailCount = result.rows.length + cancelledIds.length;
+  const returnedCount = detailCount + failedIds.length;
 
   try {
     let applied: { data: unknown; error: { message?: string } | null };
@@ -374,6 +414,8 @@ export async function runHitsSnapshotSync(input: {
         p_status: status,
         p_stopped_reason: result.stopped_reason,
         p_cursor_at: status === "ok" ? cycleStartIso : null,
+        p_returned_count: returnedCount,
+        p_detail_count: detailCount,
       });
     } else {
       applied = await input.rpc(HITS_SNAPSHOT_RPC_APPLY, {
@@ -382,6 +424,8 @@ export async function runHitsSnapshotSync(input: {
         p_failed_ids: failedIds,
         p_status: status,
         p_stopped_reason: result.stopped_reason,
+        p_returned_count: returnedCount,
+        p_detail_count: detailCount,
       });
     }
     if (applied.error) {
@@ -422,7 +466,10 @@ export async function runHitsSnapshotSync(input: {
         persisted: true,
         batch_id: batchId,
         status,
+        returned_count: returnedCount,
+        detail_count: detailCount,
         rows_upserted: Number(row.rows_upserted) || 0,
+        rows_changed: Number(row.rows_changed) || 0,
         rows_removed: Number(row.rows_removed) || 0,
         failed_count: failedIds.length,
         start_error: startError,
