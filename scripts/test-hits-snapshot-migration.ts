@@ -171,10 +171,19 @@ function main() {
     assert.match(edge, /if \(req\.method !== "GET"\)/, "continua GET-only");
     // Única leitura direta permitida: o cursor da incremental (select em
     // hits_snapshot_sync_state). Escrita continua só por RPC.
+    // Leituras diretas permitidas: cursor da incremental e existência local
+    // (materialização automática). Escrita continua só por RPC/helper.
     const froms = edge.match(/\.from\("([^"]+)"\)/g) ?? [];
-    assert.deepEqual([...new Set(froms)], ['.from("hits_snapshot_sync_state")'], "Edge só lê o estado do snapshot direto");
+    assert.deepEqual(
+      [...new Set(froms)].sort(),
+      ['.from("hits_snapshot_sync_state")', '.from("operacional_reservas")'],
+      "Edge só lê estado do snapshot e existência em operacional_reservas",
+    );
     assert.doesNotMatch(edge, /\.insert\(|\.update\(|\.delete\(|\.upsert\(/, "Edge não escreve em tabela direto: só RPC");
-    assert.doesNotMatch(edge, /operacional_reservas|operacional_hospedes/);
+    // A Edge só CONSULTA existência em operacional_reservas (materialização
+    // automática); a escrita fica no helper hits-materializar.ts.
+    assert.doesNotMatch(edge, /operacional_hospedes/);
+    assert.doesNotMatch(edge, /\.from\("operacional_reservas"\)\s*\.(insert|update|delete|upsert)\(/);
     assert.match(edge, /fetchHitsSandboxReservations\(/);
     ok("Edge importa o módulo, decide por forma da chamada e grava só por RPC");
 

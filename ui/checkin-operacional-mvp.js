@@ -1104,7 +1104,9 @@ function buildSituacaoConsultaHitsHtml(reserva) {
 }
 
 function proximaEtapaConsultaHits(reserva) {
-  if (isConsultaSomenteNoHits(reserva)) return "Preparar FNRH";
+  if (isConsultaSomenteNoHits(reserva)) {
+    return HITS_MATERIALIZACAO_AUTOMATICA_ATIVA ? "Sincronizando com o HITS" : "Preparar FNRH";
+  }
   if (reserva.entrouNoApto) return "Hóspede no apartamento";
   if (acessoLiberadoEfetivo(reserva)) return "Acesso liberado — aguardando entrada";
   if (hasFnrhPendente(reserva) || !isFnrhCompleta(reserva)) return "Aguardando FNRH";
@@ -2834,11 +2836,26 @@ async function acaoConfirmarCheckin(id) {
   refresh();
 }
 
+/**
+ * Materialização automática ativa no backend (HITS_AUTO_MATERIALIZAR_ENABLED na
+ * Edge hits-reservations-preview). Com `true`, reserva que só existe no snapshot
+ * é um estado transitório ("sincronizando"): o vínculo operacional nasce no
+ * próximo ciclo do scheduler e "Preparar FNRH" deixa de ser o caminho normal.
+ * Com `false` (padrão até a Edge ser ligada), o botão manual continua sendo a
+ * única forma de materializar. Ligar junto com a env da Edge, nunca antes.
+ */
+const HITS_MATERIALIZACAO_AUTOMATICA_ATIVA = false;
+
 /** Texto curto + destaque/CTA para coluna Próxima ação — alinhado a derivarRecomendacaoOperacional. */
 function listaProximaAcaoOperacional(reserva) {
-  // Reserva que só existe no HITS: a única ação possível é criar o vínculo
-  // operacional para a FNRH existente poder acontecer. Nada mais é oferecido.
+  // Reserva que só existe no HITS: o vínculo operacional (necessário para a
+  // FNRH) é criado pela materialização automática; o botão manual fica como
+  // contingência enquanto ela não estiver ativa. Nada mais é oferecido —
+  // e nunca um envio.
   if (isReservaSomenteLeituraHits(reserva)) {
+    if (HITS_MATERIALIZACAO_AUTOMATICA_ATIVA) {
+      return { texto: "Sincronizando com o HITS", destaque: false, cta: null };
+    }
     return {
       texto: "Preparar FNRH",
       destaque: true,

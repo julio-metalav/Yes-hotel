@@ -626,8 +626,12 @@ async function loadCafeDataset() {
   );
   if (errRpc) throw new Error(errRpc.message || "Falha ao carregar reservas.");
 
+  // Universo HITS: a RPC devolve a população do snapshot; reservation_id vem
+  // NULL para reserva ainda não materializada (a materialização automática a
+  // cria no próximo ciclo). Id sintético só para a lista — nunca vai ao banco.
   const enriched = (rpcRows || []).map((r) => ({
-    id: r.reservation_id,
+    id: r.reservation_id || "hits:" + String(r.external_reservation_id || ""),
+    __somenteHits: !r.reservation_id,
     apartamento: r.apartment_code,
     hospede_principal: r.main_guest_name,
     check_in_previsto: r.check_in_previsto,
@@ -647,7 +651,8 @@ async function loadCafeDataset() {
     pagamento_presencial_diferido_deadline_em: r.pagamento_presencial_diferido_deadline_em,
   }));
 
-  const ids = enriched.map((r) => r.id);
+  // Atendimentos só existem para reservas materializadas (id operacional real).
+  const ids = enriched.filter((r) => !r.__somenteHits).map((r) => r.id);
   const atendimentosByReserva = new Map();
   if (ids.length) {
     const { data: atts, error: errAtt } = await supabase
@@ -761,6 +766,15 @@ async function persistAttendance(card, nextQty, action) {
 
   const supabase = getAuth().getSupabaseClient();
   if (!supabase) return;
+  // Reserva ainda só no HITS (sem id operacional): não há onde gravar
+  // atendimento até a materialização automática criar a reserva local.
+  if (String(card.reservationId || "").indexOf("hits:") === 0) {
+    setLoadState(
+      "error",
+      "Reserva ainda em sincronização com o HITS — o atendimento poderá ser registrado após a materialização.",
+    );
+    return;
+  }
 
   writeInFlight = true;
   renderIndicators();

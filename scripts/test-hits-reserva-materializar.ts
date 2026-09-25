@@ -30,7 +30,14 @@ const mvp = readFileSync(resolve(ROOT, "ui/checkin-operacional-mvp.js"), "utf8")
 function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 }
-const edgeCode = stripComments(edge);
+// A escrita vive no helper compartilhado com a materialização automática;
+// a Edge só faz gate + GET + normalização + resposta. As guardas valem para
+// o conjunto (Edge + helper).
+const helper = readFileSync(
+  resolve(ROOT, "src/lib/integrations/hits/hits-materializar.ts"),
+  "utf8",
+);
+const edgeCode = stripComments(edge) + "\n" + stripComments(helper);
 
 function main() {
   console.log("\n== 1. Cria o mínimo necessário ==");
@@ -224,7 +231,8 @@ function main() {
         `${proibido} não pode aparecer na materialização`,
       );
     }
-    assert.equal((edgeCode.match(/pagamento_status/g) || []).length, 2, "pagamento_status só no objeto financeiro e na resposta");
+    // 3 ocorrências: objeto financeiro (escrita), tipo do resultado e resposta.
+    assert.equal((edgeCode.match(/pagamento_status/g) || []).length, 3, "pagamento_status só no objeto financeiro, no tipo e na resposta");
     ok("sem acesso, check-in, senha, TTLock ou quarto; pagamento só via financeiro do HITS");
 
     // Leitura no HITS, escrita só no Yes: existe um único fetch, e ele é GET.
