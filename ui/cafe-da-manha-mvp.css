@@ -1,8 +1,12 @@
 /* Café da manhã — extensão do shell oficial do Check-in Operacional */
 
+/* Quem rola é o <main> (.cafe-content): eixo vertical livre; o horizontal
+   fica contido (largura excedente é tratada dentro do card, nunca travando a
+   rolagem vertical). */
 .cafe-view .cafe-content {
   gap: 12px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .cafe-view .cafe-demo-banner {
@@ -163,9 +167,21 @@
   color: var(--op-blue);
 }
 
+/* O shell do Check-in dimensiona .op-panel para a altura RESTANTE da viewport
+   (height/max-height: 100%, flex: 1 1 0, overflow: hidden) porque lá quem rola é
+   o .op-table-wrap interno. O Café não tem rolador interno: o painel ficava com
+   a altura sobrante, escondia o resto da lista e o <main> nunca ganhava barra
+   de rolagem. Aqui o painel cresce com o conteúdo e a rolagem fica no <main>. */
 .cafe-view .cafe-list-panel {
-  flex: 1 1 auto;
-  min-height: 280px;
+  flex: 0 0 auto;
+  height: auto;
+  max-height: none;
+  min-height: 0;
+}
+
+.cafe-view .cafe-list-panel .op-panel__body {
+  flex: none;
+  min-height: 0;
 }
 
 .cafe-view .cafe-list-heading {

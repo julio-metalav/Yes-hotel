@@ -261,7 +261,7 @@ assert.ok(
 assert.match(uiSource, /script\.src = "\.\/cafe-demo-data\.js\?v=2"/);
 assert.match(html, /cafe-da-manha-mvp\.js\?v=11/);
 assert.match(html, /yes-cafe-policy\.js\?v=5/);
-assert.match(html, /cafe-da-manha-mvp\.css\?v=9/);
+assert.match(html, /cafe-da-manha-mvp\.css\?v=10/);
 assert.match(uiSource, /createSimpleAlert\("cafe-no-breakfast-alert", cafeAlert\)/);
 assert.match(uiSource, /createSimpleAlert\("ppd-cafe-alert", card\.ppdAlert\.badgeLabel\)/);
 assert.match(
