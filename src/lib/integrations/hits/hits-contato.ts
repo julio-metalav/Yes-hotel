@@ -1,18 +1,24 @@
 /**
- * Contato do hóspede vindo do HITS — preferência por CELULAR.
+ * Contato do hóspede HITS → Yes — CELULAR OFICIAL.
  *
- * O GET de detalhe/hóspede do HITS não expõe tipo de contato (só
- * `contactPhone`/`contactMail`; `contact1`/`contact2` na reserva). Sem tipo
- * explícito, a única forma de preferir o celular quando há MAIS DE UM telefone
- * disponível é o formato brasileiro: DDD + 9 dígitos começando por 9 = celular;
- * DDD + 8 dígitos começando por 2–5 = fixo. Nada além disso é inferido:
- * número que não bate com nenhum dos dois é "desconhecido" e nunca é tratado
- * como celular. Com um único telefone o comportamento é o de sempre (usa o que
- * veio). Sem heurística internacional.
+ * Contrato oficial (Swagger https://api.hitspms.net/swagger/v1/swagger.json):
+ *  - `ReservationDetailGuestDto` (detalhe da reserva, `guests[]`) tem
+ *    `idEntity`, `contactMail` e `contactPhone` — e **não** tem celular;
+ *  - `GuestRevenueDto` (GET /Datashare/RevenueManagement/Guests?EntityId=…,
+ *    exposto pelo gateway em `GET /v1/guests`) tem `entityId`, `contactMail`,
+ *    `contactPhone` e **`contactCellPhone`**.
  *
- * Nenhuma rede, nenhum envio: funções puras usadas pelo normalizador e pela
- * materialização.
+ * Por isso o celular vem do cadastro do hóspede (guest master), nunca de
+ * adivinhação sobre o telefone do detalhe. A classificação de número brasileiro
+ * que existe aqui NÃO escolhe o contato: serve apenas como PROTEÇÃO, para
+ * decidir se um valor local antigo (provável fixo) pode ser substituído pelo
+ * celular oficial — e para nunca rebaixar um celular já gravado.
+ *
+ * Módulo puro: sem rede, sem banco, sem envio.
  */
+
+import type { SyncedGuest, SyncedReservation } from "../../domain/yes-hotel/synced-reservation.ts";
+import type { HitsGuestRevenue } from "./types.ts";
 
 export type TelefoneTipoBr = "celular" | "fixo" | "desconhecido";
 
@@ -24,6 +30,12 @@ export function digitosTelefoneBr(raw: unknown): string {
   return d;
 }
 
+/**
+ * Classificação de FORMATO (proteção, não escolha): DDD + 9XXXXXXXX = celular;
+ * DDD + [2-5]XXXXXXX = fixo; qualquer outra coisa (inclusive número
+ * estrangeiro) = desconhecido. Nunca usada para competir com
+ * `contactCellPhone` explícito.
+ */
 export function classificarTelefoneBr(raw: unknown): TelefoneTipoBr {
   const d = digitosTelefoneBr(raw);
   if (d.length === 11 && /^[1-9][0-9]9[0-9]{8}$/.test(d)) return "celular";
@@ -31,75 +43,138 @@ export function classificarTelefoneBr(raw: unknown): TelefoneTipoBr {
   return "desconhecido";
 }
 
-/**
- * Um campo do HITS pode trazer mais de um número ("(67) 3321-0000 / 99999-0000").
- * Separa por / ; | , e "ou", preservando o texto original de cada número.
- */
-export function separarTelefones(raw: unknown): string[] {
-  return String(raw ?? "")
-    .split(/\s*(?:\/|;|\||,|\bou\b)\s*/i)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+function limpo(v: unknown): string {
+  return String(v ?? "").trim();
 }
 
 /**
- * Escolhe o telefone operacional entre os candidatos (na ordem recebida):
- * 1) primeiro celular; 2) senão, primeiro fixo; 3) senão, primeiro não vazio
- * (formato desconhecido — mantido como veio); 4) senão null.
- * Devolve o texto original do número escolhido, sem reformatar.
+ * Contato operacional a partir do guest master (GuestRevenueDto):
+ * WhatsApp = `contactCellPhone` e, só na ausência dele, `contactPhone`.
+ * E-mail = `contactMail`. Nada é inferido.
  */
-export function escolherTelefonePreferido(candidatos: ReadonlyArray<unknown>): string | null {
-  const tokens = candidatos.flatMap((c) => separarTelefones(c));
-  if (tokens.length === 0) return null;
-  const vistos = new Set<string>();
-  const unicos = tokens.filter((t) => {
-    const k = digitosTelefoneBr(t) || t.toLowerCase();
-    if (vistos.has(k)) return false;
-    vistos.add(k);
-    return true;
+export function contatoOficialDoGuestRevenue(
+  guest: HitsGuestRevenue | null | undefined,
+): { phone: string | null; email: string | null; origem_telefone: "celular" | "telefone" | null } {
+  if (!guest) return { phone: null, email: null, origem_telefone: null };
+  const celular = limpo(guest.contactCellPhone);
+  const telefone = limpo(guest.contactPhone);
+  const email = limpo(guest.contactMail);
+  if (celular) return { phone: celular, email: email || null, origem_telefone: "celular" };
+  if (telefone) return { phone: telefone, email: email || null, origem_telefone: "telefone" };
+  return { phone: null, email: email || null, origem_telefone: null };
+}
+
+/**
+ * Registro do guest master correspondente ao `idEntity` pedido. O retorno pode
+ * trazer vários registros: só serve o de `entityId` EXATAMENTE igual — nunca
+ * "o primeiro".
+ */
+export function selecionarGuestRevenuePorEntityId(
+  lista: ReadonlyArray<HitsGuestRevenue> | null | undefined,
+  idEntity: unknown,
+): HitsGuestRevenue | null {
+  const alvo = limpo(idEntity);
+  if (!alvo) return null;
+  const encontrados = (lista ?? []).filter((g) => limpo(g?.entityId ?? g?.idEntity) === alvo);
+  return encontrados.length === 1 ? encontrados[0]! : (encontrados[0] ?? null);
+}
+
+/**
+ * Vale a pena gastar um GET de guest master por este hóspede já materializado?
+ * Só quando o cadastro local pode MELHORAR: sem WhatsApp, com WhatsApp que não
+ * é celular (fixo/desconhecido — candidato a ser substituído pelo celular
+ * oficial) ou sem e-mail. Quem já tem celular e e-mail não gera consulta.
+ */
+export function precisaGuestMaster(
+  local: { whatsapp?: string | null; email?: string | null } | null | undefined,
+): boolean {
+  const whatsapp = limpo(local?.whatsapp);
+  const email = limpo(local?.email);
+  if (!whatsapp) return true;
+  if (classificarTelefoneBr(whatsapp) !== "celular") return true;
+  return !email;
+}
+
+/**
+ * Aplica o contato oficial do guest master sobre os hóspedes do detalhe já
+ * normalizado. Só mexe em `phone`/`email` e só quando o guest master trouxe
+ * valor; hóspede sem registro correspondente fica com o fallback do detalhe
+ * (`contactPhone`/`contactMail`). Devolve uma cópia: nada é mutado.
+ */
+export function aplicarContatoOficialNaReserva(
+  synced: SyncedReservation,
+  porEntityId: ReadonlyMap<string, HitsGuestRevenue>,
+): SyncedReservation {
+  if (porEntityId.size === 0) return synced;
+  let mudou = false;
+  const guests: SyncedGuest[] = (synced.guests ?? []).map((g) => {
+    const idEntity = limpo(g.externalGuestId);
+    const master = idEntity ? porEntityId.get(idEntity) : undefined;
+    if (!master) return g;
+    const oficial = contatoOficialDoGuestRevenue(master);
+    if (!oficial.phone && !oficial.email) return g;
+    mudou = true;
+    return {
+      ...g,
+      phone: oficial.phone ?? g.phone,
+      email: oficial.email ?? g.email,
+      // Marca a procedência: só `cell` autoriza substituir um fixo já gravado.
+      phoneSource: oficial.phone ? (oficial.origem_telefone === "celular" ? "cell" : "phone") : g.phoneSource,
+    };
   });
-  return (
-    unicos.find((t) => classificarTelefoneBr(t) === "celular") ??
-    unicos.find((t) => classificarTelefoneBr(t) === "fixo") ??
-    unicos[0] ??
-    null
-  );
+  if (!mudou) return synced;
+  const principal = guests.find((g) => g.isPrincipal) ?? guests[0] ?? null;
+  return {
+    ...synced,
+    guests,
+    phone: principal?.phone ?? synced.phone,
+    email: principal?.email ?? synced.email,
+  };
 }
 
 function mesmoTelefone(a: unknown, b: unknown): boolean {
   const da = digitosTelefoneBr(a);
   const db = digitosTelefoneBr(b);
-  return da.length > 0 && da === db;
+  if (da.length > 0 && da === db) return true;
+  return limpo(a).toLowerCase() === limpo(b).toLowerCase() && limpo(a) !== "";
 }
 
 /**
  * WhatsApp de hóspede JÁ materializado: devolve o novo valor ou null (no-op).
- * - local vazio + HITS tem telefone → preenche;
- * - local é fixo + HITS tem celular → troca pelo celular;
- * - local é celular → nunca rebaixa (nem para outro fixo, nem para desconhecido);
+ * `origemCelular` = o valor veio de `contactCellPhone` (celular oficial).
+ * - local vazio → preenche;
+ * - local é fixo e o HITS trouxe o CELULAR OFICIAL → substitui;
+ * - local é celular → nunca rebaixa (nem para fixo, nem para outro celular);
  * - mesmo número → no-op;
- * - local de formato desconhecido (não vazio) → não mexe (pode ser edição manual
- *   ou número estrangeiro; sem campo de origem no schema, é conservador).
+ * - local de formato desconhecido (não vazio) → não mexe: pode ser edição
+ *   manual ou número estrangeiro e não há coluna de origem no schema.
  */
-export function decidirWhatsappExistente(local: unknown, hits: unknown): string | null {
-  const atual = String(local ?? "").trim();
-  const novo = String(hits ?? "").trim();
+export function decidirWhatsappExistente(
+  local: unknown,
+  hits: unknown,
+  origemCelular = false,
+): string | null {
+  const atual = limpo(local);
+  const novo = limpo(hits);
   if (!novo) return null;
   if (!atual) return novo;
   if (mesmoTelefone(atual, novo)) return null;
   const tipoAtual = classificarTelefoneBr(atual);
-  const tipoNovo = classificarTelefoneBr(novo);
-  if (tipoAtual === "fixo" && tipoNovo === "celular") return novo;
+  if (tipoAtual !== "fixo") return null;
+  // Só sobe para celular: oficial (`contactCellPhone`) ou, na ausência de
+  // origem declarada, um número que comprovadamente é celular brasileiro.
+  if (origemCelular || classificarTelefoneBr(novo) === "celular") return novo;
   return null;
 }
 
 /**
  * E-mail de hóspede JÁ materializado: só preenche quando o local está vazio e o
- * HITS traz um e-mail plausível; e-mail diferente já existente não é trocado.
+ * HITS trouxe um e-mail plausível. E-mail local já preenchido nunca é
+ * sobrescrito automaticamente (não há coluna de origem que prove a procedência).
  */
 export function decidirEmailExistente(local: unknown, hits: unknown): string | null {
-  const atual = String(local ?? "").trim();
-  const novo = String(hits ?? "").trim();
+  const atual = limpo(local);
+  const novo = limpo(hits);
   if (!novo || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(novo)) return null;
   if (!atual) return novo;
   return null;

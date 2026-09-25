@@ -241,6 +241,18 @@ Regra: **o HITS decide quais reservas existem operacionalmente; o Yes só enriqu
 
 Testes: `npm run test:hits-auto-materializacao` (18) · `npm run test:cafe-universo-hits` (10).
 
+## 8f. Contato do hóspede pelo celular oficial (branch `fix/hits-contato-celular-oficial`)
+
+O detalhe da reserva (`ReservationDetailGuestDto`) **não** expõe celular — só `contactPhone`/`contactMail`. O celular é `contactCellPhone`, exclusivo do `GuestRevenueDto` (`GET /v1/guests?EntityId=…`, contrato §8.4.1). Por isso o ciclo enriquece o contato pelo **guest master**, de forma direcionada:
+
+- **quem consulta**: reserva nova que será materializada agora; e hóspede já materializado que pode melhorar (WhatsApp vazio, WhatsApp que não é celular, ou e-mail vazio) **e** com ficha FNRH ainda intocada. Quem já tem celular + e-mail, ou já preencheu a FNRH, não gera consulta;
+- **quanto custa**: ids deduplicados, teto `HITS_GUEST_LOOKUP_MAX_POR_CICLO` (10) por ciclo, orçamento próprio de 20 s com prazo absoluto de 130 s desde o início do tick, mesma cadência de 1 100 ms — nunca N+1 sobre o universo. O que não coube volta no ciclo seguinte;
+- **prioridade**: WhatsApp = `contactCellPhone` → `contactPhone` → `contactPhone` do detalhe; e-mail = `contactMail` do guest master → do detalhe;
+- **reserva já materializada**: caminho dedicado (`reconciliarContatosDaReserva`) que escreve **somente** `operacional_hospedes.whatsapp`/`email`. Celular oficial substitui fixo; celular nunca é rebaixado; e-mail só preenche vazio; ficha FNRH tocada bloqueia qualquer escrita;
+- a classificação de número brasileiro (DDD + 9 dígitos) deixou de ser fonte: serve só como proteção do dado local.
+
+Testes: `npm run test:hits-contato-preferencia` (23).
+
 ## 9. Riscos restantes / follow-ups
 
 - Reconciliação de canceladas (banco × HITS) fica desligada na tela; em PROD não havia reservas

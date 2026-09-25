@@ -1,0 +1,19 @@
+{
+  "_comentario": "FICTÍCIA. Resposta de GET /v1/guests?EntityId=4272 (gateway → GET /Datashare/RevenueManagement/Guests). Cada item é um GuestRevenueDto: é o ÚNICO DTO do contrato oficial com contactCellPhone (celular). O segundo item existe só para provar que a seleção é por entityId EXATO — nunca 'o primeiro da lista'. Nenhum dado real.",
+  "data": [
+    {
+      "entityId": 4272,
+      "name": "Hóspede Exemplo",
+      "contactMail": "hospede.exemplo@example.com",
+      "contactPhone": "+55 (67) 3321-4567",
+      "contactCellPhone": "+55 (67) 99123-4567"
+    },
+    {
+      "entityId": 4273,
+      "name": "Outro Hóspede Exemplo",
+      "contactMail": "outro.exemplo@example.com",
+      "contactPhone": "+55 (67) 3322-0000",
+      "contactCellPhone": "+55 (67) 98888-0000"
+    }
+  ]
+}

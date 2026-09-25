@@ -1,9 +1,9 @@
 {
-  "_comentario": "Fixture FICTÍCIA derivada só da FORMA do detalhe real (fixtures/hits-real-sample-detail.json): cadastro HITS com telefone fixo e celular. Nome, números e e-mail são inventados. Forma A (hipótese a confirmar com o payload real): fixo em guests[].contactPhone, celular em contact2 da reserva.",
+  "_comentario": "FICTÍCIA. Forma de ReservationDetailDto (contrato oficial HITS): guests[] é ReservationDetailGuestDto e NÃO tem contactCellPhone — só contactPhone (aqui, um FIXO) e contactMail. O celular desta mesma pessoa está em fixtures/hits-contato-guest-revenue.json (GuestRevenueDto, GET /v1/guests?EntityId=4272). Nome, números e e-mail inventados; nenhum dado real.",
   "idReservation": 3490,
-  "contactName": "Camila Exemplo",
-  "contact1": "camila.exemplo@example.com",
-  "contact2": "+55 (67) 99123-4567",
+  "contactName": "Hóspede Exemplo",
+  "contact1": "hospede.exemplo@example.com",
+  "contact2": "+55 (67) 3321-4567",
   "dateAdd": "2026-09-20T10:00:00",
   "dateUp": "2026-09-25T09:30:00",
   "notes": [],
@@ -30,10 +30,10 @@
   ],
   "guests": [
     {
-      "idEntity": 4300,
-      "name": "Camila Exemplo",
+      "idEntity": 4272,
+      "name": "Hóspede Exemplo",
       "idRoom": 12,
-      "contactMail": "camila.exemplo@example.com",
+      "contactMail": "",
       "contactPhone": "+55 (67) 3321-4567",
       "main": true,
       "federalRegistrationNumber": "00000000000",

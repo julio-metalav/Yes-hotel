@@ -198,16 +198,22 @@ async function main() {
 
     const edge = stripComments(read("supabase/functions/hits-reservations-preview/index.ts"));
     assert.match(edge, /HITS_AUTO_MATERIALIZAR_ENABLED/);
-    assert.match(edge, /HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO = 20/);
+    // O teto e a escrita moraram na Edge; agora vivem no módulo de ciclo
+    // compartilhado (hits-contato-sync), usado também pela Edge sob demanda.
+    const ciclo = stripComments(read("src/lib/integrations/hits/hits-contato-sync.ts"));
+    assert.match(ciclo, /HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO = 20/);
+    assert.match(edge, /maxMaterializacoes: HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO/);
     assert.match(edge, /if \(autoMaterializarEnabled && run\.snapshot\.persisted\)/, "só após snapshot gravado e só com a trava");
-    assert.match(edge, /materializarNovasDoCiclo\(admin\.admin, result\.rows, detalhes\)/);
-    assert.match(edge, /\.filter\(\(r\) => r\.status_reserva !== "cancelada"\)/, "só ativas");
-    assert.match(edge, /\.from\("operacional_reservas"\)\s*\.select\("external_reservation_id"\)/, "existência por SELECT");
-    assert.doesNotMatch(edge, /\.from\("operacional_reservas"\)\s*\.(insert|update|delete|upsert)\(/, "Edge não escreve direto");
+    assert.match(edge, /executarCicloContatoEMaterializacao\(\{[\s\S]*?admin: admin\.admin,[\s\S]*?rows: result\.rows,[\s\S]*?detalhes,/, "mesmas entradas do ciclo");
+    assert.match(ciclo, /\.filter\(\(r\) => r\.status_reserva !== "cancelada"\)/, "só ativas");
+    assert.match(ciclo, /\.from\("operacional_reservas"\)\s*\.select\("id, external_reservation_id"\)/, "existência por SELECT");
+    assert.doesNotMatch(edge, /\.from\("[a-z_]+"\)\s*\.(insert|update|delete|upsert)\(/, "Edge não escreve direto");
+    assert.doesNotMatch(ciclo, /\.from\("operacional_reservas"\)\s*\.(insert|update|delete|upsert)\(/, "ciclo escreve só pelo helper");
     assert.match(edge, /onDetail/);
     assert.doesNotMatch(edge, /send-fnrh-links|send-senha|digisac|resend|notify-fnrh/i);
     const fetches = edge.match(/await fetch\(/g) ?? [];
     assert.equal(fetches.length, 0, "a Edge de preview não faz fetch direto (a leitura é o leitor cadenciado)");
+    assert.doesNotMatch(ciclo, /fetch\(/, "o ciclo recebe o leitor injetado: nenhuma rede própria");
     ok("Edge preview: gancho só com trava, só ativas, detalhe reaproveitado (zero GET extra), sem envio");
 
     const leitor = stripComments(read("src/lib/integrations/hits/hits-gateway-read.ts"));

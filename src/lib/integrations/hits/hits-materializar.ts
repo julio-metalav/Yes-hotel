@@ -163,11 +163,13 @@ export async function fichaFnrhTocada(admin: SupabaseAdminLike, hospedeId: strin
 async function atualizarContatoExistente(
   admin: SupabaseAdminLike,
   row: { id: string; email?: string | null; whatsapp?: string | null },
-  guest: { phone: string | null; email: string | null },
+  guest: { phone: string | null; email: string | null; phoneSource?: "cell" | "phone" | null },
   log: (msg: string, extra?: Record<string, unknown>) => void,
 ): Promise<boolean> {
   const contatoHits: { whatsapp?: string; email?: string } = {};
-  const whatsapp = decidirWhatsappExistente(row.whatsapp, guest.phone);
+  // `phoneSource === "cell"` = veio de GuestRevenueDto.contactCellPhone: é o
+  // único caso que autoriza trocar um fixo já gravado pelo celular.
+  const whatsapp = decidirWhatsappExistente(row.whatsapp, guest.phone, guest.phoneSource === "cell");
   if (whatsapp) contatoHits.whatsapp = whatsapp;
   const email = decidirEmailExistente(row.email, guest.email);
   if (email) contatoHits.email = email;
@@ -424,5 +426,83 @@ export async function materializarReservaSincronizada(input: {
       posicoes_ambiguas: posicoesAmbiguas,
     },
     intervencao_manual: posicoesAmbiguas > 0,
+  };
+}
+
+/**
+ * RECONCILIAÇÃO DE CONTATO — reserva HITS **já materializada**.
+ *
+ * Caminho dedicado e deliberadamente estreito: não cria reserva, não cria
+ * hóspede, não cria posição, não toca financeiro, ocupação, ficha FNRH,
+ * link_token, lifecycle, nome, documento, `principal`, status operacional nem
+ * auditoria. A ÚNICA escrita possível é `operacional_hospedes.whatsapp` e
+ * `operacional_hospedes.email`, pelas regras de `hits-contato` (celular oficial
+ * substitui fixo; celular nunca é rebaixado; e-mail só preenche vazio) e
+ * somente enquanto a ficha FNRH do hóspede continuar intocada.
+ *
+ * Sem rede: o `synced` já chega enriquecido pelo guest master. Sem envio.
+ */
+export type ReconciliacaoContatoResultado = {
+  ok: boolean;
+  reserva_id: string | null;
+  hospedes_avaliados: number;
+  contatos_atualizados: number;
+};
+
+export async function reconciliarContatosDaReserva(input: {
+  admin: SupabaseAdminLike;
+  externalId: string;
+  synced: SyncedReservation;
+  log?: (msg: string, extra?: Record<string, unknown>) => void;
+}): Promise<ReconciliacaoContatoResultado> {
+  const { admin, externalId, synced } = input;
+  const log = input.log ?? (() => {});
+  const vazio: ReconciliacaoContatoResultado = {
+    ok: true,
+    reserva_id: null,
+    hospedes_avaliados: 0,
+    contatos_atualizados: 0,
+  };
+
+  const { data: reserva } = await admin
+    .from("operacional_reservas")
+    .select("id")
+    .eq("origem_externa", ORIGEM_HITS)
+    .eq("external_reservation_id", externalId)
+    .maybeSingle();
+  const reservaId = (reserva as { id?: string } | null)?.id;
+  // Reserva ainda não materializada não é assunto desta função: quem cria é a
+  // materialização, com o fluxo completo.
+  if (!reservaId) return vazio;
+
+  let avaliados = 0;
+  let atualizados = 0;
+  for (const guest of synced.guests ?? []) {
+    const idEntity = String(guest.externalGuestId ?? "").trim();
+    if (!idEntity) continue;
+    if (!String(guest.phone ?? "").trim() && !String(guest.email ?? "").trim()) continue;
+
+    const { data: existente } = await admin
+      .from("operacional_hospedes")
+      .select("id, email, whatsapp")
+      .eq("reserva_id", reservaId)
+      .eq("pms_external_guest_id", idEntity)
+      .maybeSingle();
+    if (!existente) continue;
+    avaliados += 1;
+    const mudou = await atualizarContatoExistente(
+      admin,
+      existente as { id: string; email?: string | null; whatsapp?: string | null },
+      guest,
+      log,
+    );
+    if (mudou) atualizados += 1;
+  }
+
+  return {
+    ok: true,
+    reserva_id: reservaId,
+    hospedes_avaliados: avaliados,
+    contatos_atualizados: atualizados,
   };
 }

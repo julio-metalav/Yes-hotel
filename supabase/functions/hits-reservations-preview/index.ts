@@ -29,11 +29,13 @@
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
+  fetchHitsGuestRevenues,
   fetchHitsSandboxReservations,
   fetchHitsUpdatedReservations,
   getHitsGatewayReadConfig,
   assertHitsGatewayReadReady,
   hitsGatewayReadStatus,
+  HITS_GUEST_LOOKUP_MAX_POR_CICLO,
 } from "../../../src/lib/integrations/hits/hits-gateway-read.ts";
 import {
   HITS_SNAPSHOT_WRITE_ENV,
@@ -42,10 +44,11 @@ import {
   type SnapshotRpc,
   type SnapshotSyncState,
 } from "../../../src/lib/integrations/hits/hits-snapshot-sync.ts";
+import type { SupabaseAdminLike } from "../../../src/lib/integrations/hits/hits-materializar.ts";
 import {
-  materializarReservaSincronizada,
-  type SupabaseAdminLike,
-} from "../../../src/lib/integrations/hits/hits-materializar.ts";
+  executarCicloContatoEMaterializacao,
+  HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO,
+} from "../../../src/lib/integrations/hits/hits-contato-sync.ts";
 import type { SyncedReservation } from "../../../src/lib/domain/yes-hotel/synced-reservation.ts";
 
 /**
@@ -57,7 +60,13 @@ import type { SyncedReservation } from "../../../src/lib/domain/yes-hotel/synced
  * disparada aqui. Teto por ciclo para não alongar o tick.
  */
 const HITS_AUTO_MATERIALIZAR_ENV = "HITS_AUTO_MATERIALIZAR_ENABLED";
-const HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO = 20;
+
+/**
+ * Prazo absoluto da fase pós-snapshot (enriquecimento + escrita), medido do
+ * início da requisição. O gateway de funções corta aos 150 s; abaixo disso a
+ * fase para sozinha e o que faltou volta no próximo ciclo.
+ */
+const HITS_POS_SNAPSHOT_DEADLINE_MS = 130_000;
 
 /**
  * Trava do modo incremental (Type=2 + cursor). Exige a migration
@@ -133,66 +142,6 @@ function snapshotAdmin(): {
       return (data as SnapshotSyncState | null) ?? null;
     },
   };
-}
-
-/**
- * Materializa as reservas ativas deste ciclo que ainda não têm linha em
- * operacional_reservas. Entrada: linhas do snapshot lidas agora + detalhes já
- * normalizados (onDetail). Só banco: 1 SELECT de existência + escrita do helper.
- * Sem HITS, sem envio, sem apagar. Teto por ciclo; erros são contados, não
- * derrubam o tick.
- */
-async function materializarNovasDoCiclo(
-  admin: SupabaseAdminLike,
-  rows: ReadonlyArray<{ external_reservation_id: string; status_reserva: string }>,
-  detalhes: Map<string, SyncedReservation>,
-): Promise<Record<string, unknown>> {
-  const ids = rows
-    .filter((r) => r.status_reserva !== "cancelada")
-    .map((r) => String(r.external_reservation_id || "").trim())
-    .filter((id) => id && detalhes.has(id));
-  const out = { habilitada: true, candidatas: 0, criadas: 0, reusadas: 0, erros: 0, ignoradas_teto: 0 };
-  if (ids.length === 0) return out;
-
-  const { data: existentes, error } = await admin
-    .from("operacional_reservas")
-    .select("external_reservation_id")
-    .eq("origem_externa", "hits")
-    .in("external_reservation_id", ids);
-  if (error) {
-    console.error("[HITS_AUTO_MATERIALIZAR] leitura de existentes falhou", { code: error.code });
-    return { ...out, erros: 1 };
-  }
-  const jaLocal = new Set(
-    ((existentes ?? []) as Array<{ external_reservation_id: string }>).map((r) =>
-      String(r.external_reservation_id),
-    ),
-  );
-  const novas = ids.filter((id) => !jaLocal.has(id));
-  out.candidatas = novas.length;
-
-  for (const id of novas) {
-    if (out.criadas + out.reusadas + out.erros >= HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO) {
-      out.ignoradas_teto += 1;
-      continue;
-    }
-    const synced = detalhes.get(id);
-    if (!synced) continue;
-    try {
-      const r = await materializarReservaSincronizada({
-        admin,
-        externalId: id,
-        synced,
-        log: (msg, extra) => console.error(msg, extra ?? {}),
-      });
-      if (!r.ok) out.erros += 1;
-      else if (r.reserva_criada) out.criadas += 1;
-      else out.reusadas += 1;
-    } catch (_e) {
-      out.erros += 1;
-    }
-  }
-  return out;
 }
 
 Deno.serve(async (req: Request) => {
@@ -292,11 +241,26 @@ Deno.serve(async (req: Request) => {
     }
     result = run.result;
 
-    // Materialização automática: só após snapshot gravado, só reservas ativas
-    // lidas neste ciclo (detalhe já em memória) e ainda sem linha local.
-    // Idempotente pelo helper; nenhuma chamada ao HITS; nenhum envio.
+    // Fase pós-snapshot: só após snapshot gravado. Materializa as reservas
+    // ativas deste ciclo ainda sem linha local e reconcilia o CONTATO das já
+    // materializadas, com enriquecimento DIRECIONADO pelo guest master
+    // (GET /v1/guests?EntityId=…) apenas de quem precisa. Nenhuma escrita no
+    // HITS, nenhum envio.
     if (autoMaterializarEnabled && run.snapshot.persisted) {
-      materializacao = await materializarNovasDoCiclo(admin.admin, result.rows, detalhes);
+      materializacao = await executarCicloContatoEMaterializacao({
+        admin: admin.admin,
+        rows: result.rows,
+        detalhes,
+        maxMaterializacoes: HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO,
+        maxLookups: HITS_GUEST_LOOKUP_MAX_POR_CICLO,
+        buscarGuestRevenues: (entityIds) =>
+          fetchHitsGuestRevenues({
+            config: gate.config,
+            entityIds,
+            deadlineAtMs: startedAt + HITS_POS_SNAPSHOT_DEADLINE_MS,
+          }),
+        log: (msg, extra) => console.error(msg, extra ?? {}),
+      });
     }
   } else {
     snapshot = decision.persist

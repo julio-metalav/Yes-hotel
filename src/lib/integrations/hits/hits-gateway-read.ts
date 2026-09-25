@@ -17,10 +17,12 @@ import {
   type HitsTransport,
 } from "./transport.ts";
 import type {
+  HitsGuestRevenue,
   HitsReservationDetails,
   HitsReservationListResponse,
   HitsReservationSummary,
 } from "./types.ts";
+import { selecionarGuestRevenuePorEntityId } from "./hits-contato.ts";
 import type { SyncedReservation } from "../../domain/yes-hotel/synced-reservation.ts";
 
 export const HITS_GATEWAY_DEFAULT_TIMEOUT_MS = 12_000;
@@ -743,4 +745,171 @@ export async function fetchHitsUpdatedReservations(
   };
   const result = await runGatewayRead(input, plan, undefined, true);
   return { ...result, window };
+}
+
+// ---------------------------------------------------------------------------
+// Guest master (GuestRevenueDto) — o único lugar do contrato com o celular.
+// ---------------------------------------------------------------------------
+
+/**
+ * Teto de consultas de guest master por ciclo. Conservador de propósito: cada
+ * consulta é 1 GET extra no gateway (limite de 60 req/min) e roda DEPOIS do
+ * snapshot, no tempo que sobra do tick. Com backlog, o teto drena ao longo dos
+ * ciclos em vez de estourar um único tick.
+ */
+export const HITS_GUEST_LOOKUP_MAX_POR_CICLO = 10;
+
+/** Orçamento próprio da fase de enriquecimento (fora do orçamento da leitura). */
+export const HITS_GUEST_LOOKUP_TIME_BUDGET_MS = 20_000;
+
+export type FetchHitsGuestRevenuesResult = {
+  /** Só quem foi encontrado, pela chave `entityId` EXATA. */
+  porEntityId: Map<string, HitsGuestRevenue>;
+  solicitados: number;
+  lidos: number;
+  falhas: number;
+  ignorados_teto: number;
+  parou_por: "fim" | "teto" | "time_budget" | "gate";
+};
+
+function extrairGuestRevenues(body: unknown): HitsGuestRevenue[] {
+  if (Array.isArray(body)) return body as HitsGuestRevenue[];
+  if (body && typeof body === "object") {
+    const row = body as { data?: unknown; items?: unknown; results?: unknown };
+    if (Array.isArray(row.data)) return row.data as HitsGuestRevenue[];
+    if (Array.isArray(row.items)) return row.items as HitsGuestRevenue[];
+    if (Array.isArray(row.results)) return row.results as HitsGuestRevenue[];
+  }
+  return [];
+}
+
+/**
+ * Cadastro do hóspede por `EntityId` — `GET /v1/guests?EntityId=…` (gateway →
+ * GET /Datashare/RevenueManagement/Guests). SOMENTE leitura.
+ *
+ * Direcionada por construção: recebe a lista de ids que o chamador já decidiu
+ * que precisam de enriquecimento (nunca "todos os hóspedes do ciclo"),
+ * deduplica, respeita um teto por ciclo e a MESMA cadência mínima entre
+ * requisições do resto da leitura. Falha de um id não derruba os outros: o
+ * hóspede simplesmente fica com o fallback do detalhe da reserva.
+ */
+export async function fetchHitsGuestRevenues(input: {
+  config: HitsGatewayReadConfig;
+  entityIds: ReadonlyArray<string>;
+  fetchImpl?: HitsFetch;
+  transport?: HitsTransport;
+  nowMs?: () => number;
+  sleepImpl?: (ms: number) => Promise<void>;
+  minIntervalMs?: number;
+  timeBudgetMs?: number;
+  /** Prazo absoluto (ms). Vence o orçamento relativo quando for menor. */
+  deadlineAtMs?: number;
+  maxLookups?: number;
+}): Promise<FetchHitsGuestRevenuesResult> {
+  const porEntityId = new Map<string, HitsGuestRevenue>();
+  const vistos = new Set<string>();
+  const ids: string[] = [];
+  for (const raw of input.entityIds ?? []) {
+    const id = String(raw ?? "").trim();
+    if (!id || vistos.has(id)) continue;
+    vistos.add(id);
+    ids.push(id);
+  }
+  const base = {
+    porEntityId,
+    solicitados: ids.length,
+    lidos: 0,
+    falhas: 0,
+    ignorados_teto: 0,
+  };
+  if (ids.length === 0) return { ...base, parou_por: "fim" };
+
+  const gate = assertHitsGatewayReadReady(input.config);
+  if (!gate.ok) return { ...base, ignorados_teto: ids.length, parou_por: "gate" };
+  const config = gate.config;
+
+  const now = input.nowMs ?? (() => Date.now());
+  const doSleep = input.sleepImpl ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const minIntervalMs = Math.max(0, input.minIntervalMs ?? HITS_GATEWAY_MIN_INTERVAL_MS);
+  const teto = Math.max(0, input.maxLookups ?? HITS_GUEST_LOOKUP_MAX_POR_CICLO);
+  const budget = Math.max(0, input.timeBudgetMs ?? HITS_GUEST_LOOKUP_TIME_BUDGET_MS);
+  const deadlineMs = Math.min(
+    now() + budget,
+    input.deadlineAtMs ?? Number.POSITIVE_INFINITY,
+  );
+
+  let lastStartMs: number | null = null;
+  const baseFetch = input.fetchImpl ?? fetch;
+  const pacedFetch: HitsFetch = async (url, init) => {
+    const t = now();
+    if (t >= deadlineMs) {
+      throw new HitsError({
+        code: "time_budget",
+        message: "Orçamento de tempo do enriquecimento de contato esgotado.",
+        httpStatus: null,
+        retryable: false,
+      });
+    }
+    const wait = lastStartMs == null ? 0 : lastStartMs + minIntervalMs - t;
+    if (wait > 0) {
+      if (t + wait >= deadlineMs) {
+        throw new HitsError({
+          code: "time_budget",
+          message: "Orçamento de tempo do enriquecimento de contato esgotado.",
+          httpStatus: null,
+          retryable: false,
+        });
+      }
+      await doSleep(wait);
+    }
+    lastStartMs = now();
+    return baseFetch(url, init);
+  };
+  const transport =
+    input.transport ?? createHitsTransport(pacedFetch, { nowMs: now, sleepImpl: doSleep });
+  const headers = gatewayHeaders(config);
+
+  let parouPor: FetchHitsGuestRevenuesResult["parou_por"] = "fim";
+  let consultados = 0;
+  for (let i = 0; i < ids.length; i += 1) {
+    const id = ids[i]!;
+    if (consultados >= teto) {
+      base.ignorados_teto = ids.length - i;
+      parouPor = "teto";
+      break;
+    }
+    if (now() >= deadlineMs) {
+      base.ignorados_teto = ids.length - i;
+      parouPor = "time_budget";
+      break;
+    }
+    try {
+      consultados += 1;
+      const res = await transport.request({
+        method: "GET",
+        url: `${config.baseUrl}/v1/guests?EntityId=${encodeURIComponent(id)}`,
+        headers,
+        timeoutMs: config.requestTimeoutMs,
+        maxRetries: READ_MAX_RETRIES,
+        deadlineMs,
+      });
+      const guest = selecionarGuestRevenuePorEntityId(extrairGuestRevenues(res.body), id);
+      if (guest) {
+        porEntityId.set(id, guest);
+        base.lidos += 1;
+      } else {
+        base.falhas += 1;
+      }
+    } catch (e) {
+      if (e instanceof HitsError && e.code === "time_budget") {
+        base.ignorados_teto = ids.length - i;
+        parouPor = "time_budget";
+        break;
+      }
+      // Sem contato oficial este hóspede segue com o fallback do detalhe.
+      base.falhas += 1;
+    }
+  }
+
+  return { ...base, porEntityId, parou_por: parouPor };
 }
