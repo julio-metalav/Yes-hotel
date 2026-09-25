@@ -26,6 +26,7 @@ import { aplicarContatoOficialNaReserva, precisaGuestMaster } from "./hits-conta
 import {
   materializarReservaSincronizada,
   reconciliarContatosDaReserva,
+  reconciliarFinanceiroDaReserva,
   reconciliarPlanoRefeicaoDaReserva,
   ORIGEM_HITS,
   type SupabaseAdminLike,
@@ -223,6 +224,11 @@ export type CicloContatoResultado = {
   reconciliacao: { reservas: number; contatos_atualizados: number; erros: number };
   /** Reservas já locais cujo meal_plan_desc/população foi trazido do HITS. */
   plano_refeicao: { avaliadas: number; atualizadas: number; erros: number };
+  /**
+   * Reservas já locais promovidas a pago porque o HITS passou a informar saldo
+   * zerado. `atualizadas` conta só escrita real; o resto se absteve.
+   */
+  financeiro: { avaliadas: number; atualizadas: number; erros: number };
 };
 
 /**
@@ -253,6 +259,7 @@ export async function executarCicloContatoEMaterializacao(input: {
     enriquecimento: { solicitados: 0, lidos: 0, falhas: 0, ignorados_teto: 0, parou_por: "fim" },
     reconciliacao: { reservas: 0, contatos_atualizados: 0, erros: 0 },
     plano_refeicao: { avaliadas: 0, atualizadas: 0, erros: 0 },
+    financeiro: { avaliadas: 0, atualizadas: 0, erros: 0 },
   };
 
   const plano = await planejarEnriquecimentoContato({
@@ -322,6 +329,20 @@ export async function executarCicloContatoEMaterializacao(input: {
       else if (r.atualizado) out.plano_refeicao.atualizadas += 1;
     } catch (_e) {
       out.plano_refeicao.erros += 1;
+    }
+
+    // 2b. Financeiro das já locais, no MESMO detalhe já em mãos: zero GET
+    //     extra. O backfill da materialização é one-shot (só age com saldo
+    //     nulo), então sem isto uma reserva quitada depois de materializada
+    //     ficaria para sempre como não paga. Promove para pago; nunca rebaixa,
+    //     nunca aumenta saldo já reduzido pelo Pagar.me.
+    out.financeiro.avaliadas += 1;
+    try {
+      const f = await reconciliarFinanceiroDaReserva({ admin, externalId: id, synced, log });
+      if (!f.ok) out.financeiro.erros += 1;
+      else if (f.atualizado) out.financeiro.atualizadas += 1;
+    } catch (_e) {
+      out.financeiro.erros += 1;
     }
   }
 

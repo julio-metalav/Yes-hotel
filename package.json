@@ -111,6 +111,7 @@
     "test:checkin-operational-period": "tsx scripts/test-checkin-operational-period.ts",
     "test:checkin-comissionado-status": "tsx scripts/test-checkin-comissionado-status.ts",
     "test:yes:cafe-operacional": "tsx scripts/test-cafe-operacional.ts",
+    "test:hits:reconciliacao-financeira": "tsx scripts/test-hits-reconciliacao-financeira.ts",
     "test:hits-real:json": "tsx scripts/test-hits-real-json-to-yes.ts",
     "debug:provisioning": "tsx scripts/debug-provisioning-plan.ts",
     "debug:ttlock-auth": "tsx scripts/debug-ttlock-auth.ts",

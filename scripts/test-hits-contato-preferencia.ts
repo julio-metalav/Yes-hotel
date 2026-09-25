@@ -377,13 +377,19 @@ async function main() {
       const base = syncedDoDetalhe();
       universo.set(ext, { ...base, externalReservationId: ext, guests: [{ ...base.guests[0]!, externalGuestId: idEnt }] });
       rowsUniverso.push({ external_reservation_id: ext, status_reserva: "ativa" });
-      // Plano/população já iguais aos do HITS: nada a reconciliar.
+      // Plano, população E financeiro já iguais aos do HITS: nada a
+      // reconciliar em nenhuma das fases.
       dbUniverso.reservas.push({
         id: "r-" + ext,
         origem_externa: "hits",
         external_reservation_id: ext,
         meal_plan_desc: base.mealPlanDesc ?? null,
         total_hospedes_hits: Math.max(1, Number(base.totalGuests) || 1),
+        pagamento_status: base.paymentStatus,
+        reservation_balance_due: base.reservationBalanceDue,
+        reservation_total_amount: base.reservationTotalAmount,
+        classificacao_comissionamento: base.classificacaoComissionamento,
+        classificacao_comissionamento_origem: "hits_campo",
       });
       dbUniverso.hospedes.push({ id: "h-" + ext, reserva_id: "r-" + ext, pms_external_guest_id: idEnt, whatsapp: CEL, email: EMAIL });
     }
@@ -467,8 +473,20 @@ async function main() {
     ok("18. duas posições técnicas: ambiguidade continua bloqueando criação e adoção");
 
     // 19. financeiro inalterado pelo caminho de contato.
+    // O estado local já é coerente com o HITS, inclusive no total: assim o que
+    // sobrar de escrita em operacional_reservas só pode vir do plano.
+    const baseFin = syncedDoDetalhe();
     const dbFin = fakeDb();
-    dbFin.reservas.push({ id: "res-f", origem_externa: "hits", external_reservation_id: EXTERNO, reservation_balance_due: 0, pagamento_status: "pago" });
+    dbFin.reservas.push({
+      id: "res-f",
+      origem_externa: "hits",
+      external_reservation_id: EXTERNO,
+      reservation_balance_due: 0,
+      pagamento_status: "pago",
+      reservation_total_amount: baseFin.reservationTotalAmount,
+      classificacao_comissionamento: baseFin.classificacaoComissionamento,
+      classificacao_comissionamento_origem: "hits_campo",
+    });
     dbFin.hospedes.push({ id: "h-f", reserva_id: "res-f", pms_external_guest_id: ID_ENTITY, whatsapp: FIXO, email: "" });
     dbFin.fichas.push({ id: "f-f", reserva_id: "res-f", hospede_id: "h-f", status: "pendente", fnrh_lifecycle_status: null });
     await executarCicloContatoEMaterializacao({
@@ -490,6 +508,7 @@ async function main() {
       );
     }
     assert.equal(dbFin.reservas[0]!.pagamento_status, "pago");
+    assert.equal(dbFin.reservas[0]!.reservation_balance_due, 0, "saldo quitado não regride");
     assert.equal(dbFin.hospedes[0]!.whatsapp, CEL);
     ok("19. reconciliação de contato não escreve em operacional_reservas (financeiro intocado)");
 
