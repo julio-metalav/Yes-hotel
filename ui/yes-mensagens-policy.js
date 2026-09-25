@@ -167,8 +167,12 @@
     apartamento: "34",
     wifi_rede: "YES-34",
     wifi_senha: "hotel2026",
-    checkout_horario: "11h",
-    telefone_recepcao: "(67) 99668-8886",
+    // Nulos de proposito: horario de check-out e telefone da recepcao sao
+    // configuracao do hotel (hotel_operacao_config), nao dado de exemplo. A
+    // tela injeta o valor real; sem ele, a previa mostra o que o hospede
+    // realmente receberia -- a linha inteira sai.
+    checkout_horario: null,
+    telefone_recepcao: null,
     data_entrada: "11/08/2026",
     data_saida: "13/08/2026",
   };

@@ -14,10 +14,45 @@ import { SupabaseReservationPendingStatePort } from "./reservation-pending-state
 import { SupabasePresencialDiferidoAuditPort } from "./presencial-diferido-audit.ts";
 import { isPagamentoPresencialDiferidoServerEnabled } from "../../../domain/yes-hotel/pagamento-presencial-diferido.ts";
 
-/** Horario de saida praticado pelo hotel, o mesmo ja usado nos textos atuais. */
-const CHECKOUT_HORARIO = "11h";
-/** Telefone da recepcao exibido ao hospede. */
-const TELEFONE_RECEPCAO = "(67) 99668-8886";
+/**
+ * Configuracao operacional do hotel exibida ao hospede.
+ *
+ * Vive em `hotel_operacao_config`, editavel em Configuracoes -- do mesmo jeito
+ * que o Wi-Fi e a geolocalizacao. Nao ha valor padrao no codigo de proposito:
+ * repetir o horario ou o telefone aqui recriaria a segunda fonte de verdade
+ * que a tabela veio eliminar.
+ */
+type HotelOperacaoConfig = {
+  checkout_horario: string | null;
+  telefone_recepcao: string | null;
+};
+
+const CONFIG_OPERACAO_VAZIA: HotelOperacaoConfig = {
+  checkout_horario: null,
+  telefone_recepcao: null,
+};
+
+/**
+ * Fail-soft: leitura com erro ou tabela ainda nao provisionada devolve nulos.
+ * O motor de template remove a linha inteira que cita um parametro ausente,
+ * sem deixar linha orfa -- uma mensagem com uma linha a menos e melhor que
+ * uma mensagem com telefone errado, e muito melhor que nenhuma mensagem.
+ */
+async function lerHotelOperacaoConfig(
+  client: SupabaseClient,
+): Promise<HotelOperacaoConfig> {
+  const { data, error } = await client
+    .from("hotel_operacao_config")
+    .select("checkout_horario, telefone_recepcao")
+    .eq("id", true)
+    .maybeSingle();
+  if (error || !data) return CONFIG_OPERACAO_VAZIA;
+  const row = data as { checkout_horario?: unknown; telefone_recepcao?: unknown };
+  return {
+    checkout_horario: String(row.checkout_horario ?? "").trim() || null,
+    telefone_recepcao: String(row.telefone_recepcao ?? "").trim() || null,
+  };
+}
 
 /** `2026-08-11` -> `11/08/2026`. Vazio quando a data nao vier. */
 function formatarDataBr(valor: unknown): string | null {
@@ -31,6 +66,18 @@ export function createSupabaseFirstRoomAccessPorts(
   client: SupabaseClient,
   env?: Record<string, string | undefined> | null,
 ): FirstRoomAccessPorts {
+  // Uma leitura por instancia de ports (uma por invocacao da Edge): o
+  // contexto pode ser montado mais de uma vez no mesmo ciclo.
+  let configOperacao: Promise<HotelOperacaoConfig> | null = null;
+  const carregarConfigOperacao = (): Promise<HotelOperacaoConfig> => {
+    if (configOperacao == null) {
+      configOperacao = lerHotelOperacaoConfig(client).catch(
+        () => CONFIG_OPERACAO_VAZIA,
+      );
+    }
+    return configOperacao;
+  };
+
   return {
     events: new SupabaseAccessEventRepository(client),
     correlation: new SupabaseCredentialCorrelationPort(client),
@@ -62,6 +109,7 @@ export function createSupabaseFirstRoomAccessPorts(
           wifi_ssid = apt?.wifi_ssid != null ? String(apt.wifi_ssid) : null;
           wifi_password = apt?.wifi_password != null ? String(apt.wifi_password) : null;
         }
+        const operacao = await carregarConfigOperacao();
         return {
           apartment_number,
           reservation_code: external || "—",
@@ -70,11 +118,11 @@ export function createSupabaseFirstRoomAccessPorts(
           parking_spot: aptNum && aptNum !== "—" ? aptNum : null,
           wifi_ssid,
           wifi_password,
-          // Constantes operacionais do hotel, iguais as ja usadas nos textos
-          // atuais. Ficam aqui, e nao no template, para que editar o texto nao
-          // possa alterar horario de check-out nem telefone de recepcao.
-          checkout_horario: CHECKOUT_HORARIO,
-          telefone_recepcao: TELEFONE_RECEPCAO,
+          // Configuracao do hotel, resolvida aqui e nao no template: editar o
+          // texto da mensagem nao pode alterar horario de check-out nem
+          // telefone da recepcao. O template so cita o parametro.
+          checkout_horario: operacao.checkout_horario,
+          telefone_recepcao: operacao.telefone_recepcao,
           data_entrada: formatarDataBr(r?.check_in_previsto),
           data_saida: formatarDataBr(r?.check_out_previsto),
         };

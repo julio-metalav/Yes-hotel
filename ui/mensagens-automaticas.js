@@ -99,6 +99,21 @@
     return e;
   }
 
+  /**
+   * Valores que vêm de Configurações → Dados do hotel, não do texto.
+   * A prévia precisa mostrá-los reais; a edição do texto não os altera.
+   */
+  var configHotel = { checkout_horario: null, telefone_recepcao: null };
+
+  function exemploAtual() {
+    var base = {};
+    var chaves = Object.keys(policy.EXEMPLO);
+    for (var i = 0; i < chaves.length; i++) base[chaves[i]] = policy.EXEMPLO[chaves[i]];
+    base.checkout_horario = configHotel.checkout_horario;
+    base.telefone_recepcao = configHotel.telefone_recepcao;
+    return base;
+  }
+
   function sel(attr, chave) {
     return document.querySelector("[" + attr + '="' + chave + '"]');
   }
@@ -110,7 +125,7 @@
     if (!area || !previewEl) return;
 
     var v = policy.validarTemplate(area.value);
-    var r = policy.renderizarTemplate(area.value, policy.EXEMPLO);
+    var r = policy.renderizarTemplate(area.value, exemploAtual());
     previewEl.textContent = r.texto || "(a mensagem ficaria vazia)";
 
     if (statusEl) {
@@ -308,6 +323,24 @@
       render();
       return;
     }
+    // Fail-soft: sem a configuração do hotel a prévia só fica menos completa;
+    // a edição do texto continua funcionando.
+    try {
+      var cfg = await supabase
+        .from("hotel_operacao_config")
+        .select("checkout_horario, telefone_recepcao")
+        .eq("id", true)
+        .maybeSingle();
+      if (!cfg.error && cfg.data) {
+        configHotel = {
+          checkout_horario: cfg.data.checkout_horario || null,
+          telefone_recepcao: cfg.data.telefone_recepcao || null
+        };
+      }
+    } catch (e) {
+      configHotel = { checkout_horario: null, telefone_recepcao: null };
+    }
+
     try {
       var res = await supabase.rpc("operacional_mensagens_listar");
       if (res.error) throw res.error;
