@@ -8,11 +8,19 @@
  * Sem rede, sem banco: valida o SQL e o contrato da Edge.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const ROOT = process.cwd();
-const CRON_SQL = "supabase/migrations/20261002090000_senha_auto_envio_13h_cron.sql";
+// Descoberta pelo sufixo: o timestamp da migration muda quando ela e
+// reordenada, e o teste nao pode quebrar por causa disso.
+const SUFIXO_CRON = "_senha_auto_envio_13h_cron.sql";
+const CRON_SQL = (() => {
+  const dir = "supabase/migrations";
+  const achados = readdirSync(resolve(ROOT, dir)).filter((f) => f.endsWith(SUFIXO_CRON));
+  assert.equal(achados.length, 1, "deve existir exatamente uma migration do cron das 13h");
+  return `${dir}/${achados[0]}`;
+})();
 const PENDING = "supabase/pending/senha-auto-envio-cron.sql";
 const EDGE = "supabase/functions/senha-auto-envio/index.ts";
 const CONFIG = "supabase/config.toml";
@@ -93,7 +101,7 @@ console.log("\n== Uma fonte de verdade ==");
   // O arquivo pendente não pode mais conter agendamento: duas fontes para o
   // mesmo job foi a causa de a regra nunca ter sido ativada.
   assert.doesNotMatch(pendingCodigo, /cron\.schedule/);
-  assert.match(pending, /20261002090000_senha_auto_envio_13h_cron\.sql/);
+  assert.ok(pending.includes(SUFIXO_CRON), "pending aponta para a migration do cron");
   ok("supabase/pending deixou de agendar e aponta para a migration");
 }
 
