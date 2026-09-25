@@ -602,7 +602,16 @@ async function main() {
     const listagemBody = listagem.slice(0, listagem.search(/\r?\n\}\r?\n/) + 3);
     assert.match(listagemBody, /reuseOnly: true/);
     assert.doesNotMatch(listagemBody, /force: true/);
-    assert.match(src, /opRefreshBtn\?\.addEventListener\("click", \(\) => \{\s*refreshListagem\(\)/);
+    // Antes de recarregar, o botão sincroniza a data custom digitada na tela
+    // (regressão: "Atualizar" reconsultava com a data do último "Aplicar").
+    assert.match(
+      src,
+      /opRefreshBtn\?\.addEventListener\("click", \(\) => \{[\s\S]{0,200}refreshListagem\(\)/,
+    );
+    assert.match(
+      src,
+      /opRefreshBtn\?\.addEventListener\("click", \(\) => \{[\s\S]{0,200}sincronizarPeriodoCustomDoDom\(\);/,
+    );
     ok("Atualizar da listagem reaproveita a última leitura do snapshot");
 
     // Reconciliação de canceladas pelo detalhe ao vivo fica desligada no modo snapshot.
