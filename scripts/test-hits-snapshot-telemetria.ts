@@ -284,6 +284,74 @@ async function main() {
     }
   }
 
+  console.log("\n== 3b. Cancelada explícita = GET de detalhe concluído ==");
+  {
+    // Fluxo do leitor (hits-gateway-read): a listagem Type=2/Status=2 só dá o
+    // id; o status 2 é confirmado NO DETALHE (GET /v1/reservations/:id) e só
+    // então o id vai para cancelled_ids. Logo detail_count = rows + cancelled é
+    // literalmente "GETs de detalhe concluídos com sucesso".
+    const reader = read("src/lib/integrations/hits/hits-gateway-read.ts").replace(/^\s*\/\/.*$/gm, "");
+    const iGet = reader.indexOf("url: `${config.baseUrl}/v1/reservations/${encodeURIComponent(id)}`");
+    const iDivert = reader.indexOf("if (divertCancelled && row.status_reserva === \"cancelada\") {");
+    assert.ok(iGet > -1 && iDivert > iGet, "cancelada é desviada DEPOIS do GET de detalhe, no mesmo try");
+    assert.match(reader.slice(iDivert, iDivert + 200), /cancelledIds\.push\(row\.external_reservation_id\);\s*continue;/);
+    const listagem = reader.slice(reader.indexOf("for (const summary of items) {"), reader.indexOf("if (hitCap) {"));
+    assert.doesNotMatch(listagem, /cancelledIds|cancelada/, "a listagem NÃO decide cancelamento: todo id listado vai para o GET de detalhe");
+    ok("Status=2 na listagem não é tratado sem detalhe: o cancelamento é confirmado no GET de detalhe → cancelada conta em detail_count (e em removed), falha não");
+
+    // Dinâmico, com o leitor real e transporte falso: 1 ativa + 1 cancelada + 1 detalhe falho
+    // → 3 GETs de detalhe tentados, 2 concluídos: detail 2, returned 3, removed 1, upserted 1.
+    const { fetchHitsUpdatedReservations } = await import("../src/lib/integrations/hits/hits-gateway-read.ts");
+    const calls: string[] = [];
+    const fetchImpl = async (url: string) => {
+      const u = new URL(url); calls.push(u.pathname + (u.pathname === "/v1/reservations" ? "?Status=" + u.searchParams.get("Status") : ""));
+      if (u.pathname === "/v1/reservations") {
+        const st = Number(u.searchParams.get("Status"));
+        const page = Number(u.searchParams.get("Page") ?? "1");
+        const items = page === 1 ? (st === 1 ? [{ idReservation: 3407, checkOut: "2026-09-27" }, { idReservation: 3409, checkOut: "2026-09-27" }] : st === 2 ? [{ idReservation: 3302, checkOut: "2026-09-27" }] : []) : [];
+        return new Response(JSON.stringify({ data: items }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      const id = u.pathname.split("/").pop();
+      if (id === "3409") return new Response("{}", { status: 500 });
+      const detail = { idReservation: Number(id), status: id === "3302" ? 2 : 1, contactName: "x", rooms: [{ code: "01", checkIn: "2026-09-26", checkOut: "2026-09-27", pax: 1, status: id === "3302" ? 2 : 1 }], guests: [] };
+      return new Response(JSON.stringify(detail), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    let t = 0;
+    const res = await fetchHitsUpdatedReservations({
+      config: { baseUrl: "https://gw.test", token: "t".repeat(32), requestTimeoutMs: 5_000, enabled: true, prodReadEnabled: false },
+      fetchImpl: fetchImpl as never,
+      sleepImpl: async (ms: number) => { t += ms; },
+      nowMs: () => t,
+      updatedFrom: "2026-09-25",
+      updatedTo: "2026-09-26",
+      todayYmd: "2026-09-25",
+    });
+    // (o transporte repete o GET falho por retry; conta-se por id)
+    const gets = [...new Set(calls.filter((c) => c.startsWith("/v1/reservations/")))];
+    assert.deepEqual(gets.sort(), ["/v1/reservations/3302", "/v1/reservations/3407", "/v1/reservations/3409"], "3 ids com GET de detalhe tentado (a cancelada inclusive)");
+    assert.deepEqual(res.rows.map((r) => r.external_reservation_id), ["3407"]);
+    assert.deepEqual(res.cancelled_ids, ["3302"]);
+    assert.deepEqual(res.failed.map((f) => f.external_reservation_id), ["3409"]);
+    const { rpc, calls: rpcCalls } = (() => {
+      const c: Array<{ fn: string; args: Record<string, unknown> }> = [];
+      const rpc: SnapshotRpc = async (fn, args) => { c.push({ fn, args }); return fn === HITS_SNAPSHOT_RPC_APPLY_INCREMENTAL ? { data: [{ rows_upserted: 1, rows_changed: 1, rows_removed: 1 }], error: null } : { data: null, error: null }; };
+      return { rpc, calls: c };
+    })();
+    const out = await runHitsSnapshotSync({
+      rpc, batchId: "b-3b", nowMs: () => Date.parse("2026-09-25T15:00:00Z"),
+      read: async () => { throw new Error("não deve ler completa"); },
+      readState: async () => ({ last_cursor_at: "2026-09-25T14:50:00Z" }),
+      readIncremental: async () => res,
+    });
+    const a = rpcCalls[1]!.args;
+    assert.equal(a.p_detail_count, 2, "detail = 2 GETs concluídos (ativa + cancelada); a falha não conta");
+    assert.equal(a.p_returned_count, 3, "returned = 3 ids listados");
+    assert.equal(out.snapshot.persisted && out.snapshot.rows_removed, 1);
+    assert.equal(out.snapshot.persisted && out.snapshot.rows_upserted, 1);
+    assert.equal(out.snapshot.persisted && out.snapshot.failed_count, 1);
+    ok("leitor real: 1 ativa + 1 cancelada + 1 falha → returned 3, detail 2, upserted 1, removed 1, failed 1");
+  }
+
   console.log("\n== 4. Nada além da telemetria ==");
   {
     const mod = read("src/lib/integrations/hits/hits-snapshot-sync.ts");

@@ -228,8 +228,9 @@ export type SyncModeInfo = {
  * alteradas" exceto `rows_changed`:
  *  - returned_count: ids únicos devolvidos pela listagem (após dedupe do
  *    leitor) = detail_count + failed_count;
- *  - detail_count: detalhes lidos com sucesso (linhas candidatas + canceladas
- *    explícitas);
+ *  - detail_count: GETs de detalhe concluídos com sucesso = linhas candidatas +
+ *    canceladas explícitas (o leitor confirma o status 2 NO detalhe: cada
+ *    cancelada custou um GET bem-sucedido; falhas nunca entram);
  *  - rows_upserted: linhas submetidas/upsertadas no snapshot, idênticas
  *    incluídas (= `last_rows_count`, mantido por compatibilidade);
  *  - rows_changed: linhas cujo conteúdo funcional mudou (nova ou diferente),
@@ -392,9 +393,10 @@ export async function runHitsSnapshotSync(input: {
           .map((id) => String(id ?? "").trim())
           .filter(Boolean)
       : [];
-  // Telemetria da leitura (o leitor já deduplica ids da listagem): detalhes
-  // lidos com sucesso = linhas + canceladas explícitas; devolvidos = lidos +
-  // falhos. Contagens, nunca ids/PII.
+  // Telemetria da leitura (o leitor já deduplica ids da listagem). Toda
+  // cancelada explícita passou por um GET de detalhe bem-sucedido (o status 2
+  // é confirmado no detalhe, não na listagem), então: detalhes concluídos =
+  // linhas + canceladas; devolvidos = detalhes + falhas. Contagens, nunca ids.
   const detailCount = result.rows.length + cancelledIds.length;
   const returnedCount = detailCount + failedIds.length;
 

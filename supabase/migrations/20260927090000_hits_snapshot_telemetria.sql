@@ -7,7 +7,8 @@
 -- compatibilidade (mesmo valor de sempre) e cada etapa do ciclo ganha um
 -- contador próprio:
 --   last_returned_count  ids únicos devolvidos pela listagem (após dedupe)
---   last_detail_count    detalhes HITS lidos com sucesso
+--   last_detail_count    GETs de detalhe HITS concluídos com sucesso (inclui as canceladas
+--                        explícitas: o status 2 é confirmado NO detalhe, então cada uma custou um GET)
 --   last_upserted_count  linhas submetidas/upsertadas no snapshot (= last_rows_count)
 --   last_changed_count   linhas cujo CONTEÚDO FUNCIONAL mudou (nova ou diferente)
 --   last_removed_count   linhas removidas (completa: ausentes; incremental: canceladas)
@@ -38,7 +39,7 @@ comment on column public.hits_snapshot_sync_state.last_success_rows_count is
 comment on column public.hits_snapshot_sync_state.last_returned_count is
   'IDs únicos devolvidos pela listagem HITS no último ciclo (após dedupe; inclui os que falharam no detalhe e as canceladas).';
 comment on column public.hits_snapshot_sync_state.last_detail_count is
-  'Detalhes HITS lidos com sucesso no último ciclo (linhas candidatas ao snapshot).';
+  'GETs de detalhe HITS concluídos com sucesso no último ciclo = linhas candidatas ao snapshot + canceladas explícitas (o status 2 é confirmado no detalhe; cada cancelada custou um GET bem-sucedido). Nunca inclui falhas.';
 comment on column public.hits_snapshot_sync_state.last_upserted_count is
   'Linhas submetidas/upsertadas no snapshot no último ciclo (idênticas incluídas). = last_rows_count.';
 comment on column public.hits_snapshot_sync_state.last_changed_count is
