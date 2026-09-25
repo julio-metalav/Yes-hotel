@@ -5,7 +5,7 @@ import type {
   InternalReservation,
   OperationalCredentialPreview,
   ReservationAdjustment,
-} from "../../domain/yes-hotel.ts";
+} from "../../domain/yes-hotel/index.ts";
 
 /** Motivo de origem da credencial (espelho do enum no banco). */
 export type OperacionalMotivoOrigem =

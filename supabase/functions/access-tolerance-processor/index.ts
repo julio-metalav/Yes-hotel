@@ -148,7 +148,10 @@ Deno.serve(async (req: Request) => {
   const basePorts = createSupabaseFirstRoomAccessPorts(admin, env);
   const outboxQueue = new SupabaseAccessOutboxQueuePort(admin);
 
-  const realTtlock = flags.ttlockSuspensionEnabled && !dryRun && flags.homologLockIdFilter != null;
+  // O filtro de homologacao deixou de decidir se ha execucao real: ele so
+  // reduz o alcance quando configurado. Quem liga o efeito fisico e a flag
+  // de suspensao mais o dry_run do body.
+  const realTtlock = flags.ttlockSuspensionEnabled && !dryRun;
   const ttlock = realTtlock
     ? new TtlockChangeValidityAdapter(getTtlockClient())
     : createMockTtlockValidityChangePort();

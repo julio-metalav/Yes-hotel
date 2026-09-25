@@ -110,22 +110,29 @@ export function isTtlockExecutionReal(
 }
 
 /**
- * Homologação: execução real exige lockId configurado (fail-closed).
- * Dry-run pode listar sem filtro.
+ * Filtro OPCIONAL de rollback por fechadura.
+ *
+ * Durante a homologação, execução real EXIGIA esse lock configurado. O efeito
+ * colateral era severo: o bloqueio de 1h só acontecia de fato no apartamento
+ * de homologação, e toda reserva em qualquer outro apartamento saía como
+ * `skipped_homolog_filter`, sem nenhuma suspensão. A regra existia no papel e
+ * não na operação.
+ *
+ * Agora o filtro é apenas redutor de alcance: ausente (o normal) processa
+ * todas as fechaduras da tolerância; presente, restringe àquela fechadura.
+ * A segurança de quais fechaduras podem ser tocadas não vem daqui — vem de os
+ * itens da tolerância serem montados a partir dos itens PROVISIONADOS da
+ * credencial da própria reserva, e do guard de lock inválido em
+ * `applyValidityToItems`.
+ *
+ * A assinatura mantém o formato de resultado porque as chamadas e os testes
+ * dependem dele, e porque um gate futuro pode voltar a reprovar aqui.
  */
 export function resolveHomologFilter(
   flags: AccessToleranceFlags,
   realExecution: boolean,
 ): { ok: true; filter: number | null } | { ok: false; error: string } {
-  if (!realExecution) {
-    return { ok: true, filter: flags.homologLockIdFilter };
-  }
-  if (flags.homologLockIdFilter == null) {
-    return {
-      ok: false,
-      error: "homolog_lock_required_for_real_execution",
-    };
-  }
+  void realExecution;
   return { ok: true, filter: flags.homologLockIdFilter };
 }
 
@@ -275,6 +282,23 @@ async function applyValidityToItems(input: {
         last_attempt_at: input.nowIso,
         updated_at: input.nowIso,
         last_error: "homolog_lock_filter_skip",
+      });
+      continue;
+    }
+
+    // Fail-closed de lock. Enquanto o filtro de homologacao existia, ele
+    // mascarava qualquer lock estranho: nada fora da fechadura homologada era
+    // tocado. Sem o filtro, essa verificacao passa a ser a protecao real.
+    // Nunca chamar o TTLock com um lockId que nao seja inteiro positivo.
+    if (!Number.isInteger(item.lock_id) || item.lock_id <= 0) {
+      failed += 1;
+      lastError = "lock_id_invalido";
+      await input.tolerances.updateItemSuspension!(item.id, {
+        suspension_status: input.mode === "suspend" ? "failed" : item.suspension_status,
+        restore_status: input.mode === "restore" ? "failed" : item.restore_status,
+        last_attempt_at: input.nowIso,
+        last_error: lastError,
+        updated_at: input.nowIso,
       });
       continue;
     }

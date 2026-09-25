@@ -98,18 +98,26 @@ async function main() {
     resolveAccessToleranceEffectiveDryRun(false, flags({ ttlockSuspensionEnabled: false })),
     true,
   );
+  // O filtro de homologação deixou de decidir dry-run: sem ele, a execução é
+  // real do mesmo jeito. Quem manda é a flag de suspensão.
   assert.equal(
     resolveAccessToleranceEffectiveDryRun(false, flags({ homologLockIdFilter: null })),
-    true,
+    false,
   );
-  ok("dry_run:false só sai de dry-run com TTLock + homolog");
+  ok("dry_run:false sai de dry-run com a flag TTLock, com ou sem filtro de lock");
 
   assert.equal(isTtlockExecutionReal(flags(), true), false);
   assert.equal(isTtlockExecutionReal(flags(), false), true);
   assert.equal(isTtlockExecutionReal(flags({ ttlockSuspensionEnabled: false }), false), false);
-  const blocked = resolveHomologFilter(flags({ homologLockIdFilter: null }), true);
-  assert.equal(blocked.ok, false);
-  ok("efeito físico exige dryRun=false + homolog gate");
+  // Sem filtro configurado, processa todas as fechaduras da tolerância.
+  const semFiltro = resolveHomologFilter(flags({ homologLockIdFilter: null }), true);
+  assert.equal(semFiltro.ok, true);
+  if (semFiltro.ok) assert.equal(semFiltro.filter, null);
+  // Com filtro, continua restringindo — é o caminho de rollback.
+  const comFiltro = resolveHomologFilter(flags(), true);
+  assert.equal(comFiltro.ok, true);
+  if (comFiltro.ok) assert.equal(comFiltro.filter, LOCK_HOMOLOG);
+  ok("efeito físico exige dryRun=false + flag TTLock; filtro de lock é opcional");
 
   const h = createFirstRoomAccessMemoryHarness({
     correlation: {
