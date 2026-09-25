@@ -342,6 +342,67 @@ async function main() {
     ok("grants, security definer e search_path preservados");
   }
 
+  console.log("\n== 23. Normalização SQL de acentos (hotfix) ==");
+  {
+    const fix = migration("_cafe_normalizar_meal_plan_fix.sql");
+
+    // Só a função de normalização é recriada; nada mais é tocado.
+    const code = fix.replace(/^\s*--.*$/gm, "");
+    const funcoes = [...code.matchAll(/create or replace function public\.([a-z_]+)/g)].map((m) => m[1]);
+    assert.deepEqual(funcoes, ["operacional_cafe_normalizar_meal_plan"], "escopo: só a normalização");
+    for (const fora of ["hits_reservas_snapshot", "hits_snapshot_sync", "operacional_cafe_set_atendimento", "operacional_cafe_listar_hospedagens", "fnrh", "senha", "pagarme", "cron", "alter table", "drop table", "delete from", "insert into"]) {
+      assert.equal(code.toLowerCase().includes(fora), false, "hotfix não toca " + fora);
+    }
+    assert.doesNotMatch(code, /create or replace function public\.operacional_cafe_resolve_entitlement/, "regra de entitlement inalterada");
+
+    // A causa do bug foi codificação: nenhum literal EXECUTÁVEL pode ter
+    // caractere fora de ASCII. Comentário pode.
+    const executaveisComAcento = fix
+      .split("\n")
+      .map((l, i) => [i + 1, l.replace(/--.*$/, "")])
+      .filter(([, l]) => /[^\x00-\x7F]/.test(String(l)));
+    assert.deepEqual(executaveisComAcento, [], "literais executáveis devem ser ASCII puro (escapes Unicode)");
+
+    // A tabela do translate é o maior literal U& do arquivo.
+    const tabelas = [...fix.matchAll(/U&'((?:\\[0-9A-F]{4})+)'/g)].map((m) => m[1]!);
+    const tabela = tabelas.sort((x, y) => y.length - x.length)[0]!;
+    const de = tabela.match(/\\[0-9A-F]{4}/g)!;
+    const para = fix.match(/'(aaaaaeeeeiiiiooooouuuucn)'/)![1]!;
+    assert.equal(de.length, para.length, "translate: origens e destinos com o mesmo tamanho");
+    const decodificado = de.map((x) => String.fromCharCode(parseInt(x.slice(1), 16))).join("");
+    assert.equal(decodificado, "áàâãäéèêëíìîïóòôõöúùûüçñ", "acentos minúsculos esperados");
+
+    // A regra SQL reproduzida em JS tem de bater com o espelho do domínio.
+    const mapa = new Map(de.map((x, i) => [String.fromCharCode(parseInt(x.slice(1), 16)), para[i]!]));
+    const normalizarComoSql = (desc: unknown) =>
+      [...String(desc ?? "").toLowerCase()]
+        .map((c) => mapa.get(c) ?? c)
+        .join("")
+        .replace(/\s+/g, " ")
+        .trim();
+    for (const entrada of ["Café da Manhã", "  CAFÉ   DA   MANHÃ  ", "cafe da manha", "Nenhum", "NENHUM", "", "Meia pensão", "Açaí à noite"]) {
+      assert.equal(
+        normalizarComoSql(entrada),
+        normalizeMealPlanDesc(entrada),
+        "SQL e TS normalizam igual: " + JSON.stringify(entrada),
+      );
+    }
+    assert.equal(normalizarComoSql("Café da Manhã"), "cafe da manha", "o caso do bug");
+    assert.equal(classifyMealPlanDesc("Café da Manhã"), "incluido");
+
+    // Autoverificação na própria migration: falha alto em vez de classificar errado.
+    assert.match(fix, /raise exception 'normalizacao incorreta: esperado "cafe da manha"/);
+    assert.match(fix, /raise exception 'entitlement incorreto para cafe incluido/);
+    assert.match(fix, /operacional_cafe_resolve_entitlement\(v_cafe, 2, 0\)/);
+    assert.match(fix, /operacional_cafe_resolve_entitlement\('Nenhum', 2, 0\)/);
+    assert.match(fix, /operacional_cafe_resolve_entitlement\(null, 2, 0\)/);
+    // Grants preservados.
+    assert.match(fix, /revoke all on function public\.operacional_cafe_normalizar_meal_plan\(text\) from public, anon;/);
+    assert.match(fix, /grant execute on function public\.operacional_cafe_normalizar_meal_plan\(text\) to authenticated;/);
+    assert.match(fix, /set search_path = ''/);
+    ok("23. normalização SQL: ASCII puro, tabela 24→24, idêntica ao espelho TS, com autoverificação na migration");
+  }
+
   console.log(`\nOK test-cafe-meal-plan-hits (${cases} casos)`);
 }
 
