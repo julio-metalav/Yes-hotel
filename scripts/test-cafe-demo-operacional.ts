@@ -140,11 +140,12 @@ assert.equal(
   buildCafeBreakfastEntitlement({ kind: "incluido", guestCount: 2 }).entitledQty,
   2,
 );
-assert.equal(clampCafeAttendedQty(99, avulso.entitledQty), 1);
+// O direito deixou de ser teto do atendimento (controle operacional): resta o piso 0.
+assert.equal(clampCafeAttendedQty(99, avulso.entitledQty), 99);
 assert.equal(clampCafeAttendedQty(-1, incluido.entitledQty), 0);
 assert.equal(cafeOperationalStatusLabel(semCafe, 0), "");
 assert.equal(cafeOperationalStatusLabel(naoMapeado, 0), "");
-ok("PPD não muda entitledQty; +/- respeita 0..entitledQty");
+ok("PPD não muda entitledQty; +/- nunca abaixo de 0 (direito não limita mais)");
 
 console.log("\n== Demo A–H e KPIs ==");
 const { policy, demo } = loadBrowserModules();
@@ -259,8 +260,8 @@ assert.ok(
     uiSource.indexOf("await ensureDemoModuleLoaded()"),
 );
 assert.match(uiSource, /script\.src = "\.\/cafe-demo-data\.js\?v=2"/);
-assert.match(html, /cafe-da-manha-mvp\.js\?v=11/);
-assert.match(html, /yes-cafe-policy\.js\?v=5/);
+assert.match(html, /cafe-da-manha-mvp\.js\?v=12/);
+assert.match(html, /yes-cafe-policy\.js\?v=6/);
 assert.match(html, /cafe-da-manha-mvp\.css\?v=10/);
 assert.match(uiSource, /createSimpleAlert\("cafe-no-breakfast-alert", cafeAlert\)/);
 assert.match(uiSource, /createSimpleAlert\("ppd-cafe-alert", card\.ppdAlert\.badgeLabel\)/);

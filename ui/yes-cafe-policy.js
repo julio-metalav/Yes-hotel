@@ -184,18 +184,24 @@
     };
   }
 
-  function clampCafeAttendedQty(nextValue, entitledQty) {
-    var max = Math.max(0, entitledQty);
+  // O direito deixou de ser TETO do atendimento (migration
+  // 20260928090000_cafe_controle_operacional): enquanto meal_plan_desc não
+  // estiver homologado o direito é 0 e o operador precisa contar mesmo assim.
+  // Resta o piso: nunca abaixo de zero. O parâmetro continua na assinatura
+  // porque as chamadas o informam, mas não limita mais.
+  function clampCafeAttendedQty(nextValue, _entitledQty) {
     if (!Number.isFinite(nextValue)) return 0;
-    return Math.max(0, Math.min(Math.trunc(nextValue), max));
+    return Math.max(0, Math.trunc(nextValue));
   }
 
   function cafeMissingQty(card) {
     return Math.max(0, card.entitlement.entitledQty - card.attendedQty);
   }
 
+  /** Mesma lista da RPC operacional_cafe_set_atendimento. */
   function canRoleWriteCafeAttendance(role) {
-    return String(role || "").trim().toLowerCase() === "cafe";
+    var r = String(role || "").trim().toLowerCase();
+    return r === "cafe" || r === "recepcao" || r === "admin";
   }
 
   function assertCanWriteCafeAttendance(input) {
@@ -205,12 +211,8 @@
     if (!canRegisterCafeAttendanceForDate(input.cafeDateYmd, input.now)) {
       return { ok: false, error: "cafe_write_forbidden_future_date" };
     }
-    if (input.entitlement.kind === "nao_mapeado") {
-      return { ok: false, error: "cafe_write_forbidden_unmapped_entitlement" };
-    }
-    if (input.entitlement.kind === "sem_cafe" || input.entitlement.entitledQty <= 0) {
-      return { ok: false, error: "cafe_write_forbidden_no_entitlement" };
-    }
+    // O direito NÃO barra mais o + / −: registrar quem tomou café é contagem
+    // operacional, não cobrança. Espelha a RPC.
     return { ok: true };
   }
 
@@ -221,10 +223,13 @@
     for (var i = 0; i < cards.length; i++) {
       var card = cards[i];
       var entitled = Math.max(0, card.entitlement.entitledQty);
+      var attended = clampCafeAttendedQty(card.attendedQty, entitled);
+      // Atendidos é contagem real do operador: vale mesmo sem direito apurado.
+      attendedGuests += attended;
+      // Previstos e "atendimento completo" continuam dependendo do direito
+      // oficial — sem ele não há total a comparar e nada é presumido.
       if (entitled <= 0) continue;
       expectedGuests += entitled;
-      var attended = clampCafeAttendedQty(card.attendedQty, entitled);
-      attendedGuests += attended;
       if (attended >= entitled) completeApartments += 1;
     }
     return {
@@ -234,6 +239,17 @@
       missingGuests: Math.max(0, expectedGuests - attendedGuests),
       completeApartments: completeApartments,
     };
+  }
+
+  /**
+   * "Marcar todos" só existe com total oficial: sem direito apurado não há
+   * "todos" a marcar e presumir direito a café é exatamente o que não se faz.
+   * A UI desabilita o botão por aqui; a RPC recusa pelo mesmo motivo.
+   */
+  function canMarkAllCafeAttendance(entitlement) {
+    if (!entitlement) return false;
+    if (entitlement.kind !== "incluido" && entitlement.kind !== "avulso_pago") return false;
+    return Math.max(0, entitlement.entitledQty) > 0;
   }
 
   function planMarkAllCafeAttended(cards) {
@@ -371,6 +387,7 @@
     clampCafeAttendedQty: clampCafeAttendedQty,
     cafeMissingQty: cafeMissingQty,
     canRoleWriteCafeAttendance: canRoleWriteCafeAttendance,
+    canMarkAllCafeAttendance: canMarkAllCafeAttendance,
     assertCanWriteCafeAttendance: assertCanWriteCafeAttendance,
     summarizeCafeKpis: summarizeCafeKpis,
     planMarkAllCafeAttended: planMarkAllCafeAttended,

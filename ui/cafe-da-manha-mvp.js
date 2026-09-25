@@ -125,13 +125,7 @@ function canWrite() {
 
 function canWriteCard(card) {
   if (!canWrite()) return false;
-  if (demoMode) {
-    return (
-      card.entitlement.kind !== "sem_cafe" &&
-      card.entitlement.kind !== "nao_mapeado" &&
-      card.entitlement.entitledQty > 0
-    );
-  }
+  if (demoMode) return true;
   return policy.assertCanWriteCafeAttendance({
     role: currentUser?.role,
     cafeDateYmd: selectedYmd,
@@ -339,8 +333,9 @@ function createCard(card) {
   increase.className = "icon-button";
   increase.type = "button";
   increase.textContent = "+";
-  increase.disabled =
-    !writable || card.attendedQty >= card.entitlement.entitledQty;
+  // Sem teto pelo direito: o operador conta o que serviu. "Marcar todos" é que
+  // continua preso ao total oficial.
+  increase.disabled = !writable;
   increase.dataset.action = "increase";
   increase.dataset.reservationId = card.reservationId;
 
@@ -396,7 +391,11 @@ function renderSession(user) {
   });
 
   const write = canWrite();
-  cafeReadonlyBadge?.classList.toggle("hidden", write);
+  if (cafeReadonlyBadge instanceof HTMLElement) {
+    // A tela deixou de ser só consulta: o badge agora diz em que modo se está.
+    cafeReadonlyBadge.textContent = write ? "Controle operacional" : "Somente consulta";
+    cafeReadonlyBadge.classList.remove("hidden");
+  }
   if (markAllButtonElement instanceof HTMLButtonElement) {
     markAllButtonElement.classList.toggle(
       "hidden",

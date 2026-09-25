@@ -179,7 +179,11 @@ console.log("\n== Entitlement / KPIs / mark-all ==");
   assert.equal(incluido.entitledQty, 3);
   assert.equal(sem.entitledQty, 0);
   assert.equal(avulso.entitledQty, 1);
-  assert.equal(clampCafeAttendedQty(5, avulso.entitledQty), 1);
+  // O direito não é mais teto do atendimento: clamp só garante o piso 0.
+  assert.equal(clampCafeAttendedQty(5, avulso.entitledQty), 5);
+  assert.equal(clampCafeAttendedQty(-2, avulso.entitledQty), 0);
+  assert.equal(clampCafeAttendedQty(2.7, 0), 2);
+  assert.equal(clampCafeAttendedQty(Number.NaN, 3), 0);
 
   const cards = [
     {
@@ -230,8 +234,10 @@ console.log("\n== Permissões ==");
   });
   const now = atHotelLocal("2026-08-08", 10, 0);
   assert.equal(canRoleWriteCafeAttendance("cafe"), true);
-  assert.equal(canRoleWriteCafeAttendance("admin"), false);
-  assert.equal(canRoleWriteCafeAttendance("recepcao"), false);
+  assert.equal(canRoleWriteCafeAttendance("admin"), true);
+  assert.equal(canRoleWriteCafeAttendance("recepcao"), true);
+  assert.equal(canRoleWriteCafeAttendance("manutencao"), false);
+  assert.equal(canRoleWriteCafeAttendance(""), false);
   assert.equal(
     assertCanWriteCafeAttendance({
       role: "cafe",
@@ -248,11 +254,20 @@ console.log("\n== Permissões ==");
       entitlement: incluido,
       now,
     }).ok,
-    false,
+    true,
   );
   assert.equal(
     assertCanWriteCafeAttendance({
       role: "recepcao",
+      cafeDateYmd: "2026-08-08",
+      entitlement: incluido,
+      now,
+    }).ok,
+    true,
+  );
+  assert.equal(
+    assertCanWriteCafeAttendance({
+      role: "manutencao",
       cafeDateYmd: "2026-08-08",
       entitlement: incluido,
       now,
@@ -284,7 +299,9 @@ console.log("\n== Policy browser espelhada ==");
   const now = atHotelLocal("2026-08-08", 12, 0);
   assert.equal(p.resolveCafeOperationalDateYmd(now), "2026-08-09");
   assert.equal(p.canRoleWriteCafeAttendance("cafe"), true);
-  assert.equal(p.canRoleWriteCafeAttendance("admin"), false);
+  assert.equal(p.canRoleWriteCafeAttendance("admin"), true);
+  assert.equal(p.canRoleWriteCafeAttendance("recepcao"), true);
+  assert.equal(p.canRoleWriteCafeAttendance("manutencao"), false);
   ok("yes-cafe-policy.js alinhada");
 }
 
@@ -318,11 +335,16 @@ console.log("\n== Fronteira RPC: adulteração por perfil cafe ==");
       forgedAvulsoPago: 2,
     },
   });
-  assert.equal(forged.ok, false);
-  if (!forged.ok) {
-    assert.equal(forged.error, "cafe_write_forbidden_unmapped_entitlement");
+  // O direito forjado continua ignorado; o que mudou é que nao_mapeado NÃO
+  // barra mais o registro de atendimento — só o "marcar todos".
+  assert.equal(forged.ok, true);
+  if (forged.ok) {
+    assert.equal(forged.entitlement.kind, "nao_mapeado");
+    assert.equal(forged.entitlement.entitledQty, 0, "direito forjado descartado");
+    // A quantidade pedida vale (é contagem do operador); o direito forjado, não.
+    assert.equal(forged.nextQty, 3, "set com direito 0 é permitido");
   }
-  ok("claims forged de kind/direito/avulso são ignorados; nao_mapeado rejeita");
+  ok("claims forged de kind/direito/avulso continuam ignorados; nao_mapeado já não impede o atendimento");
 
   // Mesmo com avulso “inventado” só no request (persistido = 0).
   const forgedAvulsoPersistidoZero = applyCafeAttendanceWrite({
@@ -340,7 +362,10 @@ console.log("\n== Fronteira RPC: adulteração por perfil cafe ==");
     },
   });
   assert.equal(forgedAvulsoPersistidoZero.ok, false);
-  ok("marcar_todos não libera com avulso forjado no navegador");
+  if (!forgedAvulsoPersistidoZero.ok) {
+    assert.equal(forgedAvulsoPersistidoZero.error, "cafe_write_forbidden_no_entitlement");
+  }
+  ok("marcar_todos não libera com avulso forjado no navegador (direito não se presume)");
 
   // Sem café persistido sem avulso oficial → rejeita.
   const semCafe = applyCafeAttendanceWrite({
@@ -361,11 +386,15 @@ console.log("\n== Fronteira RPC: adulteração por perfil cafe ==");
       forgedAvulsoPago: 1,
     },
   });
-  assert.equal(semCafe.ok, false);
-  if (!semCafe.ok) {
-    assert.equal(semCafe.error, "cafe_write_forbidden_no_entitlement");
+  // Contagem operacional não é cobrança: sem café declarado o operador ainda
+  // registra quem tomou. O direito (0) é gravado como registro.
+  assert.equal(semCafe.ok, true);
+  if (semCafe.ok) {
+    assert.equal(semCafe.entitlement.kind, "sem_cafe");
+    assert.equal(semCafe.entitlement.entitledQty, 0);
+    assert.equal(semCafe.nextQty, 1, "set 1 com direito 0 é permitido");
   }
-  ok("sem_cafe sem avulso oficial sincronizado rejeita atendimento");
+  ok("sem_cafe/avulso não sincronizado já permite registrar atendimento (direito vira registro)");
 
   // Direito oficial server-side (simula futura homologação) vs qty adulterada.
   const over = applyCafeAttendanceWrite({
@@ -386,11 +415,14 @@ console.log("\n== Fronteira RPC: adulteração por perfil cafe ==");
       forgedCafeKind: "incluido",
     },
   });
-  assert.equal(over.ok, false);
-  if (!over.ok) {
-    assert.equal(over.error, "cafe_write_forbidden_over_entitlement");
+  // O direito não é mais teto: 99 é aceito e o direito oficial (2) é gravado
+  // ao lado, como registro. O forjado continua descartado.
+  assert.equal(over.ok, true);
+  if (over.ok) {
+    assert.equal(over.nextQty, 99);
+    assert.equal(over.entitlement.entitledQty, 2, "direito oficial preservado no registro");
   }
-  ok("atendimento acima do direito oficial é rejeitado");
+  ok("atendimento acima do direito é aceito; direito oficial continua gravado como registro");
 
   const markAllServer = applyCafeAttendanceWrite({
     role: "cafe",
@@ -418,6 +450,88 @@ console.log("\n== Fronteira RPC: adulteração por perfil cafe ==");
   ok("marcar_todos usa teto server-side, não quantidade do navegador");
 }
 
+console.log("\n== Controle operacional: + e − com direito 0 ==");
+{
+  const now = atHotelLocal("2026-08-08", 10, 0);
+  const semDireito = {
+    statusReserva: "ativa",
+    totalHospedesHits: 2,
+    mealPlanDesc: "Cafe da manha",
+    cafeAvulsoPagoQtd: 0,
+  };
+  const req = (acao: string, qty?: number) => ({
+    cafeDateYmd: "2026-08-08",
+    operacionalReservaId: "res-op",
+    acao: acao as never,
+    ...(qty === undefined ? {} : { quantidadeAtendida: qty }),
+  });
+  const passo = (previousQty: number, acao: string) =>
+    applyCafeAttendanceWrite({ role: "cafe", reservation: semDireito, previousQty, now, request: req(acao) });
+
+  // 1 e 2: + em 0 → 1 → 2
+  const a1 = passo(0, "increment");
+  assert.equal(a1.ok && a1.nextQty, 1);
+  const a2 = passo(1, "increment");
+  assert.equal(a2.ok && a2.nextQty, 2);
+  ok("1–2. + em 0 → 1 e + de novo → 2, mesmo com direito 0 (nao_mapeado)");
+
+  // 3 e 4: − em 2 → 1 → 0
+  const a3 = passo(2, "decrement");
+  assert.equal(a3.ok && a3.nextQty, 1);
+  const a4 = passo(1, "decrement");
+  assert.equal(a4.ok && a4.nextQty, 0);
+  ok("3–4. − em 2 → 1 e − em 1 → 0");
+
+  // 5: − em 0 continua 0
+  const a5 = passo(0, "decrement");
+  assert.equal(a5.ok && a5.nextQty, 0);
+  const a5b = applyCafeAttendanceWrite({
+    role: "recepcao", reservation: semDireito, previousQty: 0, now, request: req("set", -3),
+  });
+  assert.equal(a5b.ok, false);
+  if (!a5b.ok) assert.equal(a5b.error, "cafe_invalid_quantity");
+  ok("5. − em 0 continua 0; quantidade negativa é recusada");
+
+  // 8: dois apartamentos são independentes (a chave é reserva+data)
+  const outro = applyCafeAttendanceWrite({
+    role: "cafe", reservation: semDireito, previousQty: 5, now,
+    request: { ...req("increment"), operacionalReservaId: "res-outro" },
+  });
+  assert.equal(outro.ok && outro.nextQty, 6);
+  assert.equal(a1.ok && a1.nextQty, 1, "o apartamento anterior não muda");
+  ok("8. apartamentos independentes: cada reserva+data tem seu próprio contador");
+
+  // 7: totais do topo reagem — atendidos contam mesmo sem direito; faltantes nunca negativo
+  const card = (id: string, kind: string, entitledQty: number, attendedQty: number) => ({
+    reservationId: id,
+    apartmentCode: id,
+    mainGuestName: "Anon " + id,
+    entitlement: { kind, entitledQty } as never,
+    attendedQty,
+  });
+  const kpisSemDireito = summarizeCafeKpis([card("A", "nao_mapeado", 0, 2), card("B", "sem_cafe", 0, 1)]);
+  assert.equal(kpisSemDireito.attendedGuests, 3, "atendidos contam sem direito");
+  assert.equal(kpisSemDireito.expectedGuests, 0);
+  assert.equal(kpisSemDireito.missingGuests, 0, "faltantes nunca negativo");
+  assert.equal(kpisSemDireito.apartments, 2, "universo do dia preservado");
+  assert.equal(kpisSemDireito.completeApartments, 0, "sem direito não existe 'completo'");
+  const kpisComDireito = summarizeCafeKpis([card("C", "incluido", 2, 1), card("D", "incluido", 1, 1)]);
+  assert.equal(kpisComDireito.expectedGuests, 3);
+  assert.equal(kpisComDireito.attendedGuests, 2);
+  assert.equal(kpisComDireito.missingGuests, 1);
+  assert.equal(kpisComDireito.completeApartments, 1);
+  ok("7. KPIs: atendidos sobem sem direito, previstos só com direito, faltantes nunca negativo");
+
+  // 10: o caminho de escrita não encosta em financeiro/FNRH/HITS
+  const write = readFileSync(join(process.cwd(), "src/lib/domain/yes-hotel/cafe-attendance-write.ts"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  // (`totalHospedesHits` é nome de campo da reserva, não integração.)
+  for (const proibido of ["fnrh", "pagarme", "senha", "gateway", "fetch(", "cobranca"]) {
+    assert.equal(write.toLowerCase().includes(proibido), false, "regra de café não toca " + proibido);
+  }
+  ok("10. regra de escrita do café não referencia financeiro, FNRH, senha nem HITS");
+}
+
 console.log("\n== Contrato UI/SQL sem parâmetros inseguros ==");
 {
   const js = readFileSync(join(process.cwd(), "ui/cafe-da-manha-mvp.js"), "utf8");
@@ -428,6 +542,19 @@ console.log("\n== Contrato UI/SQL sem parâmetros inseguros ==");
   assert.match(js, /p_acao:\s*action/);
   assert.match(js, /"marcar_todos"/);
   assert.doesNotMatch(js, /const aPpd\s*=/);
+  // 6. O valor persiste porque a carga vem do banco, não da memória da página.
+  assert.match(js, /\.from\("operacional_cafe_atendimentos"\)/, "recarrega atendimento do banco");
+  assert.match(js, /quantidade_atendida/);
+  // 9. Falha de gravação restaura o valor anterior (sem UI divergente).
+  assert.match(js, /writeInFlight/, "trava de clique repetido");
+  assert.match(js, /card\.attendedQty = policy\.clampCafeAttendedQty\(/, "rollback do valor anterior");
+  // Badge operacional no lugar de "somente consulta".
+  assert.match(js, /"Controle operacional"/);
+  assert.doesNotMatch(js, /cafeReadonlyBadge\?\.classList\.toggle\("hidden", write\)/, "badge não é mais só-consulta escondido");
+  // + e − não dependem mais do direito.
+  assert.match(js, /increase\.disabled = !writable;/, "+ só depende de permissão");
+  assert.match(js, /decrease\.disabled = !writable \|\| card\.attendedQty <= 0;/, "− trava no piso 0");
+  ok("6 e 9. valor vem do banco, clique repetido travado, rollback em erro, badge operacional, + e − livres do direito");
   assert.match(
     js,
     /\.sort\(\(a, b\) =>\s*policy\.compareCafeApartmentCodes\(a\.apartmentCode, b\.apartmentCode\)/s,
@@ -436,7 +563,7 @@ console.log("\n== Contrato UI/SQL sem parâmetros inseguros ==");
   const sql = readFileSync(
     join(
       process.cwd(),
-      "supabase/migrations/20260809005734_operacional_cafe_atendimento.sql",
+      "supabase/migrations/20260928090000_cafe_controle_operacional.sql",
     ),
     "utf8",
   );
@@ -450,9 +577,39 @@ console.log("\n== Contrato UI/SQL sem parâmetros inseguros ==");
   assert.match(sql, /v_reserva\.meal_plan_desc/);
   assert.match(sql, /v_reserva\.total_hospedes_hits/);
   assert.match(sql, /v_reserva\.cafe_avulso_pago_qtd/);
-  assert.match(sql, /cafe_write_forbidden_unmapped_entitlement/);
-  assert.match(sql, /cafe_write_forbidden_over_entitlement/);
+  // As duas travas de direito saíram do caminho de + / −; só marcar_todos mantém.
+  assert.doesNotMatch(sql, /cafe_write_forbidden_unmapped_entitlement/);
+  assert.doesNotMatch(sql, /cafe_write_forbidden_over_entitlement/);
+  assert.match(sql, /cafe_write_forbidden_no_entitlement/, "marcar_todos ainda exige direito");
   ok("UI e SQL sem p_cafe_kind/p_quantidade_direito; direito vem da reserva");
+
+  // A migration mantém tudo o que protegia.
+  assert.match(sql, /if auth\.uid\(\) is null then/, "autenticação obrigatória");
+  assert.match(sql, /not in \('cafe', 'recepcao', 'admin'\)/, "perfis autorizados");
+  assert.match(sql, /cafe_write_forbidden_future_date/, "data futura barrada");
+  assert.match(sql, /cafe_reservation_cancelled/, "reserva cancelada barrada");
+  assert.match(sql, /for update;/, "SELECT ... FOR UPDATE (atômico)");
+  assert.match(sql, /on conflict \(operacional_reserva_id, data_cafe\)/, "upsert idempotente");
+  assert.match(sql, /insert into public\.operacional_cafe_atendimento_auditoria/, "auditoria");
+  assert.match(sql, /security definer/);
+  // Os comentários da migration citam de propósito o que foi removido; as
+  // guardas estruturais olham só o SQL executável.
+  const sqlSemComentarios = sql.replace(/^\s*--.*$/gm, "");
+  assert.match(sql, /check \(quantidade_atendida >= 0 and quantidade_direito >= 0\)/, "piso 0, sem teto");
+  assert.doesNotMatch(sqlSemComentarios, /quantidade_atendida <= quantidade_direito/, "teto pelo direito removido");
+  assert.match(sql, /v_next := greatest\(v_prev - 1, 0\)/, "decrement nunca abaixo de 0");
+  assert.match(sql, /v_next := v_prev \+ 1;/, "increment sem teto");
+  assert.doesNotMatch(sqlSemComentarios, /least\(v_prev \+ 1/, "sem least pelo direito");
+  assert.match(
+    sql,
+    /grant execute on function public\.operacional_cafe_set_atendimento\(date, uuid, integer, text\)\s*\n\s*to authenticated;/,
+  );
+  assert.doesNotMatch(sql, /to anon|to public;/, "nada liberado a anon/public");
+  // Fora de escopo intocado.
+  const sqlCode = sql.replace(/^\s*--.*$/gm, "");
+  assert.doesNotMatch(sqlCode, /fnrh|senha|pagarme|financ|hits_reservas_snapshot/i, "não toca FNRH/senha/financeiro/HITS");
+  assert.doesNotMatch(sqlCode, /drop table|truncate|delete from/i, "nada é apagado");
+  ok("migration: autenticação, perfis, data, reserva, FOR UPDATE, upsert, auditoria, RLS e piso 0 preservados");
 }
 
 console.log("\n== Ausência de mocks no runtime UI ==");

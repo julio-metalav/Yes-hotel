@@ -116,32 +116,30 @@ export function applyCafeAttendanceWrite(input: {
     input.serverEntitlementOverride ??
     resolveCafeEntitlementFromPersistedReservation(input.reservation);
 
-  if (entitlement.kind === "nao_mapeado") {
-    return { ok: false, error: "cafe_write_forbidden_unmapped_entitlement" };
-  }
-  if (entitlement.kind === "sem_cafe" || entitlement.entitledQty <= 0) {
-    return { ok: false, error: "cafe_write_forbidden_no_entitlement" };
-  }
-  if (entitlement.kind !== "incluido" && entitlement.kind !== "avulso_pago") {
-    return { ok: false, error: "cafe_write_forbidden_no_entitlement" };
-  }
-
+  // O direito é REGISTRO, não teto: enquanto meal_plan_desc não estiver
+  // homologado ele vale 0 e o operador ainda precisa contar quem tomou café.
+  // Espelha a migration 20260928090000_cafe_controle_operacional.
   const previousQty = Math.max(0, Math.trunc(Number(input.previousQty) || 0));
-  const entitled = entitlement.entitledQty;
+  const entitled = Math.max(0, entitlement.entitledQty);
   const acao = input.request.acao;
 
   let nextQty: number;
   if (acao === "increment") {
-    nextQty = Math.min(previousQty + 1, entitled);
+    nextQty = previousQty + 1;
   } else if (acao === "decrement") {
     nextQty = Math.max(previousQty - 1, 0);
   } else if (acao === "marcar_todos") {
+    // Único caso que ainda exige direito real: sem total oficial não há
+    // "todos" a marcar, e direito a café não se presume.
+    if (
+      (entitlement.kind !== "incluido" && entitlement.kind !== "avulso_pago") ||
+      entitled <= 0
+    ) {
+      return { ok: false, error: "cafe_write_forbidden_no_entitlement" };
+    }
     nextQty = entitled;
   } else if (acao === "set") {
     const requested = Math.trunc(Number(input.request.quantidadeAtendida) || 0);
-    if (requested > entitled) {
-      return { ok: false, error: "cafe_write_forbidden_over_entitlement" };
-    }
     if (requested < 0) {
       return { ok: false, error: "cafe_invalid_quantity" };
     }
