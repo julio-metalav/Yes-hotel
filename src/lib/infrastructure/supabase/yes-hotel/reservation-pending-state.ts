@@ -4,6 +4,7 @@ import type { ReservationPendingStateInput } from "../../../domain/yes-hotel/res
 import {
   buildReservationPendingInputFromRows,
   FirstRoomAccessConfigurationError,
+  paymentStatusForFirstAccessGrace,
   type GuestFnrhSourceRow,
 } from "./reservation-pending-mapper.ts";
 
@@ -23,20 +24,24 @@ function isMissingColumnError(message: string): boolean {
  * Com migration 0024 aplicada: mapeia papéis/status formal.
  * Sem colunas PR4: ConfigurationError (não simula conclusão).
  */
+type ReservaPendingRow = {
+  pagamento_status?: string;
+  pagamento_presencial_diferido_autorizado?: boolean;
+  pagamento_presencial_diferido_efetivado?: boolean;
+  classificacao_comissionamento?: string | null;
+  reservation_balance_due?: unknown;
+};
+
 export class SupabaseReservationPendingStatePort implements ReservationPendingStatePort {
   constructor(private readonly client: SupabaseClient) {}
 
   async getReservationPendingInput(reservationId: string): Promise<ReservationPendingStateInput> {
-    let reserva: {
-      pagamento_status?: string;
-      pagamento_presencial_diferido_autorizado?: boolean;
-      pagamento_presencial_diferido_efetivado?: boolean;
-    } | null = null;
+    let reserva: ReservaPendingRow | null = null;
     {
       const first = await this.client
         .from("operacional_reservas")
         .select(
-          "id, pagamento_status, pagamento_presencial_diferido_autorizado, pagamento_presencial_diferido_efetivado",
+          "id, pagamento_status, pagamento_presencial_diferido_autorizado, pagamento_presencial_diferido_efetivado, classificacao_comissionamento, reservation_balance_due",
         )
         .eq("id", reservationId)
         .maybeSingle();
@@ -47,11 +52,11 @@ export class SupabaseReservationPendingStatePort implements ReservationPendingSt
           .eq("id", reservationId)
           .maybeSingle();
         if (legacy.error) throw new Error(`reserva: ${legacy.error.message}`);
-        reserva = legacy.data as typeof reserva;
+        reserva = legacy.data as ReservaPendingRow | null;
       } else if (first.error) {
         throw new Error(`reserva: ${first.error.message}`);
       } else {
-        reserva = first.data as typeof reserva;
+        reserva = first.data as ReservaPendingRow | null;
       }
     }
     if (!reserva) throw new Error(`Reserva não encontrada: ${reservationId}`);
@@ -155,10 +160,16 @@ export class SupabaseReservationPendingStatePort implements ReservationPendingSt
       };
     });
 
+    const pagamentoStatus = (reserva as { pagamento_status?: string }).pagamento_status;
     return {
       ...buildReservationPendingInputFromRows({
-        pagamento_status: (reserva as { pagamento_status?: string }).pagamento_status,
+        pagamento_status: pagamentoStatus,
         guests,
+      }),
+      payment_status: paymentStatusForFirstAccessGrace({
+        pagamento_status: pagamentoStatus,
+        classificacao_comissionamento: reserva.classificacao_comissionamento,
+        reservation_balance_due: reserva.reservation_balance_due,
       }),
       pagamento_presencial_diferido_autorizado: Boolean(
         (reserva as { pagamento_presencial_diferido_autorizado?: boolean })

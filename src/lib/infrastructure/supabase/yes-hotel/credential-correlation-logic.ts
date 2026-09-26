@@ -114,8 +114,12 @@ export function correlateApartmentPasscodeCandidates(input: {
   const hit = matched[0]!;
   const windowOk = withinCredentialWindow(input.occurred_at, hit.valido_de, hit.valido_ate);
   if (!windowOk) {
-    // Fora da validade: não correlaciona (fail-closed).
-    return uncorrelatedApartment();
+    // A senha É desta credencial, mas fora da janela dela.
+    // Não reatribuir a outra reserva.
+    return {
+      ...uncorrelatedApartment(),
+      diagnostic: "fora_da_validade_da_credencial",
+    };
   }
 
   return {
@@ -131,4 +135,117 @@ export function correlateApartmentPasscodeCandidates(input: {
     original_valid_from: hit.valido_de ?? undefined,
     original_valid_until: hit.valido_ate ?? undefined,
   };
+}
+
+/** Reserva já carregada do banco para o fallback de senha fora do fluxo Yes. */
+export type LiberatedStayCandidate = {
+  reservation_id: string;
+  credential_id: string;
+  credential_item_id: string;
+  logical_destination: string;
+  lock_id: number;
+  remote_keyboard_pwd_id: number | null;
+  status_provisionamento: string;
+  credential_status: string;
+  valido_de: string | null;
+  valido_ate: string | null;
+  acesso_liberado: boolean;
+  status_reserva: string;
+  check_in_previsto: string;
+  check_out_previsto: string;
+};
+
+function ymd(value: string): string {
+  return String(value ?? "").trim().slice(0, 10);
+}
+
+function stayCovers(civilDate: string, checkIn: string, checkOut: string): boolean {
+  const inn = ymd(checkIn);
+  const out = ymd(checkOut);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(inn) || !/^\d{4}-\d{2}-\d{2}$/.test(out)) return false;
+  return inn <= civilDate && civilDate <= out;
+}
+
+/**
+ * Senha que não casa com `codigo_credencial` só vincula se houver
+ * exatamente uma reserva ativa, com acesso liberado, cuja estadia cobre
+ * o dia civil do evento e cuja credencial do apartamento está provisionada.
+ * Qualquer empate permanece sem vínculo.
+ */
+export function associateUnlockToUniqueLiberatedStay(input: {
+  civil_date: string;
+  candidates: LiberatedStayCandidate[];
+}): CorrelatedRoomAccessResult {
+  const civil = ymd(input.civil_date);
+  const apartmentRows = input.candidates.filter(
+    (row) => classifyLogicalDestination(row.logical_destination) === "apartamento",
+  );
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(civil) || apartmentRows.length === 0) {
+    return uncorrelatedUnknown();
+  }
+
+  const inStay = apartmentRows.filter(
+    (row) =>
+      String(row.status_reserva ?? "").trim().toLowerCase() === "ativa" &&
+      stayCovers(civil, row.check_in_previsto, row.check_out_previsto),
+  );
+  if (inStay.length === 0) {
+    return { ...uncorrelatedApartment(), diagnostic: "sem_reserva_associavel" };
+  }
+
+  const liberated = inStay.filter((row) => row.acesso_liberado === true);
+  const reservationIds = [...new Set(liberated.map((row) => row.reservation_id))];
+  if (reservationIds.length === 0) {
+    return { ...uncorrelatedApartment(), diagnostic: "acesso_nao_liberado" };
+  }
+  if (reservationIds.length > 1) {
+    return { ...ambiguousApartment(), diagnostic: "reserva_ambigua" };
+  }
+
+  const reservationId = reservationIds[0]!;
+  const rows = liberated.filter((row) => row.reservation_id === reservationId);
+  const credentialIds = [...new Set(rows.map((row) => row.credential_id))];
+  if (credentialIds.length !== 1) {
+    return { ...ambiguousApartment(), diagnostic: "reserva_ambigua" };
+  }
+
+  const inactive = new Set(["revogada", "falhou"]);
+  const provisioned = rows.filter(
+    (row) =>
+      row.status_provisionamento === "provisionado" &&
+      !inactive.has(String(row.credential_status ?? "").toLowerCase()),
+  );
+  if (provisioned.length === 0) {
+    return { ...uncorrelatedApartment(), diagnostic: "sem_credencial_provisionada" };
+  }
+
+  const hit = provisioned[0]!;
+  if (!hit.valido_de || !hit.valido_ate) {
+    return { ...uncorrelatedApartment(), diagnostic: "credencial_sem_validade" };
+  }
+
+  return {
+    correlated: true,
+    reservation_id: hit.reservation_id,
+    credential_id: hit.credential_id,
+    credential_item_id: hit.credential_item_id,
+    logical_destination: hit.logical_destination,
+    lock_type: "apartamento",
+    within_reservation_window: true,
+    keyboard_pwd_id:
+      hit.remote_keyboard_pwd_id != null ? Number(hit.remote_keyboard_pwd_id) : undefined,
+    original_valid_from: hit.valido_de,
+    original_valid_until: hit.valido_ate,
+  };
+}
+
+/** Fallback só quando a senha não pertence a nenhuma credencial conhecida. */
+export function shouldApplyLiberatedStayFallback(
+  strict: CorrelatedRoomAccessResult,
+  hadEphemeralPwd: boolean,
+): boolean {
+  if (!hadEphemeralPwd) return false;
+  if (strict.correlated || strict.ambiguous) return false;
+  if (strict.diagnostic === "fora_da_validade_da_credencial") return false;
+  return true;
 }

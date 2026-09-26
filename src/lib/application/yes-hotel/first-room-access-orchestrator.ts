@@ -4,6 +4,7 @@
  */
 
 import {
+  clampLateStandardGraceDeadline,
   decideAccessGrace,
   evaluateFirstRoomAccessEvent,
   TTLOCK_RECORD_TYPE,
@@ -357,7 +358,7 @@ export async function processFirstRoomAccessEvent(
         decision: "ignored",
         event: eventWrite,
         correlation: correlationWrite,
-        ignored_reason: "ambiguous",
+        ignored_reason: correlation.diagnostic ?? "ambiguous",
         outbox: {
           event_type: "internal_alert",
           channel: "whatsapp",
@@ -411,7 +412,12 @@ export async function processFirstRoomAccessEvent(
     });
 
     if (!decision.accepted) {
-      const reason = decision.ignored_reason ?? decision.decision;
+      const policyReason = decision.ignored_reason ?? decision.decision;
+      const reason =
+        (policyReason === "uncorrelated" || policyReason === "not_apartment") &&
+        correlation.diagnostic
+          ? correlation.diagnostic
+          : policyReason;
       if (
         firstAccessAlready &&
         (reason === "already_started" || reason === "duplicate")
@@ -554,7 +560,12 @@ export async function processFirstRoomAccessEvent(
 
     const ppdEfetivado = grace.grace_mode === "presencial_diferido_09h";
     const nowIsoCommit = ports.clock.now().toISOString();
-    const deadlineIso = grace.suspension_due_at!;
+    const deadlineIso =
+      clampLateStandardGraceDeadline({
+        grace_mode: grace.grace_mode,
+        suspension_due_at: grace.suspension_due_at,
+        now_ms: ports.clock.now().getTime(),
+      }) ?? grace.suspension_due_at!;
     const breakfastMsg = ppdEfetivado
       ? buildGuestPaymentDeferredBreakfastMessage({
           deadlineIso,

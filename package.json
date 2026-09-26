@@ -38,6 +38,7 @@
     "test:yes:ttlock-access-poller": "tsx scripts/test-ttlock-access-poller.ts",
     "test:yes:primeiro-acesso-incidente-02-09": "tsx scripts/test-primeiro-acesso-incidente-02-09.ts",
     "test:yes:ttlock-correlation-fix": "tsx scripts/test-ttlock-correlation-fix.ts",
+    "test:yes:primeiro-acesso-abertura-manual": "tsx scripts/test-primeiro-acesso-abertura-manual.ts",
     "test:yes:fnrh-roles-completion": "tsx scripts/test-fnrh-roles-completion.ts",
     "test:yes:fnrh-legacy-lifecycle-compat": "tsx scripts/test-fnrh-legacy-lifecycle-compat.ts",
     "test:yes:fnrh-checkin-digital-v2": "tsx scripts/test-fnrh-checkin-digital-v2.ts",

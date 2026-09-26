@@ -95,6 +95,11 @@ export type CorrelatedRoomAccessResult = {
   keyboard_pwd_id?: number;
   original_valid_from?: string;
   original_valid_until?: string;
+  /**
+   * Motivo estável quando não houve vínculo seguro.
+   * Nunca carrega senha, nome ou documento.
+   */
+  diagnostic?: string;
 };
 
 export type ProvisionedCredentialItem = {

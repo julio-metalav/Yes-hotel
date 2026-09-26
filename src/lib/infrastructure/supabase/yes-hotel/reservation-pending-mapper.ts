@@ -11,6 +11,7 @@ import type {
 } from "../../../domain/yes-hotel/fnrh-completion-policy.ts";
 import { evaluateFnrhCompletion } from "../../../domain/yes-hotel/fnrh-completion-policy.ts";
 import { evaluateReservationFnrhState } from "../../../domain/yes-hotel/reservation-fnrh-state.ts";
+import { isFinanceiramenteLiberadoParaAcesso } from "../../../domain/yes-hotel/reservation-financial-classification.ts";
 
 export class FirstRoomAccessConfigurationError extends Error {
   readonly code: string;
@@ -32,6 +33,28 @@ export function mapPaymentStatusFromDb(value: string | null | undefined): Paymen
   if (v === "desconhecido" || v === "") return "desconhecido";
   if (v === "pendente") return "pendente";
   return "desconhecido";
+}
+
+/**
+ * Pendência de pagamento usada no primeiro acesso.
+ * Reserva comissionada/OTA/B2B já liberada pela regra financeira não entra
+ * no aviso de regularização de 1 hora, mesmo com `pagamento_status` pendente.
+ */
+export function paymentStatusForFirstAccessGrace(input: {
+  pagamento_status: string | null | undefined;
+  classificacao_comissionamento?: string | null;
+  reservation_balance_due?: unknown;
+}): PaymentStatusPending {
+  if (
+    isFinanceiramenteLiberadoParaAcesso({
+      pagamentoStatus: input.pagamento_status,
+      classificacao: input.classificacao_comissionamento,
+      balanceDue: input.reservation_balance_due,
+    })
+  ) {
+    return "pago";
+  }
+  return mapPaymentStatusFromDb(input.pagamento_status);
 }
 
 export function mapGuestRoleDbToDomain(

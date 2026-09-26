@@ -68,6 +68,23 @@ export function hotelLocalToUtcIso(
   return new Date(hotelLocalToUtcMs(ymd, hour, minute, second)).toISOString();
 }
 
+/** YYYY-MM-DD civil em America/Campo_Grande a partir de um instante UTC. */
+export function hotelCivilYmdFromUtcMs(utcMs: number): string {
+  if (!Number.isFinite(utcMs)) {
+    throw new Error(`Instante UTC invalido: ${utcMs}`);
+  }
+  const shifted = new Date(utcMs + YES_HOTEL_UTC_OFFSET_MINUTES * 60 * 1000);
+  const y = shifted.getUTCFullYear();
+  const mo = String(shifted.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(shifted.getUTCDate()).padStart(2, "0");
+  return `${y}-${mo}-${day}`;
+}
+
+/** 00:00 do dia civil do hotel, em milissegundos UTC. */
+export function startOfHotelCivilDayUtcMs(utcMs: number): number {
+  return hotelLocalToUtcMs(hotelCivilYmdFromUtcMs(utcMs), 0, 0, 0);
+}
+
 /**
  * Janela padrão de credencial: check-in 13:00 e check-out 11:00 em America/Campo_Grande.
  */

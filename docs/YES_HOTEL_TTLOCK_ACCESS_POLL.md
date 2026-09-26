@@ -35,7 +35,7 @@ e presente em `/v3/lockRecord/list`. Fallback: polling oficial da Open API.
 Lock `16274746` watermark atualizado após eventos diagnósticos. Records com
 `lockDate <= watermark` **não** são reprocessados.
 
-Locks novos sem checkpoint: bootstrap watermark=`now` (sem histórico).
+Locks novos sem checkpoint: watermark no início do dia civil do hotel (America/Campo_Grande). Não reprocessa dias anteriores.
 
 ## Cadência / volume
 
