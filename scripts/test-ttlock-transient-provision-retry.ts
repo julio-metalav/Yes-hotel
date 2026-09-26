@@ -259,7 +259,10 @@ async function main() {
       list: async () => [],
     });
     // Força um único lock para isolar contagem de 5xx (3 locks × retries complicam).
+    // O lock isolado é a porta do apartamento: portão sozinho não deixa a credencial pronta.
     state.itens = makeItems([{}]);
+    state.itens[0]!.tipo_destino = "apartamento";
+    state.itens[0]!.codigo_logico_destino = "APT-35";
     const r = await processarCredencialDeAcesso("cred-1", {
       repository: makeRepo(state),
       ttlockClient: client,

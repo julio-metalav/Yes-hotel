@@ -185,7 +185,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: itens } = await admin
       .from("operacional_credencial_itens")
-      .select("status_provisionamento, remote_keyboard_pwd_id")
+      .select("status_provisionamento, remote_keyboard_pwd_id, tipo_destino, codigo_logico_destino")
       .eq("credencial_id", cred.id);
 
     let lastSyncError: string | null = null;

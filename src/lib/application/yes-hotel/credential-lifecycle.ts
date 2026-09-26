@@ -6,6 +6,7 @@
 import type { TtlockClient } from "../../integrations/ttlock/client.ts";
 import { logTtlockLifecycle } from "../../integrations/ttlock/lifecycle-log.ts";
 import { accessCodesForApartment, canonicalApartmentCode } from "../../domain/yes-hotel/hits-room-change.ts";
+import { resolveProvisionCredentialStatus } from "../../domain/yes-hotel/ttlock-guest-access-gate.ts";
 import { generateRandomTtlockPasscode } from "../../domain/yes-hotel/ttlock-credential-format.ts";
 import type { CredencialItemRow, CredencialRow, ProvisioningRepository } from "./provisioning-executor.ts";
 import { processarCredencialDeAcesso } from "./provisioning-executor.ts";
@@ -743,9 +744,34 @@ export async function handleRoomChange(
   for (const destino of destinos) {
     const existente = porFechadura.get(destino.fechadura_id);
     if (!existente) {
-      const criado = await repo.insertItem(credencial.id, destino);
-      porFechadura.set(destino.fechadura_id, criado);
-      itensNovosInseridos++;
+      try {
+        const criado = await repo.insertItem(credencial.id, destino);
+        porFechadura.set(destino.fechadura_id, criado);
+        itensNovosInseridos++;
+      } catch (e) {
+        const detalhe = e instanceof Error ? e.message : String(e);
+        const msg = `Troca de apartamento ${apartamentoAntigo ?? "—"} → ${numNovoNorm}: a porta nova não foi criada (${detalhe}). Portões sozinhos não liberam a credencial.`;
+        const depois = await repo.getItens(credencial.id);
+        const resolved = resolveProvisionCredentialStatus(depois, { apartamentoAtual: numNovoNorm });
+        await repo.updateCredencial(credencial.id, {
+          status: resolved.status === "provisionada" ? "parcial" : resolved.status,
+          last_sync_error: msg,
+          last_sync_attempt_at: new Date().toISOString(),
+          sync_status: "failed",
+        });
+        return {
+          ...base,
+          status: resolved.status === "provisionada" ? "parcial" : resolved.status,
+          revogados: itensAntigosRevogados,
+          provisionados: resolved.provisionados,
+          falhas: Math.max(resolved.falhas, 1),
+          erros: [msg],
+          itensAntigosRevogados,
+          itensNovosInseridos,
+          concluida: false,
+          motivo: "provisionamento_falhou",
+        };
+      }
       continue;
     }
     if (existente.status_provisionamento === "revogado") {
