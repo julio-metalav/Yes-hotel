@@ -195,19 +195,35 @@ export type TtlockListedPasscode = {
   status?: number | null;
 };
 
-/** Localiza PIN candidato na listagem read-only (sem logar o PIN). */
+/**
+ * Localiza o PIN na listagem read-only (sem logar o PIN).
+ * Mais de um passcode igual é ambíguo: não escolhe um id.
+ */
 export function findListedPasscodeMatch(
   list: TtlockListedPasscode[] | null | undefined,
   candidatePin: string,
 ): TtlockListedPasscode | null {
   const pin = String(candidatePin || "").trim();
   if (!pin || !Array.isArray(list)) return null;
-  for (const row of list) {
-    if (String(row?.keyboardPwd ?? "").trim() === pin && typeof row.keyboardPwdId === "number") {
-      return row;
-    }
-  }
-  return null;
+  const matches = list.filter(
+    (row) =>
+      String(row?.keyboardPwd ?? "").trim() === pin && typeof row.keyboardPwdId === "number",
+  );
+  if (matches.length !== 1) return null;
+  return matches[0] ?? null;
+}
+
+/**
+ * Item que o provisionamento ainda precisa tentar.
+ * `falhou` volta mesmo com remote id: o id residual é a pista da reconciliação,
+ * não motivo para deixar a credencial presa.
+ */
+export function itemNeedsProvisionRetry(item: {
+  status_provisionamento?: string | null;
+  remote_keyboard_pwd_id?: number | string | null;
+}): boolean {
+  const st = String(item.status_provisionamento ?? "").trim();
+  return st === "pendente" || st === "provisionando" || st === "falhou";
 }
 
 export type TransientRetryState = {
@@ -297,6 +313,31 @@ export type ProvisionLockAttemptResult =
     };
 
 /**
+ * -3007 só vira sucesso com um único passcode igual ao PIN na listagem,
+ * e só se pudermos atribuí-lo a esta credencial.
+ * Listagem ausente, ambígua ou PIN de outra credencial continua falha fechada.
+ */
+async function reconcileOwnedPasscode(params: {
+  passcode: string;
+  listPasscodes: () => Promise<TtlockListedPasscode[]>;
+  pinClaimAllowed?: boolean;
+  knownKeyboardPwdId?: number | null;
+}): Promise<TtlockListedPasscode | null> {
+  let listed: TtlockListedPasscode[];
+  try {
+    listed = await params.listPasscodes();
+  } catch {
+    return null;
+  }
+  const match = findListedPasscodeMatch(listed, params.passcode);
+  if (!match) return null;
+  const known = params.knownKeyboardPwdId;
+  const knownMatches = typeof known === "number" && known === match.keyboardPwdId;
+  if (params.pinClaimAllowed === false && !knownMatches) return null;
+  return match;
+}
+
+/**
  * Uma fechadura: add com retry do mesmo PIN + reconciliação em estado incerto.
  */
 export async function attemptProvisionLockWithSamePinRetry(params: {
@@ -307,6 +348,13 @@ export async function attemptProvisionLockWithSamePinRetry(params: {
   sleepFn?: (ms: number) => Promise<void>;
   addPasscode: () => Promise<number>;
   listPasscodes: () => Promise<TtlockListedPasscode[]>;
+  /**
+   * false quando outra credencial já ocupa este PIN no lock.
+   * Nesse caso -3007 não vira sucesso, mesmo que a listagem mostre o PIN.
+   */
+  pinClaimAllowed?: boolean;
+  /** Id já gravado neste item. Se bater com a listagem, o passcode é nosso. */
+  knownKeyboardPwdId?: number | null;
   onAttemptLog?: (info: {
     attempt: number;
     classification: TtlockProvisionErrorClassification | null;
@@ -372,28 +420,20 @@ export async function attemptProvisionLockWithSamePinRetry(params: {
       });
 
       if (classification.class === "collision") {
-        // Após timeout incerto, -3007 pode ser o próprio request anterior.
-        if (priorUncertain || classification.uncertain) {
-          try {
-            const listed = await params.listPasscodes();
-            const match = findListedPasscodeMatch(listed, params.passcode);
-            if (match) {
-              params.onAttemptLog?.({
-                attempt: attempts,
-                classification,
-                reconciled: true,
-                status: "reconciled",
-              });
-              return {
-                ok: true,
-                keyboardPwdId: match.keyboardPwdId,
-                reconciled: true,
-                attempts,
-              };
-            }
-          } catch {
-            // list falhou: ainda é colisão estrangeira só se não reconciliamos
-          }
+        const match = await reconcileOwnedPasscode(params);
+        if (match) {
+          params.onAttemptLog?.({
+            attempt: attempts,
+            classification,
+            reconciled: true,
+            status: "reconciled",
+          });
+          return {
+            ok: true,
+            keyboardPwdId: match.keyboardPwdId,
+            reconciled: true,
+            attempts,
+          };
         }
         return {
           ok: false,

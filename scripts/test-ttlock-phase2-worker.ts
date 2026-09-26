@@ -153,4 +153,38 @@ const itemsReady = [
   ok("sem acesso_liberado → não corre");
 }
 
+{
+  const d = classifyTtlockPhase2Candidate({
+    credentialStatus: "parcial",
+    codigoCredencial: "7575",
+    items: [
+      { status_provisionamento: "provisionado", remote_keyboard_pwd_id: 1 },
+      { status_provisionamento: "falhou", remote_keyboard_pwd_id: 2 },
+      { status_provisionamento: "falhou", remote_keyboard_pwd_id: 3 },
+    ],
+    senhaEnviadaEm: "2026-09-26T00:00:00.000Z",
+    acessoLiberado: true,
+    reservaAtiva: true,
+  });
+  assert.equal(d.run, true);
+  assert.equal(d.kind, "provision_retry");
+  ok("parcial com item falhou e senha já enviada → retry do mesmo PIN, sem novo envio");
+}
+
+{
+  const d = classifyTtlockPhase2Candidate({
+    credentialStatus: "parcial",
+    codigoCredencial: "7575",
+    items: [
+      { status_provisionamento: "provisionado", remote_keyboard_pwd_id: 1 },
+      { status_provisionamento: "falhou", remote_keyboard_pwd_id: 2 },
+    ],
+    senhaEnviadaEm: null,
+    acessoLiberado: false,
+    reservaAtiva: true,
+  });
+  assert.equal(d.run, false);
+  ok("parcial sem acesso_liberado não dispara envio nem retry automático");
+}
+
 console.log("ok: test-ttlock-phase2-worker");

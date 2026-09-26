@@ -83,7 +83,13 @@ export function classifyTtlockPhase2Candidate(
     return { run: true, kind: "send_senha", reason: "gate_pronto_sem_envio" };
   }
 
-  if (resolved.inProgress > 0 || status === "pendente" || status === "provisionando" || status === "pronta") {
+  if (
+    resolved.inProgress > 0 ||
+    status === "pendente" ||
+    status === "provisionando" ||
+    status === "pronta" ||
+    (status === "parcial" && resolved.falhas > 0)
+  ) {
     if (!isPhase2RetryEligibleNow(input.lastSyncError, now)) {
       return { run: false, kind: null, reason: "fase2_aguardando_janela" };
     }
