@@ -25,6 +25,7 @@ import {
   FIX_RES_ID,
   TEST_ENV,
 } from "../src/lib/integrations/ttlock/access-ingest/testing/fixtures";
+import { startOfHotelCivilDayUtcMs } from "../src/lib/domain/yes-hotel/hotel-timezone";
 
 const DIAG_LOCK_DATE = 1_786_487_991_000; // 18:39:51 CG
 const NEW_LOCK_DATE = DIAG_LOCK_DATE + 120_000; // depois do checkpoint
@@ -366,16 +367,33 @@ async function main() {
     ok("I exatamente 1 internal_first_access");
   }
 
-  // Extra: bootstrap sem checkpoint não processa histórico
+  // Bootstrap: dia civil anterior fica de fora; abertura do mesmo dia entra.
   {
-    const h = harness();
-    const store = memoryStore();
-    const r = await poll(h.ports, [passcodeRecord({ lockDate: DIAG_LOCK_DATE })], store);
-    assert.equal(r.bootstrapped, true);
-    assert.equal(r.processed, 0);
-    assert.equal(h.state.events.length, 0);
-    assert.ok((store.cps.get(FIX_LOCK_APT)?.last_lock_date_ms ?? 0) > 0);
-    ok("bootstrap sem checkpoint não processa histórico");
+    const nowMs = NEW_LOCK_DATE + 60_000;
+    const dayStart = startOfHotelCivilDayUtcMs(nowMs);
+    const hOld = harness();
+    const storeOld = memoryStore();
+    const old = await pollOneLock({
+      lockId: FIX_LOCK_APT,
+      client: mockClient([passcodeRecord({ lockDate: dayStart - 10_000, recordId: 1 })]),
+      ports: hOld.ports,
+      store: storeOld,
+      env: POLL_ENV,
+      nowMs,
+    });
+    assert.equal(old.bootstrapped, true);
+    assert.equal(old.processed, 0);
+    assert.equal(hOld.state.events.length, 0);
+    assert.equal(storeOld.cps.get(FIX_LOCK_APT)?.last_lock_date_ms, dayStart - 1);
+    ok("bootstrap não reprocessa o dia civil anterior");
+
+    const hToday = harness();
+    const storeToday = memoryStore();
+    const today = await poll(hToday.ports, [passcodeRecord()], storeToday);
+    assert.equal(today.bootstrapped, true);
+    assert.equal(today.processed, 1);
+    assert.equal(hToday.state.events.length, 1);
+    ok("bootstrap processa abertura do dia civil corrente");
   }
 
   // Extra: notify e polling geram mesma idempotency_key

@@ -4,6 +4,7 @@
  */
 
 import { processFirstRoomAccessEvent } from "../../../application/yes-hotel/first-room-access-orchestrator.ts";
+import { startOfHotelCivilDayUtcMs } from "../../../domain/yes-hotel/hotel-timezone.ts";
 import type { FirstRoomAccessPorts } from "../../../application/yes-hotel/first-room-access-ports.ts";
 import type { ProcessFirstRoomAccessResult } from "../../../application/yes-hotel/first-room-access-types.ts";
 import type { TtlockClient } from "../client.ts";
@@ -132,7 +133,7 @@ async function processOnePollingRecord(args: {
 
 /**
  * Polla um lock: busca records, processa só lockDate > watermark, avança checkpoint.
- * Sem checkpoint: bootstrap watermark = now (não processa histórico).
+ * Sem checkpoint: watermark no início do dia civil do hotel. Não reprocessa dias anteriores.
  */
 export async function pollOneLock(args: {
   lockId: number;
@@ -146,27 +147,23 @@ export async function pollOneLock(args: {
 }): Promise<PollLockResult> {
   const nowMs = args.nowMs ?? Date.now();
   const lookbackMs = args.lookbackMs ?? 2 * 60 * 60 * 1000;
-  const cp = await args.store.getCheckpoint(args.lockId);
+  let cp = await args.store.getCheckpoint(args.lockId);
+  let bootstrapped = false;
 
   if (!cp) {
+    const dayStart = startOfHotelCivilDayUtcMs(nowMs);
+    cp = {
+      lock_id: args.lockId,
+      last_lock_date_ms: dayStart - 1,
+      last_record_id: null,
+    };
+    bootstrapped = true;
     await args.store.upsertCheckpoint({
       lock_id: args.lockId,
-      last_lock_date_ms: nowMs,
+      last_lock_date_ms: cp.last_lock_date_ms,
       last_record_id: null,
-      last_error: "bootstrap_skip_history",
+      last_error: "bootstrap_desde_inicio_do_dia_civil",
     });
-    return {
-      lock_id: args.lockId,
-      fetched: 0,
-      newer: 0,
-      processed: 0,
-      failed: 0,
-      skipped: 0,
-      watermark_before: 0,
-      watermark_after: nowMs,
-      bootstrapped: true,
-      results: [],
-    };
   }
 
   const watermarkBefore = cp.last_lock_date_ms;
@@ -200,6 +197,7 @@ export async function pollOneLock(args: {
       skipped: 0,
       watermark_before: watermarkBefore,
       watermark_after: watermarkBefore,
+      bootstrapped: bootstrapped || undefined,
       results: [],
     };
   }
@@ -224,6 +222,7 @@ export async function pollOneLock(args: {
       skipped: list.length,
       watermark_before: watermarkBefore,
       watermark_after: watermarkBefore,
+      bootstrapped: bootstrapped || undefined,
       results: [],
     };
   }
@@ -292,6 +291,7 @@ export async function pollOneLock(args: {
     skipped,
     watermark_before: watermarkBefore,
     watermark_after: watermarkAfter,
+    bootstrapped: bootstrapped || undefined,
     results,
   };
 }

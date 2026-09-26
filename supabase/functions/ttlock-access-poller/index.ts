@@ -3,7 +3,7 @@
  *
  * Auth: service_role Bearer OU x-access-tolerance-token (mesmo cron outbox).
  * Flag: YES_HOTEL_TTLOCK_ACCESS_POLL_ENABLED=true
- * NÃO processa histórico sem checkpoint (bootstrap = now).
+ * Sem checkpoint: processa a partir do início do dia civil do hotel, não dias anteriores.
  * Seed do lock 16274746 impede reprocessar evento 18:39:51 CG.
  */
 import { createClient } from "jsr:@supabase/supabase-js@2";

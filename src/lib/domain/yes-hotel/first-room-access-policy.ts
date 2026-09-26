@@ -260,3 +260,21 @@ export function decideAccessGrace(input: AccessGraceDecisionInput): AccessGraceD
     presencial_diferido: input.pagamento_presencial_diferido_autorizado ? deferredEval : null,
   };
 }
+
+/**
+ * Reconhecimento atrasado da abertura: o prazo de 1h já teria vencido
+ * no instante do processamento. Mantém o horário real da entrada e
+ * concede 1h a partir de agora, para o aviso e o bloqueio não coincidirem.
+ * Não altera o prazo das 09h do pagamento presencial diferido.
+ */
+export function clampLateStandardGraceDeadline(input: {
+  grace_mode?: AccessGraceMode;
+  suspension_due_at?: string;
+  now_ms: number;
+}): string | undefined {
+  const due = input.suspension_due_at;
+  if (!due || input.grace_mode !== "standard_1h") return due;
+  const dueMs = Date.parse(due);
+  if (!Number.isFinite(dueMs) || dueMs > input.now_ms) return due;
+  return new Date(input.now_ms + ONE_HOUR_MS).toISOString();
+}
