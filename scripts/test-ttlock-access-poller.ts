@@ -25,7 +25,12 @@ import {
   FIX_RES_ID,
   TEST_ENV,
 } from "../src/lib/integrations/ttlock/access-ingest/testing/fixtures";
-import { startOfHotelCivilDayUtcMs } from "../src/lib/domain/yes-hotel/hotel-timezone";
+import {
+  hotelLocalToUtcMs,
+  startOfHotelCivilDayUtcMs,
+  YES_HOTEL_UTC_OFFSET_MINUTES,
+} from "../src/lib/domain/yes-hotel/hotel-timezone";
+import { resolveTtlockRecordOccurredAt } from "../src/lib/domain/yes-hotel/ttlock-record-time";
 
 const DIAG_LOCK_DATE = 1_786_487_991_000; // 18:39:51 CG
 const NEW_LOCK_DATE = DIAG_LOCK_DATE + 120_000; // depois do checkpoint
@@ -375,7 +380,13 @@ async function main() {
     const storeOld = memoryStore();
     const old = await pollOneLock({
       lockId: FIX_LOCK_APT,
-      client: mockClient([passcodeRecord({ lockDate: dayStart - 10_000, recordId: 1 })]),
+      client: mockClient([
+        passcodeRecord({
+          lockDate: dayStart - 10_000,
+          serverDate: dayStart - 9_000,
+          recordId: 1,
+        }),
+      ]),
       ports: hOld.ports,
       store: storeOld,
       env: POLL_ENV,
@@ -420,6 +431,111 @@ async function main() {
     );
     assert.equal(keyNotify, keyPoll);
     ok("idempotency_key compartilhada notify/polling");
+  }
+
+  {
+    const lockMs = hotelLocalToUtcMs("2026-09-26", 13, 0, 0);
+    const normal = resolveTtlockRecordOccurredAt({
+      lockDateMs: lockMs,
+      serverDateMs: lockMs + 1000,
+      receivedAtMs: lockMs + 2000,
+    });
+    assert.equal(normal.usedFallback, false);
+    assert.equal(normal.occurredAtMs, lockMs);
+    assert.equal(normal.diagnostic, "lock_date");
+    const shown = new Date(normal.occurredAtMs + YES_HOTEL_UTC_OFFSET_MINUTES * 60_000);
+    assert.equal(shown.getUTCHours(), 13);
+    ok("timestamp normal e UTC de Campo Grande não converte o fuso duas vezes");
+  }
+
+  {
+    const watermark = Date.parse("2026-09-25T22:09:48.000Z");
+    const serverMs = Date.parse("2026-09-26T14:05:00.000Z");
+    const nowMs = Date.parse("2026-09-26T14:10:00.000Z");
+    const skewed = resolveTtlockRecordOccurredAt({
+      lockDateMs: watermark,
+      serverDateMs: serverMs,
+      receivedAtMs: nowMs,
+    });
+    assert.equal(skewed.usedFallback, true);
+    assert.equal(skewed.diagnostic, "server_date_clock_skew");
+    assert.equal(skewed.occurredAtMs, serverMs);
+    assert.equal(skewed.rawLockDateMs, watermark);
+
+    const future = resolveTtlockRecordOccurredAt({
+      lockDateMs: nowMs + 60 * 60 * 1000,
+      serverDateMs: nowMs - 1000,
+      receivedAtMs: nowMs,
+    });
+    assert.equal(future.usedFallback, true);
+    assert.equal(future.occurredAtMs, nowMs - 1000);
+
+    const h = harness();
+    const store = memoryStore({
+      lock_id: FIX_LOCK_APT,
+      last_lock_date_ms: watermark,
+      last_record_id: "1806027158",
+    });
+    const rec = passcodeRecord({
+      lockDate: watermark,
+      serverDate: serverMs,
+      recordId: 1806027200,
+    });
+    const first = await pollOneLock({
+      lockId: FIX_LOCK_APT,
+      client: mockClient([rec]),
+      ports: h.ports,
+      store,
+      env: POLL_ENV,
+      nowMs,
+    });
+    assert.equal(first.newer, 1);
+    assert.equal(first.processed, 1);
+    assert.equal(h.state.events.length, 1);
+    assert.equal(h.state.events[0].occurred_at, new Date(serverMs).toISOString());
+    const raw = h.state.events[0].raw_payload_sanitized as {
+      occurred_at_resolution?: { raw_lock_date_ms?: number; diagnostic?: string };
+    };
+    assert.equal(raw.occurred_at_resolution?.raw_lock_date_ms, watermark);
+    assert.equal(raw.occurred_at_resolution?.diagnostic, "server_date_clock_skew");
+    const welcomesBefore = h.state.accessOutbox.filter((o) =>
+      o.event_type === "guest_first_access_welcome",
+    ).length;
+    const second = await pollOneLock({
+      lockId: FIX_LOCK_APT,
+      client: mockClient([rec]),
+      ports: h.ports,
+      store,
+      env: POLL_ENV,
+      nowMs: nowMs + 60_000,
+    });
+    assert.equal(second.processed, 1);
+    assert.equal(h.state.events.length, 1);
+    const welcomesAfter = h.state.accessOutbox.filter((o) =>
+      o.event_type === "guest_first_access_welcome",
+    ).length;
+    assert.equal(welcomesAfter, welcomesBefore);
+    const stale = await pollOneLock({
+      lockId: FIX_LOCK_APT,
+      client: mockClient([
+        passcodeRecord({
+          lockDate: watermark - 8000,
+          serverDate: watermark - 7000,
+          recordId: 1806027100,
+          success: 0,
+        }),
+      ]),
+      ports: harness().ports,
+      store: memoryStore({
+        lock_id: FIX_LOCK_APT,
+        last_lock_date_ms: watermark,
+        last_record_id: null,
+      }),
+      env: POLL_ENV,
+      nowMs,
+    });
+    assert.equal(stale.newer, 0);
+    ok("relógio da fechadura em outro dia usa serverDate, guarda o bruto e não duplica");
   }
 
   console.log(`\nOK test-ttlock-access-poller (${passed} casos)\n`);

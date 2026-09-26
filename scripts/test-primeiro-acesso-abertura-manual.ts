@@ -338,13 +338,20 @@ async function main() {
     assert.equal(wrongPin.correlated, false);
     assert.equal(shouldApplyLiberatedStayFallback(wrongPin, true), true);
 
-    const outside = correlateApartmentPasscodeCandidates({
+    const morning = correlateApartmentPasscodeCandidates({
       candidates: [yesCandidate()],
       occurred_at: OCCURRED,
       ephemeral_keyboard_pwd: PIN_YES,
     });
-    assert.equal(outside.diagnostic, "fora_da_validade_da_credencial");
-    assert.equal(shouldApplyLiberatedStayFallback(outside, true), false);
+    assert.equal(morning.correlated, true);
+    assert.equal(morning.reservation_id, RESERVA);
+    const otherDay = correlateApartmentPasscodeCandidates({
+      candidates: [yesCandidate()],
+      occurred_at: "2026-09-25T12:40:24.000Z",
+      ephemeral_keyboard_pwd: PIN_YES,
+    });
+    assert.equal(otherDay.diagnostic, "fora_da_validade_da_credencial");
+    assert.equal(shouldApplyLiberatedStayFallback(otherDay, true), false);
 
     const known = correlateApartmentPasscodeCandidates({
       candidates: [
@@ -386,7 +393,37 @@ async function main() {
     );
     assert.deepEqual(ids, [LOCK]);
     assert.deepEqual(mergePollCandidateLockIds([13865804], ids), [13865804, LOCK]);
-    ok("poller inclui lock com acesso liberado antes do valido_de");
+    const arrivalOnly = broaderPollCandidateLockIds(
+      [
+        {
+          lock_id_ttlock: "15615070",
+          codigo_logico_destino: "APT-09",
+          credential_status: "provisionada",
+          valido_de: "2026-09-26T17:00:00.000Z",
+          valido_ate: "2026-09-27T15:00:00.000Z",
+          acesso_liberado: false,
+          entrou_no_apto: false,
+        },
+      ],
+      Date.parse("2026-09-26T14:00:00.000Z"),
+    );
+    assert.deepEqual(arrivalOnly, [15615070]);
+    const otherDayLock = broaderPollCandidateLockIds(
+      [
+        {
+          lock_id_ttlock: "15615070",
+          codigo_logico_destino: "APT-09",
+          credential_status: "provisionada",
+          valido_de: "2026-09-26T17:00:00.000Z",
+          valido_ate: "2026-09-27T15:00:00.000Z",
+          acesso_liberado: false,
+          entrou_no_apto: false,
+        },
+      ],
+      Date.parse("2026-09-25T14:00:00.000Z"),
+    );
+    assert.deepEqual(otherDayLock, []);
+    ok("poller inclui lock com acesso liberado antes do valido_de e no dia da chegada");
   }
 
   console.log(`\nOK test-primeiro-acesso-abertura-manual (${passed} casos)\n`);
