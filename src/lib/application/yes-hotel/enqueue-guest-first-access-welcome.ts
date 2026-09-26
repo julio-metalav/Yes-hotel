@@ -7,7 +7,6 @@ import {
   buildGuestFirstAccessWelcomeMessage,
   guestFirstAccessWelcomeIdempotencyKey,
   GUEST_FIRST_ACCESS_WELCOME_EVENT,
-  resolveParkingSpot,
 } from "../../domain/yes-hotel/guest-access-messages.ts";
 import type { AccessOutboxQueuePort } from "./first-room-access-ports.ts";
 import { renderizarTemplate } from "../../domain/yes-hotel/mensagens-template.ts";
@@ -101,16 +100,14 @@ async function resolverCorpo(
 export async function enqueueGuestFirstAccessWelcomeMessages(
   input: EnqueueGuestFirstAccessWelcomeInput,
 ): Promise<void> {
-  const parking = resolveParkingSpot({
-    parking_spot: input.parking_spot,
-    apartment_number: input.apartment_number,
-  });
   const padrao = buildGuestFirstAccessWelcomeMessage({
     guest_first_name: input.guest_main_name,
     apartment_number: input.apartment_number,
-    parking_spot: parking,
+    parking_spot: input.parking_spot ?? input.apartment_number,
     wifi_ssid: input.wifi_ssid,
     wifi_password: input.wifi_password,
+    checkout_horario: input.checkout_horario,
+    telefone_recepcao: input.telefone_recepcao,
   });
 
   const msg = await resolverCorpo(input, padrao);

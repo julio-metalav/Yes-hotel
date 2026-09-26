@@ -192,11 +192,12 @@ async function main() {
       wifi_ssid: "YES-34",
       wifi_password: "segredo34",
     });
-    assert.match(withWifi.body, /Bem-vindo ao Yes Hotel, Breno!/);
+    assert.match(withWifi.body, /Olá, Breno! Seja bem-vindo ao Yes Hotel\./);
+    assert.match(withWifi.body, /Apartamento: 34/);
     assert.match(withWifi.body, /Rede: YES-34/);
     assert.match(withWifi.body, /Senha: segredo34/);
-    assert.match(withWifi.body, /faixa amarela próxima ao portão/);
-    assert.match(withWifi.body, /placas “Restaurante”/);
+    assert.match(withWifi.body, /Desejamos uma excelente estadia!/);
+    assert.doesNotMatch(withWifi.body, /portão|portao|PIN|TTLock|1 hora|Estacionamento|FNRH|pagamento/i);
     assert.doesNotMatch(withWifi.body, /embaixo do roteador/i);
     assertSanitizedPayloadSafe({ body: withWifi.body });
     ok("pós C/K/L Wi-Fi + textos corretos + sanitize OK");

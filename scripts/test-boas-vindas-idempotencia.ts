@@ -249,7 +249,9 @@ async function testesTemplate() {
     // a) porta ausente
     const a = harness({ pago: true, fnrhCompleta: true });
     await processFirstRoomAccessEvent(evento("sem-porta"), a.ports);
-    assert.match(String(welcomes(a)[0]?.payload?.body ?? ""), /Bem-vindo ao Yes Hotel/);
+    assert.match(String(welcomes(a)[0]?.payload?.body ?? ""), /Seja bem-vindo ao Yes Hotel/);
+    assert.match(String(welcomes(a)[0]?.payload?.body ?? ""), /Desejamos uma excelente estadia!/);
+    assert.doesNotMatch(String(welcomes(a)[0]?.payload?.body ?? ""), /Estacionamento|portão|1 hora/);
 
     // b) leitura lanca
     const b = harness({ pago: true, fnrhCompleta: true });
@@ -261,13 +263,13 @@ async function testesTemplate() {
     const rb = await processFirstRoomAccessEvent(evento("template-quebrado"), b.ports);
     assert.notEqual(rb.status, "failed", "o primeiro acesso nao pode falhar por template");
     assert.equal(welcomes(b).length, 2, "a mensagem saiu mesmo assim");
-    assert.match(String(welcomes(b)[0]?.payload?.body ?? ""), /Bem-vindo ao Yes Hotel/);
+    assert.match(String(welcomes(b)[0]?.payload?.body ?? ""), /Seja bem-vindo ao Yes Hotel/);
 
     // c) template vazio
     const c = harness({ pago: true, fnrhCompleta: true });
     c.ports.mensagensTemplates = { async carregar() { return "   "; } };
     await processFirstRoomAccessEvent(evento("template-vazio"), c.ports);
-    assert.match(String(welcomes(c)[0]?.payload?.body ?? ""), /Bem-vindo ao Yes Hotel/);
+    assert.match(String(welcomes(c)[0]?.payload?.body ?? ""), /Seja bem-vindo ao Yes Hotel/);
 
     // d) template que renderiza vazio (so parametro ausente)
     const d = harness({ pago: true, fnrhCompleta: true });
@@ -282,7 +284,7 @@ async function testesTemplate() {
       },
     };
     await processFirstRoomAccessEvent(evento("render-vazio"), d.ports);
-    assert.match(String(welcomes(d)[0]?.payload?.body ?? ""), /Bem-vindo ao Yes Hotel/);
+    assert.match(String(welcomes(d)[0]?.payload?.body ?? ""), /Seja bem-vindo ao Yes Hotel/);
     ok("porta ausente, erro de leitura, corpo vazio e render vazio caem no texto do codigo");
   }
 

@@ -55,7 +55,9 @@ export const TEMPLATE_BOAS_VINDAS_PRIMEIRO_ACESSO = [
   "",
   "Check-out: {{checkout_horario}}",
   "",
-  "Em caso de necessidade, fale conosco pelo {{telefone_recepcao}}.",
+  "Se precisar de ajuda durante a hospedagem, fale conosco pelo {{telefone_recepcao}}.",
+  "",
+  "Desejamos uma excelente estadia!",
 ].join("\n");
 
 const PARAM_RE = /\{\{\s*([a-z_]+)\s*\}\}/g;

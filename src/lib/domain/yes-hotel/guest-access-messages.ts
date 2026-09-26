@@ -6,6 +6,10 @@
 
 import { formatTtlockPasscodeForGuest } from "./ttlock-credential-format.ts";
 import { isFinanceiramenteLiberadoParaAcesso } from "./reservation-financial-classification.ts";
+import {
+  TEMPLATE_BOAS_VINDAS_PRIMEIRO_ACESSO,
+  renderizarTemplate,
+} from "./mensagens-template.ts";
 
 export const GUEST_ACCESS_READY_EVENT = "guest_access_ready" as const;
 export const GUEST_FIRST_ACCESS_WELCOME_EVENT = "guest_first_access_welcome" as const;
@@ -13,15 +17,6 @@ export const GUEST_FIRST_ACCESS_WELCOME_EVENT = "guest_first_access_welcome" as 
 export const CONTACT_BLOCK = [
   "📞 Precisa falar conosco?",
   "Se tiver qualquer dificuldade para falar conosco por este WhatsApp,",
-  "você também pode ligar para:",
-  "",
-  "Breno: (67) 99088-1337",
-  "Julio: (67) 98402-0002",
-  "Laura: (67) 99989-5245",
-].join("\n");
-
-export const CONTACT_BLOCK_STAY = [
-  "📞 Se tiver qualquer dificuldade para falar conosco por este WhatsApp,",
   "você também pode ligar para:",
   "",
   "Breno: (67) 99088-1337",
@@ -223,6 +218,8 @@ export type BuildGuestFirstAccessWelcomeInput = {
   /** Ambos obrigatórios para exibir o bloco; senão omitir. */
   wifi_ssid?: string | null;
   wifi_password?: string | null;
+  checkout_horario?: string | null;
+  telefone_recepcao?: string | null;
 };
 
 export function shouldIncludeWifiBlock(
@@ -235,69 +232,21 @@ export function shouldIncludeWifiBlock(
 export function buildGuestFirstAccessWelcomeMessage(
   input: BuildGuestFirstAccessWelcomeInput,
 ): GuestAccessMessage {
-  const name = firstNameFrom(input.guest_first_name);
   const apt = String(input.apartment_number || "").trim() || "—";
-  const vaga = String(input.parking_spot || "").trim() || apt;
-  const ssid = String(input.wifi_ssid ?? "").trim();
-  const wifiPwd = String(input.wifi_password ?? "").trim();
-  const showWifi = shouldIncludeWifiBlock(ssid, wifiPwd);
-
-  const wifiLines = showWifi
-    ? ["", "📶 Wi-Fi", `Rede: ${ssid}`, `Senha: ${wifiPwd}`, ""]
-    : [""];
-
-  const body = [
-    `🏨 Bem-vindo ao Yes Hotel, ${name}!`,
-    "",
-    `Esperamos que tenha uma excelente estadia no apartamento ${apt}. 😊`,
-    ...wifiLines,
-    "🚗 Estacionamento",
-    `Sua vaga é a ${vaga}.`,
-    "O controle do portão de veículos está dentro do apartamento.",
-    "",
-    "Para sair com o veículo, passe pela faixa amarela próxima ao portão",
-    "e ele abrirá automaticamente.",
-    "",
-    "☕ Café da manhã",
-    "Servido das 06h às 09h.",
-    "",
-    "O salão fica no final do estacionamento.",
-    "Siga as placas “Restaurante” no prédio.",
-    "",
-    "🚭 Não é permitido fumar dentro do apartamento.",
-    "",
-    "💬 Precisando de qualquer ajuda durante sua hospedagem,",
-    "é só falar conosco por aqui.",
-    "",
-    CONTACT_BLOCK_STAY,
-    "",
-    "Desejamos uma ótima estadia!",
-  ].join("\n");
-
-  const wifiHtml = showWifi
-    ? `<p><strong>📶 Wi-Fi</strong><br/>Rede: ${escHtml(ssid)}<br/>Senha: ${escHtml(wifiPwd)}</p>`
-    : "";
-
-  const body_html = [
-    `<p>🏨 Bem-vindo ao Yes Hotel, <strong>${escHtml(name)}</strong>!</p>`,
-    `<p>Esperamos que tenha uma excelente estadia no apartamento ${escHtml(apt)}. 😊</p>`,
-    wifiHtml,
-    `<p><strong>🚗 Estacionamento</strong><br/>Sua vaga é a ${escHtml(vaga)}.<br/>O controle do portão de veículos está dentro do apartamento.</p>`,
-    `<p>Para sair com o veículo, passe pela faixa amarela próxima ao portão e ele abrirá automaticamente.</p>`,
-    `<p><strong>☕ Café da manhã</strong><br/>Servido das 06h às 09h.<br/>O salão fica no final do estacionamento.<br/>Siga as placas “Restaurante” no prédio.</p>`,
-    `<p>🚭 Não é permitido fumar dentro do apartamento.</p>`,
-    `<p>💬 Precisando de qualquer ajuda durante sua hospedagem, é só falar conosco por aqui.</p>`,
-    `<pre style="font-family:inherit;white-space:pre-wrap">${escHtml(CONTACT_BLOCK_STAY)}</pre>`,
-    `<p>Desejamos uma ótima estadia!</p>`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const render = renderizarTemplate(TEMPLATE_BOAS_VINDAS_PRIMEIRO_ACESSO, {
+    hospede_nome: input.guest_first_name,
+    apartamento: apt,
+    wifi_rede: input.wifi_ssid,
+    wifi_senha: input.wifi_password,
+    checkout_horario: input.checkout_horario,
+    telefone_recepcao: input.telefone_recepcao,
+  });
 
   return {
     kind: GUEST_FIRST_ACCESS_WELCOME_EVENT,
-    body,
+    body: render.texto,
     subject: `Bem-vindo ao Yes Hotel — Apartamento ${apt}`,
-    body_html,
+    body_html: render.html,
   };
 }
 
