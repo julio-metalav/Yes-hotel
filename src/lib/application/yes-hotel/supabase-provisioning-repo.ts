@@ -88,6 +88,10 @@ function toItemRow(r: DbItem): CredencialItemRow {
   };
 }
 
+// Produção (Yes_Hotel_automação, 2026-09-26): operacional_credenciais_acesso
+// NÃO tem revogado_em nem motivo_revogacao. A migration 0008 declara as duas,
+// mas elas não estão no schema físico. Selecionar ou gravar quebra o lifecycle.
+// A revogação auditável fica no item (operacional_credencial_itens.revogado_em).
 const COLS_CREDENCIAL =
   "id, reserva_id, status, valido_de, valido_ate, codigo_credencial, provider_tipo, sync_status, last_sync_attempt_at, last_sync_error";
 const COLS_ITEM =

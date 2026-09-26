@@ -13,6 +13,10 @@ import type {
   ProvisioningRepository,
 } from "../src/lib/application/yes-hotel/provisioning-executor.ts";
 import { decidirTrocaApartamento } from "../src/lib/domain/yes-hotel/hits-room-change.ts";
+import {
+  evaluateTtlockReadyForGuestAccess,
+  resolveProvisionCredentialStatus,
+} from "../src/lib/domain/yes-hotel/ttlock-guest-access-gate.ts";
 import { reconciliarTrocaApartamentoHits } from "../src/lib/integrations/hits/hits-room-change.ts";
 import type { SyncedReservation } from "../src/lib/domain/yes-hotel/synced-reservation.ts";
 
@@ -29,6 +33,7 @@ type World = {
   messages: number[];
   failDelete: boolean;
   failCreate: boolean;
+  failInsert: boolean;
 };
 
 function destino(apt: string): NovoItemDestino[] {
@@ -76,6 +81,7 @@ function seed(apt: string, remote: boolean, pin: string | null): World {
     messages: [],
     failDelete: false,
     failCreate: false,
+    failInsert: false,
   };
 }
 
@@ -103,6 +109,7 @@ function repoOf(world: World): ProvisioningRepository {
       return world.itens.filter((i) => i.status_provisionamento === "pendente_limpeza");
     },
     async insertItem(credencialId, destinoItem) {
+      if (world.failInsert) throw new Error("insert_falhou");
       const row: CredencialItemRow = {
         id: nid(),
         credencial_id: credencialId,
@@ -423,6 +430,61 @@ console.log("\n== ciclo HITS ==");
   assert.equal(okRemoto.acao, "lifecycle");
   assert.equal(reservas[0]!.apartamento, "10", "o ciclo não avança o apartamento; o lifecycle faz isso depois do sucesso");
   ok("10–12. ciclo: no-op, sem credencial, falha não conclui, sucesso delega sem mensagem");
+}
+
+console.log("\n== gate: portões sozinhos não ficam prontos ==");
+{
+  const pin = "4321";
+  const cred = { status: "provisionada", codigo_credencial: pin };
+  const soPortoes = [
+    { status_provisionamento: "revogado", remote_keyboard_pwd_id: 1, tipo_destino: "apartamento", codigo_logico_destino: "APT-14" },
+    { status_provisionamento: "provisionado", remote_keyboard_pwd_id: 2, tipo_destino: "portao_externo", codigo_logico_destino: "GATE-1947-EXTERNAL" },
+    { status_provisionamento: "provisionado", remote_keyboard_pwd_id: 3, tipo_destino: "portao_interno", codigo_logico_destino: "GATE-1947-INTERNAL" },
+  ];
+  const resolved = resolveProvisionCredentialStatus(soPortoes, { apartamentoAtual: "18" });
+  assert.equal(resolved.allReady, false);
+  assert.notEqual(resolved.status, "provisionada");
+  const gate = evaluateTtlockReadyForGuestAccess(cred, soPortoes, { apartamentoAtual: "18" });
+  assert.equal(gate.ready, false);
+  assert.equal(gate.reason, "sem_porta_apartamento");
+
+  const tres = [
+    { status_provisionamento: "provisionado", remote_keyboard_pwd_id: 1, tipo_destino: "apartamento", codigo_logico_destino: "APT-18" },
+    { status_provisionamento: "provisionado", remote_keyboard_pwd_id: 2, tipo_destino: "portao_externo", codigo_logico_destino: "GATE-1947-EXTERNAL" },
+    { status_provisionamento: "provisionado", remote_keyboard_pwd_id: 3, tipo_destino: "portao_interno", codigo_logico_destino: "GATE-1947-INTERNAL" },
+  ];
+  assert.equal(resolveProvisionCredentialStatus(tres).allReady, true);
+  assert.equal(resolveProvisionCredentialStatus(tres).status, "provisionada");
+  assert.equal(evaluateTtlockReadyForGuestAccess(cred, tres, { apartamentoAtual: "18" }).ready, true);
+
+  const concluida1418 = [
+    { status_provisionamento: "revogado", remote_keyboard_pwd_id: 9, tipo_destino: "apartamento", codigo_logico_destino: "APT-14" },
+    ...tres,
+  ];
+  assert.equal(resolveProvisionCredentialStatus(concluida1418, { apartamentoAtual: "18" }).status, "provisionada");
+  assert.equal(evaluateTtlockReadyForGuestAccess(cred, concluida1418, { apartamentoAtual: "18" }).ready, true);
+  assert.equal(evaluateTtlockReadyForGuestAccess(cred, concluida1418, { apartamentoAtual: "14" }).ready, false);
+  ok("portões sozinhos não ficam prontos; 3/3 e 14→18 concluída ficam");
+}
+
+console.log("\n== insert da porta nova falha depois da revogação ==");
+{
+  const world = seed("14", true, PIN);
+  world.failInsert = true;
+  const r = await move(world, "18");
+  assert.equal(r.concluida, false);
+  assert.notEqual(world.cred.status, "provisionada");
+  assert.equal(world.cred.codigo_credencial, PIN);
+  assert.equal(world.apartment, "14");
+  assert.equal(world.created.length, 0);
+  assert.equal(world.itens.some((i) => i.codigo_logico_destino === "APT-18"), false);
+  assert.equal(evaluateTtlockReadyForGuestAccess(
+    { status: world.cred.status, codigo_credencial: world.cred.codigo_credencial },
+    world.itens,
+    { apartamentoAtual: "18" },
+  ).ready, false);
+  assert.equal(world.messages.length, 0);
+  ok("revogou 14, não criou 18: credencial não fica pronta e o PIN permanece");
 }
 
 console.log("\n== sem mensagem e sem PIN na resposta ==");
