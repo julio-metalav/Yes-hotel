@@ -144,6 +144,42 @@ console.log("\n== O bug real: rotulo na linha seguinte ==");
   ok("rotulo seguido de data nao preenche nome");
 }
 
+console.log("\n== CNH real: o rotulo em duas palavras ==");
+{
+  // Caso reportado em producao: "E SOBRENOME JULIO CESAR LOPES DE OLIV...".
+  // A causa era a ordem da alternancia no regex: `NOME` vinha antes de
+  // `NOME E SOBRENOME`, casava primeiro, e a captura comecava no "E".
+  const cnh = [
+    "REPUBLICA FEDERATIVA DO BRASIL",
+    "CARTEIRA NACIONAL DE HABILITACAO",
+    "NOME E SOBRENOME",
+    "JULIO CESAR LOPES DE OLIVEIRA",
+    "DATA NASCIMENTO",
+    "12/03/1985",
+  ].join("\n");
+  const r = normalizeGoogleVisionText({ fullText: cnh });
+  assert.equal(r.suggested_fields.hospede_nome, "JULIO CESAR LOPES DE OLIVEIRA");
+  ok("rotulo NOME E SOBRENOME em linha propria nao contamina o nome");
+
+  // Mesma variante, valor na mesma linha.
+  const cnh2 = "NOME E SOBRENOME: JULIO CESAR LOPES DE OLIVEIRA\nCPF 529.982.247-25";
+  const r2 = normalizeGoogleVisionText({ fullText: cnh2 });
+  assert.equal(r2.suggested_fields.hospede_nome, "JULIO CESAR LOPES DE OLIVEIRA");
+  ok("NOME E SOBRENOME na mesma linha e lido corretamente");
+
+  // Variante com barra.
+  const cnh3 = "NOME / SOBRENOME\nANA PAULA DOS SANTOS";
+  const r3 = normalizeGoogleVisionText({ fullText: cnh3 });
+  assert.equal(r3.suggested_fields.hospede_nome, "ANA PAULA DOS SANTOS");
+  ok("variante NOME / SOBRENOME e lida corretamente");
+
+  // Nome legitimo com "E" no meio nao pode ser mutilado pela heuristica.
+  const legitimo = "NOME\nMARIA DAS GRACAS E SILVA SOUZA\nCPF 529.982.247-25";
+  const r4 = normalizeGoogleVisionText({ fullText: legitimo });
+  assert.equal(r4.suggested_fields.hospede_nome, "MARIA DAS GRACAS E SILVA SOUZA");
+  ok("nome legitimo com E e particulas permanece inteiro");
+}
+
 console.log("\n== Barreira final na persistencia ==");
 {
   // Vale para QUALQUER provider, inclusive Azure e um futuro.

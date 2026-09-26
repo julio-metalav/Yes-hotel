@@ -18,10 +18,42 @@
     { id: "concluido", label: "Concluído" },
   ];
 
-  var DOC_TYPES = [
+  /**
+   * Etapas que exibem campos lidos do documento. Só elas podem mostrar o aviso
+   * "Encontramos estes dados no seu documento".
+   *
+   * Viagem, Revisão, Aceite e Concluído não têm o que conferir do documento --
+   * o aviso aparecia nelas porque o shell usava a condição invertida.
+   */
+  var ETAPAS_COM_DADOS_DO_OCR = ["confira_dados"];
+
+  var DOC_TYPES_BRASIL = [
     { value: "cpf", label: "Brasileiro — CPF" },
-    { value: "passport", label: "Estrangeiro — Passaporte" },
+    { value: "passport", label: "Passaporte" },
   ];
+
+  /**
+   * Fluxo exterior. Nao assumir passaporte: vale tambem identidade estrangeira
+   * e documento de viagem do Mercosul.
+   *
+   * LIMITACAO CONHECIDA: o banco aceita apenas
+   * cpf|rg|cnh|passport|birth_certificate|other em `documento_tipo`. Nao ha
+   * valor proprio para "identidade estrangeira" nem para "Mercosul", e esta
+   * correcao nao cria schema novo. Os dois caem em `other`, qualificados por
+   * `pais_emissor`, e ficam indistinguiveis entre si no banco. Separar exige
+   * migration -- decisao deliberadamente adiada.
+   */
+  var DOC_TYPES_EXTERIOR = [
+    { value: "passport", label: "Passaporte" },
+    {
+      value: "other",
+      label: "Identidade estrangeira ou documento de viagem (Mercosul)",
+    },
+  ];
+
+  function docTypesFor(state) {
+    return isBrazilResident(state) ? DOC_TYPES_BRASIL : DOC_TYPES_EXTERIOR;
+  }
 
   var MOTIVO_OPTIONS = [
     { value: "lazer", label: "Lazer / turismo" },
@@ -97,7 +129,7 @@
   }
 
   function documentoNumeroLabel(docType) {
-    if (docType === "passport") return "Passaporte *";
+    if (docType === "passport") return "Número do passaporte *";
     if (docType === "cpf") return "CPF *";
     return "Número do documento *";
   }
@@ -165,6 +197,7 @@
       stepIndex: 0,
       documento_tipo: normalizeDocumentoTipo(pre.documento_tipo),
       documento_numero: pre.documento_numero || pre.documento || "",
+      pais_emissor: pre.pais_emissor || "",
       documento: pre.documento || pre.documento_numero || "",
       data_nascimento: pre.data_nascimento ? String(pre.data_nascimento).slice(0, 10) : "",
       hospede_nome: pre.hospede_nome || "",
@@ -264,6 +297,7 @@
         cidade: state.cidade,
         uf: state.uf,
         pais: state.pais,
+        pais_emissor: state.pais_emissor,
         endereco_estrangeiro: state.endereco_estrangeiro,
         telefone: state.telefone,
         email: state.email,
@@ -458,6 +492,13 @@
         }
         if (!hasText(state.documento_tipo)) {
           state.stepError = "Selecione o tipo de documento.";
+          return false;
+        }
+        // CPF é obrigatório no fluxo brasileiro e impossível no fluxo exterior:
+        // quem mora fora não é obrigado a ter CPF para se hospedar.
+        if (!isBrazilResident(state) && state.documento_tipo === "cpf") {
+          state.stepError =
+            "Para quem reside fora do Brasil, escolha passaporte ou documento estrangeiro.";
           return false;
         }
         if (!hasText(state.documento_numero)) {
@@ -670,6 +711,35 @@
       }
     }
 
+    var TAMANHO_MAXIMO_MB = 10;
+
+    /**
+     * Mensagem que reflete a causa, nao o sintoma.
+     *
+     * Antes, qualquer falha virava "Erro de conexão ao enviar o documento" --
+     * inclusive arquivo grande demais e resposta não-JSON da plataforma. O
+     * hóspede tentava de novo na mesma conexão e falhava de novo.
+     */
+    function mensagemDeFalhaNoEnvio(res, file) {
+      if (res.body && res.body.error) return String(res.body.error);
+
+      var tamanhoMb = file && file.size ? file.size / (1024 * 1024) : 0;
+      if (res.status === 413 || tamanhoMb > TAMANHO_MAXIMO_MB) {
+        return (
+          "Arquivo grande demais (limite de " +
+          TAMANHO_MAXIMO_MB +
+          " MB). Envie uma foto ou reduza o PDF."
+        );
+      }
+      if (res.status >= 500) {
+        return "O servidor não conseguiu processar o documento. Tente novamente em instantes.";
+      }
+      if (!res.body) {
+        return "Resposta inesperada do servidor ao enviar o documento. Tente novamente.";
+      }
+      return "Falha no envio do documento.";
+    }
+
     function uploadDocument(file, side) {
       if (!file) return;
       var uploadSide = side || "front";
@@ -699,15 +769,25 @@
 
       fetch(uploadUrl(), { method: "POST", body: fd })
         .then(function (r) {
-          return r.json().then(function (j) {
-            return { okHttp: r.ok, body: j };
-          });
+          // A resposta nem sempre e JSON: limite de tamanho, proxy e erro de
+          // plataforma devolvem texto ou HTML. Tratar isso como "erro de
+          // conexao" escondia a causa real -- foi o que aconteceu com PDF.
+          return r
+            .json()
+            .then(function (j) {
+              return { okHttp: r.ok, status: r.status, body: j };
+            })
+            .catch(function () {
+              return { okHttp: r.ok, status: r.status, body: null };
+            });
         })
         .then(function (res) {
           state.analyzing = false;
           state.analyzingPhase = "";
           if (!res.body || !res.body.ok) {
-            state.stepError = (res.body && res.body.error) || "Falha no envio do documento.";
+            state.stepError = mensagemDeFalhaNoEnvio(res, file);
+            // O que ja foi digitado nao se perde por causa de um envio falho.
+            scheduleDraft();
             render();
             return;
           }
@@ -729,7 +809,10 @@
         .catch(function () {
           state.analyzing = false;
           state.analyzingPhase = "";
-          state.stepError = "Erro de conexão ao enviar o documento.";
+          // Aqui sim e falha de rede: o fetch nem completou.
+          state.stepError =
+            "Não conseguimos falar com o servidor. Verifique sua conexão e tente de novo.";
+          scheduleDraft();
           render();
         });
     }
@@ -809,6 +892,7 @@
         cidade: state.cidade,
         uf: state.uf,
         pais: state.pais,
+        pais_emissor: state.pais_emissor,
         endereco_estrangeiro: state.endereco_estrangeiro,
         telefone: state.telefone,
         email: state.email,
@@ -891,11 +975,17 @@
           : "";
       var step = STEPS[state.stepIndex];
       // Feedback de processamento fica no card do documento (próximo ao preview no mobile).
-      // Na Etapa 2 o banner OCR fica só dentro de renderConfiraDados (evita duplicata).
-      var ocrBanner =
-        state.ocrBanner && !state.analyzing && step.id !== "confira_dados"
-          ? '<div class="banner" role="status">' + escapeHtml(state.ocrBanner) + "</div>"
-          : "";
+      //
+      // O aviso do OCR pertence a UMA etapa: "Confira dados", a única que
+      // mostra os campos lidos do documento. Ela já renderiza o próprio banner
+      // em renderConfiraDados.
+      //
+      // A condição daqui era `step.id !== "confira_dados"` -- invertida: o
+      // shell imprimia o aviso em TODAS as outras etapas. Era por isso que
+      // "Encontramos estes dados no seu documento" reaparecia em Viagem,
+      // Revisão, Aceite e Concluído, onde não há nada do documento para
+      // conferir.
+      var ocrBanner = ocrBannerDaEtapa(step.id);
       var err = state.stepError
         ? '<p class="error" id="v2-step-error">' + escapeHtml(state.stepError) + "</p>"
         : "";
@@ -911,8 +1001,12 @@
         nextLabel =
           state.analyzingPhase === "ocr" ? "Lendo documento…" : "Enviando documento…";
       }
+      // Na etapa do documento, depois da leitura, quem avança é "Conferir meus
+      // dados". Manter também o "Continuar" do shell deixava duas ações
+      // primárias competindo pela mesma decisão.
+      var leituraConcluida = step.id === "documento" && docLeituraConcluida();
       var nextBtn =
-        step.id === "concluido"
+        step.id === "concluido" || leituraConcluida
           ? ""
           : '<button type="button" class="btn primary" id="v2-next"' +
             (state.confirmBusy || state.analyzing ? " disabled" : "") +
@@ -1015,13 +1109,38 @@
         wireTrigger("btn-doc-file", "doc-file-front");
         wireTrigger("btn-doc-camera-back", "doc-camera-back");
         wireTrigger("btn-doc-file-back", "doc-file-back");
-        wireTrigger("btn-doc-retake-camera", "doc-camera-front");
         wireTrigger("btn-doc-retake-file", "doc-file-front");
 
         var confira = document.getElementById("btn-goto-confira");
         if (confira) {
           confira.addEventListener("click", function () {
             goNext();
+          });
+        }
+      }
+
+      if (step === "confira_dados") {
+        var toggleDoc = document.getElementById("toggle-foreign-doc");
+        if (toggleDoc) {
+          toggleDoc.addEventListener("change", function () {
+            syncStateFromDom();
+            if (toggleDoc.checked) {
+              state.pais = "Exterior";
+              state.cep = "";
+              // CPF deixa de ser opção no fluxo exterior; limpar evita ficar
+              // com um tipo que a própria lista não oferece mais.
+              if (state.documento_tipo === "cpf") {
+                state.documento_tipo = "";
+                state.documento_numero = "";
+                state.documento = "";
+              }
+            } else {
+              state.pais = "Brasil";
+              state.endereco_estrangeiro = "";
+              state.pais_emissor = "";
+            }
+            scheduleDraft();
+            render();
           });
         }
       }
@@ -1107,16 +1226,20 @@
             ? ""
             : [
                 '  <div class="doc-retake-row">',
-                '    <button type="button" class="btn secondary compact" id="btn-doc-retake-camera">Tirar outra foto</button>',
-                '    <button type="button" class="btn secondary compact" id="btn-doc-retake-file">Trocar arquivo</button>',
+                // Uma ação secundária só. O seletor de arquivo aceita imagem e
+                // PDF e, no celular, o próprio sistema oferece a câmera --
+                // então nada se perde ao fundir "tirar outra" e "trocar".
+                '    <button type="button" class="btn secondary compact" id="btn-doc-retake-file">Trocar documento</button>',
                 "  </div>",
               ].join(""),
           "</div>",
         ].join("");
       }
 
+      // Depois da leitura, as capturas saem de cena: sobram "Conferir meus
+      // dados" e uma única secundária para trocar o documento.
       var primaryCapture =
-        analyzing
+        analyzing || docLeituraConcluida()
           ? ""
           : needVerso
             ? [
@@ -1163,6 +1286,39 @@
       ].join("");
     }
 
+    /**
+     * HTML do aviso de OCR para uma etapa. Só "Confira dados" tem o que
+     * conferir, e essa etapa desenha o próprio banner -- logo o shell nunca
+     * desenha nenhum. Função nomeada para a regra ficar legível e testável.
+     */
+    /**
+     * Etapa 1 tem dois estados, e só um conjunto de ações cabe em cada um:
+     * ANTES da leitura, capturar/enviar; DEPOIS, conferir os dados (primária)
+     * ou trocar o documento (secundária).
+     *
+     * Antes disso a tela somava os dois conjuntos e chegava a mostrar cinco
+     * ações ao mesmo tempo, porque a renderização só olhava `analyzing`.
+     */
+    /** Índice de uma etapa por id; -1 quando não existe. */
+    function indexOfStep(id) {
+      for (var i = 0; i < STEPS.length; i++) {
+        if (STEPS[i].id === id) return i;
+      }
+      return -1;
+    }
+
+    function docLeituraConcluida() {
+      return !!state.showConfiraCta && !state.analyzing && !needsVersoAfterOcr();
+    }
+
+    function ocrBannerDaEtapa(stepId) {
+      if (ETAPAS_COM_DADOS_DO_OCR.indexOf(stepId) < 0) return "";
+      // "Confira dados" desenha o próprio banner; o shell não repete.
+      if (stepId === "confira_dados") return "";
+      if (!state.ocrBanner || state.analyzing) return "";
+      return '<div class="banner" role="status">' + escapeHtml(state.ocrBanner) + "</div>";
+    }
+
     function renderConfiraDados() {
       var bannerText =
         state.ocrBanner ||
@@ -1177,10 +1333,19 @@
           '" />',
         "<label>Nome social (opcional)</label>",
         '<input data-field="nome_social" value="' + escapeHtml(state.nome_social) + '" />',
+        // A residência decide QUAL documento vale. Ela ficava na etapa de
+        // Endereço, depois de o CPF já ter sido exigido aqui -- ordem
+        // invertida. É o mesmo `state.pais` da etapa seguinte, não um campo
+        // novo: quem responde aqui não responde de novo lá.
+        '<label class="check-inline">',
+        '<input type="checkbox" id="toggle-foreign-doc"' +
+          (isBrazilResident(state) ? "" : " checked") +
+          " /> Resido fora do Brasil / sem CEP brasileiro",
+        "</label>",
         "<label>Identificação *</label>",
         '<select data-field="documento_tipo">',
         '<option value="">Selecione…</option>',
-        optionHtml(DOC_TYPES, state.documento_tipo),
+        optionHtml(docTypesFor(state), state.documento_tipo),
         "</select>",
         "<label>" + escapeHtml(numLabel) + "</label>",
         '<input data-field="documento_numero" inputmode="' +
@@ -1188,6 +1353,12 @@
           '" autocomplete="off" value="' +
           escapeHtml(state.documento_numero) +
           '" />',
+        isBrazilResident(state)
+          ? ""
+          : '<label>País emissor do documento</label>' +
+            '<input data-field="pais_emissor" autocomplete="country-name" value="' +
+            escapeHtml(state.pais_emissor) +
+            '" />',
         "<label>Data de nascimento *</label>",
         '<input data-field="data_nascimento" type="date" value="' +
           escapeHtml(state.data_nascimento) +
@@ -1209,12 +1380,16 @@
 
     function renderEndereco() {
       var br = isBrazilResident(state);
+      // A mesma pergunta era feita duas vezes, em etapas diferentes. Agora ela
+      // é respondida na etapa de dados (antes de o documento ser exigido) e
+      // aqui apenas se reflete o que já foi dito, com a opção de corrigir.
       var foreignToggle =
-        '<label class="check-inline">' +
-        '<input type="checkbox" id="toggle-foreign"' +
-        (!br ? " checked" : "") +
-        " /> Resido fora do Brasil / sem CEP brasileiro" +
-        "</label>";
+        '<p class="muted">' +
+        (br
+          ? "Endereço no Brasil."
+          : "Endereço fora do Brasil — CEP brasileiro não é exigido.") +
+        ' <button type="button" class="btn-link" id="btn-corrigir-residencia">Corrigir</button>' +
+        "</p>";
 
       var brBlock = [
         "<label>CEP *</label>",
@@ -1264,17 +1439,16 @@
 
       // bind toggle after renderShell — use setTimeout microtask via bindStepHandlers extension
       setTimeout(function () {
-        var t = document.getElementById("toggle-foreign");
-        if (!t) return;
-        t.addEventListener("change", function () {
-          if (t.checked) {
-            state.pais = "Exterior";
-            state.cep = "";
-          } else {
-            state.pais = "Brasil";
-            state.endereco_estrangeiro = "";
+        var corrigir = document.getElementById("btn-corrigir-residencia");
+        if (!corrigir) return;
+        corrigir.addEventListener("click", function () {
+          syncStateFromDom();
+          var alvo = indexOfStep("confira_dados");
+          if (alvo >= 0) {
+            state.stepIndex = alvo;
+            state.stepError = "";
+            render();
           }
-          render();
         });
       }, 0);
 
@@ -1390,11 +1564,11 @@
         : "";
 
       return [
-        '<p class="banner">Revise tudo antes do aceite final.</p>',
+        '<p class="banner">Confira os dados abaixo. Se algo estiver errado, use "Corrigir informações".</p>',
         '<dl class="review">',
         "<dt>Nome</dt><dd>" + escapeHtml(state.hospede_nome) + "</dd>",
         "<dt>Documento</dt><dd>" +
-          escapeHtml(labelOf(DOC_TYPES, state.documento_tipo)) +
+          escapeHtml(labelOf(docTypesFor(state), state.documento_tipo)) +
           " · " +
           escapeHtml(state.documento_numero) +
           "</dd>",
@@ -1418,7 +1592,7 @@
           "</dd>",
         minorsHtml,
         "</dl>",
-        '<button type="button" class="btn secondary" id="v2-edit-start">Corrigir desde o início</button>',
+        '<button type="button" class="btn secondary" id="v2-edit-start">Corrigir informações</button>',
       ].join("");
     }
 
@@ -1435,8 +1609,14 @@
         '  <input type="checkbox" data-field="privacy_accepted"' +
           (state.privacy_accepted ? " checked" : "") +
           " />",
-        "  <span>Li e aceito o aviso de privacidade e o tratamento dos meus dados para fins de hospedagem.</span>",
+        "  <span>Li e aceito o <a href=\"./aviso-de-privacidade.html\" target=\"_blank\" rel=\"noopener\">Aviso de Privacidade</a> " +
+          "e os <a href=\"./termos-de-hospedagem.html\" target=\"_blank\" rel=\"noopener\">Termos de Hospedagem</a>, " +
+          "e o tratamento dos meus dados para fins de hospedagem.</span>",
         "</label>",
+        // Os links abrem em nova aba e NÃO são pré-requisito para marcar: o
+        // conteúdo fica acessível, a decisão continua do hóspede. Nada muda na
+        // semântica do aceite nem no que é persistido.
+        '<p class="muted">Os documentos abrem em uma nova aba. Você pode marcar as declarações sem abri-los.</p>',
         '<p class="muted versions">Versão dos termos: <code>' +
           escapeHtml(termsVersion) +
           "</code><br/>Versão do aviso de privacidade: <code>" +

@@ -68,13 +68,18 @@ function ok(label: string) {
 {
   assert.match(js, /function applyOcrSuggestions/);
   assert.match(js, /Encontramos estes dados no seu documento/);
+  assert.match(js, /var DOC_TYPES_BRASIL = \[/);
   assert.match(js, /Brasileiro — CPF/);
-  assert.match(js, /Estrangeiro — Passaporte/);
+  // O rótulo "Estrangeiro — Passaporte" saiu quando a lista passou a ser
+  // escolhida pelo fluxo: no exterior o passaporte não é o único documento
+  // aceito. O que importa cobrar é a capacidade, não o texto antigo.
+  assert.match(js, /var DOC_TYPES_EXTERIOR = \[/);
+  assert.match(js, /value: "passport"/);
   const confira = js.slice(js.indexOf("function renderConfiraDados()"), js.indexOf("function renderEndereco()"));
   assert.match(confira, /data-field="documento_tipo"/);
   assert.match(confira, /data-field="documento_numero"/);
   assert.match(confira, /data-field="data_nascimento"/);
-  assert.match(confira, /optionHtml\(DOC_TYPES/);
+  assert.match(confira, /optionHtml\(docTypesFor\(state\)/);
   ok("F/G. OCR + Etapa 2 com campos editáveis canônicos");
 }
 
@@ -141,6 +146,7 @@ function ok(label: string) {
   assert.match(js, /function needsTwoSides\(docType\)/);
   assert.match(js, /function needsVersoAfterOcr\(\)/);
   assert.match(js, /function isCanonicalDocType/);
+  assert.match(js, /var DOC_TYPES_BRASIL = \[/);
   assert.match(js, /Brasileiro — CPF/);
   ok("M. canônicos CPF/passaporte; verso só legado RG/CNH");
 }
