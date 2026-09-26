@@ -89,7 +89,7 @@ function toItemRow(r: DbItem): CredencialItemRow {
 }
 
 const COLS_CREDENCIAL =
-  "id, reserva_id, status, valido_de, valido_ate, codigo_credencial, provider_tipo, revogado_em, motivo_revogacao, sync_status, last_sync_attempt_at, last_sync_error";
+  "id, reserva_id, status, valido_de, valido_ate, codigo_credencial, provider_tipo, sync_status, last_sync_attempt_at, last_sync_error";
 const COLS_ITEM =
   "id, credencial_id, fechadura_id, lock_id_ttlock, tipo_destino, codigo_logico_destino, status_provisionamento, ultimo_erro, provisionado_em, revogado_em, remote_keyboard_pwd_id, codigo_enviado";
 
@@ -205,6 +205,8 @@ export function createSupabaseProvisioningRepository(
       >,
     ): Promise<void> {
       const { core, sync } = splitCredencialProvisionDbPatch(patch as Record<string, unknown>);
+      delete core.revogado_em;
+      delete core.motivo_revogacao;
       if (Object.keys(core).length > 0) {
         const { error } = await supabase
           .from("operacional_credenciais_acesso")
