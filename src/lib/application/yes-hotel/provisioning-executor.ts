@@ -211,6 +211,11 @@ export async function processarCredencialDeAcesso(
     repository: ProvisioningRepository;
     ttlockClient: TtlockClient;
     passcodeGenerator?: (exclude?: string | null | Iterable<string>) => string;
+    /**
+     * Mantém um PIN já existente. Usado em troca de apartamento: colisão no
+     * destino deve falhar fechado, nunca substituir silenciosamente a senha do hóspede.
+     */
+    preserveExistingPasscode?: boolean;
     retry?: ProcessarCredencialRetryOptions;
   },
 ): Promise<ProcessarCredencialResult> {
@@ -245,8 +250,39 @@ export async function processarCredencialDeAcesso(
   const localBlocked = await loadOccupiedPasscodes(repo, lockIds, credencialId);
 
   let passcode = credencial.codigo_credencial ? String(credencial.codigo_credencial).trim() : "";
+  const preserveExistingPasscode = deps.preserveExistingPasscode === true && Boolean(passcode);
   if (!alreadyRemoteOk) {
     if (!passcode || localBlocked.has(passcode)) {
+      if (passcode && preserveExistingPasscode) {
+        const msg =
+          "PIN existente conflita no novo destino; troca de apartamento bloqueada sem alterar a senha.";
+        erros.push(msg);
+        const pendentes = allItens.filter(itemNeedsProvision);
+        for (const item of pendentes) {
+          await repo.updateItem(item.id, {
+            status_provisionamento: "falhou",
+            ultimo_erro: msg,
+          });
+        }
+        const after = await repo.getItens(credencialId);
+        const resolved = resolveProvisionCredentialStatus(after);
+        await repo.updateCredencial(credencialId, {
+          status: resolved.status,
+          sync_status: "failed",
+          last_sync_attempt_at: new Date().toISOString(),
+          last_sync_error: msg,
+        });
+        return {
+          credencialId,
+          status: resolved.status,
+          passcode,
+          totalItens: after.length,
+          provisionados: resolved.provisionados,
+          falhas: resolved.falhas,
+          erros,
+          accessReady: false,
+        };
+      }
       if (passcode) rejectedPins.add(passcode);
       const exclude = new Set([...localBlocked, ...rejectedPins]);
       passcode = deps.passcodeGenerator
@@ -491,6 +527,7 @@ export async function processarCredencialDeAcesso(
     }
 
     if (
+      preserveExistingPasscode ||
       !canRetryWithNewPasscode({
         collisionOnAnyLock: true,
         credentialNeverFullyProvisioned: !alreadyRemoteOk,
@@ -499,6 +536,9 @@ export async function processarCredencialDeAcesso(
         rollbackFailed,
       })
     ) {
+      if (preserveExistingPasscode) {
+        erros.push("Colisão TTLock no novo destino; PIN existente foi preservado.");
+      }
       break;
     }
 

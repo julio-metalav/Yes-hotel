@@ -132,7 +132,8 @@
     "debug:ttlock-reprovision": "tsx scripts/debug-ttlock-reprovision.ts",
     "debug:ttlock-lifecycle": "tsx scripts/debug-ttlock-lifecycle-scenarios.ts",
     "debug:ttlock-retry-pending": "tsx scripts/debug-ttlock-retry-pending.ts",
-    "cleanup:ttlock-expired": "tsx scripts/cleanup-ttlock-expired.ts"
+    "cleanup:ttlock-expired": "tsx scripts/cleanup-ttlock-expired.ts",
+    "test:hits-room-change-reconcile": "tsx scripts/test-hits-room-change-reconcile.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.0",
