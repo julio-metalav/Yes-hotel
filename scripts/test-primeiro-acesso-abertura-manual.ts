@@ -299,7 +299,11 @@ async function main() {
     assert.equal(r.status, "grace_started");
     assert.equal(welcomes(h).length, 2);
     assert.equal(hourNotices(h).length, 1);
-    const due = Date.parse(h.state.tolerances[0]!.suspension_due_at);
+    const tol = h.state.tolerances[0]!;
+    const due = Date.parse(tol.suspension_due_at);
+    const started = Date.parse(tol.grace_started_at);
+    assert.equal(tol.first_room_access_at, OCCURRED);
+    assert.equal(due - started, 60 * 60 * 1000);
     assert.ok(due > Date.parse(NOW_LATE), "prazo não pode nascer vencido");
     assert.equal(due - Date.parse(NOW_LATE), 60 * 60 * 1000);
 
