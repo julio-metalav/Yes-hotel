@@ -1,10 +1,10 @@
-# Gateway HITS (leitura + escrita PAX sandbox)
+# Gateway HITS (leitura + escrita PAX sob flag)
 
 Gateway Node.js para o Yes Hotel chamar a API HITS PMS a partir de IP público fixo (whitelist APP Sistemas).
 
 Não faz deploy sozinho. Não altera Supabase, Edge, UI, migrations nem Certbot.
 
-A escrita de PAX nesta versão é **somente homologação Sandbox**. Produção permanece bloqueada. Check-in, no-show, TTLock e UI **não** fazem parte deste escopo.
+A escrita de PAX nasce **desligada**. Só liga com `HITS_GUEST_WRITE_ENABLED` exatamente `true` e tenant na lista `develop` ou `yeshotel`. Check-in, no-show, TTLock e UI **não** fazem parte deste escopo.
 
 ## Papel
 
@@ -16,7 +16,7 @@ Nginx (443) → 127.0.0.1:3001
         v
 Gateway HITS
         |  HitsClient (POST /Authorize interno + GET Datashare
-        |  + POST/PUT Guests sandbox, se a trava estiver ligada)
+        |  + POST/PUT Guests, se a flag e o tenant allowlisted estiverem ligados)
         v
 HITS PMS
 ```
@@ -32,15 +32,15 @@ O Node escuta **somente** `127.0.0.1`. Produção executa `node dist/server.js` 
 
 Mesmo código. Secrets e URLs separados. Nenhuma credencial de PROD no HOMO.
 
-### Produção: somente leitura, com trava explícita na Edge
+### Produção: leitura sempre; escrita só com flag
 
 O gateway PROD usa o mesmo artefato e as mesmas guardas. O que muda é só o env
 (`HITS_TENANT_NAME=yeshotel`, `HITS_PROPERTY_CODE=1`, `HITS_AUTHORIZE_SCOPES=WebCheckIn`,
 secret/propertyId de produção). Nele:
 
-- escrita PAX fica **bloqueada** (tenant ≠ `develop`), mesmo com `HITS_GUEST_WRITE_ENABLED=true`;
+- escrita PAX fica **desligada por padrão**. `yeshotel` pode escrever quando `HITS_GUEST_WRITE_ENABLED` for exatamente `true`;
 - check-in continua **inexistente** (`checkinEnabled` é sempre `false`);
-- `/health` não chama o HITS e é a única validação prevista antes do cutover.
+- `/health` não chama o HITS.
 
 Quem decide se o Yes lê produção é a Edge `hits-reservations-preview`
 (`src/lib/integrations/hits/hits-gateway-read.ts`), não este serviço:
@@ -81,10 +81,10 @@ POST/PATCH/DELETE em `/v1/guests` → **405**.
 Escrita PAX (POST/PUT acima) parte **desligada**. Sem as três condições abaixo responde **403** `guest_write_disabled`, sem chamar o HITS:
 
 1. configuração HITS completa (mesmo critério de `hitsReady`);
-2. `HITS_TENANT_NAME` igual a `develop` (só diferença de maiúsculas/minúsculas é ignorada);
-3. `HITS_GUEST_WRITE_ENABLED` exatamente `true`.
+2. `HITS_GUEST_WRITE_ENABLED` exatamente `true`;
+3. `HITS_TENANT_NAME` na lista fechada `develop` ou `yeshotel` (só diferença de maiúsculas/minúsculas é ignorada).
 
-Se o tenant não for `develop`, a escrita permanece bloqueada **mesmo com a flag ativa**. Produção não deve usar tenant `develop`; nesta versão a escrita em produção fica bloqueada.
+Tenant fora dessa lista continua bloqueado mesmo com a flag ativa. Produção não deve usar tenant `develop`.
 
 O tenant do Sandbox HITS é `develop`. `dev` **não** é aceito: além de não liberar a escrita, `HITS_TENANT_NAME=dev` faz a própria HITS rejeitar as leituras (comprovado em HOMO: `GET /v1/reservations/{id}` retorna 502 `hits_server_error` com `dev` e 200 com `develop`).
 

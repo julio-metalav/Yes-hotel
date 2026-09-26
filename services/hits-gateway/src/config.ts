@@ -26,7 +26,7 @@ export type GatewayConfig = {
   hits: HitsConfig;
   hitsReady: boolean;
   hitsReadyReason: string | null;
-  /** Escrita PAX só com HITS pronto + tenant sandbox `develop` + flag exact `true`. */
+  /** Escrita PAX só com HITS pronto + flag exact `true` + tenant allowlisted. */
   guestWriteEnabled: boolean;
 };
 

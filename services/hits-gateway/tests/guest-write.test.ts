@@ -21,6 +21,7 @@ import {
   HITS_DOCUMENT_TYPES,
   HITS_GENDERS,
   isHitsGuestWriteEnabled,
+  isHitsGuestWriteTenant,
   isHitsSandboxTenant,
   parseGuestsPostBody,
   parseGuestsPutBody,
@@ -158,9 +159,8 @@ test("somente o tenant develop habilita a escrita; dev não é alias", () => {
     false,
   );
 
-  // Qualquer outro tenant não habilita, inclusive prefixos e sufixos de `develop`
-  // e o tenant real de produção (`yeshotel`).
-  for (const tenant of ["prod", "production", "HOMO", "developer", "develop2", "devel", "de", "yeshotel"]) {
+  // Prefixo/sufixo e tenant desconhecido não habilitam, mesmo com a flag.
+  for (const tenant of ["prod", "production", "HOMO", "developer", "develop2", "devel", "de", "yeshotel2"]) {
     assert.equal(
       isHitsSandboxTenant(tenant),
       false,
@@ -209,9 +209,9 @@ test("somente o tenant develop habilita a escrita; dev não é alias", () => {
   );
 });
 
-test("tenant de produção yeshotel: leitura pronta, escrita PAX e check-in bloqueados", () => {
+test("tenant de produção yeshotel: leitura pronta, escrita só com flag, check-in bloqueado", () => {
   // Mesmos valores não secretos confirmados pela HITS para produção; secret e
-  // propertyId sintéticos. Mesmo com a flag exatamente `true`, nada de escrita.
+  // propertyId sintéticos. Flag exatamente `true` libera só a escrita PAX.
   const prod = loadGatewayConfig({
     GATEWAY_TOKEN: TOKEN,
     HITS_API_BASE_URL: "https://hits.example.invalid",
@@ -228,11 +228,34 @@ test("tenant de produção yeshotel: leitura pronta, escrita PAX e check-in bloq
   assert.equal(prod.hits.tenantName, "yeshotel");
   assert.equal(prod.hits.propertyCode, "1");
   assert.deepEqual(prod.hits.scopes, ["WebCheckIn"]);
-  assert.equal(prod.guestWriteEnabled, false);
+  assert.equal(prod.guestWriteEnabled, true);
   assert.equal(prod.hits.checkinEnabled, false);
   assert.equal(isHitsSandboxTenant("yeshotel"), false);
+  assert.equal(isHitsGuestWriteTenant("yeshotel"), true);
+  assert.equal(isHitsGuestWriteTenant("  YesHotel  "), true);
   assert.equal(
     isHitsGuestWriteEnabled({ hitsReady: true, tenantName: "yeshotel", guestWriteFlag: "true" }),
+    true,
+  );
+  assert.equal(
+    isHitsGuestWriteEnabled({ hitsReady: true, tenantName: "yeshotel", guestWriteFlag: "false" }),
+    false,
+  );
+  assert.equal(
+    isHitsGuestWriteEnabled({ hitsReady: false, tenantName: "yeshotel", guestWriteFlag: "true" }),
+    false,
+  );
+  assert.equal(
+    loadGatewayConfig({
+      GATEWAY_TOKEN: TOKEN,
+      HITS_API_BASE_URL: "https://hits.example.invalid",
+      HITS_SHARED_ACCESS_SECRET: SECRET,
+      HITS_PROPERTY_ID: "00000000-0000-4000-8000-000000000002",
+      HITS_TENANT_NAME: "yeshotel",
+      HITS_PROPERTY_CODE: "1",
+      HITS_CLIENT_ID: "synthetic-client",
+      HITS_GUEST_WRITE_ENABLED: "false",
+    }).guestWriteEnabled,
     false,
   );
   // Nenhuma env liga check-in neste serviço.
@@ -250,7 +273,7 @@ test("tenant de produção yeshotel: leitura pronta, escrita PAX e check-in bloq
   assert.equal(comCheckin.hits.checkinEnabled, false);
 });
 
-test("tenant yeshotel: POST/PUT respondem 403 guest_write_disabled sem chamar o HITS", async () => {
+test("tenant yeshotel + flag true: POST/PUT chamam o HITS; flag false continua 403", async () => {
   let hitsCalls = 0;
   const mock: HitsReadClient = {
     listReservations: async () => [],
@@ -281,18 +304,45 @@ test("tenant yeshotel: POST/PUT respondem 403 guest_write_disabled sem chamar o 
       headers: AUTH,
       payload: validPost,
     });
-    assert.equal(post.statusCode, 403);
-    assert.equal(post.json().code, "guest_write_disabled");
+    assert.equal(post.statusCode, 200);
+    assert.equal(post.json().ok, true);
+    assert.equal(typeof post.json().request_id, "string");
     const put = await app.inject({
       method: "PUT",
       url: "/v1/guests",
       headers: AUTH,
-      payload: { idEntity: 1, idReservation: 900001, name: "X" },
+      payload: validPut,
     });
-    assert.equal(put.statusCode, 403);
-    assert.equal(put.json().code, "guest_write_disabled");
-    assert.equal(hitsCalls, 0);
+    assert.equal(put.statusCode, 200);
+    assert.equal(put.json().ok, true);
+    const read = await app.inject({ method: "GET", url: "/health" });
+    assert.equal(read.statusCode, 200);
+    assert.equal(read.json().status, "ok");
+    assert.equal(hitsCalls, 2);
   }, { guestWriteEnabled: cfg.guestWriteEnabled });
+
+  const blocked = loadGatewayConfig({
+    GATEWAY_TOKEN: TOKEN,
+    HITS_API_BASE_URL: "https://hits.example.invalid",
+    HITS_SHARED_ACCESS_SECRET: SECRET,
+    HITS_PROPERTY_ID: "00000000-0000-4000-8000-000000000002",
+    HITS_TENANT_NAME: "yeshotel",
+    HITS_PROPERTY_CODE: "1",
+    HITS_CLIENT_ID: "synthetic-client",
+  });
+  assert.equal(blocked.guestWriteEnabled, false);
+  await withApp(mock, async (app) => {
+    const post = await app.inject({
+      method: "POST",
+      url: "/v1/reservations/900001/guests",
+      headers: AUTH,
+      payload: validPost,
+    });
+    assert.equal(post.statusCode, 403);
+    assert.equal(post.json().code, "guest_write_disabled");
+    assert.equal(post.json().message.includes("secret"), false);
+    assert.equal(hitsCalls, 2);
+  }, { guestWriteEnabled: blocked.guestWriteEnabled });
 });
 
 test("POST/PUT sem Authorization retornam 401", async () => {

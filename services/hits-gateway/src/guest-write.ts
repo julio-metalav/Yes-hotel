@@ -470,6 +470,13 @@ export function isHitsSandboxTenant(tenantName: string): boolean {
   return tenantName.trim().toLowerCase() === "develop";
 }
 
+/** Tenants que podem escrever PAX. Qualquer outro continua bloqueado. */
+const HITS_GUEST_WRITE_TENANTS = new Set(["develop", "yeshotel"]);
+
+export function isHitsGuestWriteTenant(tenantName: string): boolean {
+  return HITS_GUEST_WRITE_TENANTS.has(tenantName.trim().toLowerCase());
+}
+
 export function isHitsGuestWriteEnabled(input: {
   hitsReady: boolean;
   tenantName: string;
@@ -478,6 +485,6 @@ export function isHitsGuestWriteEnabled(input: {
   return (
     input.hitsReady === true &&
     input.guestWriteFlag === "true" &&
-    isHitsSandboxTenant(input.tenantName)
+    isHitsGuestWriteTenant(input.tenantName)
   );
 }
