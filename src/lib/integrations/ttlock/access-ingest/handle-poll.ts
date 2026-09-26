@@ -237,6 +237,7 @@ export async function pollOneLock(args: {
   const results: PollLockResult["results"] = [];
   let processed = 0;
   let failed = 0;
+  let ultimoErro: string | null = null;
   const skipped = envelope.records.length - newer.length;
   let watermarkAfter = watermarkBefore;
   let maxRecordId = cp.last_record_id;
@@ -250,9 +251,20 @@ export async function pollOneLock(args: {
       sanitizedEnvelope,
     });
     results.push(out);
-    if (out.status === "error") {
+    // `error` e a excecao capturada aqui; `failed` e a excecao capturada
+    // dentro do orquestrador, que devolve status em vez de propagar. Os dois
+    // significam a mesma coisa para o checkpoint: NADA foi persistido.
+    //
+    // Tratar `failed` como sucesso foi o que perdeu as aberturas dos
+    // apartamentos 02 e 09: o registro contava como processado, a marca
+    // d'agua passava por cima dele e o evento ficava para tras para sempre,
+    // com o ciclo se reportando saudavel. Registro que nao virou linha nunca
+    // pode ser dado como consumido.
+    if (out.status === "error" || out.status === "failed") {
       failed += 1;
-      // Não avança watermark além do primeiro falho (permite retry).
+      ultimoErro = (out.error ?? out.status).slice(0, 400);
+      // Nao avanca watermark alem do primeiro falho: o proximo ciclo tenta de
+      // novo o MESMO registro.
       break;
     }
     processed += 1;
@@ -266,7 +278,9 @@ export async function pollOneLock(args: {
     lock_id: args.lockId,
     last_lock_date_ms: watermarkAfter,
     last_record_id: maxRecordId,
-    last_error: failed > 0 ? "partial_batch_error" : null,
+    // Mensagem util em vez de um rotulo generico: sem ela, a unica pista do
+    // incidente vivia no corpo HTTP efemero da resposta do cron.
+    last_error: failed > 0 ? (ultimoErro ?? "partial_batch_error") : null,
   });
 
   return {

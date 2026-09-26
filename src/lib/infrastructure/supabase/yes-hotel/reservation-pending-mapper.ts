@@ -268,10 +268,37 @@ export function buildReservationPendingInputFromRows(args: {
     .map((g) => {
       const role = mapGuestRoleDbToDomain(g.guest_role as GuestRoleDb);
       if (!role) {
-        throw new FirstRoomAccessConfigurationError(
-          "fnrh_guest_unclassified",
-          `Hóspede ${g.id} sem classificação segura (guest_role). Não iniciar tolerância.`,
-        );
+        // Hospede sem `guest_role` seguro. Antes isto lancava excecao e
+        // derrubava o primeiro acesso INTEIRO: o erro subia ate o
+        // orquestrador, que devolvia `failed` sem persistir nada. O hospede
+        // abria a porta e o Yes nao registrava entrada, nao mandava
+        // boas-vindas e nao avisava a recepcao -- foi o incidente dos
+        // apartamentos 02 e 09.
+        //
+        // A intencao original ("nao iniciar tolerancia") estava certa; o meio
+        // estava errado. O estado conservador e o que a propria tolerancia ja
+        // modela: adulto acompanhante com ficha PENDENTE.
+        //
+        // Por que isso e conservador e nao um mascaramento:
+        // - `fnrh_status: "pending"` AFIRMA pendencia. E mais estrito que a
+        //   realidade possivel, nunca menos: um hospede sem classificacao
+        //   jamais conta como ficha concluida.
+        // - `acompanhante_adulto`, e nao `principal_adulto`, porque o banco
+        //   nao afirma quem e o responsavel; inventar isso mudaria a regra de
+        //   menor/responsavel e poderia colidir com `multiple_primary_adults`.
+        // - Pagamento nao e tocado aqui: continua vindo de `payment_status`.
+        //
+        // O acesso ja foi liberado antes deste ponto; o que passa a valer e a
+        // regra de 1h existente, que e exatamente o tratamento previsto para
+        // reserva com pendencia.
+        return {
+          id: g.id,
+          role: "acompanhante_adulto" as const,
+          fnrh_status: "pending" as const,
+          individual_confirmation: false,
+          has_phone: g.has_whatsapp,
+          has_email: g.has_email,
+        };
       }
 
       const resolved = resolveEffectiveFnrhStatusSource({

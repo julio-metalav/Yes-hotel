@@ -36,6 +36,7 @@
     "test:yes:first-room-access-orchestrator": "tsx scripts/test-first-room-access-orchestrator.ts",
     "test:yes:ttlock-access-ingest": "tsx scripts/test-ttlock-access-ingest.ts",
     "test:yes:ttlock-access-poller": "tsx scripts/test-ttlock-access-poller.ts",
+    "test:yes:primeiro-acesso-incidente-02-09": "tsx scripts/test-primeiro-acesso-incidente-02-09.ts",
     "test:yes:ttlock-correlation-fix": "tsx scripts/test-ttlock-correlation-fix.ts",
     "test:yes:fnrh-roles-completion": "tsx scripts/test-fnrh-roles-completion.ts",
     "test:yes:fnrh-legacy-lifecycle-compat": "tsx scripts/test-fnrh-legacy-lifecycle-compat.ts",
