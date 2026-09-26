@@ -1060,6 +1060,31 @@ Deno.serve(async (req: Request) => {
     const confirmOwn = body.confirm_own !== false;
 
     if (actorAlreadyDone && confirmMinorsRaw.length === 0) {
+      // Falha anterior de sync: uma nova confirmação reenvia ao HITS uma vez,
+      // sem repetir CRM nem auditoria. Sucesso já gravado não reenvia.
+      if (row.status === "erro_sincronizacao") {
+        await syncFnrhToHits(admin, row.id, row.reserva_id, now);
+        const { data: afterSync } = await admin
+          .from("fnrh_hospedes")
+          .select("fnrh_sync_status")
+          .eq("id", row.id)
+          .maybeSingle();
+        const syncStatus = String(
+          (afterSync as { fnrh_sync_status?: string | null } | null)?.fnrh_sync_status ?? "",
+        );
+        if (syncStatus !== "enviado") {
+          return jsonResponse({
+            ok: false,
+            error: "Não foi possível enviar a FNRH ao HITS",
+            fnrh_sync_status: syncStatus || "erro",
+          }, 502);
+        }
+        return jsonResponse({
+          ok: true,
+          message: "FNRH reenviada ao HITS.",
+          fnrh_sync_status: "enviado",
+        });
+      }
       // Retry puro: a ficha já está confirmada. Só falta garantir que o
       // espelho operacional não ficou preso em "enviado" — sem repetir CRM,
       // auditoria ou sync HITS, que já rodaram (ou não são o problema).

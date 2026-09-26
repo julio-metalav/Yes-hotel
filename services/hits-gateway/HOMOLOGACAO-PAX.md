@@ -105,4 +105,4 @@ Não registrar: body de request/response, nome, documento, contato, endereço, t
 1. Remover ou esvaziar `HITS_GUEST_WRITE_ENABLED` no env do serviço (`/etc/hits-gateway/hits-gateway.env`).
 2. Recarregar o processo (`systemctl restart hits-gateway` no HOMO, quando for o caso).
 3. Confirmar com um POST autenticado: esperado `403` / `guest_write_disabled`.
-4. Não deixar a flag `true` ligada em produção. Tenant diferente de `develop` já bloqueia a escrita.
+4. Em produção a flag só tem efeito com `HITS_TENANT_NAME=yeshotel`. Sem `true` exato a escrita continua desligada.
