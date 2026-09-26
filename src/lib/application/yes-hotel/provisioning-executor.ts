@@ -208,6 +208,11 @@ export async function processarCredencialDeAcesso(
     ttlockClient: TtlockClient;
     passcodeGenerator?: (exclude?: string | null | Iterable<string>) => string;
     retry?: ProcessarCredencialRetryOptions;
+    /**
+     * Troca de apartamento: o PIN já emitido não pode ser substituído.
+     * Colisão ou ocupação falha a tentativa e mantém `codigo_credencial`.
+     */
+    preserveExistingPasscode?: boolean;
   },
 ): Promise<ProcessarCredencialResult> {
   const repo = deps.repository;
@@ -241,7 +246,33 @@ export async function processarCredencialDeAcesso(
   const localBlocked = await loadOccupiedPasscodes(repo, lockIds, credencialId);
 
   let passcode = credencial.codigo_credencial ? String(credencial.codigo_credencial).trim() : "";
-  if (!alreadyRemoteOk) {
+  const preservePin = deps.preserveExistingPasscode === true && passcode.length > 0;
+  if (preservePin && localBlocked.has(passcode)) {
+    const msg =
+      "Troca de apartamento: o PIN atual está ocupado no destino. A senha não foi trocada.";
+    erros.push(msg);
+    for (const item of allItens.filter(itemNeedsProvision)) {
+      await repo.updateItem(item.id, { status_provisionamento: "falhou", ultimo_erro: msg });
+    }
+    const after = await repo.getItens(credencialId);
+    const resolved = resolveProvisionCredentialStatus(after);
+    await repo.updateCredencial(credencialId, {
+      status: resolved.status,
+      last_sync_error: msg,
+      last_sync_attempt_at: new Date().toISOString(),
+    });
+    return {
+      credencialId,
+      status: resolved.status,
+      passcode,
+      totalItens: after.length,
+      provisionados: resolved.provisionados,
+      falhas: Math.max(resolved.falhas, 1),
+      erros,
+      accessReady: false,
+    };
+  }
+  if (!preservePin && !alreadyRemoteOk) {
     if (!passcode || localBlocked.has(passcode)) {
       if (passcode) rejectedPins.add(passcode);
       const exclude = new Set([...localBlocked, ...rejectedPins]);
@@ -491,6 +522,7 @@ export async function processarCredencialDeAcesso(
     }
 
     if (
+      deps.preserveExistingPasscode === true ||
       !canRetryWithNewPasscode({
         collisionOnAnyLock: true,
         credentialNeverFullyProvisioned: !alreadyRemoteOk,
@@ -499,7 +531,9 @@ export async function processarCredencialDeAcesso(
         rollbackFailed,
       })
     ) {
-      if (alreadyRemoteOk) keptExistingPinAfterDefinitiveCollision = true;
+      if (alreadyRemoteOk || deps.preserveExistingPasscode === true) {
+        keptExistingPinAfterDefinitiveCollision = true;
+      }
       break;
     }
 

@@ -31,6 +31,10 @@ import {
   ORIGEM_HITS,
   type SupabaseAdminLike,
 } from "./hits-materializar.ts";
+import {
+  reconciliarTrocaApartamentoHits,
+  type AplicarTrocaApartamento,
+} from "./hits-room-change.ts";
 
 /** Teto de materializações por ciclo (comportamento anterior preservado). */
 export const HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO = 20;
@@ -229,6 +233,12 @@ export type CicloContatoResultado = {
    * zerado. `atualizadas` conta só escrita real; o resto se absteve.
    */
   financeiro: { avaliadas: number; atualizadas: number; erros: number };
+  /**
+   * Mesma reserva HITS mudou de apartamento. Sem credencial, só o vínculo
+   * local muda. Com credencial, o lifecycle revoga o antigo e reabre o novo
+   * com o mesmo PIN. `pendentes` não atualiza o apartamento.
+   */
+  troca_apartamento: { avaliadas: number; atualizadas: number; pendentes: number; erros: number };
 };
 
 /**
@@ -243,6 +253,7 @@ export async function executarCicloContatoEMaterializacao(input: {
   buscarGuestRevenues: BuscarGuestRevenues;
   maxMaterializacoes?: number;
   maxLookups?: number;
+  aplicarTrocaApartamento?: AplicarTrocaApartamento;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
 }): Promise<CicloContatoResultado> {
   const { admin, detalhes } = input;
@@ -260,6 +271,7 @@ export async function executarCicloContatoEMaterializacao(input: {
     reconciliacao: { reservas: 0, contatos_atualizados: 0, erros: 0 },
     plano_refeicao: { avaliadas: 0, atualizadas: 0, erros: 0 },
     financeiro: { avaliadas: 0, atualizadas: 0, erros: 0 },
+    troca_apartamento: { avaliadas: 0, atualizadas: 0, pendentes: 0, erros: 0 },
   };
 
   const plano = await planejarEnriquecimentoContato({
@@ -343,6 +355,28 @@ export async function executarCicloContatoEMaterializacao(input: {
       else if (f.atualizado) out.financeiro.atualizadas += 1;
     } catch (_e) {
       out.financeiro.erros += 1;
+    }
+
+    // 2c. Apartamento das já locais. A comparação usa o detalhe já lido.
+    //     Credencial existente segue para o lifecycle; sem ele o apartamento
+    //     não é avançado, para o próximo ciclo ainda enxergar a troca.
+    out.troca_apartamento.avaliadas += 1;
+    try {
+      const t = await reconciliarTrocaApartamentoHits({
+        admin,
+        externalId: id,
+        synced,
+        aplicarTroca: input.aplicarTrocaApartamento,
+        log,
+      });
+      if (!t.ok) {
+        if (t.acao === "pendente") out.troca_apartamento.pendentes += 1;
+        else out.troca_apartamento.erros += 1;
+      } else if (t.acao === "apartamento" || t.acao === "lifecycle") {
+        out.troca_apartamento.atualizadas += 1;
+      }
+    } catch (_e) {
+      out.troca_apartamento.erros += 1;
     }
   }
 
