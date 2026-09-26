@@ -241,6 +241,82 @@ async function main(): Promise<void> {
     const retry = await aplicarLiberacaoPorRequisitos(ports2, "res-1");
     assert.equal(retry.enviado, true);
     assert.equal(ports2.get("res-1")?.senhaEnviada, true);
+    assert.equal(
+      ports2.events.filter((e) => e.tipo === "liberacao_manual_com_pendencias").length,
+      0,
+    );
+  }
+
+  // 7) confirmação sem execução e falha de provisionamento não gravam o override
+  {
+    resetCredentialReleaseOrchestratorLocks();
+    const waitingPorts = createMockPorts(
+      baseState({ pagamentoStatus: "pendente", fnrhStatus: "pendente" }),
+    );
+    const waiting = await aplicarLiberacaoCredenciais(waitingPorts, {
+      reservaId: "res-1",
+      origem: "manual",
+    });
+    assert.equal(waiting.enviado, false);
+    assert.equal(
+      waitingPorts.events.filter((e) => e.tipo === "liberacao_manual_com_pendencias").length,
+      0,
+    );
+
+    const failPorts = createMockPorts(
+      baseState({ pagamentoStatus: "pendente", fnrhStatus: "pendente" }),
+      { failGenerate: true },
+    );
+    const failed = await aplicarLiberacaoCredenciais(failPorts, {
+      reservaId: "res-1",
+      origem: "manual",
+      confirmacaoManual: true,
+    });
+    assert.equal(failed.enviado, false);
+    assert.equal(
+      failPorts.events.filter((e) => e.tipo === "liberacao_manual_com_pendencias").length,
+      0,
+    );
+    assert.ok(failPorts.events.some((e) => e.tipo === "falha_gerar_senha"));
+  }
+
+  // 8) sucesso grava uma vez; replay e fluxo sem pendência não duplicam
+  {
+    resetCredentialReleaseOrchestratorLocks();
+    const ports = createMockPorts(
+      baseState({ pagamentoStatus: "pendente", fnrhStatus: "completa" }),
+    );
+    const confirmed = await aplicarLiberacaoCredenciais(ports, {
+      reservaId: "res-1",
+      origem: "manual",
+      confirmacaoManual: true,
+    });
+    assert.equal(confirmed.enviado, true);
+    const replay = await aplicarLiberacaoCredenciais(ports, {
+      reservaId: "res-1",
+      origem: "manual",
+      confirmacaoManual: true,
+    });
+    assert.equal(replay.skipped, true);
+    assert.equal(replay.enviado, false);
+    assert.equal(
+      ports.events.filter((e) => e.tipo === "liberacao_manual_com_pendencias").length,
+      1,
+    );
+
+    const limpo = createMockPorts(
+      baseState({ pagamentoStatus: "pago", fnrhStatus: "completa" }),
+    );
+    const normal = await aplicarLiberacaoCredenciais(limpo, {
+      reservaId: "res-1",
+      origem: "manual",
+      confirmacaoManual: true,
+    });
+    assert.equal(normal.enviado, true);
+    assert.equal(
+      limpo.events.filter((e) => e.tipo === "liberacao_manual_com_pendencias").length,
+      0,
+    );
   }
 
   console.log(
