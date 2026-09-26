@@ -28,6 +28,18 @@ export type GoogleVisionOcrConfig = {
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const VISION_URL = "https://vision.googleapis.com/v1/images:annotate";
+/**
+ * PDF nao passa por `images:annotate`: esse endpoint so aceita imagem, e um
+ * PDF volta como erro 400. O caminho de documento e `files:annotate`, com
+ * `inputConfig` em vez de `image`. Era por isso que foto funcionava e PDF nao.
+ */
+const VISION_FILES_URL = "https://vision.googleapis.com/v1/files:annotate";
+/** Paginas lidas de um PDF. Documento pessoal cabe em duas com folga. */
+const PDF_MAX_PAGES = 2;
+
+export function isPdfMime(mime: string | null | undefined): boolean {
+  return String(mime ?? "").toLowerCase().trim() === "application/pdf";
+}
 const VISION_SCOPE = "https://www.googleapis.com/auth/cloud-vision";
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -158,17 +170,29 @@ export class GoogleVisionOcrProvider implements FnrhOcrProvider {
         "google_auth_timeout",
       );
 
-      const visionBody = {
-        requests: [
-          {
-            image: { content: bytesToBase64(request.bytes) },
-            features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
-          },
-        ],
-      };
+      const ehPdf = isPdfMime(request.mime_type);
+      const conteudo = bytesToBase64(request.bytes);
+      const visionBody = ehPdf
+        ? {
+            requests: [
+              {
+                inputConfig: { content: conteudo, mimeType: "application/pdf" },
+                features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
+                pages: Array.from({ length: PDF_MAX_PAGES }, (_v, i) => i + 1),
+              },
+            ],
+          }
+        : {
+            requests: [
+              {
+                image: { content: conteudo },
+                features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
+              },
+            ],
+          };
 
       const res = await withTimeout(
-        this.fetchImpl(VISION_URL, {
+        this.fetchImpl(ehPdf ? VISION_FILES_URL : VISION_URL, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -220,10 +244,18 @@ export class GoogleVisionOcrProvider implements FnrhOcrProvider {
         return this.fail("google_vision_error", started);
       }
 
-      const fullText =
-        first?.fullTextAnnotation?.text ||
-        first?.textAnnotations?.[0]?.description ||
-        "";
+      // `files:annotate` devolve uma resposta POR PAGINA dentro de
+      // `responses[0].responses[]`; `images:annotate` devolve o texto direto.
+      const paginas = (first as { responses?: Array<{ fullTextAnnotation?: { text?: string } }> })
+        ?.responses;
+      const fullText = Array.isArray(paginas)
+        ? paginas
+            .map((pg) => String(pg?.fullTextAnnotation?.text ?? ""))
+            .filter((t) => t.trim() !== "")
+            .join("\n")
+        : first?.fullTextAnnotation?.text ||
+          first?.textAnnotations?.[0]?.description ||
+          "";
 
       if (!String(fullText).trim()) {
         return {

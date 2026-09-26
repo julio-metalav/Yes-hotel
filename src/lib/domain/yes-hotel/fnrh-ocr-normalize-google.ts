@@ -15,6 +15,7 @@ import {
 } from "./fnrh-ocr-confidence.ts";
 import type { NormalizedOcrResult } from "./fnrh-ocr-normalize.ts";
 import type { FnrhOcrSuggestedFields } from "./fnrh-ocr-port.ts";
+import { sanitizarNomeHospede } from "./fnrh-nome-plausibilidade.ts";
 
 /** Confidence conservadora para heurística de texto (MEDIUM → preenche + review). */
 export const GOOGLE_OCR_HEURISTIC_CONFIDENCE = 0.7;
@@ -155,12 +156,42 @@ function looksLikePassportDocument(text: string): boolean {
   return /PASSAPORTE|PASSPORT|P<[A-Z]{3}/i.test(text);
 }
 
+/**
+ * Nome a partir do rotulo, sem atravessar a linha as cegas.
+ *
+ * O padrao antigo usava `[:\s]+` como separador, e `\s` casa quebra de linha.
+ * Em documento onde o rotulo fica numa linha e o valor na seguinte, ele pulava
+ * para a proxima linha e capturava o PROXIMO ROTULO -- foi assim que fichas em
+ * producao acabaram com "NOME" e "SOBRENOME" gravados como nome do hospede.
+ *
+ * Agora sao duas tentativas explicitas, nesta ordem:
+ *   1. valor na MESMA linha do rotulo ("NOME: ANA SILVA");
+ *   2. valor na linha SEGUINTE, e so se ela nao for outro rotulo.
+ *
+ * Em ambos os casos o candidato ainda passa por `sanitizarNomeHospede`, que
+ * recusa rotulo, data, numero e codigo de documento. Sem candidato plausivel,
+ * devolve vazio: campo em branco e melhor que nome falso na ficha oficial.
+ */
+const ROTULO_NOME_RE =
+  /(?:NOME\s+COMPLETO|NOME\s+E\s+SOBRENOME|NOME(?:\s*\/\s*NAME)?|SURNAME\s*\/\s*GIVEN\s+NAMES?|FULL\s+NAME)\s*:?[ \t]*(.*)$/im;
+
 function extractName(text: string): string {
-  const labeled = findLabeledValue(
-    text,
-    /(?:NOME(?:\s+\/\s+NAME)?|NOME\s+COMPLETO|NOME\s+E\s+SOBRENOME|SURNAME\/GIVEN\s+NAMES?)[:\s]+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-ZÁÉÍÓÚÂÊÔÃÕÇ\s']{4,80})/i,
-  );
-  if (labeled) return labeled.replace(/\s+/g, " ").trim().toUpperCase();
+  const linhas = String(text || "").split(/\r?\n/);
+  for (let i = 0; i < linhas.length; i += 1) {
+    const m = linhas[i]!.match(ROTULO_NOME_RE);
+    if (!m) continue;
+
+    // 1. mesma linha
+    const mesmaLinha = sanitizarNomeHospede(m[1]);
+    if (mesmaLinha) return mesmaLinha.replace(/\s+/g, " ").trim().toUpperCase();
+
+    // 2. linha seguinte, desde que nao seja outro rotulo
+    const proxima = linhas[i + 1];
+    if (proxima != null) {
+      const seguinte = sanitizarNomeHospede(proxima);
+      if (seguinte) return seguinte.replace(/\s+/g, " ").trim().toUpperCase();
+    }
+  }
   return "";
 }
 

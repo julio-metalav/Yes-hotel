@@ -245,15 +245,36 @@ console.log("\n=== FNRH OCR CPF / Passaporte canônico ===\n");
   assert.match(js, /step\.id !== "confira_dados"/);
   assert.match(js, /Encontramos estes dados no seu documento/);
   assert.match(js, /Alguns dados não foram identificados/);
+  assert.match(js, /var DOC_TYPES_BRASIL = \[/);
   assert.match(js, /Brasileiro — CPF/);
-  assert.match(js, /Estrangeiro — Passaporte/);
-  // DOC_TYPES só cpf/passport (sem cnh/rg/other como opção de jornada)
-  const docTypesBlock = js.slice(js.indexOf("var DOC_TYPES = ["), js.indexOf("];", js.indexOf("var DOC_TYPES = [")) + 2);
-  assert.match(docTypesBlock, /value: "cpf"/);
-  assert.match(docTypesBlock, /value: "passport"/);
-  assert.doesNotMatch(docTypesBlock, /value: "cnh"/);
-  assert.doesNotMatch(docTypesBlock, /value: "rg"/);
-  assert.doesNotMatch(docTypesBlock, /value: "other"/);
+  // O rótulo "Estrangeiro — Passaporte" saiu quando a lista passou a ser
+  // escolhida pelo fluxo: no exterior o passaporte não é o único documento
+  // aceito. O que importa cobrar é a capacidade, não o texto antigo.
+  assert.match(js, /var DOC_TYPES_EXTERIOR = \[/);
+  assert.match(js, /value: "passport"/);
+  // A jornada continua sem cnh/rg como opção -- eles são fonte de OCR, nao
+  // escolha do hóspede. A lista agora depende do fluxo: no Brasil, CPF e
+  // passaporte; no exterior, passaporte e documento estrangeiro (`other`).
+  const blocoBrasil = js.slice(
+    js.indexOf("var DOC_TYPES_BRASIL = ["),
+    js.indexOf("];", js.indexOf("var DOC_TYPES_BRASIL = [")) + 2,
+  );
+  assert.match(blocoBrasil, /value: "cpf"/);
+  assert.match(blocoBrasil, /value: "passport"/);
+  assert.doesNotMatch(blocoBrasil, /value: "other"/);
+
+  const blocoExterior = js.slice(
+    js.indexOf("var DOC_TYPES_EXTERIOR = ["),
+    js.indexOf("];", js.indexOf("var DOC_TYPES_EXTERIOR = [")) + 2,
+  );
+  assert.match(blocoExterior, /value: "passport"/);
+  assert.match(blocoExterior, /value: "other"/);
+  assert.doesNotMatch(blocoExterior, /value: "cpf"/);
+
+  for (const bloco of [blocoBrasil, blocoExterior]) {
+    assert.doesNotMatch(bloco, /value: "cnh"/);
+    assert.doesNotMatch(bloco, /value: "rg"/);
+  }
   ok("N. banner única + UI CPF/Passaporte");
 }
 

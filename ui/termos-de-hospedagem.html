@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Termos de Hospedagem — Yes Hotel</title>
+    <link rel="icon" href="data:," />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+    <style>
+      :root {
+        --bg: #f6f5f1;
+        --surface: #ffffff;
+        --ink: #103943;
+        --muted: #586d72;
+        --line: #e4e1d8;
+        --gold: #b8942e;
+        --gold-text: #856512;
+        --petroleo: #164a54;
+        --petroleo-press: #0e3038;
+        --focus: #2f7f8c;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+      body {
+        margin: 0;
+        background: #ecebe5;
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: 16px;
+        line-height: 1.6;
+      }
+      .doc { max-width: 680px; min-height: 100vh; margin: 0 auto; background: var(--bg); overflow-x: hidden; }
+      @media (min-width: 720px) { .doc { box-shadow: 0 0 0 1px #e2dfd6; } }
+      .doc-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 20px;
+        background: var(--surface);
+        border-top: 2px solid var(--gold);
+        border-bottom: 1px solid #ebe8e0;
+      }
+      .doc-header img { display: block; height: 32px; width: auto; }
+      .voltar {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 44px;
+        padding: 0 4px;
+        border: none;
+        background: transparent;
+        color: var(--petroleo);
+        font: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .voltar svg { width: 16px; height: 16px; }
+      .voltar:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+      main { padding: 28px 20px 16px; }
+      .eyebrow { margin: 0; font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.09em; color: var(--gold-text); }
+      h1 { margin: 8px 0 0; font-size: 27px; line-height: 33px; font-weight: 600; letter-spacing: -0.015em; }
+      .versao { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+      .versao code, .versao-final code { font-family: inherit; font-weight: 600; color: var(--ink); }
+      .intro { margin: 20px 0 0; color: var(--muted); }
+      section { margin-top: 32px; }
+      h2 {
+        margin: 0 0 10px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--line);
+        font-size: 17px;
+        line-height: 24px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      p { margin: 0 0 12px; }
+      ul { margin: 0 0 12px; padding-left: 22px; }
+      li { margin-bottom: 4px; }
+      li::marker { color: var(--gold); }
+      a { color: var(--petroleo); text-underline-offset: 3px; overflow-wrap: anywhere; }
+      a:hover { color: var(--petroleo-press); }
+      .versao-final { margin: 36px 0 0; padding-top: 16px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+      .rodape { padding: 8px 20px calc(32px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+      .rodape .voltar {
+        min-height: 52px;
+        padding: 0 20px;
+        border-radius: 12px;
+        background: var(--petroleo);
+        color: #ffffff;
+        font-size: 16px;
+      }
+      .rodape .voltar:active { background: var(--petroleo-press); }
+      .dica { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="doc">
+      <header class="doc-header">
+        <img src="./assets/yes-hotel-logo-horizontal-claro.svg" alt="Yes Hotel" width="66" height="32" />
+        <button type="button" class="voltar" data-voltar>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+          Voltar ao check-in
+        </button>
+      </header>
+
+      <main>
+        <p class="eyebrow">YES HOTEL</p>
+        <h1>Termos de Hospedagem</h1>
+        <p class="versao">Versão <code>terms-v1-2026-09</code></p>
+
+        <p class="intro">Ao concluir o pré-check-in e aceitar estes Termos de Hospedagem, o hóspede declara estar ciente das condições aplicáveis à sua estadia no Yes Hotel.</p>
+
+        <section aria-labelledby="t1">
+          <h2 id="t1">1. Tarifa e café da manhã</h2>
+          <p>A inclusão ou não do café da manhã depende da tarifa contratada e será informada nas condições da reserva.</p>
+          <p>Quando não estiver incluído na tarifa, o café da manhã poderá ser contratado mediante pagamento no ato da reserva ou diretamente no restaurante do hotel.</p>
+        </section>
+
+        <section aria-labelledby="t2">
+          <h2 id="t2">2. Política de cancelamento</h2>
+          <p>Reservas canceladas com antecedência mínima de 24 horas em relação ao horário previsto para o check-in poderão ser canceladas sem custo.</p>
+          <p>Cancelamentos realizados fora desse prazo estarão sujeitos às condições específicas da tarifa e da reserva contratada.</p>
+        </section>
+
+        <section aria-labelledby="t3">
+          <h2 id="t3">3. Pagamento e garantia da reserva</h2>
+          <p>O pagamento da hospedagem deverá ser realizado de forma 100% antecipada, por meio do link de pagamento disponibilizado após a reserva ou por PIX.</p>
+          <p>O link de pagamento poderá disponibilizar QR Code para pagamento via PIX ou outras formas de pagamento eventualmente oferecidas pelo hotel.</p>
+          <p>As instruções e os dados para pagamento serão informados ao hóspede nos canais oficiais do Yes Hotel.</p>
+        </section>
+
+        <section aria-labelledby="t4">
+          <h2 id="t4">4. Check-in e check-out</h2>
+          <p>O check-in é realizado a partir das 13h00.</p>
+          <p>O check-out deverá ocorrer até as 11h00.</p>
+        </section>
+
+        <section aria-labelledby="t5">
+          <h2 id="t5">5. Animais de estimação</h2>
+          <p>É permitida a hospedagem de cães de pequeno porte, desde que não sejam ruidosos, mediante pagamento de taxa adicional de R$ 50,00 (cinquenta reais) por dia.</p>
+        </section>
+
+        <section aria-labelledby="t6">
+          <h2 id="t6">6. Proibição de fumar</h2>
+          <p>É expressamente proibido fumar dentro dos apartamentos.</p>
+          <p>O descumprimento desta regra sujeitará o hóspede a:</p>
+          <ul>
+            <li>multa no valor de R$ 1.000,00 (mil reais);</li>
+            <li>rescisão do contrato de hospedagem; e</li>
+            <li>imediata desocupação do imóvel.</li>
+          </ul>
+        </section>
+
+        <section aria-labelledby="t7">
+          <h2 id="t7">7. Cadastro obrigatório dos hóspedes</h2>
+          <p>Todos os hóspedes que permanecerão no apartamento deverão estar devidamente cadastrados antes do check-in.</p>
+          <p>O cadastro individual dos ocupantes é condição obrigatória para a utilização da hospedagem.</p>
+        </section>
+
+        <section aria-labelledby="t8">
+          <h2 id="t8">8. Pessoas não cadastradas, hóspedes extras e visitas</h2>
+          <p>Não é permitida a entrada no edifício, inclusive nas áreas comuns, nem nos apartamentos, de qualquer pessoa que não esteja vinculada à reserva e previamente cadastrada.</p>
+          <p>Também não são permitidos hóspedes extras, visitantes, festas ou eventos envolvendo pessoas que não constem regularmente da reserva.</p>
+          <p>O descumprimento desta regra sujeitará o hóspede a:</p>
+          <ul>
+            <li>multa no valor de R$ 1.000,00 (mil reais);</li>
+            <li>rescisão do contrato de hospedagem; e</li>
+            <li>imediata desocupação do imóvel.</li>
+          </ul>
+        </section>
+
+        <section aria-labelledby="t9">
+          <h2 id="t9">9. Tecnologia instalada nos apartamentos</h2>
+          <p>Os apartamentos possuem equipamentos destinados à automação e à gestão remota do empreendimento, incluindo, entre outros:</p>
+          <ul>
+            <li>modem;</li>
+            <li>gateway;</li>
+            <li>Hub Zigbee;</li>
+            <li>sensores de presença MMwave;</li>
+            <li>dispositivos de monitoramento de energia;</li>
+            <li>sistemas relacionados às fechaduras eletrônicas e climatização.</li>
+          </ul>
+          <p>Esses equipamentos poderão, entre outras funções, auxiliar no gerenciamento do consumo de energia e no desligamento dos aparelhos de ar-condicionado quando o imóvel estiver desocupado.</p>
+          <p>É expressamente proibido desligar, desconectar, remover, alterar ou interferir no funcionamento desses equipamentos.</p>
+          <p>Caso seja identificado desligamento ou intervenção realizada pelo hóspede, poderá ser interrompida a energia geral do apartamento até que um funcionário do Yes Hotel compareça ao local para religar e conferir os equipamentos.</p>
+          <p>Esses equipamentos não possuem finalidade invasiva e são utilizados exclusivamente para a gestão, automação, segurança operacional e eficiência do empreendimento.</p>
+          <p>A equipe do Yes Hotel permanece disponível para prestar esclarecimentos sobre a função dos dispositivos instalados.</p>
+          <p>O descumprimento desta regra poderá resultar na imediata rescisão do contrato de hospedagem.</p>
+        </section>
+
+        <section aria-labelledby="t10">
+          <h2 id="t10">10. Vaga de garagem</h2>
+          <p>Cada apartamento possui vaga de garagem específica, identificada com o mesmo número do apartamento.</p>
+          <p>O hóspede deverá utilizar exclusivamente a vaga correspondente à sua unidade.</p>
+        </section>
+
+        <section aria-labelledby="t11">
+          <h2 id="t11">11. Senhas de acesso</h2>
+          <p>As senhas das fechaduras eletrônicas dos portões de pedestres e da porta do apartamento serão disponibilizadas após o preenchimento do pré-check-in e o atendimento das condições aplicáveis à reserva.</p>
+          <p>As senhas terão validade exclusivamente durante o período autorizado da hospedagem.</p>
+          <p>O hóspede é responsável pela guarda e uso adequado das credenciais de acesso disponibilizadas.</p>
+        </section>
+
+        <section aria-labelledby="t12">
+          <h2 id="t12">12. Menores de idade</h2>
+          <p>Não é permitida a hospedagem de menores de 18 anos desacompanhados de seus responsáveis, observadas as exigências legais aplicáveis.</p>
+        </section>
+
+        <section aria-labelledby="t13">
+          <h2 id="t13">13. Limpeza, arrumação e troca de enxoval</h2>
+          <p>A hospedagem inclui serviço de limpeza e arrumação, com troca de enxoval a cada 3 dias.</p>
+          <p>Caso o hóspede necessite de limpeza, arrumação ou troca de enxoval antes desse período, poderá solicitar o atendimento à equipe do hotel.</p>
+        </section>
+
+        <section aria-labelledby="t14">
+          <h2 id="t14">14. Lavanderia autosserviço</h2>
+          <p>O edifício dispõe de lavanderia na modalidade autosserviço, com pagamento pay-per-use diretamente no equipamento.</p>
+          <p>O valor é de R$ 20,00 (vinte reais) por ciclo de lavagem ou secagem, para até 10 kg de roupas.</p>
+          <p>Os produtos químicos necessários ao processo estão incluídos e são fornecidos automaticamente pelos próprios equipamentos.</p>
+        </section>
+
+        <section aria-labelledby="t15">
+          <h2 id="t15">15. Festas e eventos</h2>
+          <p>Não são permitidas festas ou eventos nos apartamentos ou nas áreas do empreendimento.</p>
+          <p>Também não é permitido receber pessoas que não estejam regularmente vinculadas e cadastradas na reserva.</p>
+        </section>
+
+        <section aria-labelledby="t16">
+          <h2 id="t16">16. Controles e dispositivos fornecidos</h2>
+          <p>Todos os controles ou dispositivos disponibilizados durante a hospedagem, inclusive controles de portão, deverão permanecer no apartamento ao término da estadia.</p>
+          <p>A não devolução poderá resultar na cobrança do respectivo valor de reposição.</p>
+        </section>
+
+        <section aria-labelledby="t17">
+          <h2 id="t17">17. Saída de veículos</h2>
+          <p>O portão de veículos possui sensor de aproximação para saída.</p>
+          <p>Para deixar o edifício, basta aproximar o veículo do portão para o acionamento do sistema.</p>
+        </section>
+
+        <section aria-labelledby="t18">
+          <h2 id="t18">18. Aceite dos termos</h2>
+          <p>Ao marcar a opção de aceite durante o pré-check-in, o hóspede declara que:</p>
+          <ul>
+            <li>teve acesso a estes Termos de Hospedagem;</li>
+            <li>teve oportunidade de lê-los antes da confirmação;</li>
+            <li>compreendeu seu conteúdo;</li>
+            <li>concorda com as condições aplicáveis à hospedagem.</li>
+          </ul>
+          <p>A versão aceita dos Termos ficará vinculada ao registro do pré-check-in realizado pelo hóspede.</p>
+        </section>
+
+        <p class="versao-final">Versão: <code>terms-v1-2026-09</code></p>
+      </main>
+
+      <footer class="rodape">
+        <button type="button" class="voltar" data-voltar>Voltar ao check-in</button>
+        <p class="dica" id="dica-voltar" hidden>Para voltar ao check-in, feche esta aba.</p>
+      </footer>
+    </div>
+
+    <script>
+      (function () {
+        // A página abre em nova aba a partir da Etapa 6. Voltar = fechar esta
+        // aba; o check-in continua na aba de origem, como foi deixado. Se o
+        // navegador não permitir fechar, volta no histórico ou orienta.
+        function voltar() {
+          try {
+            window.close();
+          } catch (_e) {
+            /* segue para o plano B */
+          }
+          setTimeout(function () {
+            if (window.closed) return;
+            if (window.history.length > 1) {
+              window.history.back();
+              return;
+            }
+            var dica = document.getElementById("dica-voltar");
+            if (dica) dica.hidden = false;
+          }, 250);
+        }
+        document.querySelectorAll("[data-voltar]").forEach(function (b) {
+          b.addEventListener("click", voltar);
+        });
+      })();
+    </script>
+  </body>
+</html>

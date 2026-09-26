@@ -10,6 +10,7 @@ import {
   type FnrhFieldProvenanceMap,
 } from "./fnrh-field-provenance.ts";
 import type { FnrhOcrSuggestedFields } from "./fnrh-ocr-port.ts";
+import { sanitizarNomeHospede } from "./fnrh-nome-plausibilidade.ts";
 
 /** Campos FNRH que OCR pode persistir (sem texto bruto / sem CNH-RG extras). */
 export const FNRH_OCR_PERSISTABLE_KEYS = [
@@ -49,7 +50,11 @@ export function canonicalizeOcrSuggestedFields(
   const src = suggested ?? {};
   const out: Partial<Record<FnrhOcrPersistableKey, string>> = {};
 
-  const nome = String(src.hospede_nome ?? "").trim();
+  // Barreira final antes de gravar na ficha: vale para QUALQUER provider,
+  // inclusive um futuro. Rotulo do documento ("NOME", "SOBRENOME"), data,
+  // numero ou codigo nunca viram nome do hospede. Sem candidato plausivel o
+  // campo fica vazio e o hospede confirma manualmente.
+  const nome = sanitizarNomeHospede(src.hospede_nome);
   if (nome) out.hospede_nome = nome;
 
   const dob = String(src.data_nascimento ?? "").trim().slice(0, 10);
