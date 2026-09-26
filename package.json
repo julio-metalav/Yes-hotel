@@ -115,6 +115,7 @@
     "test:yes:hotel-operacao-config": "tsx scripts/test-hotel-operacao-config.ts",
     "test:mensagens:template": "tsx scripts/test-mensagens-template.ts",
     "test:mensagens:ui": "tsx scripts/test-mensagens-ui.ts",
+    "test:mensagens:tela-render": "tsx scripts/test-mensagens-tela-render.ts",
     "test:boas-vindas-idempotencia": "tsx scripts/test-boas-vindas-idempotencia.ts",
     "test:senha-auto-envio-13h-cron": "tsx scripts/test-senha-auto-envio-13h-cron.ts",
     "test:yes:cafe-fechamento-dia": "tsx scripts/test-cafe-fechamento-dia.ts",

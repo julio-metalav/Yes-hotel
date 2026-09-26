@@ -65,6 +65,7 @@ function applyDashboardCards(user) {
     wifi: "wifi",
     geo: "geo",
     hotel: "hotel",
+    mensagens: "mensagens",
     usuarios: "usuarios",
   };
 
