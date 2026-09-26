@@ -175,8 +175,15 @@ async function main() {
     assert.equal(r.results[0]?.status, "processed_no_pending");
     assert.equal(h.state.events.length, 1);
     assert.equal(h.state.events[0].source, ACCESS_EVENT_SOURCE_POLLING);
-    assert.equal(h.state.accessOutbox.length, 1);
-    assert.equal(h.state.accessOutbox[0].event_type, "internal_first_access");
+    // Um aviso interno + boas-vindas do hospede nos dois canais. Cobrar total
+    // 1 era o contrato de antes da boas-vindas no primeiro acesso, e escondia
+    // justamente a mensagem que faltava.
+    const tipos = h.state.accessOutbox.map((o) => o.event_type + ":" + o.channel).sort();
+    assert.deepEqual(tipos, [
+      "guest_first_access_welcome:email",
+      "guest_first_access_welcome:whatsapp",
+      "internal_first_access:whatsapp",
+    ]);
     assert.equal(h.state.tolerances.length, 0);
     assert.ok(store.cps.get(FIX_LOCK_APT)!.last_lock_date_ms >= NEW_LOCK_DATE);
     ok("A novo recordType=4 processa");
@@ -208,7 +215,16 @@ async function main() {
         r2.results[0]?.status === "ignored",
     );
     assert.equal(h.state.events.length, 1);
-    assert.equal(h.state.accessOutbox.length, 1);
+    // O replay nao pode acrescentar nada: os mesmos tres do primeiro ciclo.
+    const esperado = [
+      "guest_first_access_welcome:email",
+      "guest_first_access_welcome:whatsapp",
+      "internal_first_access:whatsapp",
+    ];
+    assert.deepEqual(
+      h.state.accessOutbox.map((o) => o.event_type + ":" + o.channel).sort(),
+      esperado,
+    );
     ok("B replay não duplica");
   }
 
@@ -306,7 +322,19 @@ async function main() {
     assert.ok(
       r.results[0]?.status === "ignored" || r.results[0]?.status === "already_started",
     );
-    assert.equal(h.state.accessOutbox.length, 0);
+    // A entrada nao pode ser remarcada nem a tolerancia reaberta.
+    assert.equal(
+      h.state.reservationEntered[FIX_RES_ID]!.first_access_at,
+      "2026-08-11T22:00:00.000Z",
+      "horario da primeira entrada foi reescrito",
+    );
+    assert.equal(h.state.tolerances.length, 0);
+    // O outbox pode ser reparado, nunca duplicado: uma chave por mensagem.
+    for (const tipo of ["internal_first_access", "guest_first_access_welcome"]) {
+      const doTipo = h.state.accessOutbox.filter((o) => o.event_type === tipo);
+      const chaves = new Set(doTipo.map((o) => o.idempotency_key));
+      assert.equal(chaves.size, doTipo.length, "chave repetida em " + tipo);
+    }
     ok("G já entrou não cria segundo first access");
   }
 
