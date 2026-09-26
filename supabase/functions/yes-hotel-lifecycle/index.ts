@@ -28,6 +28,9 @@ import {
   collectOccupiedPasscodesFromRows,
   shouldRollbackPartialPasscodeAttempt,
 } from "../../../src/lib/domain/yes-hotel/ttlock-passcode-uniqueness.ts";
+import { handleRoomChange } from "../../../src/lib/application/yes-hotel/credential-lifecycle.ts";
+import { createSupabaseProvisioningRepository } from "../../../src/lib/application/yes-hotel/supabase-provisioning-repo.ts";
+import { getTtlockClient } from "../../../src/lib/integrations/ttlock/client.ts";
 import {
   attemptProvisionLockWithSamePinRetry,
   encodeTransientRetryState,
@@ -96,6 +99,8 @@ const PAYLOAD_MERGE_KEYS = [
   "credencial_id",
   "valido_de",
   "valido_ate",
+  "novo_apartamento",
+  "novoApartamento",
 ] as const;
 
 function resolvePayloadRecord(body: Record<string, unknown>): Record<string, unknown> {
@@ -228,7 +233,7 @@ async function ensureCallerAllowed(request: Request): Promise<void> {
   const internalCaller = String(request.headers.get("x-yes-internal-caller") ?? "")
     .trim()
     .toLowerCase();
-  const internalCallers = new Set(["send-senha", "ttlock-provision-retry"]);
+  const internalCallers = new Set(["send-senha", "ttlock-provision-retry", "hits-room-change"]);
   if (internalCallers.has(internalCaller) && isServiceRoleBearer(token, supabaseServiceKey)) {
     return;
   }
@@ -2714,6 +2719,92 @@ async function handleLifecycleUpdateValidity(
   );
 }
 
+async function handleLifecycleRoomChange(
+  request: Request,
+  payload: Record<string, unknown>,
+): Promise<Response> {
+  await ensureCallerAllowed(request);
+  const reservaId = requireReservaId(payload);
+  const novoApartamento = String(payload.novo_apartamento ?? payload.novoApartamento ?? "").trim();
+  if (!novoApartamento) {
+    throw new HttpError("novo_apartamento obrigatório.", 400);
+  }
+
+  const hasCredentials = Boolean(ttlockClientId && ttlockClientSecret && ttlockUsername && ttlockPassword);
+  const result = await handleRoomChange(
+    reservaId,
+    {
+      repository: createSupabaseProvisioningRepository(adminClient),
+      ttlockClient: getTtlockClient({
+        config: {
+          clientId: ttlockClientId,
+          clientSecret: ttlockClientSecret,
+          username: ttlockUsername,
+          password: ttlockPassword,
+          tokenUrl: ttlockTokenUrl,
+          apiBaseUrl: ttlockApiBase,
+          enabled: hasCredentials,
+          hasCredentials,
+        },
+      }),
+    },
+    novoApartamento,
+  );
+
+  if (!result.concluida) {
+    await insertReservaEvento(
+      reservaId,
+      "ttlock_room_change_pendente",
+      "Troca de apartamento pendente",
+      {
+        de: result.apartamentoAnterior,
+        para: result.apartamentoNovo,
+        motivo: result.motivo,
+        pin_preservado: result.pinPreservado,
+      },
+    );
+    return jsonResponse(
+      {
+        ok: false,
+        motivo: result.motivo,
+        pin_preservado: result.pinPreservado,
+        apartamento_anterior: result.apartamentoAnterior,
+        apartamento_novo: result.apartamentoNovo,
+      },
+      409,
+    );
+  }
+
+  const apartamento = result.apartamentoNovo ?? novoApartamento;
+  const { error } = await adminClient
+    .from("operacional_reservas")
+    .update({ apartamento, updated_at: new Date().toISOString() })
+    .eq("id", reservaId);
+  if (error) {
+    return jsonResponse({ ok: false, motivo: "apartamento_nao_atualizado" }, 500);
+  }
+
+  await insertReservaEvento(
+    reservaId,
+    "ttlock_room_change",
+    "Apartamento da reserva atualizado",
+    {
+      de: result.apartamentoAnterior,
+      para: apartamento,
+      motivo: result.motivo,
+      pin_preservado: result.pinPreservado,
+      mensagem_enviada: false,
+    },
+  );
+
+  return jsonResponse({
+    ok: true,
+    motivo: result.motivo,
+    pin_preservado: result.pinPreservado,
+    apartamento,
+  });
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -2750,11 +2841,14 @@ Deno.serve(async (request: Request) => {
     if (action === "list_pending_cleanup") {
       return await listPendingCleanup(request);
     }
+    if (action === "lifecycle_room_change") {
+      return await handleLifecycleRoomChange(request, payload);
+    }
 
     return jsonResponse(
       {
         error:
-          "Ação não suportada. Use: lifecycle_cancel, lifecycle_checkout, lifecycle_provision, lifecycle_gerar_nova_senha, lifecycle_update_validity, sync_summary, retry_sync, list_pending_cleanup.",
+          "Ação não suportada. Use: lifecycle_cancel, lifecycle_checkout, lifecycle_provision, lifecycle_gerar_nova_senha, lifecycle_update_validity, lifecycle_room_change, sync_summary, retry_sync, list_pending_cleanup.",
       },
       400,
     );

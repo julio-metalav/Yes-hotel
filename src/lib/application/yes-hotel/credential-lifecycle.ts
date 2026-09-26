@@ -5,6 +5,7 @@
 
 import type { TtlockClient } from "../../integrations/ttlock/client.ts";
 import { logTtlockLifecycle } from "../../integrations/ttlock/lifecycle-log.ts";
+import { accessCodesForApartment, canonicalApartmentCode } from "../../domain/yes-hotel/hits-room-change.ts";
 import { generateRandomTtlockPasscode } from "../../domain/yes-hotel/ttlock-credential-format.ts";
 import type { CredencialItemRow, CredencialRow, ProvisioningRepository } from "./provisioning-executor.ts";
 import { processarCredencialDeAcesso } from "./provisioning-executor.ts";
@@ -47,6 +48,13 @@ export interface ReprovisionResult {
 export interface LifecycleDeps {
   repository: ProvisioningRepository;
   ttlockClient: TtlockClient;
+  retry?: {
+    shortRetryMax?: number;
+    shortDelayMs?: number;
+    shortBudgetMs?: number;
+    phase2Max?: number;
+    sleepFn?: (ms: number) => Promise<void>;
+  };
 }
 
 const NOW = () => new Date().toISOString();
@@ -573,41 +581,119 @@ export async function handleLateCheckout(
   });
 }
 
+export type RoomChangeMotivo =
+  | "noop"
+  | "credencial_revogada_so_apartamento"
+  | "apenas_local"
+  | "reconciliada"
+  | "revogacao_pendente"
+  | "provisionamento_falhou";
+
+export type RoomChangeResult = ReprovisionResult & {
+  itensAntigosRevogados: number;
+  itensNovosInseridos: number;
+  concluida: boolean;
+  motivo: RoomChangeMotivo;
+  pinPreservado: boolean;
+  apartamentoAnterior: string | null;
+  apartamentoNovo: string | null;
+};
+
+function itemTemPasscodeRemoto(item: {
+  status_provisionamento: string;
+  remote_keyboard_pwd_id: number | null;
+}): boolean {
+  if (item.remote_keyboard_pwd_id != null) return true;
+  return item.status_provisionamento === "provisionado" || item.status_provisionamento === "pendente_limpeza";
+}
+
 /**
- * Troca de apartamento: revoga itens do apartamento/bloco antigo, insere itens do novo e provisiona.
- * Mantém o mesmo passcode da credencial.
+ * Troca de apartamento da mesma reserva.
+ *
+ * Ordem: revoga só o que não pertence ao apartamento novo; portões do mesmo
+ * bloco permanecem. Só então provisiona o destino, com o PIN que já existe.
+ * Se a revogação do antigo falhar, não provisiona o novo.
+ * Se ainda não havia passcode remoto, só retargeta os itens locais — sem
+ * delete na fechadura e sem gerar PIN.
  */
 export async function handleRoomChange(
   reservaId: string,
   deps: LifecycleDeps,
   novoApartamento: string,
-): Promise<ReprovisionResult & { itensAntigosRevogados: number; itensNovosInseridos: number }> {
+): Promise<RoomChangeResult> {
   const repo = deps.repository;
   const credencial = await repo.getCredencialPorReserva(reservaId);
   if (!credencial) throw new Error(`Nenhuma credencial encontrada para reserva: ${reservaId}`);
 
-  const apartamentoAntigo = await repo.getReservaApartment(reservaId);
-  const numAntigo = apartamentoAntigo ? apartamentoAntigo.padStart(2, "0") : "";
-  const numNovo = novoApartamento.trim().replace(/\D/g, "");
-  const numNovoNorm = numNovo.length <= 2 ? numNovo.padStart(2, "0") : numNovo.slice(0, 2);
+  const apartamentoAntigo = canonicalApartmentCode(await repo.getReservaApartment(reservaId));
+  const numNovoNorm = canonicalApartmentCode(novoApartamento);
+  const pinAntes = credencial.codigo_credencial ? String(credencial.codigo_credencial).trim() : "";
+  const base = {
+    credencialId: credencial.id,
+    passcode: pinAntes || null,
+    itensAntigosRevogados: 0,
+    itensNovosInseridos: 0,
+    pinPreservado: true,
+    apartamentoAnterior: apartamentoAntigo,
+    apartamentoNovo: numNovoNorm,
+  };
 
-  const itens = await repo.getItens(credencial.id);
-  const codigosAntigos = new Set<string>();
-  if (numAntigo) {
-    codigosAntigos.add(`APT-${numAntigo}`);
-    const gateCode = parseInt(numAntigo, 10) <= 20 ? "1947" : "1967";
-    codigosAntigos.add(`GATE-${gateCode}-EXTERNAL`);
-    codigosAntigos.add(`GATE-${gateCode}-INTERNAL`);
+  if (!numNovoNorm) {
+    throw new Error(`Nenhuma fechadura encontrada para apartamento: ${novoApartamento}. Verifique se o numero e valido (01-40).`);
+  }
+  if (apartamentoAntigo === numNovoNorm) {
+    return {
+      ...base,
+      status: credencial.status,
+      revogados: 0,
+      provisionados: 0,
+      falhas: 0,
+      erros: [],
+      concluida: true,
+      motivo: "noop",
+    };
+  }
+  if (credencial.status === "revogada") {
+    return {
+      ...base,
+      status: "revogada",
+      revogados: 0,
+      provisionados: 0,
+      falhas: 0,
+      erros: [],
+      concluida: true,
+      motivo: "credencial_revogada_so_apartamento",
+    };
   }
 
+  const destinos = await repo.getFechadurasForApartment(numNovoNorm);
+  if (destinos.length === 0) {
+    throw new Error(`Nenhuma fechadura encontrada para apartamento: ${novoApartamento}. Verifique se o numero e valido (01-40).`);
+  }
+  const fechadurasNovas = new Set(destinos.map((d) => d.fechadura_id));
+  const codigosAntigos = new Set(apartamentoAntigo ? accessCodesForApartment(apartamentoAntigo) : []);
+
+  const itens = await repo.getItens(credencial.id);
+  const haviaRemoto = itens.some(itemTemPasscodeRemoto);
+  const agora = new Date().toISOString();
   let itensAntigosRevogados = 0;
-  const now = new Date().toISOString();
+  let revogacaoPendente = false;
 
   for (const item of itens) {
-    if (!codigosAntigos.has(item.codigo_logico_destino)) continue;
-    if (item.status_provisionamento !== "provisionado" && item.status_provisionamento !== "falhou") continue;
+    const antigoSomente =
+      codigosAntigos.has(item.codigo_logico_destino) && !fechadurasNovas.has(item.fechadura_id);
+    if (!antigoSomente) continue;
+    if (item.status_provisionamento === "revogado") continue;
 
-    if (item.remote_keyboard_pwd_id != null && deps.ttlockClient.isAvailable()) {
+    if (item.remote_keyboard_pwd_id != null) {
+      if (!deps.ttlockClient.isAvailable()) {
+        await repo.updateItem(item.id, {
+          status_provisionamento: "pendente_limpeza",
+          ultimo_erro: "TTLock indisponível na troca de apartamento; o apto antigo segue com o PIN.",
+        });
+        revogacaoPendente = true;
+        continue;
+      }
       try {
         await deps.ttlockClient.deleteKeyboardPassword({
           lockId: item.lock_id_ttlock,
@@ -618,46 +704,144 @@ export async function handleRoomChange(
           status_provisionamento: "pendente_limpeza",
           ultimo_erro: "Erro ao revogar remoto no room change",
         });
-        itensAntigosRevogados++;
+        revogacaoPendente = true;
         continue;
       }
     }
-    // Sucesso no delete ou item sem passcode remoto: revogado + revogado_em (local ou confirmado).
+
     await repo.updateItem(item.id, {
       status_provisionamento: "revogado",
-      revogado_em: now,
-      ultimo_erro: null,
+      revogado_em: agora,
+      ultimo_erro: item.remote_keyboard_pwd_id == null ? "substituido_antes_do_provisionamento" : null,
     });
     itensAntigosRevogados++;
   }
 
-  const destinos = await repo.getFechadurasForApartment(numNovoNorm);
-  if (destinos.length === 0) {
-    throw new Error(`Nenhuma fechadura encontrada para apartamento: ${novoApartamento}. Verifique se o numero e valido (01-40).`);
+  if (revogacaoPendente) {
+    const msg = `Troca de apartamento ${apartamentoAntigo ?? "—"} → ${numNovoNorm} pendente: o apto antigo ainda pode ter o PIN. O novo não foi provisionado.`;
+    await repo.updateCredencial(credencial.id, {
+      last_sync_error: msg,
+      last_sync_attempt_at: agora,
+      sync_status: "failed",
+    });
+    return {
+      ...base,
+      status: credencial.status,
+      revogados: itensAntigosRevogados,
+      provisionados: 0,
+      falhas: 1,
+      erros: [msg],
+      itensAntigosRevogados,
+      concluida: false,
+      motivo: "revogacao_pendente",
+    };
   }
 
   const itensExistentes = await repo.getItens(credencial.id);
-  const fechadurasJaNaCredencial = new Set(itensExistentes.map((i) => i.fechadura_id));
+  const porFechadura = new Map(itensExistentes.map((i) => [i.fechadura_id, i]));
   let itensNovosInseridos = 0;
-  for (const d of destinos) {
-    if (fechadurasJaNaCredencial.has(d.fechadura_id)) continue;
-    await repo.insertItem(credencial.id, d);
-    fechadurasJaNaCredencial.add(d.fechadura_id);
-    itensNovosInseridos++;
+  for (const destino of destinos) {
+    const existente = porFechadura.get(destino.fechadura_id);
+    if (!existente) {
+      const criado = await repo.insertItem(credencial.id, destino);
+      porFechadura.set(destino.fechadura_id, criado);
+      itensNovosInseridos++;
+      continue;
+    }
+    if (existente.status_provisionamento === "revogado") {
+      await repo.updateItem(existente.id, {
+        status_provisionamento: "pendente",
+        ultimo_erro: null,
+        revogado_em: null,
+        remote_keyboard_pwd_id: null,
+        codigo_enviado: null,
+        provisionado_em: null,
+      });
+      itensNovosInseridos++;
+    }
   }
 
-  const provisionResult = await processarCredencialDeAcesso(credencial.id, deps);
+  if (!haviaRemoto) {
+    return {
+      ...base,
+      status: credencial.status,
+      revogados: itensAntigosRevogados,
+      provisionados: 0,
+      falhas: 0,
+      erros: [],
+      itensAntigosRevogados,
+      itensNovosInseridos,
+      concluida: true,
+      motivo: "apenas_local",
+    };
+  }
+
+  if (!pinAntes) {
+    const msg = `Troca de apartamento ${apartamentoAntigo ?? "—"} → ${numNovoNorm}: havia passcode remoto sem PIN local. A troca não gerou senha nova.`;
+    await repo.updateCredencial(credencial.id, {
+      last_sync_error: msg,
+      last_sync_attempt_at: new Date().toISOString(),
+      sync_status: "failed",
+    });
+    return {
+      ...base,
+      status: credencial.status,
+      revogados: itensAntigosRevogados,
+      provisionados: 0,
+      falhas: 1,
+      erros: [msg],
+      itensAntigosRevogados,
+      itensNovosInseridos,
+      concluida: false,
+      motivo: "provisionamento_falhou",
+    };
+  }
+
+  const provisionResult = await processarCredencialDeAcesso(credencial.id, {
+    ...deps,
+    preserveExistingPasscode: pinAntes.length > 0,
+  });
+  const pinDepois = provisionResult.passcode ? String(provisionResult.passcode).trim() : "";
+  const pinOk = !pinAntes || pinDepois === pinAntes;
+  const concluida = provisionResult.falhas === 0 && provisionResult.accessReady === true && pinOk;
+  if (!concluida) {
+    const msg = pinOk
+      ? `Troca de apartamento ${apartamentoAntigo ?? "—"} → ${numNovoNorm}: apto antigo revogado e o novo não ficou provisionado. O PIN foi mantido.`
+      : `Troca de apartamento ${apartamentoAntigo ?? "—"} → ${numNovoNorm}: o provisionamento trocaria o PIN. A troca não foi concluída.`;
+    await repo.updateCredencial(credencial.id, {
+      last_sync_error: msg,
+      last_sync_attempt_at: new Date().toISOString(),
+      sync_status: "failed",
+    });
+    return {
+      ...base,
+      status: provisionResult.status,
+      passcode: pinAntes || provisionResult.passcode,
+      revogados: itensAntigosRevogados,
+      provisionados: provisionResult.provisionados,
+      falhas: Math.max(provisionResult.falhas, pinOk ? 0 : 1),
+      erros: [...provisionResult.erros, msg],
+      itensAntigosRevogados,
+      itensNovosInseridos,
+      concluida: false,
+      motivo: "provisionamento_falhou",
+      pinPreservado: pinOk,
+    };
+  }
 
   return {
-    credencialId: credencial.id,
+    ...base,
     status: provisionResult.status,
-    passcode: provisionResult.passcode,
+    passcode: pinDepois || pinAntes || null,
     revogados: itensAntigosRevogados,
     provisionados: provisionResult.provisionados,
-    falhas: provisionResult.falhas,
-    erros: provisionResult.erros,
+    falhas: 0,
+    erros: [],
     itensAntigosRevogados,
     itensNovosInseridos,
+    concluida: true,
+    motivo: "reconciliada",
+    pinPreservado: true,
   };
 }
 

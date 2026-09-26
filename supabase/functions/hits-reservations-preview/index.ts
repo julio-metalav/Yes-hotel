@@ -49,6 +49,7 @@ import {
   executarCicloContatoEMaterializacao,
   HITS_AUTO_MATERIALIZAR_MAX_POR_CICLO,
 } from "../../../src/lib/integrations/hits/hits-contato-sync.ts";
+import { aplicarTrocaApartamentoViaLifecycle } from "../../../src/lib/integrations/hits/hits-room-change-remote.ts";
 import type { SyncedReservation } from "../../../src/lib/domain/yes-hotel/synced-reservation.ts";
 
 /**
@@ -259,6 +260,7 @@ Deno.serve(async (req: Request) => {
             entityIds,
             deadlineAtMs: startedAt + HITS_POS_SNAPSHOT_DEADLINE_MS,
           }),
+        aplicarTrocaApartamento: aplicarTrocaApartamentoViaLifecycle,
         log: (msg, extra) => console.error(msg, extra ?? {}),
       });
     }
