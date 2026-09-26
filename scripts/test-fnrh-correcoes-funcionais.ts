@@ -189,16 +189,28 @@ async function main() {
 
   console.log("\n== C. Brasil exige CPF; exterior nao ==");
   {
-    // A pergunta passou para a etapa 2, ANTES da exigencia de documento.
+    // Redesign aprovado: a pergunta "Resido no exterior" fica na Etapa 1 --
+    // ainda ANTES da exigencia de documento, que so acontece na Etapa 2.
+    // Para quem nao percebeu, a Etapa 2 oferece o atalho junto ao CPF, que
+    // ativa o MESMO estado global.
+    const documento = ui.slice(
+      ui.indexOf("function renderDocumento()"),
+      ui.indexOf("function renderConfiraDados()"),
+    );
     const confira = ui.slice(
       ui.indexOf("function renderConfiraDados()"),
       ui.indexOf("function renderEndereco()"),
     );
-    assert.match(confira, /id="toggle-foreign-doc"/, "a etapa 2 precisa perguntar a residencia");
+    assert.match(documento, /id="toggle-foreign-doc"/, "a etapa 1 precisa perguntar a residencia");
+    assert.doesNotMatch(documento, /data-field="documento_numero"/, "a etapa 1 nao exige documento");
+    assert.match(confira, /Não possui CPF\? <button[^>]*id="btn-escape-exterior-cpf"/);
     assert.ok(
-      confira.indexOf("toggle-foreign-doc") < confira.indexOf("Identifica"),
-      "a residencia tem de vir ANTES da identificacao",
+      confira.indexOf("btn-escape-exterior-cpf") > confira.indexOf('data-field="documento_numero"'),
+      "o atalho fica junto ao CPF",
     );
+    // Os tres pontos de entrada chegam ao mesmo estado global.
+    assert.match(ui, /function aplicarResidencia\(exterior, lang\)/);
+    assert.match(ui, /if \(state\.residenciaExterior === true\) return false;/);
 
     // Listas por fluxo: CPF so existe no fluxo brasileiro.
     assert.match(ui, /var DOC_TYPES_BRASIL = \[/);
@@ -243,9 +255,11 @@ async function main() {
     // Nenhuma pre-marcacao.
     assert.match(aceite, /state\.data_confirmed \? " checked" : ""/);
     assert.match(aceite, /state\.privacy_accepted \? " checked" : ""/);
-    // Abrir o documento nao e pre-requisito.
-    assert.match(aceite, /pode marcar as declara\u00e7\u00f5es sem abri-los/);
+    // Abrir o documento nao e pre-requisito. O redesign tirou a frase que
+    // explicava isso ("excesso de texto"); a regra continua cobrada aqui:
+    // nada no aceite fica desabilitado ou condicionado a abrir o link.
     assert.equal(aceite.indexOf("disabled"), -1, "o aceite nao pode depender de abrir o link");
+    assert.equal(aceite.indexOf("addEventListener"), -1, "o aceite nao pode escutar o clique no link");
     // Versoes preservadas.
     assert.match(aceite, /escapeHtml\(termsVersion\)/);
     assert.match(aceite, /escapeHtml\(privacyVersion\)/);
