@@ -621,8 +621,8 @@
         ? data.menores
         : [];
     var documents = Array.isArray(data.documents) ? data.documents : [];
-    var termsVersion = data.terms_version || "terms-v1-2026-08";
-    var privacyVersion = data.privacy_notice_version || "privacy-v1-2026-08";
+    var termsVersion = data.terms_version || "terms-v1-2026-09";
+    var privacyVersion = data.privacy_notice_version || "privacy-v1-2026-09";
     var meta = data.meta || {};
     var flags = data.feature_flags || {};
 

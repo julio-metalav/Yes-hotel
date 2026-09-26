@@ -265,16 +265,27 @@ async function main() {
     assert.match(aceite, /escapeHtml\(privacyVersion\)/);
     ok("links reais, checkboxes limpos, versoes preservadas");
 
-    // As paginas existem e estao marcadas como pendentes de aprovacao.
+    // Textos oficiais publicados: nenhum placeholder pode sobrar.
     for (const pagina of ["ui/aviso-de-privacidade.html", "ui/termos-de-hospedagem.html"]) {
       const html = ler(pagina);
-      assert.match(html, /Conte\u00fado pendente de aprova\u00e7\u00e3o/, pagina + " sem aviso de pendencia");
-      assert.match(html, /n\u00e3o deve ser publicada em produ\u00e7\u00e3o/, pagina + " sem trava de publicacao");
-      assert.match(html, /Texto pendente/, pagina + " sem placeholder explicito");
+      assert.doesNotMatch(html, /pendente de aprova\u00e7\u00e3o/i, pagina + " ainda tem aviso de pendencia");
+      assert.doesNotMatch(html, /Texto pendente|\[texto|lorem ipsum/i, pagina + " ainda tem placeholder");
+      assert.doesNotMatch(html, /\bTODO\b|\bFIXME\b/, pagina + " ainda tem marcador de pendencia");
+      assert.match(html, /data-voltar/, pagina + " sem retorno ao check-in");
     }
-    assert.match(ler("ui/aviso-de-privacidade.html"), /privacy-v1-2026-08/);
-    assert.match(ler("ui/termos-de-hospedagem.html"), /terms-v1-2026-08/);
-    ok("paginas criadas, sem conteudo juridico inventado, versoes batendo");
+    // A versao exibida em cada pagina e a mesma que o servidor exige no aceite.
+    const politica = ler("src/lib/domain/yes-hotel/fnrh-checkin-v2-policy.ts");
+    const termos = /FNRH_TERMS_VERSION = "([^"]+)"/.exec(politica)![1];
+    const privacidade = /FNRH_PRIVACY_NOTICE_VERSION = "([^"]+)"/.exec(politica)![1];
+    assert.equal(termos, "terms-v1-2026-09");
+    assert.equal(privacidade, "privacy-v1-2026-09");
+    assert.match(ler("ui/termos-de-hospedagem.html"), new RegExp("<code>" + termos + "</code>"));
+    assert.match(ler("ui/aviso-de-privacidade.html"), new RegExp("<code>" + privacidade + "</code>"));
+    assert.match(ui, new RegExp('data\\.terms_version \\|\\| "' + termos + '"'));
+    assert.match(ui, new RegExp('data\\.privacy_notice_version \\|\\| "' + privacidade + '"'));
+    assert.match(ler("ui/termos-de-hospedagem.html"), /18\. Aceite dos termos/);
+    assert.match(ler("ui/aviso-de-privacidade.html"), /14\. Aceite e ci\u00eancia/);
+    ok("textos oficiais publicados, sem placeholder, versao da pagina = versao exigida no aceite");
   }
 
   console.log("\n== 9. Revisao com funcao clara ==");

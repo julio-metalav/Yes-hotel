@@ -4,8 +4,8 @@
  */
 
 export const FNRH_V2_SCHEMA_VERSION = "fnrh-checkin-v2.1";
-export const FNRH_TERMS_VERSION = "terms-v1-2026-08";
-export const FNRH_PRIVACY_NOTICE_VERSION = "privacy-v1-2026-08";
+export const FNRH_TERMS_VERSION = "terms-v1-2026-09";
+export const FNRH_PRIVACY_NOTICE_VERSION = "privacy-v1-2026-09";
 
 export type FnrhDocumentoTipoV2 =
   | "cpf"

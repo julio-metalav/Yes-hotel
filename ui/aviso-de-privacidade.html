@@ -2,54 +2,327 @@
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Yes Hotel — Aviso de Privacidade</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Aviso de Privacidade — Yes Hotel</title>
     <link rel="icon" href="data:," />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
     <style>
-      body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.6;
-        color: #1f2937; margin: 0; padding: 1.5rem; background: #f7f8f8; }
-      main { max-width: 760px; margin: 0 auto; background: #fff; border: 1px solid #e5e7eb;
-        border-radius: 12px; padding: 1.5rem; }
-      h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
-      .versao { color: #6b7280; font-size: 0.85rem; margin: 0 0 1.25rem; }
-      .pendente { border: 1px solid #e0d5a8; background: #fdf8e6; color: #6b5a12;
-        border-radius: 8px; padding: 0.8rem 1rem; margin: 0 0 1.25rem; font-size: 0.92rem; }
-      h2 { font-size: 1.05rem; margin: 1.5rem 0 0.4rem; }
-      .voltar { display: inline-block; margin-top: 1.5rem; color: #1d4ed8; }
+      :root {
+        --bg: #f6f5f1;
+        --surface: #ffffff;
+        --ink: #103943;
+        --muted: #586d72;
+        --line: #e4e1d8;
+        --gold: #b8942e;
+        --gold-text: #856512;
+        --petroleo: #164a54;
+        --petroleo-press: #0e3038;
+        --focus: #2f7f8c;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+      body {
+        margin: 0;
+        background: #ecebe5;
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: 16px;
+        line-height: 1.6;
+      }
+      .doc { max-width: 680px; min-height: 100vh; margin: 0 auto; background: var(--bg); overflow-x: hidden; }
+      @media (min-width: 720px) { .doc { box-shadow: 0 0 0 1px #e2dfd6; } }
+      .doc-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 20px;
+        background: var(--surface);
+        border-top: 2px solid var(--gold);
+        border-bottom: 1px solid #ebe8e0;
+      }
+      .doc-header img { display: block; height: 32px; width: auto; }
+      .voltar {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 44px;
+        padding: 0 4px;
+        border: none;
+        background: transparent;
+        color: var(--petroleo);
+        font: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .voltar svg { width: 16px; height: 16px; }
+      .voltar:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+      main { padding: 28px 20px 16px; }
+      .eyebrow { margin: 0; font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.09em; color: var(--gold-text); }
+      h1 { margin: 8px 0 0; font-size: 27px; line-height: 33px; font-weight: 600; letter-spacing: -0.015em; }
+      .versao { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+      .versao code, .versao-final code { font-family: inherit; font-weight: 600; color: var(--ink); }
+      .intro { margin: 20px 0 0; color: var(--muted); }
+      section { margin-top: 32px; }
+      h2 {
+        margin: 0 0 10px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--line);
+        font-size: 17px;
+        line-height: 24px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      p { margin: 0 0 12px; }
+      ul { margin: 0 0 12px; padding-left: 22px; }
+      li { margin-bottom: 4px; }
+      li::marker { color: var(--gold); }
+      a { color: var(--petroleo); text-underline-offset: 3px; overflow-wrap: anywhere; }
+      a:hover { color: var(--petroleo-press); }
+      .versao-final { margin: 36px 0 0; padding-top: 16px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+      .rodape { padding: 8px 20px calc(32px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+      .rodape .voltar {
+        min-height: 52px;
+        padding: 0 20px;
+        border-radius: 12px;
+        background: var(--petroleo);
+        color: #ffffff;
+        font-size: 16px;
+      }
+      .rodape .voltar:active { background: var(--petroleo-press); }
+      .contatos { margin: 0 0 12px; display: flex; flex-direction: column; gap: 10px; }
+      .contatos div { display: flex; flex-direction: column; }
+      .contatos dt { font-size: 12px; line-height: 16px; color: var(--muted); }
+      .contatos dd { margin: 0; }
+      .dica { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
     </style>
   </head>
   <body>
-    <main>
-      <h1>Aviso de Privacidade</h1>
-      <p class="versao">Versão <code>privacy-v1-2026-08</code></p>
+    <div class="doc">
+      <header class="doc-header">
+        <img src="./assets/yes-hotel-logo-horizontal-claro.svg" alt="Yes Hotel" width="66" height="32" />
+        <button type="button" class="voltar" data-voltar>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+          Voltar ao check-in
+        </button>
+      </header>
 
-      <p class="pendente" role="note">
-        <strong>Conteúdo pendente de aprovação.</strong>
-        O texto oficial deste aviso ainda não foi fornecido. Esta página existe para
-        que o link do check-in digital tenha destino real, e
-        <strong>não deve ser publicada em produção</strong> antes da aprovação do
-        texto definitivo.
-      </p>
+      <main>
+        <p class="eyebrow">YES HOTEL</p>
+        <h1>Aviso de Privacidade</h1>
+        <p class="versao">Versão <code>privacy-v1-2026-09</code></p>
 
-      <h2>1. Quem trata os seus dados</h2>
-      <p>[Texto pendente.]</p>
+        <p class="intro">Este Aviso de Privacidade explica como o Yes Hotel trata os dados pessoais fornecidos por hóspedes durante o processo de reserva, pré-check-in, hospedagem e atendimento.</p>
+        <p class="intro">Nosso objetivo é tratar os dados pessoais de forma adequada, segura e transparente, nos termos da Lei nº 13.709/2018 — Lei Geral de Proteção de Dados Pessoais (LGPD).</p>
 
-      <h2>2. Quais dados são coletados</h2>
-      <p>[Texto pendente.]</p>
+        <section aria-labelledby="p1">
+          <h2 id="p1">1. Quem é responsável pelo tratamento dos dados</h2>
+          <p>Para fins deste Aviso de Privacidade, o tratamento dos dados pessoais relacionados à hospedagem é realizado pelo Yes Hotel, por meio da empresa responsável por sua operação.</p>
+          <p>O Yes Hotel atua como controlador dos dados pessoais quando define as finalidades e os meios essenciais utilizados no tratamento dessas informações.</p>
+        </section>
 
-      <h2>3. Para que os dados são usados</h2>
-      <p>[Texto pendente.]</p>
+        <section aria-labelledby="p2">
+          <h2 id="p2">2. Quais dados pessoais podemos tratar</h2>
+          <p>Durante o pré-check-in e a hospedagem, poderão ser tratados os seguintes dados:</p>
+          <ul>
+            <li>nome completo;</li>
+            <li>nome social, quando informado;</li>
+            <li>data de nascimento;</li>
+            <li>nacionalidade;</li>
+            <li>CPF;</li>
+            <li>RG, CNH, passaporte ou outro documento de identificação;</li>
+            <li>número e país emissor do documento;</li>
+            <li>endereço residencial;</li>
+            <li>telefone;</li>
+            <li>e-mail;</li>
+            <li>informações relativas à reserva e à hospedagem;</li>
+            <li>procedência e destino;</li>
+            <li>motivo da viagem;</li>
+            <li>meio de transporte;</li>
+            <li>informações necessárias ao cadastro de menores e acompanhantes;</li>
+            <li>documentos enviados pelo hóspede para preenchimento ou validação cadastral;</li>
+            <li>informações extraídas desses documentos por sistemas de leitura automatizada;</li>
+            <li>registros relacionados ao preenchimento e confirmação da ficha de hospedagem;</li>
+            <li>registros técnicos e operacionais necessários à segurança e ao funcionamento dos sistemas de acesso e hospedagem.</li>
+          </ul>
+        </section>
 
-      <h2>4. Com quem os dados são compartilhados</h2>
-      <p>[Texto pendente.]</p>
+        <section aria-labelledby="p3">
+          <h2 id="p3">3. Como obtemos os dados</h2>
+          <p>Os dados pessoais podem ser obtidos:</p>
+          <ul>
+            <li>diretamente do hóspede durante a reserva ou o pré-check-in;</li>
+            <li>por meio de documentos enviados pelo hóspede;</li>
+            <li>a partir dos sistemas de reserva utilizados pelo Yes Hotel;</li>
+            <li>durante o atendimento realizado pelos canais oficiais do hotel;</li>
+            <li>durante a prestação dos serviços de hospedagem;</li>
+            <li>por sistemas tecnológicos utilizados para operação, segurança e controle de acesso.</li>
+          </ul>
+          <p>Quando o hóspede envia uma imagem ou arquivo de documento, determinadas informações poderão ser identificadas automaticamente para facilitar o preenchimento do cadastro.</p>
+          <p>O hóspede deverá conferir e, quando necessário, corrigir os dados antes de concluir o pré-check-in.</p>
+        </section>
 
-      <h2>5. Por quanto tempo os dados são guardados</h2>
-      <p>[Texto pendente.]</p>
+        <section aria-labelledby="p4">
+          <h2 id="p4">4. Para que utilizamos os dados pessoais</h2>
+          <p>Os dados pessoais poderão ser utilizados para:</p>
+          <ul>
+            <li>identificar o hóspede;</li>
+            <li>realizar e administrar reservas;</li>
+            <li>preencher e manter os registros exigidos para a hospedagem;</li>
+            <li>realizar o pré-check-in;</li>
+            <li>permitir a entrada e o acesso às áreas autorizadas do empreendimento;</li>
+            <li>gerar e administrar credenciais ou senhas de acesso;</li>
+            <li>prestar atendimento ao hóspede;</li>
+            <li>executar os serviços contratados;</li>
+            <li>cumprir obrigações legais e regulatórias;</li>
+            <li>manter registros administrativos, financeiros e operacionais;</li>
+            <li>prevenir fraudes e uso indevido das instalações;</li>
+            <li>preservar a segurança de hóspedes, colaboradores e do empreendimento;</li>
+            <li>solucionar incidentes, reclamações ou solicitações;</li>
+            <li>exercer direitos em processos administrativos, judiciais ou extrajudiciais.</li>
+          </ul>
+          <p>O tratamento poderá ocorrer com fundamento nas diferentes hipóteses legais previstas na LGPD, conforme a finalidade envolvida, e não necessariamente apenas com base em consentimento.</p>
+        </section>
 
-      <h2>6. Seus direitos e como exercê-los</h2>
-      <p>[Texto pendente.]</p>
+        <section aria-labelledby="p5">
+          <h2 id="p5">5. Documentos e leitura automatizada</h2>
+          <p>O hóspede poderá enviar fotografia, imagem ou arquivo digital de documento de identificação para facilitar o preenchimento do pré-check-in.</p>
+          <p>O Yes Hotel poderá utilizar tecnologia de leitura automatizada para identificar informações presentes no documento, como nome, número do documento, data de nascimento ou outros dados cadastrais.</p>
+          <p>A leitura automatizada tem como finalidade auxiliar o preenchimento do formulário.</p>
+          <p>O hóspede deverá revisar as informações apresentadas antes da confirmação.</p>
+          <p>O envio de documentos não autoriza sua utilização para finalidades incompatíveis com a hospedagem.</p>
+        </section>
 
-      <a class="voltar" href="javascript:window.close()">Fechar</a>
-    </main>
+        <section aria-labelledby="p6">
+          <h2 id="p6">6. Dados de crianças e adolescentes</h2>
+          <p>Quando a hospedagem envolver crianças ou adolescentes, poderão ser tratados dados necessários à identificação, vínculo com o responsável e cumprimento das exigências aplicáveis à hospedagem.</p>
+          <p>O tratamento desses dados será realizado observando-se o melhor interesse da criança ou do adolescente e as demais exigências legais aplicáveis.</p>
+        </section>
+
+        <section aria-labelledby="p7">
+          <h2 id="p7">7. Compartilhamento de dados</h2>
+          <p>Os dados pessoais poderão ser compartilhados, quando necessário, com fornecedores e prestadores de serviços utilizados na operação do hotel, tais como:</p>
+          <ul>
+            <li>sistemas de gestão hoteleira;</li>
+            <li>plataformas de reservas;</li>
+            <li>serviços de hospedagem de sistemas e bancos de dados;</li>
+            <li>serviços de comunicação;</li>
+            <li>serviços de pagamento;</li>
+            <li>sistemas de controle de acesso e fechaduras eletrônicas;</li>
+            <li>fornecedores de tecnologia utilizados para processamento de documentos;</li>
+            <li>prestadores de serviços técnicos e operacionais.</li>
+          </ul>
+          <p>Também poderão ser compartilhados com autoridades públicas ou órgãos competentes quando houver obrigação legal, regulatória ou ordem válida para apresentação das informações.</p>
+          <p>Os fornecedores que tratam dados em nome do Yes Hotel deverão utilizá-los apenas para as finalidades necessárias à prestação do serviço contratado e em conformidade com as instruções e obrigações aplicáveis.</p>
+        </section>
+
+        <section aria-labelledby="p8">
+          <h2 id="p8">8. Tecnologia e registros operacionais do apartamento</h2>
+          <p>Os apartamentos possuem tecnologias destinadas à automação, segurança e gestão operacional, conforme informado nos <a href="./termos-de-hospedagem.html">Termos de Hospedagem</a>.</p>
+          <p>Determinados equipamentos poderão produzir registros técnicos relacionados, por exemplo, ao funcionamento das fechaduras, acesso ao apartamento, consumo ou estado de equipamentos e operação dos sistemas de automação.</p>
+          <p>Esses registros são utilizados para gestão, segurança, suporte técnico e operação do empreendimento.</p>
+          <p>Os equipamentos não têm como finalidade realizar vigilância invasiva da vida privada dos hóspedes.</p>
+        </section>
+
+        <section aria-labelledby="p9">
+          <h2 id="p9">9. Por quanto tempo mantemos os dados</h2>
+          <p>Os dados pessoais serão armazenados pelo período necessário para:</p>
+          <ul>
+            <li>cumprir as finalidades relacionadas à hospedagem;</li>
+            <li>cumprir obrigações legais ou regulatórias;</li>
+            <li>manter registros necessários à atividade empresarial;</li>
+            <li>exercer direitos em processos judiciais, administrativos ou extrajudiciais;</li>
+            <li>prevenir fraudes e solucionar incidentes ou contestações.</li>
+          </ul>
+          <p>Após o término da necessidade de tratamento, os dados poderão ser eliminados, anonimizados ou mantidos quando houver fundamento legal para sua conservação.</p>
+        </section>
+
+        <section aria-labelledby="p10">
+          <h2 id="p10">10. Segurança das informações</h2>
+          <p>O Yes Hotel adota medidas administrativas e tecnológicas destinadas a proteger os dados pessoais contra acessos não autorizados, perda, alteração, divulgação ou utilização indevida.</p>
+          <p>O acesso aos dados é limitado às pessoas, sistemas e prestadores que necessitem dessas informações para a execução das respectivas atividades.</p>
+          <p>Nenhum sistema é completamente imune a riscos, mas são adotadas medidas compatíveis com a natureza dos dados tratados e com a operação do empreendimento.</p>
+        </section>
+
+        <section aria-labelledby="p11">
+          <h2 id="p11">11. Direitos do titular</h2>
+          <p>Nos termos da LGPD, o titular poderá, conforme aplicável ao caso, solicitar:</p>
+          <ul>
+            <li>confirmação da existência de tratamento;</li>
+            <li>acesso aos seus dados pessoais;</li>
+            <li>correção de dados incompletos, inexatos ou desatualizados;</li>
+            <li>informações sobre o compartilhamento de dados;</li>
+            <li>anonimização, bloqueio ou eliminação de dados tratados em desconformidade com a legislação;</li>
+            <li>portabilidade, quando aplicável;</li>
+            <li>eliminação de dados tratados com base em consentimento, observadas as hipóteses legais de conservação;</li>
+            <li>revogação do consentimento, quando essa for a base legal utilizada;</li>
+            <li>informações sobre as consequências da negativa de consentimento, quando aplicável.</li>
+          </ul>
+        </section>
+
+        <section aria-labelledby="p12">
+          <h2 id="p12">12. Como exercer seus direitos</h2>
+          <p>Para exercer direitos relacionados aos seus dados pessoais, o titular poderá entrar em contato pelos canais oficiais do Yes Hotel.</p>
+          <p>O Yes Hotel poderá solicitar informações adicionais necessárias para confirmar a identidade do solicitante e evitar o fornecimento de dados pessoais a terceiros não autorizados.</p>
+          <p>Canais de atendimento sobre privacidade:</p>
+          <dl class="contatos">
+            <div><dt>E-mail</dt><dd><a href="mailto:yeshotel@yeshotel.com.br">yeshotel@yeshotel.com.br</a></dd></div>
+            <div><dt>E-mail alternativo</dt><dd><a href="mailto:oliver.investimentos.flats@gmail.com">oliver.investimentos.flats@gmail.com</a></dd></div>
+            <div><dt>Telefone</dt><dd><a href="tel:+556721800225">(67) 2180-0225</a></dd></div>
+          </dl>
+        </section>
+
+        <section aria-labelledby="p13">
+          <h2 id="p13">13. Alterações deste aviso</h2>
+          <p>Este Aviso de Privacidade poderá ser atualizado para refletir alterações legais, regulatórias, tecnológicas ou operacionais.</p>
+          <p>Quando houver alteração relevante, será disponibilizada nova versão do documento.</p>
+          <p>A versão vigente estará disponível no pré-check-in ou nos canais oficiais do Yes Hotel.</p>
+        </section>
+
+        <section aria-labelledby="p14">
+          <h2 id="p14">14. Aceite e ciência</h2>
+          <p>Ao acessar e utilizar o pré-check-in, o hóspede declara ter tido acesso a este Aviso de Privacidade.</p>
+          <p>A marcação da opção de aceite nos documentos da FNRH registra a ciência do hóspede sobre este Aviso e sobre os <a href="./termos-de-hospedagem.html">Termos de Hospedagem</a>.</p>
+        </section>
+
+        <p class="versao-final">Versão: <code>privacy-v1-2026-09</code></p>
+      </main>
+
+      <footer class="rodape">
+        <button type="button" class="voltar" data-voltar>Voltar ao check-in</button>
+        <p class="dica" id="dica-voltar" hidden>Para voltar ao check-in, feche esta aba.</p>
+      </footer>
+    </div>
+
+    <script>
+      (function () {
+        // A página abre em nova aba a partir da Etapa 6. Voltar = fechar esta
+        // aba; o check-in continua na aba de origem, como foi deixado. Se o
+        // navegador não permitir fechar, volta no histórico ou orienta.
+        function voltar() {
+          try {
+            window.close();
+          } catch (_e) {
+            /* segue para o plano B */
+          }
+          setTimeout(function () {
+            if (window.closed) return;
+            if (window.history.length > 1) {
+              window.history.back();
+              return;
+            }
+            var dica = document.getElementById("dica-voltar");
+            if (dica) dica.hidden = false;
+          }, 250);
+        }
+        document.querySelectorAll("[data-voltar]").forEach(function (b) {
+          b.addEventListener("click", voltar);
+        });
+      })();
+    </script>
   </body>
 </html>
