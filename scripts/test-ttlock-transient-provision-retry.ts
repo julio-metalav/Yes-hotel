@@ -17,9 +17,11 @@ import {
   attemptProvisionLockWithSamePinRetry,
   classifyTtlockProvisionError,
   findListedPasscodeMatch,
+  itemNeedsProvisionRetry,
   parseTransientRetryState,
   encodeTransientRetryState,
 } from "../src/lib/domain/yes-hotel/ttlock-provision-retry.ts";
+import { syncStatusForProvisionResult } from "../src/lib/domain/yes-hotel/ttlock-guest-access-gate.ts";
 import { TtlockApiError } from "../src/lib/integrations/ttlock/types.ts";
 import type { TtlockClient } from "../src/lib/integrations/ttlock/client.ts";
 
@@ -76,12 +78,7 @@ function makeRepo(state: {
       return state.itens.map((i) => ({ ...i }));
     },
     async getItensPendentes() {
-      return state.itens.filter(
-        (i) =>
-          i.status_provisionamento === "pendente" ||
-          i.status_provisionamento === "provisionando" ||
-          (i.status_provisionamento === "falhou" && i.remote_keyboard_pwd_id == null),
-      );
+      return state.itens.filter((i) => itemNeedsProvisionRetry(i));
     },
     async getItensProvisionados() {
       return state.itens.filter((i) => i.status_provisionamento === "provisionado");
@@ -497,6 +494,149 @@ async function main() {
     );
     assert.equal(state.itens[2].status_provisionamento, "provisionando");
     ok("2/3 transitório → provisionando (não falhou / sem rollback)");
+  }
+
+  {
+    assert.equal(itemNeedsProvisionRetry({ status_provisionamento: "falhou", remote_keyboard_pwd_id: 41640128 }), true);
+    assert.equal(itemNeedsProvisionRetry({ status_provisionamento: "revogado", remote_keyboard_pwd_id: 1 }), false);
+    assert.equal(syncStatusForProvisionResult("provisionada"), "ok");
+    assert.equal(syncStatusForProvisionResult("parcial"), "partial");
+    assert.equal(syncStatusForProvisionResult("falhou"), "failed");
+    assert.equal(
+      findListedPasscodeMatch(
+        [
+          { keyboardPwdId: 1, keyboardPwd: "7575" },
+          { keyboardPwdId: 2, keyboardPwd: "7575" },
+        ],
+        "7575",
+      ),
+      null,
+    );
+    ok("falhou com remote id volta ao retry; listagem ambígua não escolhe id");
+  }
+
+  {
+    const r = await attemptProvisionLockWithSamePinRetry({
+      passcode: "7575",
+      shortRetryMax: 0,
+      shortDelayMs: 0,
+      budget: { sleptMs: 0, maxBudgetMs: 0 },
+      sleepFn: async () => {},
+      addPasscode: async () => {
+        throw new Error("TTLock erro -3007: The same passcode already exists. Please use another one.");
+      },
+      listPasscodes: async () => [{ keyboardPwdId: 118066476, keyboardPwd: "7575" }],
+      knownKeyboardPwdId: 118066476,
+    });
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.reconciled, true);
+      assert.equal(r.keyboardPwdId, 118066476);
+    }
+    ok("-3007 com o PIN exato na fechadura reconcilia e adota o keyboardPwdId");
+  }
+
+  {
+    const r = await attemptProvisionLockWithSamePinRetry({
+      passcode: "7575",
+      shortRetryMax: 0,
+      shortDelayMs: 0,
+      budget: { sleptMs: 0, maxBudgetMs: 0 },
+      sleepFn: async () => {},
+      addPasscode: async () => {
+        throw new Error("TTLock erro -3007: The same passcode already exists.");
+      },
+      listPasscodes: async () => [{ keyboardPwdId: 99, keyboardPwd: "7575" }],
+      pinClaimAllowed: false,
+      knownKeyboardPwdId: 41640128,
+    });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.equal(r.stillRetryable, false);
+    ok("-3007 com PIN de outra credencial não marca provisionado");
+  }
+
+  {
+    const r = await attemptProvisionLockWithSamePinRetry({
+      passcode: "7575",
+      shortRetryMax: 0,
+      shortDelayMs: 0,
+      budget: { sleptMs: 0, maxBudgetMs: 0 },
+      sleepFn: async () => {},
+      addPasscode: async () => {
+        throw new Error("timeout");
+      },
+      listPasscodes: async () => {
+        throw new Error("lock offline");
+      },
+    });
+    assert.equal(r.ok, false);
+    ok("timeout com listagem indisponível não vira sucesso");
+  }
+
+  {
+    const state = {
+      cred: { ...baseCred(), codigo_credencial: "7575", status: "parcial" as const, sync_status: "ok" as const },
+      itens: makeItems([
+        { status_provisionamento: "provisionado", remote_keyboard_pwd_id: 11 },
+        { status_provisionamento: "falhou", remote_keyboard_pwd_id: 22, ultimo_erro: "TTLock erro -3007" },
+        { status_provisionamento: "falhou", remote_keyboard_pwd_id: 33, ultimo_erro: "Abortado: colisão" },
+      ]),
+    };
+    const pins = new Set<string>();
+    const client = makeClient({
+      add: async (_lock, pin) => {
+        pins.add(pin);
+        throw new Error("TTLock erro -3007: The same passcode already exists.");
+      },
+      list: async (lockId) => {
+        const id = Number(lockId);
+        return [{ keyboardPwdId: id === 100 ? 11 : id === 101 ? 22 : 33, keyboardPwd: "7575" }];
+      },
+    });
+    const r = await processarCredencialDeAcesso("cred-1", {
+      repository: makeRepo(state),
+      ttlockClient: client,
+      retry: { shortDelayMs: 0, shortRetryMax: 0, shortBudgetMs: 0, sleepFn: async () => {} },
+    });
+    assert.equal(r.accessReady, true);
+    assert.equal(r.status, "provisionada");
+    assert.equal(state.cred.codigo_credencial, "7575");
+    assert.equal(pins.size, 1);
+    assert.equal(state.cred.sync_status, "ok");
+    assert.equal(state.itens.every((i) => i.status_provisionamento === "provisionado"), true);
+    ok("parcial 1/3 + falhou com remote id completa 3/3 no mesmo PIN");
+  }
+
+  {
+    const state = {
+      cred: { ...baseCred(), codigo_credencial: "7575", status: "parcial" as const, sync_status: "ok" as const },
+      itens: makeItems([
+        { status_provisionamento: "provisionado", remote_keyboard_pwd_id: 11 },
+        { status_provisionamento: "falhou", remote_keyboard_pwd_id: 22 },
+        { status_provisionamento: "falhou", remote_keyboard_pwd_id: 33 },
+      ]),
+    };
+    const repo = makeRepo(state);
+    repo.listOccupiedPasscodesOnLocks = async () => ["7575"];
+    const client = makeClient({
+      add: async () => {
+        throw new Error("TTLock erro -3007: The same passcode already exists.");
+      },
+      list: async () => [{ keyboardPwdId: 999, keyboardPwd: "7575" }],
+    });
+    const r = await processarCredencialDeAcesso("cred-1", {
+      repository: repo,
+      ttlockClient: client,
+      passcodeGenerator: () => {
+        throw new Error("não pode gerar PIN novo");
+      },
+      retry: { shortDelayMs: 0, shortRetryMax: 0, shortBudgetMs: 0, sleepFn: async () => {} },
+    });
+    assert.equal(r.accessReady, false);
+    assert.equal(state.cred.codigo_credencial, "7575");
+    assert.equal(state.cred.sync_status, "partial");
+    assert.notEqual(state.cred.sync_status, "ok");
+    ok("PIN já aplicado e não reconciliável permanece 7575, sync parcial, sem envio");
   }
 
   console.log("\nTodos os testes de retry transitório TTLock passaram.");

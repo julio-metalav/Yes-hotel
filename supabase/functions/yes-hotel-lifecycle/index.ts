@@ -18,7 +18,10 @@ import {
   validityIsoToTtlockMs,
 } from "../_shared/hotel-timezone.ts";
 import { executeLifecycleUpdateValidity } from "../_shared/lifecycle-update-validity.ts";
-import { resolveProvisionCredentialStatus } from "../../../src/lib/domain/yes-hotel/ttlock-guest-access-gate.ts";
+import {
+  resolveProvisionCredentialStatus,
+  syncStatusForProvisionResult,
+} from "../../../src/lib/domain/yes-hotel/ttlock-guest-access-gate.ts";
 import { splitCredencialProvisionDbPatch } from "../../../src/lib/domain/yes-hotel/ttlock-provision-db-patch.ts";
 import {
   canRetryWithNewPasscode,
@@ -29,6 +32,7 @@ import {
   attemptProvisionLockWithSamePinRetry,
   encodeTransientRetryState,
   formatProvisionItemTransientError,
+  itemNeedsProvisionRetry,
   parseTransientRetryState,
   TTLOCK_PROVISION_PHASE2_MAX,
   TTLOCK_PROVISION_SHORT_BUDGET_MS,
@@ -980,15 +984,10 @@ async function getAllItensCredencial(credencialId: string): Promise<ItemRow[]> {
   return (Array.isArray(data) ? data : []) as ItemRow[];
 }
 
-/** Pendente, provisionando (retry transitório) ou falhou sem remote id. */
+/** Pendente, provisionando ou falhou — inclusive falhou com remote id residual. */
 async function getItensPendentes(credencialId: string): Promise<ItemRow[]> {
   const all = await getAllItensCredencial(credencialId);
-  return all.filter(
-    (i) =>
-      i.status_provisionamento === "pendente" ||
-      i.status_provisionamento === "provisionando" ||
-      (i.status_provisionamento === "falhou" && i.remote_keyboard_pwd_id == null),
-  );
+  return all.filter((i) => itemNeedsProvisionRetry(i));
 }
 
 /**
@@ -1536,6 +1535,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
   let collisionAttempt = 0;
   let workingItens = itens;
   let rollbackFailed = false;
+  let keptExistingPinAfterDefinitiveCollision = false;
   let hadTransientPending = false;
   let lastTransientClass = "transient";
   const shortRetryMax = Number(Deno.env.get("TTLOCK_PROVISION_SHORT_RETRY_MAX") || TTLOCK_PROVISION_SHORT_RETRY_MAX);
@@ -1593,6 +1593,8 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
             },
           ),
         listPasscodes: () => ttlockListKeyboardPasswords(item.lock_id_ttlock),
+        pinClaimAllowed: !localBlocked.has(passcode),
+        knownKeyboardPwdId: item.remote_keyboard_pwd_id,
         onAttemptLog: (info) => {
           logTtlockLifecycle({
             action: "provision",
@@ -1611,7 +1613,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
             error_message: info.classification
               ? `class=${info.classification.class};transient=${info.classification.transient};retry_count=${info.attempt}`
               : info.status === "reconciled"
-                ? "reconciled_after_uncertain"
+                ? "reconciled_same_passcode"
                 : undefined,
             timestamp: new Date().toISOString(),
           });
@@ -1752,6 +1754,7 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
         rollbackFailed,
       })
     ) {
+      if (alreadyRemoteOk) keptExistingPinAfterDefinitiveCollision = true;
       break;
     }
 
@@ -1879,7 +1882,12 @@ async function handleLifecycleProvision(request: Request, payload: Record<string
     await persistCredencialProvisionOutcome(credencial.id, {
       status: resolved.status,
       last_sync_attempt_at: nowIso,
-      ...(resolved.allReady ? { sync_status: "ok", last_sync_error: null } : {}),
+      sync_status: syncStatusForProvisionResult(resolved.status),
+      last_sync_error: resolved.allReady
+        ? null
+        : keptExistingPinAfterDefinitiveCollision
+          ? "Colisão definitiva: o PIN já aplicado não foi trocado. A listagem não confirmou que o passcode deste lock pertence à credencial."
+          : "Provisionamento incompleto.",
     });
   }
 

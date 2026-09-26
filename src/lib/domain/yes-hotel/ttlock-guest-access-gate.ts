@@ -126,3 +126,13 @@ export function resolveProvisionCredentialStatus(itens: TtlockItemReadyRow[]): {
   else if (provisionados > 0) status = "parcial";
   return { status, provisionados, falhas, allReady, inProgress };
 }
+
+/** sync_status coerente com o status operacional. `parcial` não permanece `ok`. */
+export function syncStatusForProvisionResult(
+  status: "provisionada" | "provisionando" | "parcial" | "falhou",
+): "ok" | "pending" | "partial" | "failed" {
+  if (status === "provisionada") return "ok";
+  if (status === "provisionando") return "pending";
+  if (status === "parcial") return "partial";
+  return "failed";
+}

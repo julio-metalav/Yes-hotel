@@ -10,7 +10,10 @@ import {
   formatTtlockKeyboardPwdName,
   TTLOCK_PASSCODE_COLLISION_RETRY_MAX,
 } from "../../domain/yes-hotel/ttlock-credential-format.ts";
-import { resolveProvisionCredentialStatus } from "../../domain/yes-hotel/ttlock-guest-access-gate.ts";
+import {
+  resolveProvisionCredentialStatus,
+  syncStatusForProvisionResult,
+} from "../../domain/yes-hotel/ttlock-guest-access-gate.ts";
 import {
   canRetryWithNewPasscode,
   shouldRollbackPartialPasscodeAttempt,
@@ -19,6 +22,7 @@ import {
   attemptProvisionLockWithSamePinRetry,
   encodeTransientRetryState,
   formatProvisionItemTransientError,
+  itemNeedsProvisionRetry,
   parseTransientRetryState,
   TTLOCK_PROVISION_PHASE2_MAX,
   TTLOCK_PROVISION_SHORT_BUDGET_MS,
@@ -163,15 +167,7 @@ export type ProcessarCredencialRetryOptions = {
 };
 
 function itemNeedsProvision(item: CredencialItemRow): boolean {
-  if (item.status_provisionamento === "pendente") return true;
-  if (item.status_provisionamento === "provisionando") return true;
-  if (
-    item.status_provisionamento === "falhou" &&
-    item.remote_keyboard_pwd_id == null
-  ) {
-    return true;
-  }
-  return false;
+  return itemNeedsProvisionRetry(item);
 }
 
 function hasSuccessfulRemote(itens: CredencialItemRow[]): boolean {
@@ -315,6 +311,7 @@ export async function processarCredencialDeAcesso(
 
   let collisionAttempt = 0;
   let rollbackFailed = false;
+  let keptExistingPinAfterDefinitiveCollision = false;
   let hadTransientPending = false;
   let lastTransientClass = "transient";
   const budget: ShortRetryBudget = { sleptMs: 0, maxBudgetMs: shortBudgetMs };
@@ -365,6 +362,9 @@ export async function processarCredencialDeAcesso(
           if (typeof client.listKeyboardPasswords !== "function") return [];
           return client.listKeyboardPasswords({ lockId: item.lock_id_ttlock });
         },
+        pinClaimAllowed: !localBlocked.has(passcode),
+        knownKeyboardPwdId:
+          typeof item.remote_keyboard_pwd_id === "number" ? item.remote_keyboard_pwd_id : null,
         onAttemptLog: (info) => {
           logTtlockLifecycle({
             action: "provision",
@@ -409,7 +409,7 @@ export async function processarCredencialDeAcesso(
           lock_id: item.lock_id_ttlock,
           status: "success",
           error_message: result.reconciled
-            ? "reconciled_after_uncertain;transient=false"
+            ? "reconciled_same_passcode;transient=false"
             : undefined,
           timestamp: new Date().toISOString(),
         });
@@ -499,6 +499,7 @@ export async function processarCredencialDeAcesso(
         rollbackFailed,
       })
     ) {
+      if (alreadyRemoteOk) keptExistingPinAfterDefinitiveCollision = true;
       break;
     }
 
@@ -598,9 +599,12 @@ export async function processarCredencialDeAcesso(
     await repo.updateCredencial(credencialId, {
       status: resolved.status,
       last_sync_attempt_at: nowIso,
-      ...(resolved.allReady
-        ? { sync_status: "ok" as const, last_sync_error: null }
-        : {}),
+      sync_status: syncStatusForProvisionResult(resolved.status),
+      last_sync_error: resolved.allReady
+        ? null
+        : keptExistingPinAfterDefinitiveCollision
+          ? "Colisão definitiva: o PIN já aplicado não foi trocado. A listagem não confirmou que o passcode deste lock pertence à credencial."
+          : "Provisionamento incompleto.",
     });
   }
 
