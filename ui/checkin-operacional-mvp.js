@@ -4623,6 +4623,21 @@ async function submitDetailTopContatoPanel() {
         confirmacaoGerarNova: modo === "senha_nova",
       });
       if (result.ok) {
+        if (
+          !result.skipped &&
+          modo === "senha" &&
+          reservaAtual
+        ) {
+          const decisaoPos = avaliarPoliticaCredenciaisReserva(reservaAtual, {
+            origem: "manual",
+            confirmacaoManual: true,
+            acaoSolicitada: "gerar_enviar",
+          });
+          const pendencias = (decisaoPos && decisaoPos.pendenciasAtuais) || [];
+          if (pendencias.length > 0) {
+            registrarLiberacaoManualComPendencias(reservaAtual, pendencias);
+          }
+        }
         if (modo === "senha_nova" && reservaAtual) {
           const usuario =
             (sessionUserElement && sessionUserElement.textContent) || "operador";
@@ -4978,13 +4993,19 @@ function confirmarLiberacaoManualComPendencias(reserva, decisao) {
   const texto =
     "Há pendência(s) ainda aberta(s): " +
     labels.join(" e ") +
-    ".\n\nDeseja gerar e enviar as credenciais mesmo assim?\n(O evento será registrado no histórico.)";
+    ".\n\nDeseja gerar e enviar as credenciais mesmo assim?\n(O histórico só registra a liberação se o envio for concluído.)";
   return window.confirm(texto);
 }
 
 function registrarLiberacaoManualComPendencias(reserva, pendencias) {
-  if (!reserva) return;
-  reserva.liberacaoManualComPendencias = pendencias.length > 0;
+  if (!reserva || !pendencias || pendencias.length === 0) return;
+  const jaRegistrado =
+    Array.isArray(reserva.historicoOperacional) &&
+    reserva.historicoOperacional.some(
+      (ev) => ev && ev.tipo === "liberacao_manual_com_pendencias",
+    );
+  if (jaRegistrado) return;
+  reserva.liberacaoManualComPendencias = true;
   const now = new Date();
   const usuario =
     (sessionUserElement && sessionUserElement.textContent) || "operador";
@@ -5070,10 +5091,6 @@ async function aplicarLiberacaoCredenciaisNoPainel(reservaId, options) {
       return { ok: true, skipped: true, motivo: "ja_enviada" };
     }
 
-    if (origem === "manual" && decisao.pendenciasAtuais.length > 0) {
-      registrarLiberacaoManualComPendencias(reserva, decisao.pendenciasAtuais);
-    }
-
     if (PAINEL_DATA_SOURCE === PAINEL_DATA_SOURCE_BACKEND) {
       if (!acessoLiberadoEfetivo(reserva) && decisao.deveGerar) {
         const liberar = await backendLiberarAcesso(reservaId);
@@ -5124,6 +5141,15 @@ async function aplicarLiberacaoCredenciaisNoPainel(reservaId, options) {
         );
         return { ok: false, skipped: false, error: result.error, decisao };
       }
+      if (
+        !result.skipped &&
+        origem === "manual" &&
+        (opts.acaoSolicitada || "gerar_enviar") === "gerar_enviar" &&
+        decisao.motivo === "manual" &&
+        decisao.pendenciasAtuais.length > 0
+      ) {
+        registrarLiberacaoManualComPendencias(reserva, decisao.pendenciasAtuais);
+      }
       return {
         ok: true,
         skipped: !!result.skipped,
@@ -5135,6 +5161,14 @@ async function aplicarLiberacaoCredenciaisNoPainel(reservaId, options) {
 
     // Fallback local/mock: marca enviado sem TTLock/comunicação reais.
     reserva.senhaEnviadaEm = new Date().toISOString();
+    if (
+      origem === "manual" &&
+      (opts.acaoSolicitada || "gerar_enviar") === "gerar_enviar" &&
+      decisao.motivo === "manual" &&
+      decisao.pendenciasAtuais.length > 0
+    ) {
+      registrarLiberacaoManualComPendencias(reserva, decisao.pendenciasAtuais);
+    }
     addHistoricoEvento(
       reserva,
       origem === "manual" ? "envio_manual_senha" : "envio_auto_senha",
@@ -7257,10 +7291,6 @@ function bindDetailListeners(reserva) {
         if (!confirmarLiberacaoManualComPendencias(reservaAtual, decisao)) {
           return;
         }
-        registrarLiberacaoManualComPendencias(
-          reservaAtual,
-          decisao.pendenciasAtuais || [],
-        );
       }
       openTopContatoPanel(rid, acao === "reenviar" ? "senha_reenviar" : "senha");
     });

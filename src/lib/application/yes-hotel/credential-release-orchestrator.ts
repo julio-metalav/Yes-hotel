@@ -290,25 +290,6 @@ export async function aplicarLiberacaoCredenciais(
       }
     }
 
-    if (
-      input.origem === "manual" &&
-      decisao.pendenciasAtuais.length > 0 &&
-      ports.registerEvent
-    ) {
-      await ports.registerEvent({
-        reservaId: fresh.reservaId,
-        tipo: "liberacao_manual_com_pendencias",
-        titulo: "Acesso/credenciais liberados manualmente com pendências",
-        detalhe: JSON.stringify({
-          origem: "manual",
-          usuario_id: input.usuarioId || null,
-          usuario: input.usuarioLabel || null,
-          pendencias: decisao.pendenciasAtuais,
-          em: agora.toISOString(),
-        }),
-      });
-    }
-
     const sendResult = await ports.sendCredentials({
       reservaId: fresh.reservaId,
       manual: input.origem === "manual",
@@ -346,6 +327,27 @@ export async function aplicarLiberacaoCredenciais(
         origemRegistro,
         error: sendResult.error,
       };
+    }
+
+    if (
+      !sendResult.skipped &&
+      input.origem === "manual" &&
+      decisao.motivo === "manual" &&
+      decisao.pendenciasAtuais.length > 0 &&
+      ports.registerEvent
+    ) {
+      await ports.registerEvent({
+        reservaId: fresh.reservaId,
+        tipo: "liberacao_manual_com_pendencias",
+        titulo: "Acesso/credenciais liberados manualmente com pendências",
+        detalhe: JSON.stringify({
+          origem: "manual",
+          usuario_id: input.usuarioId || null,
+          usuario: input.usuarioLabel || null,
+          pendencias: decisao.pendenciasAtuais,
+          em: agora.toISOString(),
+        }),
+      });
     }
 
     if (ports.registerEvent) {
