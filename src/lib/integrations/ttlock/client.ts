@@ -192,17 +192,17 @@ export class TtlockClient {
     const token = await this.ensureAccessToken();
     const date = Date.now();
 
-    const body: Record<string, string | number> = {
+    const body = new URLSearchParams({
       clientId: this.config.clientId,
       accessToken: token,
-      lockId,
+      lockId: String(lockId),
       keyboardPwd: params.keyboardPwd,
-      startDate: params.startDate,
-      endDate: params.endDate,
-      addType: 2,
-      date,
-    };
-    if (params.keyboardPwdName != null) body.keyboardPwdName = params.keyboardPwdName;
+      startDate: String(params.startDate),
+      endDate: String(params.endDate),
+      addType: "2",
+      date: String(date),
+    });
+    if (params.keyboardPwdName != null) body.set("keyboardPwdName", params.keyboardPwdName);
 
     const url = `${this.config.apiBaseUrl}/v3/keyboardPwd/add`;
     const controller = new AbortController();
@@ -211,8 +211,8 @@ export class TtlockClient {
     try {
       const res = await this.fetchImpl(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        headers: { "Content-Type": TTLOCK_PASSCODE_FORM_CONTENT_TYPE },
+        body: body.toString(),
         signal: controller.signal,
       });
 
