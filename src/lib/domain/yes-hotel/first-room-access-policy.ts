@@ -262,19 +262,43 @@ export function decideAccessGrace(input: AccessGraceDecisionInput): AccessGraceD
 }
 
 /**
- * Reconhecimento atrasado da abertura: o prazo de 1h já teria vencido
- * no instante do processamento. Mantém o horário real da entrada e
- * concede 1h a partir de agora, para o aviso e o bloqueio não coincidirem.
+ * A RPC exige suspension_due_at = grace_started_at + 1h.
+ * Se a abertura só foi reconhecida depois desse prazo, os dois relógios
+ * passam a contar de agora — a hora da porta fica em first_room_access_at.
  * Não altera o prazo das 09h do pagamento presencial diferido.
  */
-export function clampLateStandardGraceDeadline(input: {
+export function alignStandardGraceWindow(input: {
   grace_mode?: AccessGraceMode;
+  first_room_access_at?: string;
+  grace_started_at?: string;
   suspension_due_at?: string;
   now_ms: number;
-}): string | undefined {
-  const due = input.suspension_due_at;
-  if (!due || input.grace_mode !== "standard_1h") return due;
-  const dueMs = Date.parse(due);
-  if (!Number.isFinite(dueMs) || dueMs > input.now_ms) return due;
-  return new Date(input.now_ms + ONE_HOUR_MS).toISOString();
+}): {
+  first_room_access_at: string;
+  grace_started_at: string;
+  suspension_due_at: string;
+} {
+  const door = input.first_room_access_at ?? input.grace_started_at ?? new Date(input.now_ms).toISOString();
+  const started = input.grace_started_at ?? door;
+  const dueMs = Date.parse(String(input.suspension_due_at ?? ""));
+  const late =
+    input.grace_mode === "standard_1h" &&
+    Number.isFinite(dueMs) &&
+    dueMs <= input.now_ms;
+  if (!late) {
+    const due =
+      input.suspension_due_at ??
+      new Date(Date.parse(started) + ONE_HOUR_MS).toISOString();
+    return {
+      first_room_access_at: door,
+      grace_started_at: started,
+      suspension_due_at: due,
+    };
+  }
+  const startMs = input.now_ms;
+  return {
+    first_room_access_at: door,
+    grace_started_at: new Date(startMs).toISOString(),
+    suspension_due_at: new Date(startMs + ONE_HOUR_MS).toISOString(),
+  };
 }

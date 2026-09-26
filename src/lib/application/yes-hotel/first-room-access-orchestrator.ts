@@ -4,7 +4,7 @@
  */
 
 import {
-  clampLateStandardGraceDeadline,
+  alignStandardGraceWindow,
   decideAccessGrace,
   evaluateFirstRoomAccessEvent,
   TTLOCK_RECORD_TYPE,
@@ -559,13 +559,16 @@ export async function processFirstRoomAccessEvent(
       })();
 
     const ppdEfetivado = grace.grace_mode === "presencial_diferido_09h";
-    const nowIsoCommit = ports.clock.now().toISOString();
-    const deadlineIso =
-      clampLateStandardGraceDeadline({
-        grace_mode: grace.grace_mode,
-        suspension_due_at: grace.suspension_due_at,
-        now_ms: ports.clock.now().getTime(),
-      }) ?? grace.suspension_due_at!;
+    const nowMsCommit = ports.clock.now().getTime();
+    const nowIsoCommit = new Date(nowMsCommit).toISOString();
+    const graceWindow = alignStandardGraceWindow({
+      grace_mode: grace.grace_mode,
+      first_room_access_at: grace.grace_started_at,
+      grace_started_at: grace.grace_started_at,
+      suspension_due_at: grace.suspension_due_at,
+      now_ms: nowMsCommit,
+    });
+    const deadlineIso = graceWindow.suspension_due_at;
     const breakfastMsg = ppdEfetivado
       ? buildGuestPaymentDeferredBreakfastMessage({
           deadlineIso,
@@ -616,7 +619,7 @@ export async function processFirstRoomAccessEvent(
             body: welcome.body,
             pending_snapshot: grace.pending_snapshot,
           },
-          idempotency_key: `welcome:${correlation.credential_id}:${grace.grace_started_at}`,
+          idempotency_key: `welcome:${correlation.credential_id}:${graceWindow.grace_started_at}`,
           available_at: pendingAt,
         }
       : {
@@ -643,9 +646,9 @@ export async function processFirstRoomAccessEvent(
       event: eventWrite,
       correlation: correlationWrite,
       grace: {
-        first_room_access_at: grace.grace_started_at!,
-        grace_started_at: grace.grace_started_at!,
-        suspension_due_at: deadlineIso,
+        first_room_access_at: graceWindow.first_room_access_at,
+        grace_started_at: graceWindow.grace_started_at,
+        suspension_due_at: graceWindow.suspension_due_at,
         pending_payment: pending.payment_pending,
         pending_fnrh: pending.fnrh_pending,
         pending_snapshot: grace.pending_snapshot,
@@ -741,7 +744,7 @@ export async function processFirstRoomAccessEvent(
           recipient_ref: null,
           template: "access_grace_welcome",
           payload: { body: welcome.body, subject: "Yes Hotel — acesso" },
-          idempotency_key: `welcome:${correlation.credential_id}:${grace.grace_started_at}:email`,
+          idempotency_key: `welcome:${correlation.credential_id}:${graceWindow.grace_started_at}:email`,
           status: "pending",
           attempts: 0,
           available_at: pendingAt,
