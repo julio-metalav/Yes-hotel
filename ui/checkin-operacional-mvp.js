@@ -4544,6 +4544,13 @@ function closeTopContatoPanel() {
   if (panel) panel.classList.add("hidden");
 }
 
+/** Tempo mínimo de leitura da confirmação antes do re-render (igual ao modal de senha). */
+const FEEDBACK_LEITURA_MS = 1400;
+
+function esperarLeituraDeFeedback() {
+  return new Promise((resolve) => window.setTimeout(resolve, FEEDBACK_LEITURA_MS));
+}
+
 async function submitDetailTopContatoPanel() {
   const panel = document.getElementById("detail-top-contato-panel");
   if (!panel) return;
@@ -4568,7 +4575,17 @@ async function submitDetailTopContatoPanel() {
     msgEl.textContent = "";
     msgEl.classList.remove("is-error", "is-success");
   }
-  if (confirmBtn) confirmBtn.disabled = true;
+  // A operação leva de segundos a dezenas de segundos (contato + TTLock +
+  // WhatsApp/e-mail + releitura do banco). Sem o rótulo de progresso o botão só
+  // ficava cinza e o operador concluía que o clique não teve efeito — mesmo
+  // padrão que o modal de senha já usava antes do painel inline.
+  const confirmLabel = confirmBtn ? confirmBtn.textContent : "";
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = modo === "senha" || modo === "senha_reenviar" || modo === "senha_nova"
+      ? "Gerando e enviando…"
+      : "Enviando…";
+  }
   try {
     const okPersist = await persistirContatoPrincipalSemRefresh(rid, idx, email, whatsapp);
     if (!okPersist) {
@@ -4633,6 +4650,11 @@ async function submitDetailTopContatoPanel() {
           msgEl.classList.remove("hidden", "is-error");
           msgEl.classList.add("is-success");
         }
+        // refreshFromSource() relê o banco e chama renderDetail(), que recria o
+        // innerHTML do detalhe — inclusive este painel e esta mensagem. Sem a
+        // pausa a confirmação de sucesso era destruída antes de ser lida e a
+        // tela parecia não ter reagido ao clique.
+        await esperarLeituraDeFeedback();
         await refreshFromSource();
         closeTopContatoPanel();
       } else {
@@ -4651,7 +4673,10 @@ async function submitDetailTopContatoPanel() {
     }
     closeTopContatoPanel();
   } finally {
-    if (confirmBtn) confirmBtn.disabled = false;
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      if (confirmLabel) confirmBtn.textContent = confirmLabel;
+    }
   }
 }
 

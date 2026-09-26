@@ -44,6 +44,7 @@
     "test:yes:fnrh-document-first-ux": "tsx scripts/test-fnrh-document-first-ux.ts",
     "test:yes:fnrh-provenance-confirm": "tsx scripts/test-fnrh-provenance-confirm.ts",
     "test:yes:central-acoes-operacional-ui": "tsx scripts/test-central-acoes-operacional-ui.ts",
+    "test:yes:senha-feedback-pos-envio": "tsx scripts/test-senha-feedback-pos-envio.ts",
     "test:yes:fnrh-nome-confirmado-painel": "tsx scripts/test-fnrh-nome-confirmado-painel.ts",
     "test:yes:fnrh-azure-ocr": "tsx scripts/test-fnrh-azure-ocr.ts",
     "test:yes:fnrh-google-vision-ocr": "tsx scripts/test-fnrh-google-vision-ocr.ts",
