@@ -596,15 +596,23 @@ export async function processarCredencialDeAcesso(
       });
     }
   } else {
+    const partialRetryable = resolved.status === "parcial" && resolved.falhas > 0;
     await repo.updateCredencial(credencialId, {
       status: resolved.status,
       last_sync_attempt_at: nowIso,
       sync_status: syncStatusForProvisionResult(resolved.status),
       last_sync_error: resolved.allReady
         ? null
-        : keptExistingPinAfterDefinitiveCollision
-          ? "Colisão definitiva: o PIN já aplicado não foi trocado. A listagem não confirmou que o passcode deste lock pertence à credencial."
-          : "Provisionamento incompleto.",
+        : partialRetryable
+          ? encodeTransientRetryState({
+              phase: 2,
+              count: phase2Count,
+              errorClass: keptExistingPinAfterDefinitiveCollision ? "collision" : "definitive",
+              nextEligibleAt: new Date(Date.now() + 60_000).toISOString(),
+            })
+          : keptExistingPinAfterDefinitiveCollision
+            ? "Colisão definitiva: o PIN já aplicado não foi trocado. A listagem não confirmou que o passcode deste lock pertence à credencial."
+            : "Provisionamento incompleto.",
     });
   }
 

@@ -315,6 +315,7 @@ export type ProvisionLockAttemptResult =
 /**
  * -3007 só vira sucesso com um único passcode igual ao PIN na listagem,
  * e só se pudermos atribuí-lo a esta credencial.
+ * Sem remote id conhecido, a listagem só vale depois de tentativa incerta.
  * Listagem ausente, ambígua ou PIN de outra credencial continua falha fechada.
  */
 async function reconcileOwnedPasscode(params: {
@@ -420,20 +421,27 @@ export async function attemptProvisionLockWithSamePinRetry(params: {
       });
 
       if (classification.class === "collision") {
-        const match = await reconcileOwnedPasscode(params);
-        if (match) {
-          params.onAttemptLog?.({
-            attempt: attempts,
-            classification,
-            reconciled: true,
-            status: "reconciled",
-          });
-          return {
-            ok: true,
-            keyboardPwdId: match.keyboardPwdId,
-            reconciled: true,
-            attempts,
-          };
+        const knownId = params.knownKeyboardPwdId;
+        const hasKnownRemoteId = typeof knownId === "number";
+        const uncertainAttempt = priorUncertain || classification.uncertain;
+        // Sem id remoto, o PIN na fechadura pode ser legado ou de fora do Yes.
+        // Só adotamos esse id depois de uma tentativa incerta nossa.
+        if (hasKnownRemoteId || uncertainAttempt) {
+          const match = await reconcileOwnedPasscode(params);
+          if (match) {
+            params.onAttemptLog?.({
+              attempt: attempts,
+              classification,
+              reconciled: true,
+              status: "reconciled",
+            });
+            return {
+              ok: true,
+              keyboardPwdId: match.keyboardPwdId,
+              reconciled: true,
+              attempts,
+            };
+          }
         }
         return {
           ok: false,
