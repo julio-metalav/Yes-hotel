@@ -114,6 +114,8 @@ console.log("\n== Regra das 13h preservada: libera sem FNRH e sem pagamento ==")
   const corpo = edge.slice(ini, edge.indexOf("\n}\n", ini));
   assert.match(corpo, /if \(reserva\.senha_enviada_em\)/);
   assert.match(corpo, /if \(reserva\.entrou_no_apto\)/);
+  assert.match(corpo, /motivo: "encerrada"/);
+  assert.match(corpo, /callSendSenha\(reserva\.id, "horario_13h"/);
   for (const proibido of ["pagamento_status", "fnrh_status_agregado", "comission", "classificacao"]) {
     assert.equal(
       corpo.includes(proibido),

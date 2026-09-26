@@ -46,7 +46,7 @@ export class SupabaseTtlockPollCheckpointStore implements PollCheckpointStore {
 
     const { data: creds, error: credErr } = await this.client
       .from("operacional_credenciais_acesso")
-      .select("id, status, valido_ate, reserva_id")
+      .select("id, status, valido_de, valido_ate, reserva_id")
       .in("id", credIds)
       .eq("status", "provisionada");
     if (credErr) throw new Error(`poll candidates credenciais: ${credErr.message}`);
@@ -73,6 +73,7 @@ export class SupabaseTtlockPollCheckpointStore implements PollCheckpointStore {
         lock_id_ttlock: String(item.lock_id_ttlock ?? ""),
         codigo_logico_destino: String(item.codigo_logico_destino ?? ""),
         credential_status: String(cred.status ?? ""),
+        valido_de: cred.valido_de != null ? String(cred.valido_de) : null,
         valido_ate: cred.valido_ate != null ? String(cred.valido_ate) : null,
         acesso_liberado: reserva.acesso_liberado === true,
         entrou_no_apto: reserva.entrou_no_apto === true,

@@ -5,6 +5,7 @@
 
 import { processFirstRoomAccessEvent } from "../../../application/yes-hotel/first-room-access-orchestrator.ts";
 import { startOfHotelCivilDayUtcMs } from "../../../domain/yes-hotel/hotel-timezone.ts";
+import { resolveTtlockRecordOccurredAt } from "../../../domain/yes-hotel/ttlock-record-time.ts";
 import type { FirstRoomAccessPorts } from "../../../application/yes-hotel/first-room-access-ports.ts";
 import type { ProcessFirstRoomAccessResult } from "../../../application/yes-hotel/first-room-access-types.ts";
 import type { TtlockClient } from "../client.ts";
@@ -63,14 +64,29 @@ export type PollLockResult = {
   }>;
 };
 
+function recordIsNewForPoll(
+  record: TtlockAccessRecordParsed,
+  watermarkBefore: number,
+  receivedAtMs: number,
+): boolean {
+  if (record.lockDate > watermarkBefore) return true;
+  const resolved = resolveTtlockRecordOccurredAt({
+    lockDateMs: record.lockDate,
+    serverDateMs: record.serverDate ?? null,
+    receivedAtMs,
+  });
+  return resolved.usedFallback && resolved.occurredAtMs > watermarkBefore;
+}
+
 async function processOnePollingRecord(args: {
   lockId: number;
   record: TtlockAccessRecordParsed;
   ports: FirstRoomAccessPorts;
   env: Record<string, string | undefined>;
   sanitizedEnvelope: ReturnType<typeof sanitizeNotifyPayload>;
+  receivedAtMs: number;
 }): Promise<PollLockResult["results"][number]> {
-  const { lockId, record, ports, env, sanitizedEnvelope } = args;
+  const { lockId, record, ports, env, sanitizedEnvelope, receivedAtMs } = args;
   let ephemeral = record.keyboardPwd;
   try {
     const source_event_id = buildSourceEventId(ACCESS_EVENT_SOURCE_POLLING, lockId, record);
@@ -84,12 +100,24 @@ async function processOnePollingRecord(args: {
       },
       env,
     );
+    const resolvedTime = resolveTtlockRecordOccurredAt({
+      lockDateMs: record.lockDate,
+      serverDateMs: record.serverDate ?? null,
+      receivedAtMs,
+    });
     const recordSanitized = sanitizedEnvelope.records.find((r) => r.index === record.index);
     const raw_payload_sanitized = {
       lockId: sanitizedEnvelope.lockId,
       lockMac_masked: sanitizedEnvelope.lockMac_masked,
       record: recordSanitized,
       source: ACCESS_EVENT_SOURCE_POLLING,
+      occurred_at_resolution: {
+        diagnostic: resolvedTime.diagnostic,
+        used_fallback: resolvedTime.usedFallback,
+        raw_lock_date_ms: resolvedTime.rawLockDateMs,
+        raw_server_date_ms: resolvedTime.rawServerDateMs,
+        occurred_at_ms: resolvedTime.occurredAtMs,
+      },
     };
     assertSanitizedPayloadSafe(raw_payload_sanitized);
 
@@ -99,7 +127,7 @@ async function processOnePollingRecord(args: {
         source: ACCESS_EVENT_SOURCE_POLLING,
         source_event_id,
         idempotency_key,
-        occurred_at: new Date(record.lockDate).toISOString(),
+        occurred_at: new Date(resolvedTime.occurredAtMs).toISOString(),
         lock_id: lockId,
         record_type: record.recordType,
         success: record.success,
@@ -230,7 +258,7 @@ export async function pollOneLock(args: {
   const envelope = parseResult.parsed;
   const sanitizedEnvelope = sanitizeNotifyPayload(envelope);
   const newer = envelope.records
-    .filter((r) => r.lockDate > watermarkBefore)
+    .filter((r) => recordIsNewForPoll(r, watermarkBefore, nowMs))
     .sort((a, b) => a.lockDate - b.lockDate || a.index - b.index);
 
   const results: PollLockResult["results"] = [];
@@ -248,6 +276,7 @@ export async function pollOneLock(args: {
       ports: args.ports,
       env: args.env,
       sanitizedEnvelope,
+      receivedAtMs: nowMs,
     });
     results.push(out);
     // `error` e a excecao capturada aqui; `failed` e a excecao capturada

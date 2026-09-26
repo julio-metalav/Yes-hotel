@@ -1,4 +1,8 @@
 import type { CorrelatedRoomAccessResult } from "../../../application/yes-hotel/first-room-access-types.ts";
+import {
+  hotelCivilYmdFromUtcMs,
+  startOfHotelCivilDayUtcMs,
+} from "../../../domain/yes-hotel/hotel-timezone.ts";
 import { constantTimeEqual } from "../../../integrations/ttlock/access-ingest/constant-time.ts";
 import { classifyLogicalDestination } from "../../../integrations/ttlock/access-ingest/lock-type.ts";
 
@@ -112,7 +116,9 @@ export function correlateApartmentPasscodeCandidates(input: {
   }
 
   const hit = matched[0]!;
-  const windowOk = withinCredentialWindow(input.occurred_at, hit.valido_de, hit.valido_ate);
+  const windowOk =
+    withinCredentialWindow(input.occurred_at, hit.valido_de, hit.valido_ate) ||
+    sameArrivalDayBeforeValidity(input.occurred_at, hit.valido_de, hit.valido_ate);
   if (!windowOk) {
     // A senha É desta credencial, mas fora da janela dela.
     // Não reatribuir a outra reserva.
@@ -154,6 +160,24 @@ export type LiberatedStayCandidate = {
   check_in_previsto: string;
   check_out_previsto: string;
 };
+
+/**
+ * PIN desta credencial, no dia civil de valido_de, antes das 13h.
+ * A fechadura pode abrir de manhã; isso não reatribui outro dia nem outra reserva.
+ */
+function sameArrivalDayBeforeValidity(
+  occurredAt: string,
+  validFrom: string | null | undefined,
+  validUntil: string | null | undefined,
+): boolean {
+  const t = Date.parse(occurredAt);
+  const from = Date.parse(String(validFrom ?? ""));
+  const until = Date.parse(String(validUntil ?? ""));
+  if (!Number.isFinite(t) || !Number.isFinite(from) || !Number.isFinite(until)) return false;
+  if (t >= from || t > until) return false;
+  if (hotelCivilYmdFromUtcMs(t) !== hotelCivilYmdFromUtcMs(from)) return false;
+  return t >= startOfHotelCivilDayUtcMs(from);
+}
 
 function ymd(value: string): string {
   return String(value ?? "").trim().slice(0, 10);
