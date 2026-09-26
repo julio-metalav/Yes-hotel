@@ -172,6 +172,42 @@ const itemsReady = [
 }
 
 {
+  const items = [
+    { status_provisionamento: "provisionado", remote_keyboard_pwd_id: 1 },
+    { status_provisionamento: "falhou", remote_keyboard_pwd_id: 2 },
+    { status_provisionamento: "falhou", remote_keyboard_pwd_id: 3 },
+  ];
+  const encoded = encodeTransientRetryState({
+    phase: 2,
+    count: 1,
+    errorClass: "collision",
+    nextEligibleAt: "2026-09-26T17:10:00.000Z",
+  });
+  const base = {
+    credentialStatus: "parcial",
+    codigoCredencial: "7575",
+    items,
+    senhaEnviadaEm: "2026-09-26T00:00:00.000Z",
+    lastSyncError: encoded,
+    acessoLiberado: true,
+    reservaAtiva: true,
+  };
+  const before = classifyTtlockPhase2Candidate({
+    ...base,
+    now: new Date("2026-09-26T17:09:00.000Z"),
+  });
+  assert.equal(before.run, false);
+  assert.equal(before.reason, "fase2_aguardando_janela");
+  const after = classifyTtlockPhase2Candidate({
+    ...base,
+    now: new Date("2026-09-26T17:10:00.000Z"),
+  });
+  assert.equal(after.run, true);
+  assert.equal(after.kind, "provision_retry");
+  ok("parcial persistente não roda antes de nextEligibleAt e volta depois");
+}
+
+{
   const d = classifyTtlockPhase2Candidate({
     credentialStatus: "parcial",
     codigoCredencial: "7575",

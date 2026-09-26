@@ -22,6 +22,7 @@ import {
   encodeTransientRetryState,
 } from "../src/lib/domain/yes-hotel/ttlock-provision-retry.ts";
 import { syncStatusForProvisionResult } from "../src/lib/domain/yes-hotel/ttlock-guest-access-gate.ts";
+import { classifyTtlockPhase2Candidate } from "../src/lib/domain/yes-hotel/ttlock-provision-phase2.ts";
 import { TtlockApiError } from "../src/lib/integrations/ttlock/types.ts";
 import type { TtlockClient } from "../src/lib/integrations/ttlock/client.ts";
 
@@ -537,6 +538,59 @@ async function main() {
   }
 
   {
+    let listed = 0;
+    const r = await attemptProvisionLockWithSamePinRetry({
+      passcode: "7575",
+      shortRetryMax: 0,
+      shortDelayMs: 0,
+      budget: { sleptMs: 0, maxBudgetMs: 0 },
+      sleepFn: async () => {},
+      addPasscode: async () => {
+        throw new Error("TTLock erro -3007: The same passcode already exists.");
+      },
+      listPasscodes: async () => {
+        listed++;
+        return [{ keyboardPwdId: 999, keyboardPwd: "7575" }];
+      },
+      pinClaimAllowed: true,
+      knownKeyboardPwdId: null,
+    });
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.equal(r.stillRetryable, false);
+      assert.equal(r.uncertain, false);
+    }
+    assert.equal(listed, 0);
+    ok("-3007 sem remote id e sem tentativa incerta não adota o PIN da fechadura");
+  }
+
+  {
+    let adds = 0;
+    const r = await attemptProvisionLockWithSamePinRetry({
+      passcode: "7575",
+      shortRetryMax: 1,
+      shortDelayMs: 0,
+      budget: { sleptMs: 0, maxBudgetMs: 1 },
+      sleepFn: async () => {},
+      addPasscode: async () => {
+        adds++;
+        if (adds === 1) throw new Error("timeout");
+        throw new Error("TTLock erro -3007: The same passcode already exists.");
+      },
+      listPasscodes: async () =>
+        adds === 1 ? [] : [{ keyboardPwdId: 118066476, keyboardPwd: "7575" }],
+      pinClaimAllowed: true,
+      knownKeyboardPwdId: null,
+    });
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.reconciled, true);
+      assert.equal(r.keyboardPwdId, 118066476);
+    }
+    ok("-3007 sem remote id reconcilia só depois de tentativa incerta");
+  }
+
+  {
     const r = await attemptProvisionLockWithSamePinRetry({
       passcode: "7575",
       shortRetryMax: 0,
@@ -636,7 +690,33 @@ async function main() {
     assert.equal(state.cred.codigo_credencial, "7575");
     assert.equal(state.cred.sync_status, "partial");
     assert.notEqual(state.cred.sync_status, "ok");
+    const retryState = parseTransientRetryState(state.cred.last_sync_error);
+    assert.ok(retryState?.nextEligibleAt);
+    const nextEligibleAt = Date.parse(String(retryState?.nextEligibleAt));
+    assert.equal(Number.isFinite(nextEligibleAt), true);
+    const phase2Input = {
+      credentialStatus: state.cred.status,
+      codigoCredencial: state.cred.codigo_credencial,
+      items: state.itens,
+      senhaEnviadaEm: "2026-09-26T00:00:00.000Z",
+      lastSyncError: state.cred.last_sync_error,
+      acessoLiberado: true,
+      reservaAtiva: true,
+    };
+    const beforeWindow = classifyTtlockPhase2Candidate({
+      ...phase2Input,
+      now: new Date(nextEligibleAt - 1_000),
+    });
+    assert.equal(beforeWindow.run, false);
+    assert.equal(beforeWindow.reason, "fase2_aguardando_janela");
+    const afterWindow = classifyTtlockPhase2Candidate({
+      ...phase2Input,
+      now: new Date(nextEligibleAt + 1_000),
+    });
+    assert.equal(afterWindow.run, true);
+    assert.equal(afterWindow.kind, "provision_retry");
     ok("PIN já aplicado e não reconciliável permanece 7575, sync parcial, sem envio");
+    ok("parcial com falha persistente espera nextEligibleAt antes de novo retry");
   }
 
   console.log("\nTodos os testes de retry transitório TTLock passaram.");
