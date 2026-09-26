@@ -14,6 +14,12 @@ import {
   GoogleVisionOcrProvider,
   isPdfMime,
 } from "../src/lib/domain/yes-hotel/fnrh-ocr-google-vision.ts";
+import {
+  FNRH_PRIVACY_NOTICE_VERSION,
+  FNRH_TERMS_VERSION,
+  type FnrhCheckinV2Draft,
+  validateAceiteStep,
+} from "../src/lib/domain/yes-hotel/fnrh-checkin-v2-policy.ts";
 
 const ROOT = process.cwd();
 const ler = (rel: string) => readFileSync(resolve(ROOT, rel), "utf8").replace(/\r\n/g, "\n");
@@ -286,6 +292,36 @@ async function main() {
     assert.match(ler("ui/termos-de-hospedagem.html"), /18\. Aceite dos termos/);
     assert.match(ler("ui/aviso-de-privacidade.html"), /14\. Aceite e ci\u00eancia/);
     ok("textos oficiais publicados, sem placeholder, versao da pagina = versao exigida no aceite");
+
+    // Versao unica: so 2026-09 passa no aceite. Sem compatibilidade com 2026-08.
+    const aceiteCom = (t: string | null, p: string | null) =>
+      validateAceiteStep({ data_confirmed: true, privacy_accepted: true, terms_version: t, privacy_notice_version: p } as FnrhCheckinV2Draft);
+    assert.equal(FNRH_TERMS_VERSION, "terms-v1-2026-09");
+    assert.equal(FNRH_PRIVACY_NOTICE_VERSION, "privacy-v1-2026-09");
+    assert.equal(aceiteCom("terms-v1-2026-09", "privacy-v1-2026-09").ok, true);
+    assert.deepEqual(aceiteCom("terms-v1-2026-08", "privacy-v1-2026-09").errors, ["terms_version_mismatch"]);
+    assert.deepEqual(aceiteCom("terms-v1-2026-09", "privacy-v1-2026-08").errors, ["privacy_notice_version_mismatch"]);
+    assert.deepEqual(aceiteCom("terms-v9-desconhecida", "privacy-v9-desconhecida").errors, [
+      "terms_version_mismatch",
+      "privacy_notice_version_mismatch",
+    ]);
+    assert.equal(aceiteCom(null, null).ok, false);
+    // Nenhum resto de 2026-08 no codigo da FNRH.
+    for (const arq of [
+      "ui/fnrh-checkin-v2.js",
+      "ui/termos-de-hospedagem.html",
+      "ui/aviso-de-privacidade.html",
+      "src/lib/domain/yes-hotel/fnrh-checkin-v2-policy.ts",
+      "supabase/functions/fnrh-get/index.ts",
+      "supabase/functions/fnrh-submit/index.ts",
+    ]) {
+      assert.doesNotMatch(ler(arq), /(terms|privacy)-v1-2026-08/, arq + " ainda cita 2026-08");
+    }
+    // fnrh-get entrega a constante; fnrh-submit valida pela policy.
+    assert.match(ler("supabase/functions/fnrh-get/index.ts"), /terms_version: FNRH_TERMS_VERSION/);
+    assert.match(ler("supabase/functions/fnrh-get/index.ts"), /privacy_notice_version: FNRH_PRIVACY_NOTICE_VERSION/);
+    assert.match(ler("supabase/functions/fnrh-submit/index.ts"), /validateFnrhCheckinV2Confirm\(input\.draft\)/);
+    ok("aceite: 2026-09 aceito; 2026-08 e versao desconhecida rejeitados");
   }
 
   console.log("\n== 9. Revisao com funcao clara ==");
