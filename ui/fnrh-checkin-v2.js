@@ -626,19 +626,28 @@
     var meta = data.meta || {};
     var flags = data.feature_flags || {};
 
-    // Preferências só de interface (modo exterior, idioma, partes do endereço
-    // estrangeiro). Ficam na sessão do navegador para sobreviver a um reload;
-    // nada disso vai ao servidor além dos campos que já existiam.
-    var PREFS_KEY = "yh_fnrh_ui_v1_" + String(guestId || "");
-    function lerPrefs() {
+    // Idioma do modo exterior: é a única preferência sem campo no servidor.
+    // Fica no aparelho (localStorage), por link. Modo exterior e endereço
+    // vêm do próprio rascunho (`pais`, `logradouro`, `cidade`...), então não
+    // há estado duplicado. Em outro aparelho o hóspede escolhe o idioma de
+    // novo, sem perder dado nem voltar ao fluxo Brasil.
+    var LANG_KEY = "yh_fnrh_lang_v1_" + String(guestId || "");
+    function lerIdiomaSalvo() {
       try {
-        var raw = sessionStorage.getItem(PREFS_KEY);
-        return raw ? JSON.parse(raw) || {} : {};
+        var v = localStorage.getItem(LANG_KEY);
+        return v === "es" || v === "en" ? v : "";
       } catch (_e) {
-        return {};
+        return "";
       }
     }
-    var prefs = lerPrefs();
+    function salvarIdioma(lang) {
+      try {
+        if (lang === "es" || lang === "en") localStorage.setItem(LANG_KEY, lang);
+        else localStorage.removeItem(LANG_KEY);
+      } catch (_e) {
+        /* navegador sem localStorage: segue sem persistir */
+      }
+    }
 
     var state = {
       stepIndex: 0,
@@ -705,15 +714,12 @@
       draftStatus: "",
       draftOk: null,
       confirmBusy: false,
-      // Estado global "Resido no exterior" (undefined = sem decisão explícita).
+      // Estado global "Resido no exterior", lido do rascunho: `pais` fora do
+      // Brasil (inclusive "Exterior", gravado ao ativar o modo) = exterior.
       residenciaExterior:
-        prefs.exterior === true ? true : prefs.exterior === false ? false : undefined,
-      lang: prefs.lang === "es" || prefs.lang === "en" ? prefs.lang : "pt",
+        hasText(pre.pais) && !ehBrasil(pre.pais) ? true : hasText(pre.pais) ? false : undefined,
+      lang: "pt",
       langSheet: "",
-      extPartes: Object.assign(
-        { rua: "", complemento: "", cidade: "", regiao: "", postal: "" },
-        prefs.partes || {},
-      ),
       ocrKeys: {},
       ocrResultado: "",
       cepFound: false,
@@ -724,34 +730,22 @@
     Object.keys(state.fieldOrigin || {}).forEach(function (k) {
       if (state.fieldOrigin[k] === "ocr") state.ocrKeys[k] = true;
     });
-    if (!isBrazilResident(state) && state.lang === "pt") {
-      // Modo exterior sem idioma escolhido (ex.: nova sessão): pergunta de novo.
-      state.langSheet = "gerenciar";
-    }
-    // Endereço estrangeiro gravado antes, sem as partes na sessão: o texto
-    // inteiro vai para a primeira linha, para não se perder.
-    if (
-      hasText(state.endereco_estrangeiro) &&
-      !hasText(state.extPartes.rua) &&
-      !hasText(state.extPartes.cidade)
-    ) {
-      state.extPartes.rua = state.endereco_estrangeiro;
-    }
-
-    function salvarPrefs() {
-      try {
-        sessionStorage.setItem(
-          PREFS_KEY,
-          JSON.stringify({
-            exterior: state.residenciaExterior,
-            lang: state.lang,
-            partes: state.extPartes,
-          }),
-        );
-      } catch (_e) {
-        /* navegador sem sessionStorage: segue sem persistir */
+    if (!isBrazilResident(state)) {
+      state.lang = lerIdiomaSalvo();
+      if (!state.lang) {
+        // Modo exterior sem idioma neste aparelho: pergunta, sem mudar nada.
+        state.lang = "pt";
+        state.langSheet = "gerenciar";
+      }
+      // Rascunho anterior ao endereço estruturado: o texto livre vai para a
+      // primeira linha, para não se perder.
+      if (hasText(state.endereco_estrangeiro) && !hasText(state.logradouro) && !hasText(state.cidade)) {
+        state.logradouro = state.endereco_estrangeiro;
       }
     }
+
+    /** Campos de endereço: o formato muda entre Brasil e exterior. */
+    var CAMPOS_ENDERECO = ["cep", "logradouro", "numero", "complemento", "bairro", "cidade", "uf"];
 
     /**
      * Único ponto que liga/desliga o modo exterior (Etapa 1 e os atalhos
@@ -759,11 +753,10 @@
      * Etapa 2 aplicava antes: CPF não é opção no exterior.
      */
     function aplicarResidencia(exterior, lang) {
+      var mudou = exterior !== !isBrazilResident(state);
       if (exterior) {
         state.residenciaExterior = true;
         if (ehBrasil(state.pais) || !hasText(state.pais)) state.pais = "Exterior";
-        state.cep = "";
-        state.cepFound = false;
         if (state.documento_tipo === "cpf") {
           state.documento_tipo = "";
           state.documento_numero = "";
@@ -777,8 +770,17 @@
         state.pais_emissor = "";
         state.lang = "pt";
       }
+      // Endereço do Brasil não serve no exterior e vice-versa.
+      if (mudou) {
+        CAMPOS_ENDERECO.forEach(function (k) {
+          state[k] = "";
+          markDirtyManual(k);
+        });
+        state.cepFound = false;
+        state.cepError = "";
+      }
       markDirtyManual("pais");
-      salvarPrefs();
+      salvarIdioma(state.lang);
       scheduleDraft();
     }
 
@@ -918,21 +920,18 @@
         if (isNaN(idx) || !state.minors[idx] || !key) return;
         state.minors[idx][key] = el.value;
       });
-      // Endereço no exterior: a interface pede rua, complemento, cidade,
-      // estado/província e código postal; o contrato de dados continua o
-      // mesmo -- tudo vai composto em `endereco_estrangeiro`, com o país.
-      var extEls = root.querySelectorAll("[data-ext]");
-      if (extEls.length) {
-        extEls.forEach(function (el) {
-          state.extPartes[el.getAttribute("data-ext")] = el.value;
-        });
-        var partes = state.extPartes;
+      // Endereço no exterior: rua, complemento, cidade, estado/província e
+      // código postal usam as mesmas colunas do endereço brasileiro
+      // (logradouro, complemento, cidade, uf, cep) -- é o que o rascunho já
+      // grava e devolve. `endereco_estrangeiro` continua sendo enviado,
+      // composto a partir delas, porque é o que o servidor valida.
+      if (root.querySelector("[data-endereco-exterior]")) {
         var composto = [
-          partes.rua,
-          partes.complemento,
-          partes.cidade,
-          partes.regiao,
-          partes.postal,
+          state.logradouro,
+          state.complemento,
+          state.cidade,
+          state.uf,
+          state.cep,
           hasText(state.pais) && state.pais !== "Exterior" ? state.pais : "",
         ]
           .map(function (v) {
@@ -944,7 +943,6 @@
           state.endereco_estrangeiro = composto;
           markDirtyManual("endereco_estrangeiro");
         }
-        salvarPrefs();
       }
     }
 
@@ -1105,11 +1103,11 @@
             state.stepError = "Para endereço no Brasil, use o fluxo Brasil.";
             return false;
           }
-          if (!hasText(state.extPartes.rua)) {
+          if (!hasText(state.logradouro)) {
             state.stepError = "Informe a rua e o número.";
             return false;
           }
-          if (!hasText(state.extPartes.cidade)) {
+          if (!hasText(state.cidade)) {
             state.stepError = "Informe a cidade.";
             return false;
           }
@@ -1594,9 +1592,9 @@
       "Informe um CEP válido com 8 dígitos.": "cep",
       "Escolha o país onde você mora.": "pais",
       "Para endereço no Brasil, use o fluxo Brasil.": "pais",
-      "Informe a rua e o número.": "ext_rua",
-      "Informe a cidade.": "ext_cidade",
-      "Informe o endereço completo no exterior.": "ext_rua",
+      "Informe a rua e o número.": "logradouro",
+      "Informe a cidade.": "cidade",
+      "Informe o endereço completo no exterior.": "logradouro",
       "Selecione o motivo da viagem.": "motivo_viagem",
       "Selecione o meio de transporte.": "meio_transporte",
       "Informe a procedência.": "procedencia",
@@ -1972,13 +1970,6 @@
             }
           });
         });
-        body.querySelectorAll("[data-ext]").forEach(function (el) {
-          el.addEventListener("input", function () {
-            limparErroDoCampo(el);
-            syncStateFromDom();
-            scheduleDraft();
-          });
-        });
       }
 
       bindStepHandlers();
@@ -2061,7 +2052,7 @@
             aplicarResidencia(true, escolhido);
           } else {
             state.lang = escolhido === "es" ? "es" : "en";
-            salvarPrefs();
+            salvarIdioma(state.lang);
           }
           state.langSheet = "";
           state.stepError = "";
@@ -2144,7 +2135,9 @@
       }
 
       if (step === "endereco") {
-        var cepInput = document.querySelector('[data-field="cep"]');
+        // Busca de CEP só no fluxo Brasil: no exterior o mesmo campo guarda o
+        // código postal estrangeiro.
+        var cepInput = isBrazilResident(state) ? document.querySelector('[data-field="cep"]') : null;
         if (cepInput) {
           var consultar = function () {
             syncStateFromDom();
@@ -2590,12 +2583,12 @@
 
       var parte = function (key, label, attrs, optional) {
         return campoHtml({
-          key: "ext_" + key,
+          key: key,
           label: label,
           optional: optional,
           tag: false,
           control: function (id, err, aria) {
-            return inputTag(id, err, aria, 'data-ext="' + key + '" ' + attrs, state.extPartes[key]);
+            return inputTag(id, err, aria, attrs, state[key]);
           },
         });
       };
@@ -2612,14 +2605,19 @@
       });
       return [
         introHtml("Onde você mora?", "Seu endereço residencial."),
-        '<section class="yh-section">',
+        '<section class="yh-section" data-endereco-exterior="1">',
         pais,
-        parte("rua", "Rua e número", 'autocomplete="address-line1"'),
-        parte("complemento", "Complemento", 'autocomplete="address-line2" placeholder="Apto, andar, unidade"', true),
-        parte("cidade", "Cidade", 'autocomplete="address-level2"'),
+        parte("logradouro", "Rua e número", 'data-field="logradouro" autocomplete="address-line1"'),
+        parte(
+          "complemento",
+          "Complemento",
+          'data-field="complemento" autocomplete="address-line2" placeholder="Apto, andar, unidade"',
+          true,
+        ),
+        parte("cidade", "Cidade", 'data-field="cidade" autocomplete="address-level2"'),
         '<div class="yh-grid-2">',
-        parte("regiao", "Estado / província", 'autocomplete="address-level1"', true),
-        parte("postal", "Código postal", 'autocomplete="postal-code"', true),
+        parte("uf", "Estado / província", 'data-field="uf" autocomplete="address-level1"', true),
+        parte("cep", "Código postal", 'data-field="cep" autocomplete="postal-code"', true),
         "</div>",
         '<p class="yh-escape">Mora no Brasil? <button type="button" class="yh-inline-link" id="btn-corrigir-residencia">Voltar ao fluxo Brasil</button></p>',
         "</section>",
@@ -2788,13 +2786,12 @@
           [state.bairro, [state.cidade, state.uf].filter(hasText).join(", ")].filter(hasText).join(" · "),
           hasText(state.cep) ? "CEP " + formatarCep(state.cep) : "",
         ];
-      } else if (hasText(state.extPartes.rua) || hasText(state.extPartes.cidade)) {
-        var p = state.extPartes;
+      } else if (hasText(state.logradouro) || hasText(state.cidade)) {
         linhasEndereco = [
-          p.rua,
-          p.complemento,
-          [p.cidade, p.regiao].filter(hasText).join(", "),
-          p.postal,
+          state.logradouro,
+          state.complemento,
+          [state.cidade, state.uf].filter(hasText).join(", "),
+          state.cep,
           state.pais !== "Exterior" ? state.pais : "",
         ];
       } else {
@@ -2981,6 +2978,33 @@
       }
     }
 
+    /**
+     * Retomada pelo mesmo link: o rascunho não guarda a etapa (não há coluna
+     * para isso e esta mudança não cria schema). A jornada volta para a
+     * primeira etapa que ainda tem pendência, usando as MESMAS validações do
+     * "Continuar"; se tudo até a viagem estiver completo, para a Revisão.
+     * O aceite nunca é retomado marcado: ele é sempre refeito.
+     */
+    function etapaDeRetomada() {
+      if (!state.has_document_upload) return 0;
+      var atual = state.stepIndex;
+      var destino = indexOfStep("revisao");
+      for (var i = 0; i < STEPS.length; i++) {
+        var id = STEPS[i].id;
+        if (id === "revisao") break;
+        if (!isStepVisible(id)) continue;
+        state.stepIndex = i;
+        if (!validateCurrentStep()) {
+          destino = i;
+          break;
+        }
+      }
+      state.stepIndex = atual;
+      state.stepError = "";
+      return destino < 0 ? 0 : destino;
+    }
+
+    state.stepIndex = etapaDeRetomada();
     render();
     setTimeout(doDraft, 400);
   }

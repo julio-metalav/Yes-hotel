@@ -287,6 +287,35 @@ async function main() {
     ok("texto da revisao aponta para a acao certa, sem navegacao nova");
   }
 
+  console.log("\n== H. Retomada do rascunho (reload / reabrir o link) ==");
+  {
+    // Modo exterior vem do proprio rascunho (`pais`), nao do navegador.
+    assert.match(
+      ui,
+      /residenciaExterior:\s*\n\s*hasText\(pre\.pais\) && !ehBrasil\(pre\.pais\) \? true/,
+    );
+    // Endereco no exterior usa as colunas que o rascunho ja grava/devolve.
+    const endereco = ui.slice(ui.indexOf("function renderEndereco()"), ui.indexOf("function renderViagem"));
+    assert.match(endereco, /data-endereco-exterior/);
+    for (const campo of ["logradouro", "complemento", "cidade", "uf", "cep"]) {
+      assert.match(endereco, new RegExp('data-field="' + campo + '"'), "exterior sem " + campo);
+    }
+    // Nada de estado paralelo na sessao; so o idioma fica no aparelho.
+    assert.equal(ui.indexOf("sessionStorage"), -1, "estado duplicado na sessao do navegador");
+    assert.match(ui, /var LANG_KEY = "yh_fnrh_lang_v1_"/);
+    // Busca de CEP so no fluxo Brasil (no exterior o campo e codigo postal).
+    assert.match(ui, /var cepInput = isBrazilResident\(state\) \? document\.querySelector/);
+    // A etapa e retomada com as mesmas validacoes do "Continuar".
+    assert.match(ui, /function etapaDeRetomada\(\) \{/);
+    assert.match(ui, /state\.stepIndex = etapaDeRetomada\(\);\s*\n\s*render\(\);/);
+    // Aceite nunca vai marcado no autosave nem volta marcado.
+    const draft = ui.slice(ui.indexOf("function collectDraftBody()"), ui.indexOf("function doDraft()"));
+    assert.match(draft, /data_confirmed: false,/);
+    assert.match(draft, /privacy_accepted: false,/);
+    assert.match(ui, /\/\/ Aceite nunca inicia marcado na UI\s*\n\s*data_confirmed: false,\s*\n\s*privacy_accepted: false,/);
+    ok("exterior, idioma, endereco e etapa retomados sem estado duplicado; aceite sempre desmarcado");
+  }
+
   console.log("\n== G. Regressao: nada do fluxo essencial mudou ==");
   {
     // Rascunho, navegacao e submit continuam nos mesmos pontos.
